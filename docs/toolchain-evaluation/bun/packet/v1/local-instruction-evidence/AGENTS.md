@@ -1,0 +1,97 @@
+# AGENTS.md
+
+Agent-Team: Electron (Vue 3 + TypeScript, pnpm) frontend + Python (uv) backend.
+This file is a router — read the referenced file BEFORE doing the matching work.
+
+## Route table
+
+| Situation | Read first |
+|---|---|
+| Dev setup, tests, typecheck, PR and commit rules | `CONTRIBUTING.md` |
+| Process boundaries, ownership, persistence and trust boundaries | `docs/en-US/architecture.md` |
+| Adding or changing an agent CLI integration | `docs/en-US/cli-extension-guide.md` |
+| Building or changing a plugin | `docs/en-US/plugin-development.md` |
+| Editor, diff, or plan surfaces | `docs/en-US/editor-design.md` |
+| Keyboard shortcuts and the key resolver | `docs/en-US/keybindings.md` |
+
+Read routed files on demand, not all up front.
+
+An optional machine-local overlay may exist at `.Codex/playbook/` and
+`~/.Codex/playbook/` for delegation and model-choice guidance. Neither is
+checked in, so a fresh clone will not have them. Read them when present; never
+block on them — every rule required to work in this repo is in this file or the
+routed in-repo docs above.
+
+## Always-on rules (the expensive-to-violate subset)
+
+1. **Tests**: `pnpm test:run`, never `pnpm test` (watch mode hangs). Backend:
+   `uv --project backend run pytest backend/tests` (the path argument is
+   required — without it pytest misses backend's ini config). Run verification
+   commands bare — no pipe to tail/head (it eats the exit code).
+2. **Never clear terminal scrollback** — no `term.clear()` in any
+   resize/redraw path.
+3. **No self-initiated commits** — the user decides when to commit, unless
+   they explicitly authorized committing for the task.
+4. **No UI automation** (cliclick/screencapture/AppleScript) — the user tests
+   UI manually.
+5. **Giant files** — any file over ~2K lines: Grep tool to locate → Read with
+   offset/limit → batch edits through one subagent. Never whole-file Read,
+   never bash/python inline search. The largest, as of v0.1.75, are
+   `src/renderer/src/App.vue` (~11.8K lines),
+   `backend/agent_team_backend/ws_handlers.py` (~5.0K),
+   `src/renderer/src/components/GitPane.vue` (~3.5K),
+   `src/renderer/src/components/SettingsModal.vue` (~3.0K),
+   `backend/agent_team_backend/usage_service.py` (~2.9K),
+   `src/renderer/src/components/ControlPane.vue` (~2.8K),
+   `backend/agent_team_backend/git_service.py` (~2.7K),
+   `src/renderer/src/EditorWindowApp.vue` (~2.7K), and
+   `src/renderer/src/composables/useTerminal.ts` (~2.6K). Check with `wc -l`
+   rather than trusting this list — it drifts.
+
+## Workflow (Plan Documents)
+
+Plan mode is **opt-in only** — enter it solely when the user explicitly asks
+(e.g. "建立計畫", "plan 模式"). Never create a plan file proactively, even for
+complex tasks; without a plan, state assumptions and implement directly.
+
+When a plan exists or was explicitly requested:
+
+1. Plans are agent-authored HTML in `.agent-team/plans/` per
+   `.agent-team/plans/_spec.md` (copy `_template.html` to start). The user
+   views them in the app.
+2. Updates (todo status, stage, review notes): edit only the `plan-meta`
+   JSON block plus its matching visible markup — never rewrite the file.
+3. Approval gate: write code only when the plan's `stage` is `approved` or
+   later. The user saying "開始" means: set `stage: approved` + `approvedAt`,
+   then start.
+4. Legacy `.cursor/plans/*.plan.md` stay readable; never create new ones.
+
+## Language
+
+**Codebase language: English** — all code, comments, commit messages, variable
+names, and in-repo documentation.
+
+## Behavioral core
+
+1. **Think first**: state assumptions; if multiple readings exist, list them —
+   don't pick silently; if truly unclear, ask.
+2. **Minimum code**: only what was asked; no speculative abstraction,
+   flexibility, or impossible-case error handling.
+3. **Surgical changes**: every changed line maps to the request; don't
+   "improve" adjacent code; clean up only orphans your own change created.
+4. **Goal-driven**: turn the task into verifiable acceptance criteria before
+   coding ("fix bug" → "write a reproducing test, make it pass"), then loop
+   until they verify.
+
+## Agent skills
+
+- Issue tracker routing: read `docs/agents/issue-tracker.md` before creating or
+  updating implementation specifications or tickets.
+- Triage: read `docs/agents/triage-labels.md` before assigning category or
+  readiness metadata.
+- Domain context: read `docs/agents/domain.md` before locating context documents
+  or ADRs.
+
+The `docs/agents/` directory is workspace-local and may be absent from a fresh
+clone. If it is unavailable, do not block; the repository rules remain in this
+file, `AGENTS.md`, and the routed in-repo documentation.
