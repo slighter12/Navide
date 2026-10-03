@@ -1,0 +1,499 @@
+{
+  "ticket": "09",
+  "fixed_review_base_and_head": "d89016bab788d76b5346d51e83ea9fba535f3a72",
+  "initial_product_base": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+  "source_packet": "1.1; 27 delivered hashes verified",
+  "references": [
+    {
+      "id": "baseline-acceptance",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket-01-acceptance-round3.json",
+      "sha256": "4e1e726c507242d8d771ffe28ef9166cc48d82196a62131569567292eb6df4b4",
+      "bytes": 1203,
+      "lines": 16,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "baseline-artifact-results",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/artifact-results.json",
+      "sha256": "e96a26e9bc055884b02200c7e3347e762579684a9451579ef410e74c5fabe046",
+      "bytes": 5230,
+      "lines": 0,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "baseline-evidence",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-01/evidence.json",
+      "sha256": "ce760f58118d503888d77b7392f27fdf0d3c8f3d93bc63da2ab08ea6c960a887",
+      "bytes": 258497,
+      "lines": 1,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "baseline-freeze",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/round3/frozen-manifest.json",
+      "sha256": "c7128e1250ac2be6a589d60620b03258a66d61d8458dbcaa03b3a830bc345d25",
+      "bytes": 121635,
+      "lines": 1,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "baseline-handoff",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket-01-handoff.json",
+      "sha256": "49f3a8ac7acdf93e0779cd761aadb4963d9f2e94c29286dce6b0992633abcffd",
+      "bytes": 2809,
+      "lines": 97,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "baseline-inventory",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/root-test-files.json",
+      "sha256": "fa340c9a5a586b06581ec878a5a95c840e08d10f04ef0910686cd1d6af5a9813",
+      "bytes": 165833,
+      "lines": 3345,
+      "inspection": "supporting-hash-and-selected-summary-only"
+    },
+    {
+      "id": "baseline-report",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-01/report.md",
+      "sha256": "b604bf31dc21b497708c0306a01d27eef863dd308eb8c7c7d5980bd06c3ec62a",
+      "bytes": 20742,
+      "lines": 98,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "baseline-review",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket-01-review-round3.md",
+      "sha256": "3a787f14e9c2d7f839144ee8e07164acd9ac88942367a6930ab7e215db663ecf",
+      "bytes": 5352,
+      "lines": 77,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "baseline-review-index",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-01/round2-review-index.json",
+      "sha256": "de26640ca2de9ba04c98018d9b447107fb420dfab27ffd3467a4557a7db97137",
+      "bytes": 17993,
+      "lines": 1,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "baseline-sdk-results",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/sdk-dom-results.json",
+      "sha256": "e1b61b4e72a857089fd7089796c353475d1c55edddb2e634851c108a88376313",
+      "bytes": 12574,
+      "lines": 0,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-acceptance",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket-02-acceptance.json",
+      "sha256": "8b9c4d6051a32405ca6275a5d4bd615f1bc70844b3ebd2d5f5461ebcdf3711d3",
+      "bytes": 1428,
+      "lines": 29,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-artifact-receipt",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/artifact-build-pack-vitest.json",
+      "sha256": "8212e9df2ef16857cb671f21b0bab49672164f57d80bee59c0c4c08545ed9173",
+      "bytes": 3923,
+      "lines": 61,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-artifact-results",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/artifact-results.json",
+      "sha256": "1f3a331757b8d156309ed3a0a7344f26609780871891e3774d2188e8dd7820df",
+      "bytes": 483,
+      "lines": 0,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-build-receipt",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/public-build-uninstrumented.json",
+      "sha256": "e89a9671116514b6741c0cad0514bffee30c3f904886d1a1e9aedf94e97b3413",
+      "bytes": 3506,
+      "lines": 52,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-build-stderr",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/public-build-uninstrumented.stderr",
+      "sha256": "7ed2f4b301d0d0a37346fe0dab32d7d73942590cf18367d331996bdba5b1eb9e",
+      "bytes": 266,
+      "lines": 2,
+      "inspection": "bounded-text-inert-framing-required"
+    },
+    {
+      "id": "bun-build-stdout",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/public-build-uninstrumented.stdout",
+      "sha256": "9cf0e8093742a10b0c1b9967e6ca8d28a42fc2d53ec9bb20c79d080078a9a576",
+      "bytes": 2643,
+      "lines": 24,
+      "inspection": "bounded-text-inert-framing-required"
+    },
+    {
+      "id": "bun-commit",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commit/result.json",
+      "sha256": "e7dd9a530f0d82f09d7a562417532b74f7c39867948d84f139a96f503a5938cf",
+      "bytes": 117044,
+      "lines": 2712,
+      "inspection": "supporting-hash-and-selected-summary-only"
+    },
+    {
+      "id": "bun-committed-blobs",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commit/committed-blobs.json",
+      "sha256": "f8211ac953238dd4fc4a1d80a0f937fd59521b4230d3abcc08f690153092bbaf",
+      "bytes": 1804,
+      "lines": 51,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-dom-stderr",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/sdk-dom-uninstrumented.stderr",
+      "sha256": "e3998ed9019c76a2d7fab425d4add91dbf89de70ec4345a4c5795e68a32aba97",
+      "bytes": 10671,
+      "lines": 122,
+      "inspection": "bounded-text-inert-framing-required"
+    },
+    {
+      "id": "bun-effective-graph",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/effective-graph.json",
+      "sha256": "70eaafcaf77f5e6fd63e746f7f437b8f0d1abafa1add03ab1bff88fa1702197f",
+      "bytes": 244820,
+      "lines": 1,
+      "inspection": "supporting-hash-and-selected-summary-only"
+    },
+    {
+      "id": "bun-evidence",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-02/evidence.json",
+      "sha256": "e46e0aca2fdc6424235e86a2e012c7cf2a253ac11118e3a736e642b86640fb93",
+      "bytes": 87180,
+      "lines": 520,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-first-receipt",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/dom-first-case.json",
+      "sha256": "87dd9b6ad7f47827a560561054f1ffb9cd07fc8c9c63bc7204c13a617aa17e7a",
+      "bytes": 3791,
+      "lines": 60,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-freeze",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/freeze/frozen-manifest.json",
+      "sha256": "8151de0cea4828f6a4d1ff6f1d5d1a6d7f34dc6a2d3201fad41bfdf872d93037",
+      "bytes": 28214,
+      "lines": 834,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-handoff",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket-02-handoff.json",
+      "sha256": "1e54cd134249249ab450bf8e1ba3e37f697ae292b559848d83b3bed6bc2d5c4b",
+      "bytes": 687,
+      "lines": 13,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-installed-inventory",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/installed-inventory.json",
+      "sha256": "a015f608e487d82877cb6613498b92d094f5bf9579662a410940b955347942de",
+      "bytes": 348777,
+      "lines": 1,
+      "inspection": "supporting-hash-and-selected-summary-only"
+    },
+    {
+      "id": "bun-lock-comparison",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/candidate-lock-comparison.json",
+      "sha256": "53fd0baedf5524d575b171f21c777f968218ac2410fdfbb222be3575cca1d80d",
+      "bytes": 39051,
+      "lines": 1762,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-negative-guard",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/negative-guard.json",
+      "sha256": "1f31683a869a26e01d36979612551bdd8bfd42a1ea673bcc78a78f2fc6d30a43",
+      "bytes": 1161,
+      "lines": 27,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-process-final",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/owned-process-final.json",
+      "sha256": "c68df71bbd263abc6736928713a4115771072edf52f63dd7b41a4f49c8cc4491",
+      "bytes": 352,
+      "lines": 14,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-reinstall",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/frozen-reinstall-hashes.json",
+      "sha256": "d9cbc74b6224aebfb99c0fbf1c8241ac680935bdc8cdf2b4b666471e9ba2e4b8",
+      "bytes": 596,
+      "lines": 14,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-report",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-02/report.md",
+      "sha256": "12c4709ac1a66c5dcdac27ff77e8cf3fe6430931476006abc7c8d86eb45da9bd",
+      "bytes": 16973,
+      "lines": 89,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "bun-review",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket-02-review-round1.md",
+      "sha256": "5609ab28f56b33869ec8b4f310722c91de45bfee3045792d7eccb969d0856fba",
+      "bytes": 5074,
+      "lines": 70,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "bun-review-index",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-02/review-index.json",
+      "sha256": "41e5556da0e110732d81d5e84d6021da4ccbf68e70176b1b06f4a5ec7642f6ca",
+      "bytes": 68465,
+      "lines": 1,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-runtime",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/runtime.jsonl",
+      "sha256": "1f21b752251e2eb01cd7f7e9dd90b28bfbff6601c8bbc1fd88430824c68fede8",
+      "bytes": 18641,
+      "lines": 28,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-sdk-dom-receipt",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/sdk-dom-vitest.json",
+      "sha256": "8329317a4f8632cab20c754164492ac0c98b40fd2a8cd215e34ef5a8a33148a9",
+      "bytes": 3867,
+      "lines": 60,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-sdk-results",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/sdk-dom-results.json",
+      "sha256": "4a0b0850a438a0de00594fc8925e117cfa3c3323c53dc36dd33a898609f39087",
+      "bytes": 18760,
+      "lines": 0,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-security",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/security-comparison.json",
+      "sha256": "15d2e108b5460775dd25844b5879ec5dac6c3e40a5f8934e96c5d46f0e80b171",
+      "bytes": 2760,
+      "lines": 85,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-threads-receipt",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/dom-first-threads-probe.json",
+      "sha256": "de19626387b0dc35dc6b5deed2bd851730bd7289ae4e14dd906859324c9e8c3a",
+      "bytes": 3847,
+      "lines": 61,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-tools",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/tools.json",
+      "sha256": "cefaadbddb291a0433c590ab81d9071876e3b476b31bcf7206f4f695b38461fc",
+      "bytes": 833,
+      "lines": 20,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-unobserved-receipt",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/commands/sdk-dom-uninstrumented.json",
+      "sha256": "022ba95562c10c9de7fa33580d9cef539ec019d95447eb73216ce310bf879dff",
+      "bytes": 3789,
+      "lines": 59,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "bun-unobserved-results",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/sdk-dom-uninstrumented-results.json",
+      "sha256": "327d775f70e1606bb5350eaff2500bfe0fbcc583e96ef2d97e7c05045da29c3c",
+      "bytes": 18765,
+      "lines": 0,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "coordination-registry",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/registry.json",
+      "sha256": "fa3dae778cfdfe95a0b28951db1661f408bc31b84aad0228d00c8e843cc00975",
+      "bytes": 8408,
+      "lines": 190,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "guard-source",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/scripts/bun-evaluation.mjs",
+      "sha256": "04a34e356407df125a6abebbaef210d90cc7592c4fa6400f3d2b1f8bfcc2dd4b",
+      "bytes": 1736,
+      "lines": 44,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "handoff",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/packet/v1/handoff.md",
+      "sha256": "f9561e4fb8459b1d1193ea97fa591a25505a6c07e8b2a75a2db967854cbfcb47",
+      "bytes": 9942,
+      "lines": 53,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "helper-source",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/tests/support/publicPackagesSetup.ts",
+      "sha256": "c0897206f7dc2432fe2e04be2510e7bd6ea408087ca1d52c9c1280804c4c6e40",
+      "bytes": 8205,
+      "lines": 171,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "packet-manifest",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/packet/v1/manifest.json",
+      "sha256": "57d18628a4a90421bdcf429a13330c4e7e155ee5536f15621282ddc837edef51",
+      "bytes": 13538,
+      "lines": 196,
+      "inspection": "bounded-structured-selected-fields"
+    },
+    {
+      "id": "spec",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/spec.md",
+      "sha256": "1be894c4c9dc6d73f2119a13c6e9d210b75763ef897d84700f433db0fae7f507",
+      "bytes": 31637,
+      "lines": 203,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "ticket05-spec",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/05-public-consumer-compatibility.md",
+      "sha256": "f17f45660e694751008545dbab295e5ff00a289176476742d382139868d79979",
+      "bytes": 3402,
+      "lines": 31,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "ticket06-spec",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/06-macos-test-performance.md",
+      "sha256": "d791518fe9bead1a45bc133e07b24bb5c77a75126edc5b5d0f29c7997dd8c49d",
+      "bytes": 3346,
+      "lines": 30,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "ticket09-spec",
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/09-evidence-backed-recommendation.md",
+      "sha256": "18d3ac24505284faf742bb8b9d7daa861b368470c9f76fcb905c540e6189fd14",
+      "bytes": 4802,
+      "lines": 36,
+      "inspection": "bounded-text"
+    },
+    {
+      "id": "verified-prior-identities",
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-09/verified-existing-evidence.json",
+      "sha256": "41effb713662c2cf7361f44bcb8eda63414eedf384ebb1d5d660ee4915cb8331",
+      "bytes": 78993,
+      "lines": 2074,
+      "inspection": "supporting-hash-and-selected-summary-only"
+    }
+  ],
+  "prior_evidence_verification": {
+    "files_hash_verified": 296,
+    "receipt": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-09/preparation-receipt.json",
+    "coverage": "All manifest-listed packet files, indexed 01 result/tool/inventory/artifact references and command streams, all 02 raw references/command receipts/streams/tools, both accepted freezes and 02 frozen generated snapshots, seven actual committed blobs; selected JSON summary/count assertions. No product execution or whole third-party cache rereview.",
+    "limits": "Prior inventories/cache/source trees only streaming hashes and selected structured summaries; full substantive 01/02 prior review retained by matching identities. No fresh Full Review claimed."
+  },
+  "named_reference_scopes": {
+    "requirements-and-provenance": [
+      "packet-manifest",
+      "handoff",
+      "spec",
+      "ticket09-spec",
+      "ticket06-spec",
+      "ticket05-spec",
+      "coordination-registry"
+    ],
+    "accepted-baseline": [
+      "baseline-report",
+      "baseline-evidence",
+      "baseline-review-index",
+      "baseline-freeze",
+      "baseline-review",
+      "baseline-acceptance",
+      "baseline-handoff",
+      "baseline-sdk-results",
+      "baseline-artifact-results"
+    ],
+    "actual-stop": [
+      "bun-report",
+      "bun-evidence",
+      "bun-review-index",
+      "bun-freeze",
+      "bun-review",
+      "bun-acceptance",
+      "bun-handoff",
+      "bun-committed-blobs",
+      "bun-sdk-results",
+      "bun-unobserved-results",
+      "bun-artifact-results",
+      "bun-negative-guard",
+      "bun-security",
+      "bun-lock-comparison",
+      "bun-reinstall",
+      "bun-runtime",
+      "bun-process-final",
+      "bun-tools",
+      "bun-sdk-dom-receipt",
+      "bun-unobserved-receipt",
+      "bun-first-receipt",
+      "bun-threads-receipt",
+      "bun-artifact-receipt",
+      "bun-build-receipt",
+      "bun-dom-stderr",
+      "bun-build-stdout",
+      "bun-build-stderr"
+    ],
+    "experimental-source-references": [
+      "guard-source",
+      "helper-source"
+    ],
+    "supporting-identities": [
+      "baseline-inventory",
+      "bun-commit",
+      "bun-installed-inventory",
+      "bun-effective-graph",
+      "verified-prior-identities"
+    ]
+  },
+  "review_bounds": {
+    "per_text_file_bytes": 262144,
+    "per_text_file_lines": 2000,
+    "per_batch_files": 32,
+    "per_batch_bytes": 262144,
+    "per_named_scope_batches": 4,
+    "per_named_scope_bytes": 1048576,
+    "algorithm": "Bytewise path order, consecutive accumulation, each candidate exactly once; source09 candidate batch/index frozen externally, no self-reference",
+    "large_support": "Explicit hash-only references are not textual review candidates; complete prior lossless inventory parts stay in existing 01/02 named indices, not duplicated"
+  },
+  "review_delivery": {
+    "candidate_scope": "docs/toolchain-evaluation/bun/ticket-09/**; all WIP/new/untracked included by external freeze",
+    "worker_checks_and_freeze_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-09",
+    "ticket_review": "Fresh independent Sol/high Standards + Spec + Security + over-engineering pending",
+    "checkpoint_C": "PENDING; coordinator owns fresh Sol/high + actual Opus5.5/medium Full Review stage AND entire issue, adversarial exchange and integrated immutable external report AFTER source freeze; no extra final-review cycle",
+    "provenance": "Observed coordination/registry.json reference; current ticket-09 handoff pending, no future hash or invented C receipt",
+    "writes": "Stop at freeze; corrections require renewed assignment; stage/commit only after review and explicit coordinator go-ahead"
+  },
+  "exact_stage_allowlist_after_authorization": [
+    "docs/toolchain-evaluation/bun/ticket-09/report.md",
+    "docs/toolchain-evaluation/bun/ticket-09/matrix.json",
+    "docs/toolchain-evaluation/bun/ticket-09/evidence-index.json"
+  ]
+}

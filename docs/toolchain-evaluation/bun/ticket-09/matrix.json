@@ -1,0 +1,1246 @@
+{
+  "ticket": "09",
+  "route": "actual-02-early-stop",
+  "recommendation": "retain Node22.23.2/pnpm10.0.0; defer Bun adoption",
+  "states": {
+    "pass": "Bounded executed or identity-comparison evidence only; detail limits the claim",
+    "fail": "Actual recorded workflow/gate failure; expected negative-version exits are a guard pass",
+    "not-run": "No execution evidence; not waived or presumed incompatible",
+    "blocked": "Not executed or assurance incomplete because named mandatory prerequisites/evidence are absent"
+  },
+  "baseline": {
+    "node": "22.23.2",
+    "pnpm": "10.0.0 JavaScript entry",
+    "scope": "Accepted instrumented selected 01 workflows, not unconditional equivalence/full suite"
+  },
+  "candidate": {
+    "bun": "1.4.2",
+    "scope": "02 E1 FAILED; STOP artifact accepted and committed"
+  },
+  "platform_notes": {
+    "macOS": "27.0.1 Darwin arm64 actual host",
+    "Linux": "No actual baseline/candidate operations; 06 pass absent and separate platform authority absent; runner availability not probed or asserted",
+    "Windows": "Same missing required native execution; depends on 06 not 07; no simulation qualifies"
+  },
+  "workflow_contract_matrix": [
+    {
+      "workflow_or_contract": "Isolated source/tools/environment preservation",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Accepted bounded archive/isolation checks; no startup"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Accepted bounded preservation; 09 original/status/source read-only checks"
+        },
+        "evidence": [
+          "baseline-handoff",
+          "bun-handoff",
+          "verified-prior-identities"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Clean frozen dependency installation",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "620 packages; retained pnpm lock"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Exit 0; retained native Bun lock and source graph"
+        },
+        "evidence": [
+          "baseline-evidence",
+          "bun-evidence"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Repeated frozen installation",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No separate repeated-install claim"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Exit 0; package and both lock hashes unchanged"
+        },
+        "evidence": [
+          "bun-reinstall"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Registry/installed graph and integrity parity",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "688 registry/620 installed identities"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "688 registry/620 distinct installed/621 physical; 739 integrity addresses; 1141 edges, zero differences; 68 exclusions; 3 local packages"
+        },
+        "evidence": [
+          "baseline-evidence",
+          "bun-lock-comparison",
+          "bun-installed-inventory",
+          "bun-effective-graph"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Effective overrides and retained security declarations",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "13 constraints; electron/esbuild only; one existing GHSA exception"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Same declarations and effective retained resolutions; not complete behavioral trust proof"
+        },
+        "evidence": [
+          "baseline-evidence",
+          "bun-security",
+          "bun-effective-graph"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Dependency install lifecycle behavior",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Bounded install records esbuild and refused koffi/electron-winstaller"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Observed optimizer behavior incomplete; koffi reported, electron-winstaller absent from untrusted; NOT security PASS"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-security"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Normal high-threshold advisory policy",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Exit 0; lower findings and ignored high remain"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Exit 0; 612 lock names/544 installed names; findings remain"
+        },
+        "evidence": [
+          "baseline-evidence",
+          "bun-security"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Supplemental JSON audit clean exit",
+      "macOS": {
+        "baseline": {
+          "state": "fail",
+          "detail": "Actual exit 1; ignored body excluded but metadata/actions retain it"
+        },
+        "Bun": {
+          "state": "fail",
+          "detail": "Actual exit 1; ignored advisory body retained; not vulnerability-free"
+        },
+        "evidence": [
+          "baseline-evidence",
+          "bun-security"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Complete security/lifecycle assurance",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No vulnerability-free or whole-policy certification"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Declaration/audit partial passes do not complete lifecycle assurance"
+        },
+        "evidence": [
+          "bun-security",
+          "spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Exact Bun version acceptance/rejection without mandatory manager",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Candidate-specific requirement; standalone pnpm Node20 is not baseline"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Correct 1.4.2 accepted; actual 1.4.1 install/build rejected pre-effects with competing tools; no manager required by guard"
+        },
+        "evidence": [
+          "bun-negative-guard",
+          "bun-evidence",
+          "guard-source"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Future Bun upgrades independently validated",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No future candidate"
+        },
+        "Bun": {
+          "state": "not-run",
+          "detail": "No automatic upgrade or untested future-version compatibility claim"
+        },
+        "evidence": [
+          "spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Existing SDK selected Vitest behavior",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "27 passed, 0 failed/skipped"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "27 passed, 0 failed/skipped in observed and uninstrumented selections"
+        },
+        "evidence": [
+          "baseline-sdk-results",
+          "bun-sdk-results",
+          "bun-unobserved-results"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Existing Vue/happy-dom EditorPane selected behavior",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "9 passed, 0 failed/skipped; instrumented control"
+        },
+        "Bun": {
+          "state": "fail",
+          "detail": "9 failed, 0 skipped both selections; Monaco/null canvas and dirty assertion errors; cause not proven"
+        },
+        "evidence": [
+          "baseline-sdk-results",
+          "bun-sdk-results",
+          "bun-unobserved-results",
+          "bun-dom-stderr"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "First-case and existing threads-pool diagnostics",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No matching diagnostic control"
+        },
+        "Bun": {
+          "state": "fail",
+          "detail": "Both exit 1; 1 failed/8 name-filtered skips each, not coverage"
+        },
+        "evidence": [
+          "bun-first-receipt",
+          "bun-threads-receipt"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Public contracts TypeScript build",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Existing artifact build prerequisite"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Actual tsc succeeded before later UI declaration failure"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-report",
+          "bun-artifact-receipt"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Public SDK TypeScript build",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Existing artifact build prerequisite"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Actual tsc succeeded before later UI declaration failure"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-report",
+          "bun-artifact-receipt"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Public UI Vite build",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Existing complete artifact setup"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "Produced partial JS/styles/workers before declaration failure; not valid complete artifacts"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-build-stdout"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Public UI Vue declarations / complete public build",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Actual complete public build succeeded under instrumented control"
+        },
+        "Bun": {
+          "state": "fail",
+          "detail": "Actual setup and uninstrumented build exit 1; TS2307 on two .vue imports"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-artifact-receipt",
+          "bun-build-receipt",
+          "bun-build-stdout"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Mini-IDE required frontend preparation",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Real artifact setup build; not complete application build"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not reached after UI declaration failure"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-artifact-receipt"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Four real setup package tarballs",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "Contracts/SDK/UI/Git packed and retained; not runtime acceptance"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "ZERO packs executed after setup failure"
+        },
+        "evidence": [
+          "baseline-evidence",
+          "bun-artifact-results"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Selected deterministic public CLI archive case",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "1 passed/14 filtered skips; real CLI run twice"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "ZERO cases executed; no signing/CLI pass"
+        },
+        "evidence": [
+          "baseline-artifact-results",
+          "bun-artifact-results"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Observed JavaScript subprocess identities",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "72 Node events, 58 unique PIDs, exact Node22.23.2; observer limitations"
+        },
+        "Bun": {
+          "state": "pass",
+          "detail": "28 Bun1.4.2 events/28 PIDs; controlled PATH excludes Node/npm/pnpm/mise; only actually reached children"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-runtime",
+          "bun-evidence"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Runtime proof for all daily workflows",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Baseline not a Bun-only target or whole-workflow certification"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Partial child proof cannot cover pack/CLI/startup or every workflow"
+        },
+        "evidence": [
+          "bun-evidence",
+          "spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Current root test discovery/ownership",
+      "macOS": {
+        "baseline": {
+          "state": "pass",
+          "detail": "836 files=808 unit+4 cli+24 artifacts; Mini-IDE boundaries now root artifacts"
+        },
+        "Bun": {
+          "state": "not-run",
+          "detail": "Unchanged source ownership is not independent Bun full-discovery/execution proof"
+        },
+        "evidence": [
+          "baseline-inventory",
+          "baseline-evidence"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Aggregate TypeScript/Vue/application/Plugin typechecks",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Complete root non-watch unit/CLI/artifact execution",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Mini-IDE standalone boundary/source suites and exact ownership accounting",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Git/Plans package boundary suites",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Complete public CLI validation/signature/authorization denials",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Official Plugin builds and usable products",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Application build and required native/Python/uv artifacts",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Protected development startup/process/backend/Plugin readiness",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Packaged Plans/Host/supervisor install-execute-lifecycle with real opt-in fixtures",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Not executed by bounded 01; later comparison prerequisites not released"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Not executed; 02 E1 failed and required 03/04 pass absent"
+        },
+        "evidence": [
+          "spec",
+          "baseline-report",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Independent supported Node/npm consumer installation/types/build/CLI",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Selected archive and tarballs do not validate these consumers/contracts"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "No complete Bun-produced packed artifacts or consumer/lifecycle result; unchanged authority floor"
+        },
+        "evidence": [
+          "ticket05-spec",
+          "spec",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Independent supported Node/pnpm consumer installation/types/build/CLI",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Selected archive and tarballs do not validate these consumers/contracts"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "No complete Bun-produced packed artifacts or consumer/lifecycle result; unchanged authority floor"
+        },
+        "evidence": [
+          "ticket05-spec",
+          "spec",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Public exports/subpaths/declarations/schemas/styles/workers/peers contract floor",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Selected archive and tarballs do not validate these consumers/contracts"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "No complete Bun-produced packed artifacts or consumer/lifecycle result; unchanged authority floor"
+        },
+        "evidence": [
+          "ticket05-spec",
+          "spec",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Host Capability Limits/Manifest Permissions/Package-version Grants/Execution Policy behavior",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Selected archive and tarballs do not validate these consumers/contracts"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "No complete Bun-produced packed artifacts or consumer/lifecycle result; unchanged authority floor"
+        },
+        "evidence": [
+          "ticket05-spec",
+          "spec",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "External consumer tool freedom",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Existing tools remain permitted; no new consumer policy"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Bun artifacts still unvalidated in Node/npm/pnpm consumer projects; cannot force Bun"
+        },
+        "evidence": [
+          "ticket05-spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Isolated release/CI Node exception",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No release/CI operation authorized or exercised"
+        },
+        "Bun": {
+          "state": "not-run",
+          "detail": "Design allowance retained, not validated and not daily fallback authority"
+        },
+        "evidence": [
+          "spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Full-root cold/warm end-to-end performance",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No >=5 matched samples/medians/dispersion"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Execution NOT-RUN because E2 incomplete; diagnostics are not performance/inconclusive PASS"
+        },
+        "evidence": [
+          "ticket06-spec",
+          "spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "SDK single-file cold/warm end-to-end performance",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No >=5 matched samples/medians/dispersion"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Execution NOT-RUN because E2 incomplete; diagnostics are not performance/inconclusive PASS"
+        },
+        "evidence": [
+          "ticket06-spec",
+          "spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "DOM single-file cold/warm end-to-end performance",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No >=5 matched samples/medians/dispersion"
+        },
+        "Bun": {
+          "state": "blocked",
+          "detail": "Execution NOT-RUN because E2 incomplete; diagnostics are not performance/inconclusive PASS"
+        },
+        "evidence": [
+          "ticket06-spec",
+          "spec"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Primary daily Bun-only simplification achieved",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "Supported existing Node/pnpm retained; not whole-baseline pass"
+        },
+        "Bun": {
+          "state": "fail",
+          "detail": "Not achieved: mandatory DOM/public-build gates fail and remaining daily gates absent"
+        },
+        "evidence": [
+          "spec",
+          "bun-handoff"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    },
+    {
+      "workflow_or_contract": "Product visual acceptance",
+      "macOS": {
+        "baseline": {
+          "state": "not-run",
+          "detail": "No app startup/UI changes entered"
+        },
+        "Bun": {
+          "state": "not-run",
+          "detail": "Not reached; no automation/screenshots or visual acceptance claim"
+        },
+        "evidence": [
+          "baseline-report",
+          "bun-report"
+        ]
+      },
+      "Linux": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      },
+      "Windows": {
+        "baseline": "not-run",
+        "Bun": "not-run"
+      }
+    }
+  ],
+  "ticket_states": [
+    {
+      "ticket": "01",
+      "execution": "executed",
+      "gate": "pass (bounded baseline accepted/committed)",
+      "technical_dependencies": []
+    },
+    {
+      "ticket": "02",
+      "execution": "executed",
+      "gate": "fail (STOP evidence accepted/committed)",
+      "technical_dependencies": [
+        "01"
+      ]
+    },
+    {
+      "ticket": "03",
+      "execution": "not-run",
+      "gate": "blocked",
+      "technical_dependencies": [
+        "02"
+      ]
+    },
+    {
+      "ticket": "04",
+      "execution": "not-run",
+      "gate": "blocked",
+      "technical_dependencies": [
+        "03"
+      ]
+    },
+    {
+      "ticket": "05",
+      "execution": "not-run",
+      "gate": "blocked",
+      "technical_dependencies": [
+        "03"
+      ]
+    },
+    {
+      "ticket": "06",
+      "execution": "not-run",
+      "gate": "blocked",
+      "technical_dependencies": [
+        "04",
+        "05"
+      ]
+    },
+    {
+      "ticket": "07",
+      "execution": "not-run",
+      "gate": "blocked; platform authority separately required",
+      "technical_dependencies": [
+        "06"
+      ]
+    },
+    {
+      "ticket": "08",
+      "execution": "not-run",
+      "gate": "blocked; platform authority separately required",
+      "technical_dependencies": [
+        "06"
+      ]
+    },
+    {
+      "ticket": "09",
+      "execution": "report prepared",
+      "gate": "pending independent review/coordinator acceptance",
+      "technical_dependencies": [
+        "02 concrete STOP, alternative early-stop route"
+      ]
+    }
+  ],
+  "checkpoints": {
+    "A": "SKIPPED / NOT-RUN, not passed",
+    "B": "SKIPPED / NOT-RUN, not passed",
+    "C": "PENDING / NOT-RUN at source freeze; fresh Sol/high and Opus5.5/medium Full Review of 09 and entire issue required; integrated actual result retained externally after freeze"
+  },
+  "performance_rule": {
+    "executed_samples": 0,
+    "verdict": "not-run",
+    "required_initial_samples_per_runtime_workload_cache_condition": 5,
+    "required_workloads": [
+      "full-root",
+      "SDK",
+      "DOM"
+    ],
+    "cache_conditions": [
+      "cold",
+      "warm"
+    ],
+    "slowdown_formula": "Bun median / baseline median - 1",
+    "fail_if_slowdown_strictly_greater_than": 0.1,
+    "unresolved_variance": "inconclusive, never pass; additional sampling required"
+  },
+  "human_evaluation_acceptance": "pending after C, separate from product visual acceptance not reached",
+  "publication_and_migration_authority": "none"
+}
