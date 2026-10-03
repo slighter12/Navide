@@ -1,0 +1,196 @@
+{
+  "packet_version": "1.1",
+  "presentation_correction": {
+    "prior_packet_version": 1,
+    "prior_freeze_sha256": "91bbbecf1f70ff3d80781860c361484a6859ca068e8ba4eac6438abd7087cf39",
+    "preserved_raw_manifest": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/round3/original-inputs/docs/toolchain-evaluation/bun/packet/v1/manifest.json",
+    "preserved_raw_manifest_sha256": "bd07f1b6487dfde4e4cac024d885a7fc12b93156e141621df786fbfb78eb2e88",
+    "derivation_receipt": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/round3/packet-derivation.json",
+    "reason": "staged git diff --check exit 2: new blank line at EOF in two copied local-source Markdown files",
+    "transformation": "Remove exactly one final LF byte from issue-tracker.md and triage-labels.md; retain the prior terminal LF and every preceding byte.",
+    "delivered_corrections_count": 2,
+    "authority": "Raw original inputs and fixed-base rules retain their existing provenance; formatted delivery copies create no new instruction authority."
+  },
+  "created_utc": "2026-10-03T17:44:01.910302+00:00",
+  "issue": "https://github.com/slighter12/Navide/issues/2",
+  "base_sha": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+  "target": "origin/main (slighter12/Navide); no publication authority",
+  "branch": "eval/issue-2-bun-toolchain",
+  "worktree": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain",
+  "source_workspace": "/Users/slighter12/git/personal/Navide",
+  "source_status_before_hex": "204d204147454e54532e6d6400204d20434c415544452e6d64003f3f20646f63732f6164722f00",
+  "source_dirty_hashes": {
+    "AGENTS.md": "02fa8e2622117e8f71c64f0f4765541281b285ff482c35ad67152a6f46db4700",
+    "CLAUDE.md": "dd2e47427d13c35c44c7ec8d501faad2ff1d7a934cc06410ed4303d7718b11fc"
+  },
+  "files": [
+    {
+      "source": "AGENTS.md",
+      "provenance": "git:f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/base-rules/AGENTS.md",
+      "sha256": "56df85ce5d14212b3960e96bdd8b47031dd79a28e490a702d5edfc1f9ef03562"
+    },
+    {
+      "source": "CLAUDE.md",
+      "provenance": "git:f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/base-rules/CLAUDE.md",
+      "sha256": "079dfab677079686ab9abfa1b571e05f882f344e96f22a62bab4208137f15d1e"
+    },
+    {
+      "source": "CONTRIBUTING.md",
+      "provenance": "git:f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/base-rules/CONTRIBUTING.md",
+      "sha256": "ad86d8921fa67e462c86454808f7578c1464b07ae308e5a12b705bdf877554be"
+    },
+    {
+      "source": "docs/en-US/architecture.md",
+      "provenance": "git:f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/base-rules/docs/en-US/architecture.md",
+      "sha256": "0230777de6eb38e06ba17e162fa042ede60ec05dc8cf2598612abfc6d5490d74"
+    },
+    {
+      "source": "docs/en-US/plugin-development.md",
+      "provenance": "git:f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/base-rules/docs/en-US/plugin-development.md",
+      "sha256": "9c14917658b94b8406842d6de2b72606a984d92da27828bf9f72ec9a49818e44"
+    },
+    {
+      "source": "docs/en-US/ci-and-cli-regression.md",
+      "provenance": "git:f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/base-rules/docs/en-US/ci-and-cli-regression.md",
+      "sha256": "54b30e9aa765e611ee1a81236d30851021f633e38e1ab0f3804be8a78be3192e"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/CONTEXT.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/CONTEXT.md",
+      "sha256": "0a4334b6acc2b8bdba855b4cdc257f806f75eb06f7159ddbdaa1d58b1c2fb738"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/docs/agents/issue-tracker.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/agents/issue-tracker.md",
+      "sha256": "6e46bd42ec877f3b3b831404b3cd2ceea7fa3b17b29394a84486e6930590f7b6",
+      "source_raw_sha256": "7afba2972cdc2bc543ca66b780244411d1fbe02e36bbb229a0078d561b751d2a",
+      "preserved_raw_copy": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/round3/original-inputs/docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/agents/issue-tracker.md",
+      "presentation_derivation": "Remove exactly one final LF byte (0x0A); sha256 identifies delivered bytes, source_raw_sha256 identifies the unchanged raw source."
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/docs/agents/triage-labels.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/agents/triage-labels.md",
+      "sha256": "d7f6a462736906c251fd2da388aada037571621531247acbf26cf47d83a54362",
+      "source_raw_sha256": "2c1ad072c810911eb2c4488724d2dec72b7558f2ac27ba7c19721347d952ab82",
+      "preserved_raw_copy": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-01/round3/original-inputs/docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/agents/triage-labels.md",
+      "presentation_derivation": "Remove exactly one final LF byte (0x0A); sha256 identifies delivered bytes, source_raw_sha256 identifies the unchanged raw source."
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/docs/agents/domain.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/agents/domain.md",
+      "sha256": "a665e3380685cc5a5e128e90a2ca2bbddff1f29ae359f077f9d4725e20c82b4f"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/docs/adr/0001-preserve-agent-cli-semantics.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/adr/0001-preserve-agent-cli-semantics.md",
+      "sha256": "da5517ecb36963872e37826c402be74102242b41caf08640b8afdc2155f43908"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/docs/adr/0002-language-neutral-agent-cli-declarations.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/adr/0002-language-neutral-agent-cli-declarations.md",
+      "sha256": "647d4d6816148e8f1e2bfcd555b855a29907385baf58ab3251bfd1cf7d700a38"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/docs/adr/0003-evaluate-a-complete-agent-cli-runtime.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/docs/adr/0003-evaluate-a-complete-agent-cli-runtime.md",
+      "sha256": "fcde859904383ce4e5e494b18153e23c82481b9756947658cd8675e770c6c12d"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/spec.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/spec.md",
+      "sha256": "1be894c4c9dc6d73f2119a13c6e9d210b75763ef897d84700f433db0fae7f507"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issue-body.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issue-body.md",
+      "sha256": "1f5dd1410b6e78772b397df1764aca2b12544cbd6a8fa153842dbd320cf05673"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/discussion.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/discussion.md",
+      "sha256": "9ca92a9f22959147b6bf434594c84f3c92f21dc213ceb31bfe09ddd21460461f"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/01-macos-isolation-and-baseline.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/01-macos-isolation-and-baseline.md",
+      "sha256": "ad0ebd22e8d781ea5ceeaff7e7f00a93021e8070561087e669e3adc857104f6f"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/02-bun-minimal-feasibility.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/02-bun-minimal-feasibility.md",
+      "sha256": "c8cb6b37d8841c2fab5bcdfca79150f6baaf6ff387fa6f4f711541aeb6371b60"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/03-macos-build-and-startup.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/03-macos-build-and-startup.md",
+      "sha256": "a06e60e946e19c40a34be603a1e6fee7891904a88d11000d1b563179b69922e5"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/04-macos-tests-and-plugin-lifecycle.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/04-macos-tests-and-plugin-lifecycle.md",
+      "sha256": "3ebfd2dc7c423c9748e5d317a41776fdc5b2cd943dd952655c76bf1d01868fd5"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/05-public-consumer-compatibility.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/05-public-consumer-compatibility.md",
+      "sha256": "f17f45660e694751008545dbab295e5ff00a289176476742d382139868d79979"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/06-macos-test-performance.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/06-macos-test-performance.md",
+      "sha256": "d791518fe9bead1a45bc133e07b24bb5c77a75126edc5b5d0f29c7997dd8c49d"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/07-linux-equivalent-evidence.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/07-linux-equivalent-evidence.md",
+      "sha256": "7cfeb5363a2ebf84af17b432f6d59ee2f25a81b984a306728da79a41fffb80dd"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/08-windows-equivalent-evidence.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/08-windows-equivalent-evidence.md",
+      "sha256": "0f7a825f3b2c97e3d0711f813c625c1fe398e2e948ad3fe49764d1c4b9f2de19"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/.scratch/bun-toolchain-evaluation/issues/09-evidence-backed-recommendation.md",
+      "provenance": "explicitly requested local handoff source; not GitHub fetch; not product baseline",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/09-evidence-backed-recommendation.md",
+      "sha256": "18d3ac24505284faf742bb8b9d7daa861b368470c9f76fcb905c540e6189fd14"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/AGENTS.md",
+      "provenance": "dirty instruction evidence only; fixed-base copy supplies repository rules",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-instruction-evidence/AGENTS.md",
+      "sha256": "02fa8e2622117e8f71c64f0f4765541281b285ff482c35ad67152a6f46db4700"
+    },
+    {
+      "source": "/Users/slighter12/git/personal/Navide/CLAUDE.md",
+      "provenance": "dirty instruction evidence only; fixed-base copy supplies repository rules",
+      "packet_path": "docs/toolchain-evaluation/bun/packet/v1/local-instruction-evidence/CLAUDE.md",
+      "sha256": "dd2e47427d13c35c44c7ec8d501faad2ff1d7a934cc06410ed4303d7718b11fc"
+    }
+  ]
+}
