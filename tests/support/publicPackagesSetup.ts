@@ -25,6 +25,9 @@ const builtPackages = ['packages/plugin-contracts', 'packages/plugin-sdk', 'pack
 const packedPackages = [...builtPackages, 'plugins/navide-git']
 
 function packageManager(): { command: string; prefix: string[] } {
+  if (process.versions.bun) {
+    return { command: process.execPath, prefix: [join(repositoryRoot, 'scripts/bun-evaluation.mjs')] }
+  }
   // `pnpm` alone is a .cmd shim on Windows that execFile cannot start; under
   // `pnpm test:run` npm_execpath is pnpm's own script.
   const inherited = process.env.npm_execpath ?? ''
