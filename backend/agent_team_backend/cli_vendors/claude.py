@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import osplat
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._claude_facts import CLAUDE
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -1266,7 +1267,7 @@ async def fetch_claude_account_dir(config_dir: Path) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^claude\s+(?:\S+\s+)*--resume\s+(\S+)")
+_RESUME_RE = re.compile(rf"^{re.escape(CLAUDE.command)}\s+(?:\S+\s+)*{re.escape(CLAUDE.resume_flag)}\s+(\S+)")
 
 
 def _resume_id_from_command(command) -> str:
@@ -1389,7 +1390,7 @@ _EXTENSIONS = ExtensionsSpec(sources=(
 
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="claude",
+    key=CLAUDE.key,
     # Official standalone CLI network requirements (verified 2026-09-21):
     # https://code.claude.com/docs/en/network-config#network-access-requirements
     # Only concrete hosts: dynamic artifact/Gerrit hosts and arbitrary tools
@@ -1417,7 +1418,7 @@ SPEC = VendorSpec(
     data_dir_env_vars=("CLAUDE_CONFIG_DIR",),
     supports_model=True,
     supports_effort=True,
-    known_efforts=('low', 'medium', 'high', 'xhigh', 'max'),
+    known_efforts=CLAUDE.known_efforts,
     skills_supported=True,
     # --add-dir adds another project directory, and Claude Code discovers a
     # project's skills below .claude/skills — so the view has to carry that
@@ -1467,7 +1468,7 @@ SPEC = VendorSpec(
         ),
         max_chars=10_000,
     ),
-    login_command_args="auth login",
+    login_command_args=CLAUDE.login_args,
     install_hooks=_install_hooks,
     # The usage-limit banner Claude Code prints ("You've hit your … limit ·
     # resets 3pm (Asia/Taipei)"); the same detector the frontend spec's
@@ -1573,5 +1574,6 @@ SPEC = VendorSpec(
     # (previous prompts shown when scrolling up) disappears. 3s is the room the
     # handler needs for a read-modify-write of that file, and the master stays
     # open across it because a HUP mid-write is the same lost entry.
-    shutdown=ShutdownSpec(graceful=True, grace_s=3.0, defer_master_close=True),
+    shutdown=ShutdownSpec(graceful=CLAUDE.graceful, grace_s=CLAUDE.grace_s,
+                          defer_master_close=CLAUDE.defer_master_close),
 )

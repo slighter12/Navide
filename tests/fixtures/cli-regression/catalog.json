@@ -1,5 +1,26 @@
 {
   "schemaVersion": 1,
+  "runtimeReferences": {
+    "claude": {
+      "seam": "production TS WS client / authenticated Python handlers and stores / selected native Rust PTY",
+      "platforms": ["darwin"],
+      "cases": [
+        {
+          "id": "claude-checkpoint-resume",
+          "file": "tests/cli/claudeRuntime.test.ts",
+          "name": "native Claude production-client checkpoint and persisted resume",
+          "capabilities": ["launch", "reader", "resume", "shutdown"]
+        },
+        {
+          "id": "claude-selected-failure",
+          "file": "tests/cli/claudeRuntime.test.ts",
+          "name": "native Claude production-client selected failure has no rescue",
+          "capabilities": ["launch"],
+          "evidence": "negative startup refusal; no actual native process is claimed"
+        }
+      ]
+    }
+  },
   "vendors": {
     "aider": {
       "capabilities": [

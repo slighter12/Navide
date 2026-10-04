@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { missingContracts } from './contractReporter'
+import { missingContracts, missingRuntimeReferences } from './contractReporter'
+
+describe('native reference execution coverage invariant', () => {
+  const entry = { id: 'claude-checkpoint-resume', file: 'tests/cli/claudeRuntime.test.ts', name: 'native Claude checkpoint' }
+  const passed = { file: '/repo/' + entry.file, name: entry.name, state: 'passed', receipt: entry.id }
+  it('requires the actual declared test and its post-assertion receipt', () => {
+    expect(missingRuntimeReferences([entry], [passed])).toEqual([])
+    expect(missingRuntimeReferences([entry], [])).toEqual([entry.id])
+    expect(missingRuntimeReferences([entry], [{ ...passed, receipt: undefined }])).toEqual([entry.id])
+    expect(missingRuntimeReferences([entry], [{ ...passed, file: '/repo/tests/cli/shellRuntime.test.ts' }])).toEqual([entry.id])
+    expect(missingRuntimeReferences([entry], [passed, passed])).toEqual([entry.id])
+  })
+  it.each(['skipped', 'pending', 'failed'])('rejects a %s native reference case', (state) => {
+    expect(missingRuntimeReferences([entry], [{ ...passed, state }])).toEqual([entry.id])
+  })
+})
 
 describe('frontend CLI execution coverage invariant', () => {
   const passed = { name: 'frontend contract claude', state: 'passed', receipt: 'claude' }

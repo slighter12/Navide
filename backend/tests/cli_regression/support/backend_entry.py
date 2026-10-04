@@ -5,6 +5,10 @@ import os
 from tests.cli_regression.support.isolation import install_external_guards
 
 install_external_guards(Path(os.environ["NAVIDE_REGRESSION_ROOT"]))
+if os.environ.get("NAVIDE_REGRESSION_KEYCHAIN_FIXTURE") == "1":
+    from tests.cli_regression.support.fixture_keychain import runner
+    from agent_team_backend import credential_vault
+    credential_vault._default_security_runner = runner(Path(os.environ["NAVIDE_REGRESSION_ROOT"]))
 if generation := os.environ.get("NAVIDE_BASELINE_TRACE"):
     from tests.cli_regression.support.baseline_diagnostics import install_trace
     install_trace(Path(os.environ["NAVIDE_REGRESSION_ROOT"]), generation)
