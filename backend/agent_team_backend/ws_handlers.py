@@ -13,6 +13,7 @@ function-level ``from . import app``.
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ from . import (
     trust_store,
 )
 from .cli_vendors.codex import command_with_resume_id as codex_command_with_resume_id
+from .cli_runtime import RustTerminalService
 from .cli_vendors.registry import VENDORS as CLI_VENDORS
 from .cli_vendors.registry import vendor as cli_vendor
 from .ipc import make_error, make_event, make_response
@@ -7207,8 +7209,10 @@ async def _terminal_create_impl(
                     resume_dedup_id,
                 )
                 raise _TerminalCreateReapTimeout(stale.id)
-    def _spawn_and_claim(spawn_command=None) -> Any:
-        term = session.terminals.create(
+    async def _spawn_and_claim(spawn_command=None) -> Any:
+        native = isinstance(session.terminals, RustTerminalService)
+        create = session.terminals.create_async if native else session.terminals.create
+        term = create(
             pane_id=payload["pane_id"],
             agent_key=agent_key,
             command=payload["command"],
@@ -7221,10 +7225,14 @@ async def _terminal_create_impl(
             output_log_file=payload.get("output_log_file") or "",
             **({"spawn_command": spawn_command} if spawn_command is not None else {}),
         )
+        if native:
+            term = await term
         transaction["term_id"] = term.id
         # Claim immediately. A CLI can die while attribution registration is
         # still running; its terminal.exit must still reach this renderer.
         app._PTY_OWNERS[term.id] = session
+        if native:
+            await session.terminals.activate_async(term.id)
         return term
 
     # The account this launch is pinned to, resolved ONCE (under the switch
@@ -7379,7 +7387,7 @@ async def _terminal_create_impl(
                     raise quota_failover.FailoverRefused("CREDENTIAL_STORE_UNVERIFIED", "this login command cannot verify its credential store")
                 if wrapped is not None:
                     env.update(launch.env)
-                term = _spawn_and_claim(wrapped)
+                term = await _spawn_and_claim(wrapped)
                 metadata["credential_launch_term_id"] = term.id
                 term.metadata.update(metadata)
                 try:
@@ -7447,7 +7455,7 @@ async def _terminal_create_impl(
                 metadata["quota_transaction_id"] = quota_tx_id
                 metadata["quota_original_pane_id"] = quota_pane_id
             if term is None:
-                term = _spawn_and_claim()
+                term = await _spawn_and_claim()
             if managed_path:
                 term.metadata.update(metadata)
             if quota_tx_id:
@@ -7469,7 +7477,7 @@ async def _terminal_create_impl(
                 switch_lock.release()
     else:
         portable_credentials.note_launch(str(payload["pane_id"]), "")
-        term = _spawn_and_claim()
+        term = await _spawn_and_claim()
     # What became of the window's own env settings. Only now is the answer
     # final: `env` is written by six later sources and `env_remove` (applied
     # last of all, in terminals.spawn) can still delete a key that survived
@@ -7708,7 +7716,10 @@ async def terminal_input(session: "Session", msg_id: str, msg_type: str, payload
     # started between the renderer's last look and this write still refuses it.
     session_id = payload["terminal_session_id"]
     if payload.get("require_shell_prompt") is True and payload["data"]:
-        if session.terminals.shell_in_foreground(session_id) is False:
+        foreground = (await session.terminals.shell_in_foreground_async(session_id)
+                      if isinstance(session.terminals, RustTerminalService)
+                      else session.terminals.shell_in_foreground(session_id))
+        if foreground is False:
             await session.send_json(
                 make_response(msg_id, msg_type, {"ok": False, "error": "foreground-busy"})
             )
@@ -7728,7 +7739,9 @@ async def terminal_input(session: "Session", msg_id: str, msg_type: str, payload
         # Anything else written (a person typing, a kill-line after a failed
         # injection) means the line is no longer only what was injected.
         _GUARDED_LINES.pop(session_id, None)
-    pending = session.terminals.write(session_id, payload["data"])
+    pending = (await session.terminals.write_async(session_id, payload["data"])
+               if isinstance(session.terminals, RustTerminalService)
+               else session.terminals.write(session_id, payload["data"]))
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "pending": pending}))
     # A keyboard frame (the renderer flags only those: not mouse/focus reports,
     # not paste or programmatic injection) is a human dev-time heartbeat for
@@ -7747,7 +7760,12 @@ async def terminal_shell_at_prompt(session: "Session", msg_id: str, msg_type: st
     running something in front of it (False), or unknown (None). Polled by the
     renderer's messaging gate; a tcgetpgrp per session, no subprocess."""
     ids = [str(x) for x in (payload.get("terminal_session_ids") or [])]
-    states = {sid: session.terminals.shell_in_foreground(sid) for sid in ids}
+    states = {
+        sid: (await session.terminals.shell_in_foreground_async(sid)
+              if isinstance(session.terminals, RustTerminalService)
+              else session.terminals.shell_in_foreground(sid))
+        for sid in ids
+    }
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "states": states}))
 
 
@@ -8024,18 +8042,22 @@ async def terminal_resize(session: "Session", msg_id: str, msg_type: str, payloa
     # frontend first — otherwise xterm re-wraps stale-width content
     # after narrowing and the CLI's repaints strand corrupt frames in
     # scrollback (visible as residual text). See drain_output().
-    await session.terminals.drain_output(payload["terminal_session_id"])
-    session.terminals.resize(
-        payload["terminal_session_id"],
-        int(payload["cols"]),
-        int(payload["rows"]),
-    )
+    tid = payload["terminal_session_id"]
+    if isinstance(session.terminals, RustTerminalService):
+        async with session.terminals.control_async(tid, int(payload["cols"]), int(payload["rows"])):
+            await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+        return
+    await session.terminals.drain_output(tid)
+    session.terminals.resize(tid, int(payload["cols"]), int(payload["rows"]))
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
 @handler("terminal.interrupt")
 async def terminal_interrupt(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
-    session.terminals.interrupt(payload["terminal_session_id"])
+    if isinstance(session.terminals, RustTerminalService):
+        await session.terminals.interrupt_async(payload["terminal_session_id"])
+    else:
+        session.terminals.interrupt(payload["terminal_session_id"])
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
@@ -8158,44 +8180,45 @@ async def terminal_reattach(session: "Session", msg_id: str, msg_type: str, payl
         alive.append(tid)
     # Transfer ownership of reattached PTYs to this window.
     app._claim_ptys(session, alive)
-    if cols > 0 and rows > 0:
-        for tid in alive:
-            session.terminals.force_redraw(tid, cols, rows)
-    # Where each survivor is actually writing its transcript. A reattaching
-    # pane has a fresh pane id, and the path its caller derives from that id
-    # names a file no one ever opened — the conversation is in the log the
-    # session opened at create time. Absent for a session started without one.
-    from .terminals import live_output_log_for
+    async with AsyncExitStack() as controls:
+        if cols > 0 and rows > 0:
+            if isinstance(session.terminals, RustTerminalService):
+                # One ACK covers all survivors; consistent unique lock order
+                # avoids overlapping reattach lists deadlocking each other.
+                for tid in sorted(set(alive)):
+                    await controls.enter_async_context(session.terminals.control_async(tid, cols, rows, redraw=True))
+            else:
+                for tid in alive:
+                    session.terminals.force_redraw(tid, cols, rows)
+        # Where each survivor is actually writing its transcript. A reattaching
+        # pane has a fresh pane id, and the path its caller derives from that id
+        # names a file no one ever opened — the conversation is in the log the
+        # session opened at create time. Absent for a session started without one.
+        from .terminals import live_output_log_for
 
-    logs = {tid: live_output_log_for(tid) for tid in alive}
-    sessions: dict[str, dict[str, str]] = {}
-    if session.host_authenticated:
-        for tid in alive:
-            stored = stored_sessions.get(tid)
-            if stored is None:
-                continue
-            row = {
-                "agent_key": stored.agent_key or "",
-                "workspace_path": os.path.realpath(stored.cwd),
-            }
-            origin = stored.metadata.get("origin")
-            if isinstance(origin, str) and origin:
-                row["origin"] = origin
-            sessions[tid] = row
-    response_payload: dict[str, Any] = {
-        "alive": alive,
-        "dead": dead,
-        "logs": {tid: path for tid, path in logs.items() if path},
-    }
-    if session.host_authenticated:
-        response_payload["sessions"] = sessions
-    await session.send_json(
-        make_response(
-            msg_id,
-            msg_type,
-            response_payload,
-        )
-    )
+        logs = {tid: live_output_log_for(tid) for tid in alive}
+        sessions: dict[str, dict[str, str]] = {}
+        if session.host_authenticated:
+            for tid in alive:
+                stored = stored_sessions.get(tid)
+                if stored is None:
+                    continue
+                row = {
+                    "agent_key": stored.agent_key or "",
+                    "workspace_path": os.path.realpath(stored.cwd),
+                }
+                origin = stored.metadata.get("origin")
+                if isinstance(origin, str) and origin:
+                    row["origin"] = origin
+                sessions[tid] = row
+        response_payload: dict[str, Any] = {
+            "alive": alive,
+            "dead": dead,
+            "logs": {tid: path for tid, path in logs.items() if path},
+        }
+        if session.host_authenticated:
+            response_payload["sessions"] = sessions
+        await session.send_json(make_response(msg_id, msg_type, response_payload))
 
 
 @handler("terminal.redraw")
@@ -8216,8 +8239,14 @@ async def terminal_redraw(session: "Session", msg_id: str, msg_type: str, payloa
         # deadline; without draining first, the SIGWINCH could interrupt
         # an in-flight frame and strand a corrupt repaint — exactly what
         # the resize drain/grace machinery exists to prevent.
-        await session.terminals.drain_output(tid)
-        session.terminals.force_redraw(tid, cols, rows)
+        if isinstance(session.terminals, RustTerminalService):
+            async with session.terminals.control_async(tid, cols, rows, redraw=True):
+                await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+        else:
+            await session.terminals.drain_output(tid)
+            session.terminals.force_redraw(tid, cols, rows)
+            await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+        return
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 

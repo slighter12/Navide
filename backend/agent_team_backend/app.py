@@ -923,7 +923,14 @@ def get_terminals() -> TerminalService:
     TerminalService.__init__ binds to the running event loop."""
     global _TERMINALS
     if _TERMINALS is None:
-        _TERMINALS = TerminalService(emit=_active_emit)
+        selected = os.environ.get("NAVIDE_ACR_EVAL_RUNTIME", "python")
+        if selected != "python":
+            if selected != "rust-shell" or not os.environ.get("NAVIDE_REGRESSION_ROOT"):
+                raise RuntimeError("Rust evaluation requires the isolated regression harness")
+            from .cli_runtime import RustTerminalService
+            _TERMINALS = RustTerminalService(emit=_active_emit)
+        else:
+            _TERMINALS = TerminalService(emit=_active_emit)
     return _TERMINALS
 
 

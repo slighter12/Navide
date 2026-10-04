@@ -9,6 +9,10 @@ if generation := os.environ.get("NAVIDE_BASELINE_TRACE"):
     from tests.cli_regression.support.baseline_diagnostics import install_trace
     install_trace(Path(os.environ["NAVIDE_REGRESSION_ROOT"]), generation)
 
+if os.environ.get("NAVIDE_CONTROL_FENCE_GATE") == "1":
+    from tests.cli_regression.support.control_fence_gate import install
+    install(Path(os.environ["NAVIDE_REGRESSION_ROOT"]))
+
 from agent_team_backend.__main__ import main
 
 raise SystemExit(main())
