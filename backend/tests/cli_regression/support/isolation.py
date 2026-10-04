@@ -12,6 +12,8 @@ import socket
 import subprocess
 import sys
 
+from .redacted_diagnostics import redact
+
 
 CLI_NAMES = frozenset({
     "claude", "codex", "gemini", "kimi", "grok", "qwen", "opencode", "kilo",
@@ -184,9 +186,12 @@ def install_external_guards(root: Path) -> None:
     """
     refusals = root / "refusals.jsonl"
 
-    def refuse(kind: str) -> None:
+    def refuse(kind: str, *, executable=None, argv=None) -> None:
+        receipt = {"boundary": kind}
+        if executable:
+            receipt.update(executable=executable, argv=argv)
         with refusals.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps({"boundary": kind}) + "\n")
+            stream.write(redact(json.dumps(receipt, default=os.fsdecode)) + "\n")
         raise PermissionError(f"regression harness refused {kind}")
 
     original_popen = subprocess.Popen
@@ -201,8 +206,8 @@ def install_external_guards(root: Path) -> None:
 
     class GuardedPopen(original_popen):
         def __init__(self, args, *rest, **kwargs):
-            if real_cli_in(args, kwargs.get("env"), (root,)):
-                refuse("real CLI")
+            if executable := real_cli_in(args, kwargs.get("env"), (root,)):
+                refuse("real CLI", executable=executable, argv=args)
             if any(Path(word).name == "security" for word in command_words(args)):
                 refuse("Keychain executable")
             kwargs["env"] = launch_env(kwargs.get("env"))
@@ -292,8 +297,8 @@ def install_external_guards(root: Path) -> None:
     spawn = osplat.terminal_backend.spawn
 
     def guarded_spawn(argv, **kwargs):
-        if real_cli_in(argv, kwargs.get("env"), (root,)):
-            refuse("real native CLI")
+        if executable := real_cli_in(argv, kwargs.get("env"), (root,)):
+            refuse("real native CLI", executable=executable, argv=argv)
         kwargs["env"] = launch_env(kwargs.get("env"))
         return spawn(argv, **kwargs)
 

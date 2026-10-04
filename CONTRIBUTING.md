@@ -171,7 +171,7 @@ for suite ownership, provider isolation, contract coverage and diagnostics.
 
 **Python**
 - Follow PEP 8.
-- Run `uv --project backend run pytest backend/tests` before committing.
+- Run the complete backend suite with `uv --project backend run pytest backend/tests` before committing. Focused runs such as `-m cli_regression` supplement this check; they never replace it.
 
 **UI text and docs**
 - Follow the [glossary](docs/en-US/glossary.md): "Navide plugin" and "Navide

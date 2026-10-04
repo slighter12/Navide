@@ -7,7 +7,6 @@ from collections import defaultdict
 import json
 import os
 from pathlib import Path
-import shutil
 import signal
 import socket
 import subprocess
@@ -22,6 +21,7 @@ from agent_team_backend.applog import in_data_dir
 
 from .cli_shim import base_python_executable
 from .isolation import isolated_environment
+from .redacted_diagnostics import archive_text
 
 
 #: How long a shutting-down backend's owned children get to exit on their own
@@ -45,8 +45,9 @@ _STACK_DUMP_WAIT_S = 1.5
 
 
 class BackendProcess:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, artifact_prefix: str = ""):
         self.root = root
+        self.artifact_prefix = artifact_prefix
         self.env = isolated_environment(root)
         self.env["NAVIDE_REGRESSION_ROOT"] = str(root)
         self.env["NAVIDE_SHUTDOWN_DIAG"] = "1"
@@ -58,7 +59,7 @@ class BackendProcess:
         self.decoders = defaultdict(lambda: codecs.getincrementaldecoder("utf-8")())
         self.children: set[int] = set()
         self._owned_children: dict[int, psutil.Process] = {}
-        self.log_path = root / "backend.log"
+        self.log_path = root / f"{artifact_prefix}backend.log"
 
     async def __aenter__(self):
         self._log = self.log_path.open("w", encoding="utf-8")
@@ -181,7 +182,8 @@ class BackendProcess:
                     self.process.stdin.close()
                 except BrokenPipeError:
                     pass
-            (self.root / "scenario.json").write_text(json.dumps({
+            scenario_path = self.root / f"{self.artifact_prefix}scenario.json"
+            scenario_path.write_text(json.dumps({
                 "events": self.events, "children": sorted(self.children), "survivors": survivors,
                 "registry_reaped": registry_reaped,
                 "backend_exit_code": self.process.returncode if self.process else None,
@@ -193,10 +195,9 @@ class BackendProcess:
             process_id = self.process.pid if self.process else "not-started"
             destination = Path(__file__).resolve().parents[4] / "test-results" / "ci" / "cli-regression" / f"{self.root.parent.name}-{process_id}"
             destination.mkdir(parents=True, exist_ok=True)
-            for name in ("backend.log", "scenario.json", "refusals.jsonl"):
-                source = self.root / name
+            for source in (self.log_path, scenario_path, self.root / "refusals.jsonl"):
                 if source.exists():
-                    shutil.copyfile(source, destination / name)
+                    archive_text(source, destination / source.name)
         assert exit_error is None, exit_error
         assert not registry_reaped, (
             f"PTY children survived backend shutdown (registry cleanup reaped them): "
