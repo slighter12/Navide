@@ -9,6 +9,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -61,8 +62,8 @@ class NativePeer:
         self.process.stdin.flush()
         return request["id"]
 
-    def receive(self):
-        record = self.queue.get(timeout=15)
+    def receive(self, timeout=15):
+        record = self.queue.get(timeout=timeout)
         if "id" in record:
             self.responses[record["id"]] = record
         else:
@@ -105,6 +106,76 @@ class NativePeer:
             for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
                 stream.close()
             self.reader.join(timeout=2)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires a paced POSIX filesystem fixture")
+def test_native_paced_historical_observation_does_not_block_shell_admission(tmp_path):
+    """Correctness proof with a held external history stream, not a timing benchmark."""
+    native = NativePeer(tmp_path)
+    released = threading.Event()
+    opened = threading.Event()
+    writer = None
+    try:
+        script = tmp_path / "native_shell_peer.py"
+        shutil.copyfile(Path(__file__).parent / "cli_regression/support/native_shell_peer.py", script)
+        sid, generation = native.create([base_python_executable(), "-u", str(script)])
+        while b"NATIVE_READY " not in native.output.get(sid, b""):
+            native.receive()
+        history = tmp_path / "history.jsonl"
+        os.mkfifo(history)
+
+        def paced_history():
+            if released.wait(5):
+                with history.open("wb"):
+                    opened.set()  # Release the real native File::open rendezvous.
+
+        writer = threading.Thread(target=paced_history, daemon=True)
+        writer.start()
+        observation = native.send("observe", {"vendor": "claude", "path": str(history), "mode": "activity", "seen": []})
+        controls = [native.send("write", {"data_b64": base64.b64encode(b"responsive\r").decode()}, sid, generation),
+                    native.send("interrupt", {"data_b64": "Aw=="}, sid, generation),
+                    native.send("kill", {"force": True}, sid, generation)]
+        deadline = time.monotonic() + 1
+        try:
+            for request in controls:
+                while request not in native.responses:
+                    native.receive(timeout=max(0.001, deadline - time.monotonic()))
+                assert native.responses.pop(request)["ok"]
+        except queue.Empty:
+            pytest.fail("unrelated shell control admission waited for historical I/O release")
+        assert observation not in native.responses and not released.is_set() and not opened.is_set()
+        released.set()
+        writer.join(timeout=1)
+        assert not writer.is_alive() and opened.is_set()
+        while observation not in native.responses:
+            native.receive()
+        failed = native.responses.pop(observation)
+        # The paced open completes, then a FIFO is (correctly) not seekable.
+        assert not failed["ok"] and failed["error"]["code"] == "IO_FAILED"
+        assert "seek" in failed["error"]["message"].lower()
+        (tmp_path / "held-history.json").write_text(json.dumps({"request_id": observation, "path": str(history),
+            "process_bound": False, "controls_admitted_before_release": controls, "response": failed}, indent=2))
+        history.unlink()
+        history.write_text("")
+        observation = native.send("observe", {"vendor": "claude", "path": str(history), "mode": "activity", "seen": []})
+        result = native.result(observation)
+        parts = [row for row in native.events if row.get("observation_id") == observation]
+        assert result["observation_parts"] == len(parts)
+        observed = json.loads(b"".join(base64.b64decode(row["data_b64"]) for row in parts))
+        assert observed["parser"] == "rust-claude-jsonl-v1" and observed["path"] == str(history)
+        assert all(observed["ownership"][key] is None for key in (
+            "session_id", "session_generation", "pane_id", "workspace_path"))
+        assert all(row["runtime_generation"] == native.generation for row in parts)
+        while not any(row.get("event") == "cleaned" and row["session_id"] == sid for row in native.events):
+            native.receive()
+        cleaned = next(row for row in native.events if row.get("event") == "cleaned" and row["session_id"] == sid)
+        assert cleaned["cleanup_complete"] and cleaned["root_reaped"]
+        assert cleaned["survivors"] == cleaned["unverifiable"] == []
+    finally:
+        released.set()
+        if writer:
+            writer.join(timeout=1)
+        native.close()
 
 
 def test_native_held_control_fence_rejects_overlap_without_fifo_deadlock(tmp_path):
@@ -155,6 +226,53 @@ def test_native_admitted_writes_and_controls_remain_fifo(tmp_path):
         native.result(native.send("kill", {"force": True}, sid, generation))
     finally:
         native.close()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS native WINCH/PTY fixture")
+def test_native_producer_completes_stdout_after_winch(tmp_path):
+    native = NativePeer(tmp_path)
+    expected = b"WINCH_FRAME " + b"x" * 65536 + b"\r\nWINCH_DONE\r\n"
+    observed = b""
+    try:
+        script = tmp_path / "native_shell_peer.py"
+        shutil.copyfile(Path(__file__).parent / "cli_regression/support/native_shell_peer.py", script)
+        sid, generation = native.create(["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)",
+                                         base_python_executable(), "-u", str(script)])
+        while not native.output.get(sid, b"").endswith(b"\r\n"):
+            native.receive()
+        start = len(native.output[sid])
+        native.result(native.send("flow", {"paused": True}, sid, generation))
+        native.result(native.send("write", {"data_b64": base64.b64encode(b"winch-short-write\r").decode()}, sid, generation))
+        sent = tmp_path / "winch-sent.json"
+        deadline = time.monotonic() + 0.5
+        while not sent.exists():
+            assert time.monotonic() < deadline, "producer did not signal its held stdout write"
+            time.sleep(0.001)
+        signal_receipt = json.loads(sent.read_text())
+        owned = next(row for row in native.events if row.get("event") == "owned" and row["session_id"] == sid)
+        assert signal_receipt == {"pid": owned["root"]["pid"], "signal": "SIGWINCH"}
+        native.result(native.send("flow", {"paused": False}, sid, generation))
+        while not native.output[sid].endswith(b"WINCH_DONE\r\n"):
+            native.receive()
+        observed = native.output[sid][start:]
+        offset = 0
+        for sequence, row in enumerate((e for e in native.events if e.get("event") == "output"), start=1):
+            assert row["seq"] == sequence and row["offset"] == offset and row["dropped_before"] == 0
+            assert row["runtime_generation"] == native.generation and row["session_generation"] == generation
+            offset += len(base64.b64decode(row["data_b64"]))
+        assert observed == expected
+    finally:
+        native.close()
+        owned = [row for row in native.events if row.get("event") == "owned"]
+        cleaned = [row for row in native.events if row.get("event") == "cleaned"]
+        (tmp_path / "winch-proof.json").write_text(json.dumps({"identity": native.identity, "owned": owned, "cleaned": cleaned,
+            "expected_bytes": len(expected), "observed_bytes": len(observed),
+            "expected_sha256": hashlib.sha256(expected).hexdigest(), "observed_sha256": hashlib.sha256(observed).hexdigest(),
+            "sidecar_exit": native.process.returncode, "signal_origin": "external producer self-WINCH",
+            "rescue": native.process.returncode != 0}, indent=2))
+        assert {row["session_id"] for row in owned} == {row["session_id"] for row in cleaned}
+        assert all(row["cleanup_complete"] and row["root_reaped"] and not row["survivors"] and not row["unverifiable"] for row in cleaned)
+        assert native.process.returncode == 0
 
 
 def test_native_bookkeeping_is_bounded_after_settled_requests_and_sessions(tmp_path):

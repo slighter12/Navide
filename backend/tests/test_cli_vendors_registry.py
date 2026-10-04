@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,12 +51,28 @@ NON_VENDOR_AGENT_KEYS = {"terminal"}
 # platform seam from a vendor cannot form a cycle.
 ALLOWED_LOCAL_IMPORTS = {
     "base", "_protocols", "applog", "log_readers.base", "osplat", "skills_store",
-    "usage_common",
+    "usage_common", "_claude_facts",
 }
 VENDOR_IMPORT_EXEMPTIONS = {"kilo": {"opencode"}}
 # psutil is a leaf (codex reads CODEX_HOME off running processes to keep a
 # live pane home out of the startup sweep).
 ALLOWED_THIRD_PARTY = {"httpx", "psutil", "yaml"}
+
+
+def _frontend_declared_source(path: Path) -> str:
+    source = path.read_text(encoding="utf-8")
+    if path.stem == "claude":
+        assert "from './_claudeFacts'" in source
+        generated = (FRONTEND_AGENTS_DIR / "_claudeFacts.ts").read_text(encoding="utf-8")
+        facts = json.loads(generated.partition("export const CLAUDE = ")[2].removesuffix(" as const\n"))
+        source = re.sub(r"CLAUDE\.(\w+)", lambda match: repr(facts[match[1]]), source)
+    return source
+
+
+def test_generated_claude_facts_are_current() -> None:
+    result = subprocess.run([sys.executable, str(REPO_ROOT / "scripts/generate-claude-facts.py"), "--check"],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_registry_matches_expected_vendor_set() -> None:
@@ -348,7 +366,7 @@ def test_help_panel_sign_in_column_matches_login_command_args() -> None:
     for path in FRONTEND_AGENTS_DIR.glob("*.ts"):
         if path.stem.startswith("_") or path.stem in {"index", "types", "terminal"}:
             continue
-        spec_source = path.read_text(encoding="utf-8")
+        spec_source = _frontend_declared_source(path)
         key = re.search(r"agentKey: '([a-z]+)'", spec_source)
         command = re.search(r"defaultCommand: '([^']+)'", spec_source)
         assert key and command, f"{path.name} declares no agentKey/defaultCommand"
@@ -434,7 +452,7 @@ def test_model_capability_matches_the_frontend_agent_spec() -> None:
     for path in FRONTEND_AGENTS_DIR.glob("*.ts"):
         if path.stem.startswith("_") or path.stem in {"index", "types"}:
             continue
-        source = path.read_text(encoding="utf-8")
+        source = _frontend_declared_source(path)
         keys = set(re.findall(r"agentKey: '([a-z]+)'", source))
         assert len(keys) == 1, f"{path.name} declares agentKeys {sorted(keys)}"
         key = keys.pop()

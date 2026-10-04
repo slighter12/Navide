@@ -14,6 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from .. import osplat
+from ..cli_runtime_claude import reference_spec
 from .base import VendorRuntimeContext, VendorSpec
 from . import (
     aider,
@@ -36,7 +37,7 @@ from . import (
 _ALL: tuple[VendorSpec, ...] = (
     aider.SPEC,
     antigravity.SPEC,
-    claude.SPEC,
+    reference_spec(claude.SPEC),
     codex.SPEC,
     copilot.SPEC,
     cursor.SPEC,

@@ -2,6 +2,7 @@
 import asyncio
 from collections import deque
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,7 @@ async def test_concurrent_request_counters_follow_wire_order_and_settle():
     service._runtime_generation = "unit-generation"
     service._request_number = 0
     service._pending = {}
+    service._observations = {}
     service._admission = asyncio.Semaphore(256)
     service._send_lock = asyncio.Lock()
     ids = []
@@ -237,3 +239,70 @@ async def test_actual_rust_launch_boundary_refuses_unowned_provider_before_nativ
     receipts = [json.loads(line) for line in (tmp_path / "runtime-receipts.jsonl").read_text().splitlines()]
     assert any(record["event"] == "ready" for record in receipts)
     assert not any(record["event"] == "owned" for record in receipts)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ack_already_queued", [False, True])
+@pytest.mark.parametrize("cleanup_failed", [False, True])
+async def test_kill_all_fences_retained_exit_cleanup_and_late_error(tmp_path, monkeypatch,
+                                                                  ack_already_queued, cleanup_failed):
+    """Supplemental event race: real bridge handlers; controlled ACK and external store pacing."""
+    from agent_team_backend import pty_registry
+
+    async def emit(_frame):
+        pass
+
+    service = RustTerminalService(emit)
+    service._data_dir = tmp_path
+    service._runtime = SimpleNamespace(returncode=None)
+    session = RuntimeSession("naturally-exited", "pane", "terminal", [], str(tmp_path),
+                             RuntimeProcessView(100), "unit-generation", {}, {})
+    service._sessions[session.id] = service._retained[session.id] = session
+    await service._finish_exit(session, {"last_output_seq": 0, "reason": "exit", "exit_code": 0,
+                                        "uptime_ms": 1, "dropped_tail_bytes": 0})
+    assert session.closed and session.id not in service._sessions and not session.cleanup.is_set()
+    allow_ack = asyncio.Event()
+    unregister_started = threading.Event()
+    allow_unregister = threading.Event()
+    unregistered = threading.Event()
+    original_unregister = pty_registry.unregister
+
+    def paced_unregister(pid):
+        unregister_started.set()
+        assert allow_unregister.wait(2), "controlled store acknowledgment deadline"
+        original_unregister(pid)
+        unregistered.set()
+
+    monkeypatch.setattr(pty_registry, "unregister", paced_unregister)
+
+    async def acknowledge():
+        await allow_ack.wait()
+        await service._finish_cleanup(session, {"cleanup_complete": not cleanup_failed,
+            "root_reaped": True, "survivors": [], "unverifiable": []})
+
+    cleanup = service._task(acknowledge()) if ack_already_queued else None
+    fence = asyncio.create_task(service.kill_all())
+    try:
+        await asyncio.sleep(0)
+        assert not fence.done(), "shutdown returned before retained ownership ACK"
+        if cleanup is None:
+            cleanup = service._task(acknowledge())
+        allow_ack.set()
+        if cleanup_failed:
+            with pytest.raises(RuntimeError, match="CLEANUP_FAILED"):
+                await asyncio.wait_for(fence, 2)
+            assert session.cleanup.is_set() and session.cleanup_error
+        else:
+            assert await asyncio.to_thread(unregister_started.wait, 1)
+            assert not fence.done() and not session.cleanup.is_set()
+            allow_unregister.set()
+            await asyncio.wait_for(fence, 2)
+            assert session.cleanup.is_set() and unregistered.is_set()
+    finally:
+        allow_ack.set()
+        allow_unregister.set()
+        if cleanup:
+            await asyncio.wait_for(cleanup, 2)
+        if not fence.done():
+            fence.cancel()
+        await asyncio.gather(fence, return_exceptions=True)

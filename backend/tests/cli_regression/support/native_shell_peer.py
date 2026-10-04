@@ -21,7 +21,12 @@ def main():
 
     def emit(text):
         with lock:
-            print(text, flush=True)
+            data = (text + "\n").encode("utf-8")
+            while data:
+                written = os.write(sys.stdout.fileno(), data)
+                if written <= 0:
+                    raise OSError("stdout write made no progress")
+                data = data[written:]
 
     def dimensions():
         size = os.get_terminal_size(0)
@@ -52,6 +57,17 @@ def main():
         if line == "burst":
             worker = threading.Thread(target=burst)
             worker.start()
+        elif line == "winch-short-write":
+            def winch():
+                os.kill(os.getpid(), signal.SIGWINCH)
+                Path("winch-sent.tmp").write_text(json.dumps({"pid": os.getpid(), "signal": "SIGWINCH"}))
+                Path("winch-sent.tmp").replace("winch-sent.json")
+
+            timer = threading.Timer(0.02, winch)
+            timer.start()
+            emit("WINCH_FRAME " + "x" * 65536)
+            timer.join()
+            emit("WINCH_DONE")
         elif line == "size":
             if resizes:
                 emit("WINCH " + json.dumps(resizes[-1]))

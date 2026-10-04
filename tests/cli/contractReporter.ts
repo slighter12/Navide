@@ -17,6 +17,16 @@ export function missingContracts(vendors: string[], results: ContractResult[]): 
   })
 }
 
+export interface RuntimeReference { id: string; file: string; name: string }
+export interface RuntimeResult extends ContractResult { file: string }
+
+export function missingRuntimeReferences(cases: RuntimeReference[], results: RuntimeResult[]): string[] {
+  return cases.filter((entry) => {
+    const matches = results.filter((result) => result.file.replaceAll('\\', '/').endsWith('/' + entry.file) && result.name === entry.name)
+    return matches.length !== 1 || matches[0].state !== 'passed' || matches[0].receipt !== entry.id
+  }).map((entry) => entry.id)
+}
+
 export default class CliContractReporter implements Reporter {
   onTestRunEnd(modules: ReadonlyArray<TestModule>): void {
     if (process.env.NAVIDE_CLI_COVERAGE_REQUIRED !== '1') return
@@ -29,8 +39,18 @@ export default class CliContractReporter implements Reporter {
         name: test.name, state: test.result().state, receipt: test.meta().cliContract,
       })))
     const missing = missingContracts(vendors, results)
+    const references = Object.entries(catalog.runtimeReferences ?? {}).map(([vendor, declaration]: [string, any]) => ({
+      vendor, ...declaration, applicable: declaration.platforms.includes(process.platform),
+    }))
+    const runtimeResults = modules.flatMap((module) => [...module.children.allTests()].map((test) => ({
+      file: module.moduleId, name: test.name, state: test.result().state, receipt: test.meta().cliRuntimeReference,
+    }))).filter((result) => references.some((reference) => reference.cases.some((entry: RuntimeReference) =>
+      result.file.replaceAll('\\', '/').endsWith('/' + entry.file) && result.name === entry.name)))
+    const missingRuntime = missingRuntimeReferences(references.filter((reference) => reference.applicable).flatMap((reference) => reference.cases), runtimeResults)
     mkdirSync(resolve('test-results/ci'), { recursive: true })
-    writeFileSync(resolve('test-results/ci/cli-contracts.json'), JSON.stringify({ vendors, results, missing }, null, 2) + '\n')
-    if (missing.length) throw new Error(`CLI contracts did not execute successfully: ${missing.join(', ')}`)
+    writeFileSync(resolve('test-results/ci/cli-contracts.json'), JSON.stringify({ vendors, results, missing,
+      runtimeReferences: { platform: process.platform, declarations: references, results: runtimeResults, missing: missingRuntime },
+    }, null, 2) + '\n')
+    if (missing.length || missingRuntime.length) throw new Error(`CLI contracts did not execute successfully: ${[...missing, ...missingRuntime].join(', ')}`)
   }
 }

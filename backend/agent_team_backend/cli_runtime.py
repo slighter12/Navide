@@ -114,6 +114,7 @@ class RustTerminalService(TerminalService):
         self._ownership_pages: dict[str, list[dict]] = {}
         self._settled: deque[str] = deque()
         self._write_locks: dict[str, asyncio.Lock] = {}
+        self._observations: dict[str, list[bytes]] = {}
 
     def _receipt(self, record: dict) -> None:
         root = os.environ.get("NAVIDE_REGRESSION_ROOT")
@@ -175,6 +176,9 @@ class RustTerminalService(TerminalService):
                     raise RuntimeError("PROTOCOL_MISMATCH at handshake")
                 self._receipt({**ready, **self._runtime_identity})
             except BaseException as error:
+                # Expected teardown after a rejected handshake must not turn
+                # its causal failure into a later protocol-EOF failure.
+                self._stopping = True
                 self._lost = str(error) or "READY_TIMEOUT at handshake"
                 if self._runtime.returncode is None:
                     self._runtime.terminate()
@@ -205,6 +209,15 @@ class RustTerminalService(TerminalService):
                     if record.get("event") != "ready":
                         raise RuntimeError("START_FAILED before ready: " + str(record.get("error", {}).get("code")))
                     self._ready.set_result(record)
+                    continue
+                if record.get("event") == "observation":
+                    request_id = record["observation_id"]
+                    if request_id not in self._pending:
+                        raise RuntimeError("PROTOCOL_ERROR: unowned observation")
+                    parts = self._observations.setdefault(request_id, [])
+                    if record["part"] != len(parts):
+                        raise RuntimeError("PROTOCOL_ERROR: observation order")
+                    parts.append(base64.b64decode(record["data_b64"], validate=True))
                     continue
                 if request_id := record.get("id"):
                     future = self._pending.get(request_id)
@@ -308,22 +321,75 @@ class RustTerminalService(TerminalService):
                     self._runtime.stdin.write(encoded)
                     await self._runtime.stdin.drain()
                 response = await asyncio.wait_for(asyncio.shield(future), 15)
+                result = response.get("result", {})
+                if op == "observe" and "observation_parts" in result:
+                    parts = self._observations.get(request_id, [])
+                    if result["observation_parts"] != len(parts):
+                        raise RuntimeError("PROTOCOL_ERROR: incomplete observation")
+                    result = json.loads(b"".join(parts))
+                    if not response.get("ok"):
+                        error = response.get("error", {})
+                        if (result.get("mode") != "activity" or not result.get("error")
+                                or result["error"] != error.get("message")
+                                or error.get("code") != "IO_FAILED" or error.get("stage") != "io"):
+                            raise RuntimeError("PROTOCOL_ERROR: invalid activity error progress")
+                        result["error"] = f"{error['code']} at {error['stage']}: {error['message']}"
+                        return result  # Validated/applied by the activity reader before raising.
                 if not response.get("ok"):
                     error = response.get("error", {})
                     raise RuntimeError(f"{error.get('code')} at {error.get('stage')}: {error.get('message')}")
-                return response["result"]
+                return result
             except TimeoutError as error:
                 raise RuntimeError(f"REQUEST_TIMEOUT: {op}") from error
             finally:
                 self._pending.pop(request_id, None)
+                self._observations.pop(request_id, None)
                 if future.done() and not future.cancelled():
                     future.exception()
+
+    async def observe_claude(self, args: dict) -> dict:
+        await self._ensure_started()
+        path = Path(args["path"])
+        from .cli_vendors.registry import vendor
+        spec = vendor("claude")
+        session = next((s for s in self._retained.values() if s.agent_key == "claude"
+                        and (s.metadata.get("explicit_session_id") or spec.resume_id_from_command(s.command)) == path.stem
+                        and not s.closed), None)
+        result = await self._request("observe", {"vendor": "claude", **args}, session)
+        if (result.get("parser") != "rust-claude-jsonl-v1" or result.get("path") != str(path)
+                or result.get("mode") != args["mode"] or result.get("native_session_id") != path.stem):
+            raise RuntimeError("PROTOCOL_ERROR: wrong observation parser/path/mode/session")
+        context = result["ownership"]
+        if session and (context.get("session_id") != session.id or context.get("session_generation") != session.generation
+                        or context.get("pane_id") != session.pane_id or context.get("workspace_path") != session.cwd):
+            raise RuntimeError("PROTOCOL_ERROR: wrong observation ownership")
+        if not session and any(context.get(key) is not None for key in (
+                "session_id", "session_generation", "pane_id", "workspace_path")):
+            raise RuntimeError("PROTOCOL_ERROR: historical observation claimed process ownership")
+        if result.get("error"):
+            seen = result.get("seen")
+            previous = set(args.get("seen", []))
+            if not isinstance(seen, list) or not all(isinstance(key, str) for key in seen):
+                raise RuntimeError("PROTOCOL_ERROR: invalid activity seen progress")
+            markers = [key for key in seen if key.startswith("act_hw::")]
+            old_water = max((int(key[8:]) for key in previous if key.startswith("act_hw::")), default=0)
+            if (len(markers) != 1 or not markers[0][8:].isascii() or not markers[0][8:].isdecimal()
+                    or int(markers[0][8:]) <= old_water
+                    or set(seen) - set(markers) != {key for key in previous if not key.startswith("act_hw::")}
+                    or result["events"]):
+                raise RuntimeError("PROTOCOL_ERROR: invalid activity high-water progress")
+        self._receipt({**context, "runtime_generation": self._runtime_generation,
+                       **{key: result[key] for key in ("parser", "path", "native_session_id", "identity", "mode")},
+                       "checkpoint_offset": result["checkpoint"].get("offset"),
+                       "seen": result["seen"], "event_count": len(result["events"]),
+                       **({"error": result["error"]} if result.get("error") else {})})
+        return result
 
     def create(self, **kwargs):
         raise RuntimeError("Selected Rust runtime requires native async create; no Python fallback")
 
     async def create_async(self, **kwargs) -> RuntimeSession:
-        if kwargs.get("agent_key") not in (None, "", "terminal"):
+        if kwargs.get("agent_key") not in (None, "", "terminal", "claude"):
             raise RuntimeError("Rust agent runtime not yet integrated; no Python fallback")
         await self._ensure_started()
         argv = self._resolve_command(kwargs.get("spawn_command") or kwargs["command"])
@@ -338,7 +404,8 @@ class RustTerminalService(TerminalService):
         env = prepare_native_launch(argv, cwd=cwd, env=env)
         sid, generation = str(uuid4()), secrets.token_hex(16)
         args = {"session_id": sid, "session_generation": generation, "pane_id": kwargs["pane_id"],
-                "workspace_path": cwd, "argv": argv, "cwd": cwd, "env": env, "cols": cols, "rows": rows}
+                "workspace_path": cwd, "argv": argv, "cwd": cwd, "env": env, "cols": cols, "rows": rows,
+                "agent_key": kwargs.get("agent_key") or ""}
         self._launches[sid] = args
         self._owned[sid] = self._loop.create_future()
         try:
@@ -575,12 +642,18 @@ class RustTerminalService(TerminalService):
             if self._runtime.returncode is not None and not self._retained:
                 return  # Failed startup was identity-bound and already reaped.
             raise RuntimeError(self._lost)
-        self._stopping = True
-        result = await self._request("shutdown")
-        if not result["cleanup_complete"]:
+        # App shutdown sweeps PTYs before its existing watcher/checkpoint
+        # drain. Keep observation alive through that drain; the backend-owned
+        # pipe EOF terminates the sidecar when the backend itself exits.
+        owned = tuple(self._retained.values())
+        async with asyncio.timeout(15):
+            await asyncio.gather(*(self.kill(s.id) for s in owned if not s.closed))
+            # Natural exit can remove _sessions before its cleaned ACK arrives.
+            # The event is set only after successful ownership unregister.
+            await asyncio.gather(*(s.cleanup.wait() for s in owned))
+            while pending := self._event_tasks - {self._reader_task, self._stderr_task}:
+                await asyncio.gather(*tuple(pending))
+        if any(s.cleanup_error for s in owned):
             raise RuntimeError("CLEANUP_FAILED at shutdown")
-        await asyncio.wait_for(self._runtime.wait(), 2)
-        if self._runtime.returncode:
-            raise RuntimeError("Rust runtime failed shutdown")
-        if self._event_tasks:
-            await asyncio.gather(*tuple(self._event_tasks))
+        if self._lost:
+            raise RuntimeError(self._lost)

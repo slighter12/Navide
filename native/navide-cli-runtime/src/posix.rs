@@ -10,6 +10,11 @@ use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[path = "claude.rs"]
+mod claude;
+#[path = "claude_facts.rs"]
+mod claude_facts;
+
 const CAP: usize = 5 * 1024 * 1024;
 const CHUNK: usize = 16384;
 const MAX_REQUEST: usize = 32 * 1024 * 1024;
@@ -135,6 +140,7 @@ struct Session {
     create_id: String,
     pane: String,
     workspace: String,
+    agent_key: String,
     fd: Option<OwnedFd>,
     child: Child,
     root: Value,
@@ -340,6 +346,10 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
     let pane = text(args, "pane_id")?.to_owned();
     let workspace = text(args, "workspace_path")?.to_owned();
     let cwd = text(args, "cwd")?.to_owned();
+    let agent = args["agent_key"].as_str().unwrap_or("");
+    if !matches!(agent, "" | "terminal") && agent != claude_facts::KEY {
+        return Err(io::Error::other("agent runtime not integrated"));
+    }
     let argv: Vec<String> = args["argv"]
         .as_array()
         .ok_or_else(|| io::Error::other("argv required"))?
@@ -431,6 +441,7 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
         create_id: request.into(),
         pane,
         workspace,
+        agent_key: args["agent_key"].as_str().unwrap_or("").to_owned(),
         fd: Some(master),
         child,
         root,
@@ -471,7 +482,12 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
     let root_live = before
         .get(&pid)
         .is_some_and(|entry| Some(entry.2.as_str()) == session.root["start_value"].as_str());
-    let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+    let graceful = session.agent_key == claude_facts::KEY && claude_facts::GRACEFUL;
+    let signal = if force && !graceful {
+        libc::SIGKILL
+    } else {
+        libc::SIGTERM
+    };
     if root_live {
         // SAFETY: root PID+birth is matched and its own child group remains owned.
         unsafe {
@@ -497,7 +513,17 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
             }
         }
     }
-    if !force {
+    if graceful {
+        // Keep the master and reads alive across Claude's native cleanup hook.
+        let deadline = Instant::now() + Duration::from_millis(claude_facts::GRACE_MS);
+        if !claude_facts::DEFER_MASTER_CLOSE {
+            session.fd.take();
+        }
+        while session.child.try_wait()?.is_none() && Instant::now() < deadline {
+            session.read(wire, 256 * 1024);
+            thread::sleep(Duration::from_millis(5));
+        }
+    } else if !force {
         thread::sleep(Duration::from_secs(1));
     }
     let after = snapshot()?;
@@ -649,6 +675,32 @@ fn session_lock(session: &Arc<Mutex<Session>>) -> std::sync::MutexGuard<'_, Sess
 fn execute(request: &Value, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result<Value> {
     let op = text(request, "op")?;
     let args = &request["args"];
+    if op == "observe" {
+        if args["vendor"] != claude_facts::KEY {
+            return Err(io::Error::other("observer not integrated"));
+        }
+        let context = if let Some(sid) = request["session_id"].as_str() {
+            let session = sessions
+                .lock()
+                .unwrap()
+                .sessions
+                .get(sid)
+                .cloned()
+                .ok_or_else(|| io::Error::other("UNKNOWN_SESSION"))?;
+            let session = session.lock().unwrap();
+            if request["session_generation"] != session.generation
+                || session.agent_key != claude_facts::KEY
+            {
+                return Err(io::Error::other("STALE_SESSION"));
+            }
+            session.event("observed")
+        } else {
+            json!({"event":"observed","session_id":null,"session_generation":null,"pane_id":null,"workspace_path":null})
+        };
+        let mut result = claude::observe(args)?;
+        result["ownership"] = context;
+        return Ok(result);
+    }
     if op == "ping" {
         let registry = sessions.lock().unwrap();
         let queue = wire.queue.lock().unwrap();
@@ -815,6 +867,21 @@ fn execute(request: &Value, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result
 fn respond(request: Value, sessions: &Sessions, wire: &Arc<Wire>) {
     let id = request["id"].clone();
     let response = match execute(&request, sessions, wire) {
+        Ok(result) if request["op"] == "observe" => {
+            let bytes = serde_json::to_vec(&result).expect("JSON value is serializable");
+            for (part, chunk) in bytes.chunks(CHUNK).enumerate() {
+                wire.control(
+                    json!({"event":"observation","observation_id":id,"part":part,
+                    "data_b64":STANDARD.encode(chunk)}),
+                );
+            }
+            let mut reply = json!({"id":id,"ok":true,"result":{"observation_parts":bytes.len().div_ceil(CHUNK)}});
+            if let Some(error) = result["error"].as_str() {
+                reply["ok"] = json!(false);
+                reply["error"] = json!({"code":"IO_FAILED","message":error,"stage":"io"});
+            }
+            reply
+        }
         Ok(result) => json!({"id":id,"ok":true,"result":result}),
         Err(error) => {
             if request["op"] == "create" {
@@ -887,6 +954,7 @@ pub fn run() -> io::Result<()> {
     let mut last_request = 0u64;
     let mut input_error = None;
     let mut shutdown = None;
+    let mut observation_sender: Option<mpsc::SyncSender<Value>> = None;
     let mut stdin = io::stdin().lock();
     loop {
         let mut line = Vec::new();
@@ -964,11 +1032,36 @@ pub fn run() -> io::Result<()> {
                 };
                 wire.control(json!({"id":request["id"],"ok":false,"error":{"code":"BAD_REQUEST","message":"session queue not admitting","stage":"admit"}}));
             }
+        } else if request["op"] == "observe" {
+            // Historical/settled observation has no live session worker, but
+            // its filesystem I/O must not run on shared stdin admission.
+            let sender = observation_sender.get_or_insert_with(|| {
+                let (sender, receiver) = mpsc::sync_channel(256);
+                let request_sessions = sessions.clone();
+                let request_wire = wire.clone();
+                let worker_count = sessions.lock().unwrap().worker_count.clone();
+                worker_count.fetch_add(1, Ordering::SeqCst);
+                thread::spawn(move || {
+                    while let Ok(request) = receiver.recv() {
+                        respond(request, &request_sessions, &request_wire);
+                    }
+                    worker_count.fetch_sub(1, Ordering::SeqCst);
+                });
+                sender
+            });
+            if let Err(error) = sender.try_send(request) {
+                let request = match error {
+                    mpsc::TrySendError::Full(request)
+                    | mpsc::TrySendError::Disconnected(request) => request,
+                };
+                wire.control(json!({"id":request["id"],"ok":false,"error":{"code":"BAD_REQUEST","message":"observation queue not admitting","stage":"admit"}}));
+            }
         } else {
-            // Runtime operations and settled-session queries have no native I/O wait.
+            // Other runtime operations and settled-state queries have no I/O wait.
             respond(request, &sessions, &wire);
         }
     }
+    drop(observation_sender); // Drain admitted work under the existing teardown count/deadline.
     if let Some(error) = &input_error {
         wire.control(json!({"event":"fatal","error":{"code":"PROTOCOL_ERROR","message":error.to_string(),"stage":"validate"}}));
     }
