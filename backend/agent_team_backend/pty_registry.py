@@ -107,6 +107,22 @@ def register(pid: int, argv: list[str]) -> None:
         _save(entries)
 
 
+def register_owned(pid: int, argv: list[str], lstart: str, runtime_generation: str,
+                   session_id: str, session_generation: str) -> None:
+    """Persist supplied native ownership; failure prevents candidate publication."""
+    if not lstart:
+        raise ValueError("native ownership requires a start identity")
+    with _lock:
+        db = _get_db()
+        entries = db.kv_get(_KV_KEY) or {}
+        entries[str(pid)] = {
+            "argv0": argv[0], "lstart": lstart, "owner": os.getpid(),
+            "runtime_generation": runtime_generation, "session_id": session_id,
+            "session_generation": session_generation,
+        }
+        db.kv_set(_KV_KEY, entries, now=int(time.time()))
+
+
 def unregister(pid: int) -> None:
     with _lock:
         entries = _load()

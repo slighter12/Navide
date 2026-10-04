@@ -303,6 +303,22 @@ def install_external_guards(root: Path) -> None:
         return spawn(argv, **kwargs)
 
     osplat.terminal_backend.spawn = guarded_spawn
+
+    from agent_team_backend import cli_runtime
+
+    def guarded_native_launch(argv, *, cwd, env):
+        if executable := real_cli_in(argv, env, (root,)):
+            refuse("real Rust child CLI", executable=executable, argv=argv)
+        if not Path(cwd).resolve().is_relative_to(root.resolve()):
+            refuse("Rust child cwd outside isolated root")
+        for key in ("HOME", "USERPROFILE"):
+            if not Path(env.get(key, "")).resolve().is_relative_to(root.resolve()):
+                refuse("Rust child home outside isolated root")
+        if any(any(word in key.upper() for word in ("API_KEY", "AUTH_TOKEN", "ACCESS_TOKEN", "SECRET_KEY")) for key in env):
+            refuse("Rust child provider credential")
+        return launch_env(env)
+
+    cli_runtime.prepare_native_launch = guarded_native_launch
     # The real vault implementation still runs; only the external OS account
     # store is empty. A scenario needing credentials supplies its own fake.
     from agent_team_backend import credential_vault
