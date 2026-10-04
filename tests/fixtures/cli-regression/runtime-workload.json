@@ -1,0 +1,18 @@
+{
+  "version": 6,
+  "methodRevision": "correction-r2-method-6",
+  "frozenAt": "2026-10-04T00:09:14Z",
+  "baselineRevision": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+  "sessionCounts": [1, 4],
+  "measurementRepeats": 5,
+  "idleMs": 1000,
+  "ioRounds": 300,
+  "burstLines": 128,
+  "burstWidth": 2048,
+  "resourceIntervalMs": 50,
+  "observationSettleMs": 50,
+  "deadlineMs": 15000,
+  "vendors": ["claude", "opencode"],
+  "input": "café 世界 \\ quote' \" ; | &",
+  "reply": "Regression reply: café 完成\n---MSG-END---"
+}

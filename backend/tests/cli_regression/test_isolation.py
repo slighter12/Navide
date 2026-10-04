@@ -201,10 +201,10 @@ from tests.cli_regression.support.isolation import install_external_guards
 install_external_guards(Path(sys.argv[1]))
 try:
     if sys.argv[3] == 'popen':
-        subprocess.Popen([sys.argv[2]])
+        subprocess.Popen([sys.argv[2], 'http://127.0.0.1/ws?t=SYNTHETIC_AUTH_SENTINEL'])
     else:
         from agent_team_backend import osplat
-        osplat.terminal_backend.spawn([sys.argv[2]], cwd=sys.argv[1], env={}, rows=30, cols=100)
+        osplat.terminal_backend.spawn([sys.argv[2], 'http://127.0.0.1/ws?t=SYNTHETIC_AUTH_SENTINEL'], cwd=sys.argv[1], env={}, rows=30, cols=100)
 except PermissionError:
     pass
 else:
@@ -213,6 +213,9 @@ else:
     subprocess.run([sys.executable, "-c", script, str(root), str(executable), boundary], env=env, check=True)
     refusal = json.loads((root / "refusals.jsonl").read_text())
     assert refusal["boundary"] == ("real CLI" if boundary == "popen" else "real native CLI")
+    assert refusal["executable"] == str(executable)
+    assert refusal["argv"][0] == str(executable)
+    assert "SYNTHETIC_AUTH_SENTINEL" not in (root / "refusals.jsonl").read_text()
 
 
 def test_shards_partition_real_collection_without_omission(tmp_path):
