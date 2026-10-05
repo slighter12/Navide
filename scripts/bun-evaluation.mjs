@@ -21,8 +21,8 @@ switch (command) {
     invocation = ['--bun', 'install', '--frozen-lockfile']
     break
   case 'run':
-    if (!['test:run', 'build:public-packages', 'build:mini-ide:v2'].includes(args[0])) {
-      console.error('Ticket 02 permits test:run, build:public-packages, or build:mini-ide:v2 only.')
+    if (!['test:run', 'build:public-packages', 'build:mini-ide:v2', 'typecheck:web', 'typecheck:node'].includes(args[0])) {
+      console.error('Ticket 02 permits test:run, build:public-packages, build:mini-ide:v2, typecheck:web, or typecheck:node only.')
       process.exit(1)
     }
     invocation = ['--bun', 'run', ...args]

@@ -41,6 +41,12 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Exact mock IDs from EditorPane; let Vite resolve them without a stack importer.
+    alias: [
+      { find: /^\.\/view\/EditorViewMonaco\.vue$/, replacement: resolve(__dirname, 'packages/plugin-ui/src/editor/view/EditorViewMonaco.vue') },
+      { find: /^\.\.\/foundation$/, replacement: resolve(__dirname, 'packages/plugin-ui/src/foundation/index.ts') },
+      { find: /^\.\.\/shared$/, replacement: resolve(__dirname, 'packages/plugin-ui/src/shared/index.ts') },
+    ],
     globals: false,
     projects: [
       { extends: true, test: { name: 'unit', include: allTests, exclude: [...excludedTests, ...cliTests, ...artifactTests] } },

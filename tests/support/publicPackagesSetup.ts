@@ -44,11 +44,11 @@ function pnpm(args: string[], cwd: string): string {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     CI: '1',
-    PNPM_CONFIG_PM_ON_FAIL: 'ignore',
-    // A newer pnpm re-verifies the workspace before `run` and can replace
-    // node_modules on a config mismatch.
-    npm_config_verify_deps_before_run: 'false',
     PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}`,
+  }
+  if (!process.versions.bun) {
+    env.PNPM_CONFIG_PM_ON_FAIL = 'ignore'
+    env.npm_config_verify_deps_before_run = 'false'
   }
   // Vitest sets NODE_ENV=test in this process. Inherited, it makes Vite and
   // @vitejs/plugin-vue emit a development build of plugin-ui that differs from
@@ -92,7 +92,7 @@ function artifactDigest(root: string, paths: string[], source = false): string {
     const windows = process.platform === 'win32'
     const relevantEnvironmentKeys = new Set([
       'NAVIDE_PLUGIN_ARTIFACT_VERSION', 'NAVIDE_MINI_IDE_DIST_DIR', 'NAVIDE_PNPM',
-      'npm_execpath', 'npm_config_user_agent', 'NODE_OPTIONS', 'SOURCE_DATE_EPOCH',
+      'npm_execpath', 'npm_config_user_agent', 'NODE_OPTIONS', 'BUN_OPTIONS', 'SOURCE_DATE_EPOCH',
       'LANG', 'LC_ALL', 'TZ',
     ].map((key) => windows ? key.toUpperCase() : key))
     const environment = Object.entries(process.env)
@@ -101,6 +101,7 @@ function artifactDigest(root: string, paths: string[], source = false): string {
       .sort()
     hash.update(JSON.stringify({
       node: process.version, executable: process.execPath, platform: process.platform, arch: process.arch,
+      bun: process.versions.bun,
       environment,
     }))
   }
@@ -120,6 +121,8 @@ export function prepareArtifactInputs(root: string, build: () => void, prepared 
   const stamp = join(root, 'node_modules/.cache/navide-artifact-inputs.json')
   const inputs = artifactDigest(root, [
     ...builtPackages, 'plugins/navide-mini-ide', 'tests/support/publicPackagesSetup.ts',
+    'scripts/bun/vue-tsc.cjs',
+    ...(process.versions.bun ? ['bun.lock'] : []),
     'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc',
     ...readdirSync(root).filter((file) => /^tsconfig.*\.json$/.test(file) || /^\.env(?:\.|$)/.test(file)),
     ...['typescript', 'vue-tsc', 'vite', '@vitejs/plugin-vue'].map((name) => `node_modules/${name}/package.json`),
