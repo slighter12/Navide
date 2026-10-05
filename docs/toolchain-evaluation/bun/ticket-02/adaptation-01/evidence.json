@@ -1,0 +1,979 @@
+{
+  "source_head": "e5578080101a2f568ad75b5620b1f7d0031bdb8f",
+  "initial_base": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+  "machine_local_immutable_evidence_not_hosted_validation": true,
+  "four_reviewed_roots": [
+    {
+      "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install",
+      "anchor": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/freeze/anchor.json",
+        "bytes": 1271,
+        "sha256": "9751bc31e08ea160e7f40412b33fb11bb52054481ededf9f6879ecd4a283a41d",
+        "role": "Frozen evidence anchor, not current acceptance metadata"
+      },
+      "manifest": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/freeze/manifest.json",
+        "bytes": 3678,
+        "sha256": "b7c1bf15c9b18d08f80efa70c7c199a604e9476232876e4a83fbe8a72a4e84e9",
+        "role": "Complete frozen payload locator, supporting metadata"
+      },
+      "root_device": 16777231,
+      "root_inode": 59898335,
+      "complete_inventory": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/freeze/payload.jsonl.gz",
+        "bytes": 14498722,
+        "sha256": "783a376cf028addfb11ce15cd8574fb1c82498c23f2d6f43e11b2aff3d506700",
+        "role": "Complete lossless frozen inventory; giant supporting bytes, not semantic vendor review"
+      }
+    },
+    {
+      "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01",
+      "anchor": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/freeze/anchor.json",
+        "bytes": 1510,
+        "sha256": "a95d03025aa205bbb8aa77d5c90d9f6069a969a69febebe5df1905c29d5bd903",
+        "role": "Frozen evidence anchor, not current acceptance metadata"
+      },
+      "manifest": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/freeze/manifest.json",
+        "bytes": 2749,
+        "sha256": "50f04ee772ef3a2fb76d16bb9aea72194e70f38bc02e5bcad9b4643fc6c9c951",
+        "role": "Complete frozen payload locator, supporting metadata"
+      },
+      "root_device": 16777231,
+      "root_inode": 60196222,
+      "complete_inventory": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/freeze/payload.jsonl.gz",
+        "bytes": 4567622,
+        "sha256": "799f41b89068bc8e468ddbdb5aec2a378c44a4d2368050cf4cca75be0e2361fd",
+        "role": "Complete lossless frozen inventory; giant supporting bytes, not semantic vendor review"
+      }
+    },
+    {
+      "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02",
+      "anchor": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/freeze/anchor.json",
+        "bytes": 1587,
+        "sha256": "88145cc3986b917ab2763ea640edb024a56d08c009e76a517d2511001f9c4a49",
+        "role": "Frozen evidence anchor, not current acceptance metadata"
+      },
+      "manifest": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/freeze/manifest.json",
+        "bytes": 2918,
+        "sha256": "706625f3aec518ba1d78de8919e7a97f41336b7fd9150f6769e5369927d6a2cf",
+        "role": "Complete frozen payload locator, supporting metadata"
+      },
+      "root_device": 16777231,
+      "root_inode": 60285142,
+      "complete_inventory": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/freeze/payload.jsonl.gz",
+        "bytes": 4652049,
+        "sha256": "f3b50f38c749e3bb67d9e91847e172513eeef154bae46ddb4041ca2d6929f4dd",
+        "role": "Complete lossless frozen inventory; giant supporting bytes, not semantic vendor review"
+      }
+    },
+    {
+      "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-03-qualification",
+      "anchor": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-03-qualification/freeze/anchor.json",
+        "bytes": 1158,
+        "sha256": "bcc020bcda345ab99adec3852011f858d66b608a5bb0b089925e116d0d621404",
+        "role": "Frozen evidence anchor, not current acceptance metadata"
+      },
+      "manifest": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-03-qualification/freeze/manifest.json",
+        "bytes": 1219,
+        "sha256": "c2890d7db7f1a5a98237737a6ec96059687422aa27865c1a6b13e83189ecf329",
+        "role": "Complete frozen payload locator, supporting metadata"
+      },
+      "root_device": 16777231,
+      "root_inode": 60379321
+    }
+  ],
+  "complete_raw_evidence_references": [
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/freeze/anchor.json",
+      "bytes": 1271,
+      "sha256": "9751bc31e08ea160e7f40412b33fb11bb52054481ededf9f6879ecd4a283a41d",
+      "role": "Frozen evidence anchor, not current acceptance metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/freeze/manifest.json",
+      "bytes": 3678,
+      "sha256": "b7c1bf15c9b18d08f80efa70c7c199a604e9476232876e4a83fbe8a72a4e84e9",
+      "role": "Complete frozen payload locator, supporting metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/freeze/payload.jsonl.gz",
+      "bytes": 14498722,
+      "sha256": "783a376cf028addfb11ce15cd8574fb1c82498c23f2d6f43e11b2aff3d506700",
+      "role": "Complete lossless frozen inventory; giant supporting bytes, not semantic vendor review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/REPORT.md",
+      "bytes": 9757,
+      "sha256": "edc30ddf645767726f29114819a80fb774764083306bf4e8472698af2ddf34d0",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/REVIEW.md",
+      "bytes": 4716,
+      "sha256": "580446b29bb5846993d3780d29e197010d4244f787fe753cca9e8fc5e7d45e42",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-install/COMMANDS.json",
+      "bytes": 55031,
+      "sha256": "160f536982e5d2d18d806efb91cf69372cfaf83fdbba4137ae5d28db771cb7e0",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/freeze/anchor.json",
+      "bytes": 1510,
+      "sha256": "a95d03025aa205bbb8aa77d5c90d9f6069a969a69febebe5df1905c29d5bd903",
+      "role": "Frozen evidence anchor, not current acceptance metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/freeze/manifest.json",
+      "bytes": 2749,
+      "sha256": "50f04ee772ef3a2fb76d16bb9aea72194e70f38bc02e5bcad9b4643fc6c9c951",
+      "role": "Complete frozen payload locator, supporting metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/freeze/payload.jsonl.gz",
+      "bytes": 4567622,
+      "sha256": "799f41b89068bc8e468ddbdb5aec2a378c44a4d2368050cf4cca75be0e2361fd",
+      "role": "Complete lossless frozen inventory; giant supporting bytes, not semantic vendor review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/REPORT.md",
+      "bytes": 6297,
+      "sha256": "5cf8bf6ff2319b12bcff3c7f908b5415dbb145e7209f7055501c60883e97bbf5",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/REVIEW.md",
+      "bytes": 3524,
+      "sha256": "6b1ff8162fd346a617c1b29c8a10fa2b20aff9eb3d47ee3145dcc322a811283e",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-01/COMMANDS.json",
+      "bytes": 25946,
+      "sha256": "2d0b722cc7b8437628eb91994e222b5777d909aad6ccfd61746046b33903b35c",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/freeze/anchor.json",
+      "bytes": 1587,
+      "sha256": "88145cc3986b917ab2763ea640edb024a56d08c009e76a517d2511001f9c4a49",
+      "role": "Frozen evidence anchor, not current acceptance metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/freeze/manifest.json",
+      "bytes": 2918,
+      "sha256": "706625f3aec518ba1d78de8919e7a97f41336b7fd9150f6769e5369927d6a2cf",
+      "role": "Complete frozen payload locator, supporting metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/freeze/payload.jsonl.gz",
+      "bytes": 4652049,
+      "sha256": "f3b50f38c749e3bb67d9e91847e172513eeef154bae46ddb4041ca2d6929f4dd",
+      "role": "Complete lossless frozen inventory; giant supporting bytes, not semantic vendor review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/REPORT.md",
+      "bytes": 9964,
+      "sha256": "706b7e0d5d5e2295733b8e7928c5c6c8c19c3be20bc648e4840ca9ff43280850",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/REVIEW.md",
+      "bytes": 5531,
+      "sha256": "2d567d5797346a506eb352eb5e6c467b1d7cb3225521c8cc804078d8741cd2c5",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/COMMANDS.json",
+      "bytes": 5077,
+      "sha256": "13c2981f7e1354fa9c45af37d3de5c35e07ab1d42d0ecce589c40a1c78779a27",
+      "role": "Complete frozen scope/result/command index; raw files remain at the bound root"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-03-qualification/freeze/anchor.json",
+      "bytes": 1158,
+      "sha256": "bcc020bcda345ab99adec3852011f858d66b608a5bb0b089925e116d0d621404",
+      "role": "Frozen evidence anchor, not current acceptance metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-03-qualification/freeze/manifest.json",
+      "bytes": 1219,
+      "sha256": "c2890d7db7f1a5a98237737a6ec96059687422aa27865c1a6b13e83189ecf329",
+      "role": "Complete frozen payload locator, supporting metadata"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/verification/source-correction.json",
+      "bytes": 1946,
+      "sha256": "85c22dd9d26dde93b0490ca65b88f7f37871d84f244e4bb948e3becd4b199d7e",
+      "role": "Accepted corrected-E1 evidence; unchanged exact-source/graph carryover, not a new run"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/verification/carryover-applicability.json",
+      "bytes": 14944,
+      "sha256": "b69e280b39ecbbb0bf049242e808e687d414231daedb9a04ece7bc8bb3c26c31",
+      "role": "Accepted corrected-E1 evidence; unchanged exact-source/graph carryover, not a new run"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/verification/cache-correction-results.json",
+      "bytes": 2304,
+      "sha256": "09ac25ec56ee1772ca3ba23081b57d840fff842d705e84dbeafdf16ff08f6b52",
+      "role": "Accepted corrected-E1 evidence; unchanged exact-source/graph carryover, not a new run"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/verification/actual-runtime-identity.json",
+      "bytes": 911,
+      "sha256": "b793dbe7f95df9bc5ad1aadc2b2d5eeeda6a9438ea8b738343b34df1bf9e22fe",
+      "role": "Accepted corrected-E1 evidence; unchanged exact-source/graph carryover, not a new run"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/verification/renewed-cases.json",
+      "bytes": 16990,
+      "sha256": "beecf58b63f5a43589a1ffa127fd7a8a4804e14a4ace19fe1a7ab44837580f5e",
+      "role": "Accepted corrected-E1 evidence; unchanged exact-source/graph carryover, not a new run"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/verification/renewed-declaration-parity.json",
+      "bytes": 43432,
+      "sha256": "5ad64afdef9b96bb20fedf2560c0418005d4cdd7e88b299490a28a31305ab467",
+      "role": "Accepted corrected-E1 evidence; unchanged exact-source/graph carryover, not a new run"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/INVENTORY-QUALIFICATION.md",
+      "bytes": 2290,
+      "sha256": "835363d016a567b29c18dd562cd49744d614d376c5da81a88ed31e4ce842fdef",
+      "role": "Accepted corrected-E1 evidence; unchanged exact-source/graph carryover, not a new run"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-03-qualification/QUALIFICATION.md",
+      "bytes": 6179,
+      "sha256": "5676560d8779e203aef72216e32e406e680066e4bf3d3a2d1846ee023c4aee2d",
+      "role": "Additive directory-schema wording qualification, no rerun or retroactive repair"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-03-qualification/REFERENCES.json",
+      "bytes": 18484,
+      "sha256": "25746f48998eda9b072cec46b02d879cda0b8164e69db50fe1ad5f7dc0774dae",
+      "role": "Additive directory-schema wording qualification, no rerun or retroactive repair"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-round1-incomplete.md",
+      "bytes": 2239,
+      "sha256": "def9681b5bda7ed73967db85cae1bd85294b2afda345d04071945e583cce85f2",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-round2-scope-hold.md",
+      "bytes": 1982,
+      "sha256": "a2b5f37d2ee08684e7f2b7cb3940a11d0cb940f75e846b6d508a6c804ba2ce38",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-round3-process-hold.md",
+      "bytes": 2399,
+      "sha256": "a4ac79008f79cc867bd25414f5ef67dabd0f8c26d549a3757abf185fef941037",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-round4-ancestor-hold.md",
+      "bytes": 2043,
+      "sha256": "307cbbc4cb73f0b3d0dca2974700d9317d97ccb9b36a411aaf3d123310102279",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-round4-phase2b-hold.md",
+      "bytes": 1632,
+      "sha256": "80474bde1e5e0dbb08f3fa1a842ee6cb5bc12e78ccee1a05c397db288e0858ac",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-bun-cache-input-finding.md",
+      "bytes": 1117,
+      "sha256": "ee18b2709695dc948b20cebd29ffed4a5eb8960c643d05ee61488d1c1a93efcf",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-p3-inventory-qualification.md",
+      "bytes": 793,
+      "sha256": "e5b2617890a7e70b550ee5ee428c40e6c9b380564b53bfee90dc981af78f8787",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-integration-dispatch-undelivered-draft01-invalid-digest.md",
+      "bytes": 6759,
+      "sha256": "fbf9ea2598adcb05ffc05b1d68dcc7c1d54d143fb1e3115621fd1e1a0a883c35",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-integration-dispatch-draft01-precheck-failure.json",
+      "bytes": 756,
+      "sha256": "fd62f2707a2e6a366cc9af03536d3e0852984c56b316e832bd012cfa102bdf23",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-integration-dispatch.md",
+      "bytes": 6785,
+      "sha256": "5a8316ccedf08183ca9531724129138b1cb12bef8a021afca9f7bb8ea062e4ef",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-round4-phase2c-pass.md",
+      "bytes": 5914,
+      "sha256": "dc28266ddad448f8e1bc81fdad686ecd381237e2afc67f9a730ca03f87a03e6d",
+      "role": "Actual coordinator record; historical holds/failures are retained and uncredited unless explicitly superseded for corrected E1"
+    },
+    {
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-02/report.md",
+      "bytes": 16973,
+      "sha256": "12c4709ac1a66c5dcdac27ff77e8cf3fe6430931476006abc7c8d86eb45da9bd",
+      "role": "Historical initial E1 STOP remains unchanged"
+    },
+    {
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-09/report.md",
+      "bytes": 17201,
+      "sha256": "ee56a36fa8778af0a60582f8b8c4e18c388e7decba58f17e2c840ebd2fda21e5",
+      "role": "Historical early-stop recommendation remains unchanged; not retrofitted adoption"
+    },
+    {
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/02-bun-minimal-feasibility.md",
+      "bytes": 3602,
+      "sha256": "c8cb6b37d8841c2fab5bcdfca79150f6baaf6ff387fa6f4f711541aeb6371b60",
+      "role": "Actual ticket02 acceptance criteria; historical no-authorization wording is not current dispatch"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/identity-bun.json",
+      "bytes": 5057,
+      "sha256": "141282e2074c263b657b6a9fdc0eed59e7f97bfd5d113d887364ba063c55ef3e",
+      "role": "Fresh bare owned-copy command receipt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/identity-bun.stdout",
+      "bytes": 221,
+      "sha256": "159268a04710177027cb31a0e39292e4c11e28d44df48db481b895af984e2a38",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/identity-bun.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/sdk-dom-36.json",
+      "bytes": 5230,
+      "sha256": "2e9b414fe3c252f4ecea4a6da1fc4f0fb5806382bb8c866fafe0a31209d4e7e7",
+      "role": "Fresh bare owned-copy command receipt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/sdk-dom-36.stdout",
+      "bytes": 166,
+      "sha256": "238c526771c50736578d45f2737b8fd453d7925ad4c1ed2c6d48255747e59e1a",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/sdk-dom-36.stderr",
+      "bytes": 444,
+      "sha256": "7cfe3de941fb8977781e3348dc394a607023920791a5ce92a33925642e7798fc",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/cold-setup-51.json",
+      "bytes": 5374,
+      "sha256": "930c459fff72e106e4caccb8cb0ae78a79d0be61ff47b21742f738b43d7c7121",
+      "role": "Fresh bare owned-copy command receipt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/cold-setup-51.stdout",
+      "bytes": 169,
+      "sha256": "952c6c172d9e36311c809ce1b1c456910b9cc70d9f49f2fcae468e77d82a52bb",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/cold-setup-51.stderr",
+      "bytes": 513,
+      "sha256": "9ca8ee317b93c1c573fd484948c9e50ebcf2306c5b0b6e5c800815f6aa5022bc",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/public-build.json",
+      "bytes": 4963,
+      "sha256": "8b6b4f6fd90f34ab613afc286c09052f14743b059a8b797b2389816b2c927fd1",
+      "role": "Fresh bare owned-copy command receipt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/public-build.stdout",
+      "bytes": 2370,
+      "sha256": "80cd4824a24d166f632960e9ed8466468723860c48efc4622c3407c96ea772e4",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/public-build.stderr",
+      "bytes": 230,
+      "sha256": "bfa38f1c094ddec2e477b3ea62834591ee1c79642a913617dcb8f1e5e2e7184c",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/typecheck-node.json",
+      "bytes": 4989,
+      "sha256": "4256b4df434515ff0cedd536f0f23338a994720982c250ce6e670881b6291ed3",
+      "role": "Fresh bare owned-copy command receipt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/typecheck-node.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/typecheck-node.stderr",
+      "bytes": 37,
+      "sha256": "428b9324432f7040641e5ea862c2dc991567eba7b7d89a500fd84cad6eea2d3a",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/typecheck-web.json",
+      "bytes": 4964,
+      "sha256": "2d941fd182e4e359f409f86b24234b4047113872d4b7caa2fbebf8c7268e1700",
+      "role": "Fresh bare owned-copy command receipt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/typecheck-web.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/commands/typecheck-web.stderr",
+      "bytes": 61,
+      "sha256": "56e4d40e136bdd918c6ce4648042942e10a04201076191b422a7dcf65200b036",
+      "role": "Complete new outer stdout/stderr, never a truncated excerpt"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/approved-inputs.json",
+      "bytes": 8234,
+      "sha256": "9d68efd284cbd454eea3dcfaab17b29d7b93177b63e4e68c71e4db9977d7f5e6",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/original-source.json",
+      "bytes": 580362,
+      "sha256": "0663b454891187ba9d41dc9bbc6cea4c1009094c9e3d3b0245e035c514eb95e1",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/exact-owned-source.json",
+      "bytes": 579536,
+      "sha256": "bbfc1a2918a3667d6e3d7b6f3b35c917d8bb75f5a6038fdf3a82c199fcb3f8e6",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/copied-library-identities.json",
+      "bytes": 8377032,
+      "sha256": "52af016d91c256faa452db76c3b5d5c8f76b2afaafb48bb3fd7c5c815dc1fc52",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/actual-runtime.json",
+      "bytes": 242,
+      "sha256": "afce8024325832a22b56ad858e83690186426576eff366991e15234d6dabee86",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/named-cases.json",
+      "bytes": 20938,
+      "sha256": "4861a829383024b9329e6c273030ea1d496670cac3b438dce98a1da2204caef9",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/cold-before.json",
+      "bytes": 110,
+      "sha256": "6f6c8f71e7e37ddd8e7f3160e153e8d9530f00a01b12a83adfb62cf04c3250b1",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/cold-after.json",
+      "bytes": 62739,
+      "sha256": "f9a9bbb8bf482bbd0c6bdce62a37d3df88008f21fbcb9ffb39e82115907c79c9",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/declarations-carryover-check.json",
+      "bytes": 21827,
+      "sha256": "b257e3d2ef8a66ebe42e7762d7e364e71c449523e599fd453cdf3bb7ef4a97d2",
+      "role": "Fresh integration provenance, identities, case inventory or generated effect"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/freeze/anchor.json",
+      "bytes": 1124,
+      "sha256": "3ca6b3c63d75862c96e568319641e08208caaa7e25bc826f9ca7defbe24a20ed",
+      "role": "Immutable rejected integration01 history / actual complete review HOLD, never rewritten or relabeled PASS"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/freeze/manifest.json",
+      "bytes": 1605,
+      "sha256": "3880f7d4e74b4063c3264fff6df9b760ada369542deb03ec87214376fc049499",
+      "role": "Immutable rejected integration01 history / actual complete review HOLD, never rewritten or relabeled PASS"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/verification/integrated-wip.json",
+      "bytes": 3597844,
+      "sha256": "6382782f7acd3662bc8f80673a06b8532e03de7bdf641c1b00824934e3105e7d",
+      "role": "Immutable rejected integration01 history / actual complete review HOLD, never rewritten or relabeled PASS"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/COMMANDS.json",
+      "bytes": 3955,
+      "sha256": "34c8c7395995e232d97994b79b704982fae4ef559ac378d7d12cf4d9e56f5f03",
+      "role": "Immutable rejected integration01 history / actual complete review HOLD, never rewritten or relabeled PASS"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-integration01-review-round1-hold.md",
+      "bytes": 5604,
+      "sha256": "5236d1713dde9de9926d6722edc614cad766d110c767a2f7a8c51931251b906f",
+      "role": "Immutable rejected integration01 history / actual complete review HOLD, never rewritten or relabeled PASS"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/source-correction.json",
+      "bytes": 3598184,
+      "sha256": "1992ac9f6d54d0b242231b3c3f58dea02b5e92766bcb3bd9b1fdf17cfca46733",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/child-env-shape.json",
+      "bytes": 5682,
+      "sha256": "98b43993efb5ac0c485b0c4348f78fdb0af83efa3d6ef2466834cd2e9a80c0bf",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/named-cases.json",
+      "bytes": 33548,
+      "sha256": "1759db45be47e0c42565382fc95507f70ac3208cf42508bcdf3e54c5c9005eac",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/declaration-parity.json",
+      "bytes": 22031,
+      "sha256": "feeb3704fcf84a5db44cc3ef1d4e898db298b35306eb298379c94ed7e05c344f",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/actual-bun.json",
+      "bytes": 228,
+      "sha256": "66a90b52c3e5eed9c20c2c9a02f865d54fcc337c8c9daf7e34e1c9890b7f4911",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/actual-node.json",
+      "bytes": 213,
+      "sha256": "ee9a61f5ed8927e98facced3ae8367430de17c94ccedd581a534457c8241e128",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/bun-cold-before.json",
+      "bytes": 165,
+      "sha256": "d86973ca1345dc4e625febf4206c856b85f91a6a1af10e6e2a2296c4610ff89d",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/bun-cold-after.json",
+      "bytes": 63102,
+      "sha256": "8af108844977e31f3eb6db1e323ef28abca14e0df76be7268742d715c04cd2c7",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/node-cold-before.json",
+      "bytes": 173,
+      "sha256": "41a10626e682fe79f4fe96a8f4c8050898a8128d94d2a8777be38a2751a4cc5f",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/verification/node-cold-after.json",
+      "bytes": 63110,
+      "sha256": "4a78cea330a5b518f81773a8752742eaabbcc71a736aeea1cf0c6398c1f5b5e8",
+      "role": "Fresh bounded integration02 proof; supporting installed-library inventories are not semantic review"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-cold-51.json",
+      "bytes": 5109,
+      "sha256": "29eebf51c39a6bb62cd80fac7f0438e61acd9b896be36ce2c79105a4f6fdc914",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-cold-51.stdout",
+      "bytes": 166,
+      "sha256": "d022219c748c13906d5b7de13e11b3fc02a6b9638919bc657e875205f9219cd8",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-cold-51.stderr",
+      "bytes": 510,
+      "sha256": "8036e9d6abe9721ee4bd450e53fc8c6847ee7105db89be82368c610fb7b3ee2e",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-public-build.json",
+      "bytes": 4815,
+      "sha256": "81fbb9f317ade20ab94abd7d06aa58edea68582861663dc4fbd82f68804b0c0b",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-public-build.stdout",
+      "bytes": 1581,
+      "sha256": "b2943efda38bf732b75d644ce670974e7bf5ace2ffa2d6f266cba27c0ad80f13",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-public-build.stderr",
+      "bytes": 230,
+      "sha256": "bfa38f1c094ddec2e477b3ea62834591ee1c79642a913617dcb8f1e5e2e7184c",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-sdk-dom-36.json",
+      "bytes": 5082,
+      "sha256": "638272698a97d6c40e4dd9a391eb431c418f685b4335a156a67ae7fb91321ffc",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-sdk-dom-36.stdout",
+      "bytes": 169,
+      "sha256": "8108ff4c7633fc80d86439d6f9d3e53aaceb9feae2d34bc35ca7efa299cd0132",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-sdk-dom-36.stderr",
+      "bytes": 447,
+      "sha256": "a270a43a98c05a29ccb16746718ad2efa3f6340d173cacb3488ca389ba6ac12b",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-node.json",
+      "bytes": 4842,
+      "sha256": "fa27f6c3ac91e4e6c3ae3ea3f21edb8af177f4e9b48d12ec7152300851d48118",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-node.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-node.stderr",
+      "bytes": 37,
+      "sha256": "428b9324432f7040641e5ea862c2dc991567eba7b7d89a500fd84cad6eea2d3a",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-web.json",
+      "bytes": 4822,
+      "sha256": "e5ffc863d9a5e25cef0f2316294dafa4ce7a261550753353a18c93343988b8e0",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-web.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-web.stderr",
+      "bytes": 61,
+      "sha256": "56e4d40e136bdd918c6ce4648042942e10a04201076191b422a7dcf65200b036",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-corrected.json",
+      "bytes": 5542,
+      "sha256": "81836148b655cfa91e046ce1f0d1cb554e2716f846699d371b24db7c88d3203a",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-corrected.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-corrected.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-old.json",
+      "bytes": 5404,
+      "sha256": "bd89d143a21734c4bf42b943eb7c54fbdd75a3e2a170eecbba5fb1296f62aa4c",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-old.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-old.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-corrected.json",
+      "bytes": 5602,
+      "sha256": "619015de818c4e96ca4f9f2f7f5eefcfe7e4538b6d8b2ac22ea47936e43a3254",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-corrected.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-corrected.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-old.json",
+      "bytes": 5464,
+      "sha256": "1bb6db5d90cd29eb8c6d6e1af43a918a61af24441e9a8f36711d6afc3fa4578b",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-old.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-old.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-bun.json",
+      "bytes": 4832,
+      "sha256": "634f1fe4de7fe3b2a6041562353a28f1edc2cec988704c42e968f6d7058118e1",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-bun.stdout",
+      "bytes": 207,
+      "sha256": "7294baba65447824b4a1920946736b8901a42e6836744f071822e8d218f2b99b",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-bun.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-node.json",
+      "bytes": 4854,
+      "sha256": "46e94639d901f3b166b72b6302a7c7a148d680965f80c7f6f740e664e2e1ddce",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-node.stdout",
+      "bytes": 196,
+      "sha256": "94d40a84c89b184ff557153a474a548aea4bb647f5c6250912bdae9d53f62743",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-node.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-pnpm10.json",
+      "bytes": 4905,
+      "sha256": "c6ce324566c5100937eae9c6657fe9fdea107cbfd0dd92be9bb5a20a5ecf2792",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-pnpm10.stdout",
+      "bytes": 7,
+      "sha256": "21653d2744fdd071f9ef138c805393901bb9547cf3e777ebf50215a191f986ea",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-pnpm10.stderr",
+      "bytes": 121,
+      "sha256": "8840018c8a92dd6b93f37a1b43898dd0b3a69c6898bdda811c4ecd7fd3c0d88c",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/install-own-pnpm10.json",
+      "bytes": 4821,
+      "sha256": "ca31ef1b1113714161579e7985d5f7bedef3cfa6b7872ee91acbca8a2ccbd767",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/install-own-pnpm10.stdout",
+      "bytes": 98,
+      "sha256": "c7b6c8d7828bc0d7acd44e49e47a0790cdc33641ef710eae2241f7326c188b4a",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/install-own-pnpm10.stderr",
+      "bytes": 77,
+      "sha256": "b404ccdaae31476ec134e67b3fb97cbd6894988460558b9d136b899d3ae5bdfe",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/node-cold-51.json",
+      "bytes": 5561,
+      "sha256": "512846efb2d44ed27b0053d100043d77a4f108f816bf8f8539c890bc4cfaceb6",
+      "role": "Actual new command receipt, fixture labels are env shape only"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/node-cold-51.stdout",
+      "bytes": 167,
+      "sha256": "54d44b8a7cad6873413917610a818f8f1b5b4187577c8e5987bcd5909d0acebd",
+      "role": "Complete actual new outer stream, no output filtering"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/node-cold-51.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "role": "Complete actual new outer stream, no output filtering"
+    }
+  ],
+  "current_integration_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-03-docs",
+  "current_freeze_locator": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-03-docs/freeze/anchor.json",
+  "current_wip_review": "Integration02 PASS49eedc40 valid for unchanged source/historical checks; commit01 format HOLD; integration03 docs-only whole-nine WIP review PENDING.",
+  "giant_payloads_kept_external": true,
+  "no_libraries_binaries_or_old_raw_receipt_bodies_copied_into_git": true,
+  "prior_accepted_source_mapping": [
+    {
+      "path": "package.json",
+      "accepted_sha256": "09d9b62fe7c03f6b38e402fa50ff2a68724df24cf039cab384b573ea9e726fc2",
+      "source": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/candidate/package.json"
+    },
+    {
+      "path": "scripts/bun-evaluation.mjs",
+      "accepted_sha256": "c2699874ef444e3b61216cfe327f8e91b40ec5e82f6771c02246cdad765c7276",
+      "source": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/candidate/scripts/bun-evaluation.mjs"
+    },
+    {
+      "path": "scripts/bun/vue-tsc.cjs",
+      "accepted_sha256": "e1db20f844f3610ef598a5cc4c7cce1c2bc900018ec261bbe414b45c1c2e3e72",
+      "source": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/candidate/scripts/bun/vue-tsc.cjs"
+    },
+    {
+      "path": "tests/support/publicPackagesSetup.ts",
+      "accepted_sha256": "94ebd68aa3d682ebb07e78b8f3f2bccac808dc98a2889d9bbeac8c6c9daa98b4",
+      "source": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/candidate/tests/support/publicPackagesSetup.ts"
+    },
+    {
+      "path": "vitest.config.ts",
+      "accepted_sha256": "e642279494041b735ab7e9dfafaa91d659e3d17e65281ed29365e9801f20965f",
+      "source": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/sol-e1-correction-02/candidate/vitest.config.ts"
+    }
+  ],
+  "source_mapping": [
+    {
+      "path": "package.json",
+      "current_sha256": "09d9b62fe7c03f6b38e402fa50ff2a68724df24cf039cab384b573ea9e726fc2",
+      "prior_accepted_sha256": "09d9b62fe7c03f6b38e402fa50ff2a68724df24cf039cab384b573ea9e726fc2",
+      "current_review": "PENDING",
+      "only_new_source_delta": false
+    },
+    {
+      "path": "scripts/bun-evaluation.mjs",
+      "current_sha256": "c2699874ef444e3b61216cfe327f8e91b40ec5e82f6771c02246cdad765c7276",
+      "prior_accepted_sha256": "c2699874ef444e3b61216cfe327f8e91b40ec5e82f6771c02246cdad765c7276",
+      "current_review": "PENDING",
+      "only_new_source_delta": false
+    },
+    {
+      "path": "scripts/bun/vue-tsc.cjs",
+      "current_sha256": "e1db20f844f3610ef598a5cc4c7cce1c2bc900018ec261bbe414b45c1c2e3e72",
+      "prior_accepted_sha256": "e1db20f844f3610ef598a5cc4c7cce1c2bc900018ec261bbe414b45c1c2e3e72",
+      "current_review": "PENDING",
+      "only_new_source_delta": false
+    },
+    {
+      "path": "tests/support/publicPackagesSetup.ts",
+      "current_sha256": "28b2e9c9c8ced9c6811f7c398fb7adb13e9ee6977c5c17361471e9967faec9c6",
+      "prior_accepted_sha256": "94ebd68aa3d682ebb07e78b8f3f2bccac808dc98a2889d9bbeac8c6c9daa98b4",
+      "current_review": "PENDING",
+      "only_new_source_delta": true
+    },
+    {
+      "path": "vitest.config.ts",
+      "current_sha256": "e642279494041b735ab7e9dfafaa91d659e3d17e65281ed29365e9801f20965f",
+      "prior_accepted_sha256": "e642279494041b735ab7e9dfafaa91d659e3d17e65281ed29365e9801f20965f",
+      "current_review": "PENDING",
+      "only_new_source_delta": false
+    }
+  ],
+  "integration01_history": {
+    "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01",
+    "anchor_sha256": "3ca6b3c63d75862c96e568319641e08208caaa7e25bc826f9ca7defbe24a20ed",
+    "actual_reviewer": "ea3ec52a",
+    "hold_sha256": "5236d1713dde9de9926d6722edc614cad766d110c767a2f7a8c51931251b906f",
+    "old_root_unchanged": true,
+    "old_countercondition_static_not_destructive_reproduction": true
+  },
+  "tracked_review_representation": {
+    "tracked_path": "docs/toolchain-evaluation/bun/ticket-02/adaptation-01/REVIEW-PASS.md",
+    "normalized_sha256": "a58b1b2b1b373c78ac50883dcacfcd2979e67497324ec50be36c76dee02d0dab",
+    "normalized_bytes": 5910,
+    "original_raw_external_transcript": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-e1-review-round4-phase2c-pass.md",
+      "sha256": "dc28266ddad448f8e1bc81fdad686ecd381237e2afc67f9a730ca03f87a03e6d",
+      "bytes": 5914,
+      "response": "7e4782aa"
+    },
+    "raw_byte_identical": false,
+    "only_normalization": {
+      "original_lines": [
+        3,
+        8
+      ],
+      "removed_ascii_space_bytes_per_line": 2,
+      "removed_total_bytes": 4
+    },
+    "raw_external_transcript_unchanged": true
+  },
+  "document_only_integration03": {
+    "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-03-docs",
+    "five_source_and_command_cases_bytes_unchanged": true,
+    "prior_source_review": {
+      "response": "49eedc40",
+      "sha256": "753388cc54fb675e4708121c0590492cac5c82865c61df61156f4a37badc6683",
+      "valid_scope": "Exact integration02 source and historical checks; not acceptance of this new document packet"
+    },
+    "commit01_hold": {
+      "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/commit-01",
+      "anchor_sha256": "b41e864f611f2cd815a48622106100532b3ae84273d86f7aaf90c232c04fe395",
+      "record_path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/ticket02-commit01-actual-hold.md",
+      "record_sha256": "30865bb1255e31d68603e9103afee9810cb91334f279e789fb5223bb1d9c47e0",
+      "failed_check_receipt": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/commit-01/commands/034-staged-diff-check.json",
+      "failed_check_exit": 2,
+      "hooks_executed": false,
+      "commit_created": false,
+      "receipt_writer_failure": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/commit-01/history/hold-receipt-writer-failure.md",
+      "all_old_bodies_preserved": true
+    },
+    "unstage_only_exact_nine_after_verification": true,
+    "no_technical_reruns_new_assurance_stage_or_commit": true,
+    "renewed_whole_nine_wip_review": "PENDING"
+  }
+}

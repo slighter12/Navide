@@ -1,0 +1,1409 @@
+{
+  "scope": "Fresh corrected integration02 E1 and separate real Node/pnpm control; explicit synthetic child-env probes are env shape ONLY",
+  "commands": [
+    {
+      "label": "bun-cold-51",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-cold-51.json",
+        "bytes": 5109,
+        "sha256": "29eebf51c39a6bb62cd80fac7f0438e61acd9b896be36ce2c79105a4f6fdc914",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "scripts/bun-evaluation.mjs",
+        "run",
+        "test:run",
+        "--project",
+        "unit",
+        "--project",
+        "artifacts",
+        "packages/plugin-sdk/src/index.test.ts",
+        "packages/plugin-ui/src/editor/EditorPane.test.ts",
+        "packages/plugin-sdk/bin/navide-plugin.test.ts",
+        "--reporter=json",
+        "--outputFile=/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-cold-51.results.json"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/work",
+      "exit_code": 0,
+      "pid": 55266,
+      "observer": false,
+      "stdout": {
+        "path": "commands/bun-cold-51.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60554815,
+          "mode": 420,
+          "bytes": 166,
+          "mtime_ns": 1791186533446613791,
+          "ctime_ns": 1791186533446613791,
+          "sha256": "d022219c748c13906d5b7de13e11b3fc02a6b9638919bc657e875205f9219cd8"
+        }
+      },
+      "stderr": {
+        "path": "commands/bun-cold-51.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60554816,
+          "mode": 420,
+          "bytes": 510,
+          "mtime_ns": 1791186517861622133,
+          "ctime_ns": 1791186517861622133,
+          "sha256": "8036e9d6abe9721ee4bd450e53fc8c6847ee7105db89be82368c610fb7b3ee2e"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "bun-public-build",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-public-build.json",
+        "bytes": 4815,
+        "sha256": "81fbb9f317ade20ab94abd7d06aa58edea68582861663dc4fbd82f68804b0c0b",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "scripts/bun-evaluation.mjs",
+        "run",
+        "build:public-packages"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/work",
+      "exit_code": 0,
+      "pid": 55436,
+      "observer": false,
+      "stdout": {
+        "path": "commands/bun-public-build.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60555980,
+          "mode": 420,
+          "bytes": 1581,
+          "mtime_ns": 1791186538238374189,
+          "ctime_ns": 1791186538238374189,
+          "sha256": "b2943efda38bf732b75d644ce670974e7bf5ace2ffa2d6f266cba27c0ad80f13"
+        }
+      },
+      "stderr": {
+        "path": "commands/bun-public-build.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60555981,
+          "mode": 420,
+          "bytes": 230,
+          "mtime_ns": 1791186533578618074,
+          "ctime_ns": 1791186533578618074,
+          "sha256": "bfa38f1c094ddec2e477b3ea62834591ee1c79642a913617dcb8f1e5e2e7184c"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "bun-sdk-dom-36",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-sdk-dom-36.json",
+        "bytes": 5082,
+        "sha256": "638272698a97d6c40e4dd9a391eb431c418f685b4335a156a67ae7fb91321ffc",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "scripts/bun-evaluation.mjs",
+        "run",
+        "test:run",
+        "--project",
+        "unit",
+        "packages/plugin-sdk/src/index.test.ts",
+        "packages/plugin-ui/src/editor/EditorPane.test.ts",
+        "--reporter=json",
+        "--outputFile=/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-sdk-dom-36.results.json"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/work",
+      "exit_code": 0,
+      "pid": 55209,
+      "observer": false,
+      "stdout": {
+        "path": "commands/bun-sdk-dom-36.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60554483,
+          "mode": 420,
+          "bytes": 169,
+          "mtime_ns": 1791186517652283293,
+          "ctime_ns": 1791186517652283293,
+          "sha256": "8108ff4c7633fc80d86439d6f9d3e53aaceb9feae2d34bc35ca7efa299cd0132"
+        }
+      },
+      "stderr": {
+        "path": "commands/bun-sdk-dom-36.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60554484,
+          "mode": 420,
+          "bytes": 447,
+          "mtime_ns": 1791186516963903726,
+          "ctime_ns": 1791186516963903726,
+          "sha256": "a270a43a98c05a29ccb16746718ad2efa3f6340d173cacb3488ca389ba6ac12b"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "bun-typecheck-node",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-node.json",
+        "bytes": 4842,
+        "sha256": "fa27f6c3ac91e4e6c3ae3ea3f21edb8af177f4e9b48d12ec7152300851d48118",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "scripts/bun-evaluation.mjs",
+        "run",
+        "typecheck:node"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/work",
+      "exit_code": 0,
+      "pid": 55463,
+      "observer": false,
+      "stdout": {
+        "path": "commands/bun-typecheck-node.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60556354,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186539616221989,
+          "ctime_ns": 1791186539616237155,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "stderr": {
+        "path": "commands/bun-typecheck-node.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60556355,
+          "mode": 420,
+          "bytes": 37,
+          "mtime_ns": 1791186539628759964,
+          "ctime_ns": 1791186539628759964,
+          "sha256": "428b9324432f7040641e5ea862c2dc991567eba7b7d89a500fd84cad6eea2d3a"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "bun-typecheck-web",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/bun-typecheck-web.json",
+        "bytes": 4822,
+        "sha256": "e5ffc863d9a5e25cef0f2316294dafa4ce7a261550753353a18c93343988b8e0",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "scripts/bun-evaluation.mjs",
+        "run",
+        "typecheck:web"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/work",
+      "exit_code": 0,
+      "pid": 55466,
+      "observer": false,
+      "stdout": {
+        "path": "commands/bun-typecheck-web.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60556427,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186542098150247,
+          "ctime_ns": 1791186542098168414,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "stderr": {
+        "path": "commands/bun-typecheck-web.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60556428,
+          "mode": 420,
+          "bytes": 61,
+          "mtime_ns": 1791186542110316348,
+          "ctime_ns": 1791186542110316348,
+          "sha256": "56e4d40e136bdd918c6ce4648042942e10a04201076191b422a7dcf65200b036"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "envshape-bun-corrected",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-corrected.json",
+        "bytes": 5542,
+        "sha256": "81836148b655cfa91e046ce1f0d1cb554e2716f846699d371b24db7c88d3203a",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-bun-corrected/invoke.mjs"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-bun-corrected",
+      "exit_code": 0,
+      "pid": 55136,
+      "observer": false,
+      "stdout": {
+        "path": "commands/envshape-bun-corrected.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551262,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186503711493623,
+          "ctime_ns": 1791186503711514998,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "stderr": {
+        "path": "commands/envshape-bun-corrected.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551263,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186503711551373,
+          "ctime_ns": 1791186503711574457,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "env_shape_only": true
+    },
+    {
+      "label": "envshape-bun-old",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-bun-old.json",
+        "bytes": 5404,
+        "sha256": "bd89d143a21734c4bf42b943eb7c54fbdd75a3e2a170eecbba5fb1296f62aa4c",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-bun-old/invoke.mjs"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-bun-old",
+      "exit_code": 0,
+      "pid": 55129,
+      "observer": false,
+      "stdout": {
+        "path": "commands/envshape-bun-old.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551189,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186503104363355,
+          "ctime_ns": 1791186503104392146,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "stderr": {
+        "path": "commands/envshape-bun-old.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551190,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186503104427438,
+          "ctime_ns": 1791186503104441771,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "env_shape_only": true
+    },
+    {
+      "label": "envshape-node-corrected",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-corrected.json",
+        "bytes": 5602,
+        "sha256": "619015de818c4e96ca4f9f2f7f5eefcfe7e4538b6d8b2ac22ea47936e43a3254",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/node/bin/node",
+        "--experimental-strip-types",
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-node-corrected/invoke.mjs"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-node-corrected",
+      "exit_code": 0,
+      "pid": 55123,
+      "observer": false,
+      "stdout": {
+        "path": "commands/envshape-node-corrected.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551120,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186502966523375,
+          "ctime_ns": 1791186502966534000,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "stderr": {
+        "path": "commands/envshape-node-corrected.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551121,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186502966558958,
+          "ctime_ns": 1791186502966568875,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "env_shape_only": true
+    },
+    {
+      "label": "envshape-node-old",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/envshape-node-old.json",
+        "bytes": 5464,
+        "sha256": "1bb6db5d90cd29eb8c6d6e1af43a918a61af24441e9a8f36711d6afc3fa4578b",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/node/bin/node",
+        "--experimental-strip-types",
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-node-old/invoke.mjs"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/fixtures/envshape-node-old",
+      "exit_code": 0,
+      "pid": 55105,
+      "observer": false,
+      "stdout": {
+        "path": "commands/envshape-node-old.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551030,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186502164782989,
+          "ctime_ns": 1791186502164797947,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "stderr": {
+        "path": "commands/envshape-node-old.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551031,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186502164829114,
+          "ctime_ns": 1791186502164844530,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "env_shape_only": true
+    },
+    {
+      "label": "identity-bun",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-bun.json",
+        "bytes": 4832,
+        "sha256": "634f1fe4de7fe3b2a6041562353a28f1edc2cec988704c42e968f6d7058118e1",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "-e",
+        "console.log(JSON.stringify({execPath:process.execPath,node:process.versions.node,bun:process.versions.bun,platform:process.platform,arch:process.arch}))"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/work",
+      "exit_code": 0,
+      "pid": 55190,
+      "observer": false,
+      "stdout": {
+        "path": "commands/identity-bun.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551482,
+          "mode": 420,
+          "bytes": 207,
+          "mtime_ns": 1791186516000975697,
+          "ctime_ns": 1791186516000975697,
+          "sha256": "7294baba65447824b4a1920946736b8901a42e6836744f071822e8d218f2b99b"
+        }
+      },
+      "stderr": {
+        "path": "commands/identity-bun.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551483,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186515994028419,
+          "ctime_ns": 1791186515994041961,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "identity-node",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-node.json",
+        "bytes": 4854,
+        "sha256": "46e94639d901f3b166b72b6302a7c7a148d680965f80c7f6f740e664e2e1ddce",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/node/bin/node",
+        "-e",
+        "console.log(JSON.stringify({execPath:process.execPath,node:process.versions.node,bun:process.versions.bun,platform:process.platform,arch:process.arch}))"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/work",
+      "exit_code": 0,
+      "pid": 55191,
+      "observer": false,
+      "stdout": {
+        "path": "commands/identity-node.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551500,
+          "mode": 420,
+          "bytes": 196,
+          "mtime_ns": 1791186516026081565,
+          "ctime_ns": 1791186516026081565,
+          "sha256": "94d40a84c89b184ff557153a474a548aea4bb647f5c6250912bdae9d53f62743"
+        }
+      },
+      "stderr": {
+        "path": "commands/identity-node.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551501,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186516003348276,
+          "ctime_ns": 1791186516003364484,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "identity-pnpm10",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/identity-pnpm10.json",
+        "bytes": 4905,
+        "sha256": "c6ce324566c5100937eae9c6657fe9fdea107cbfd0dd92be9bb5a20a5ecf2792",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/node/bin/node",
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/pnpm/node_modules/pnpm/bin/pnpm.cjs",
+        "--version"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/node-control",
+      "exit_code": 0,
+      "pid": 55195,
+      "observer": false,
+      "stdout": {
+        "path": "commands/identity-pnpm10.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60554458,
+          "mode": 420,
+          "bytes": 7,
+          "mtime_ns": 1791186516566759629,
+          "ctime_ns": 1791186516566759629,
+          "sha256": "21653d2744fdd071f9ef138c805393901bb9547cf3e777ebf50215a191f986ea"
+        }
+      },
+      "stderr": {
+        "path": "commands/identity-pnpm10.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60554459,
+          "mode": 420,
+          "bytes": 121,
+          "mtime_ns": 1791186516566637630,
+          "ctime_ns": 1791186516566637630,
+          "sha256": "8840018c8a92dd6b93f37a1b43898dd0b3a69c6898bdda811c4ecd7fd3c0d88c"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "install-own-pnpm10",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/install-own-pnpm10.json",
+        "bytes": 4821,
+        "sha256": "ca31ef1b1113714161579e7985d5f7bedef3cfa6b7872ee91acbca8a2ccbd767",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/bun/bin/bun",
+        "install",
+        "--ignore-scripts"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/pnpm",
+      "exit_code": 0,
+      "pid": 55192,
+      "observer": false,
+      "stdout": {
+        "path": "commands/install-own-pnpm10.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551521,
+          "mode": 420,
+          "bytes": 98,
+          "mtime_ns": 1791186516402265160,
+          "ctime_ns": 1791186516402265160,
+          "sha256": "c7b6c8d7828bc0d7acd44e49e47a0790cdc33641ef710eae2241f7326c188b4a"
+        }
+      },
+      "stderr": {
+        "path": "commands/install-own-pnpm10.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60551522,
+          "mode": 420,
+          "bytes": 77,
+          "mtime_ns": 1791186516402234869,
+          "ctime_ns": 1791186516402234869,
+          "sha256": "b404ccdaae31476ec134e67b3fb97cbd6894988460558b9d136b899d3ae5bdfe"
+        }
+      },
+      "env_shape_only": false
+    },
+    {
+      "label": "node-cold-51",
+      "receipt": {
+        "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/node-cold-51.json",
+        "bytes": 5561,
+        "sha256": "512846efb2d44ed27b0053d100043d77a4f108f816bf8f8539c890bc4cfaceb6",
+        "role": "Fresh receipt"
+      },
+      "argv": [
+        "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/tools/node/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--project",
+        "unit",
+        "--project",
+        "artifacts",
+        "packages/plugin-sdk/src/index.test.ts",
+        "packages/plugin-ui/src/editor/EditorPane.test.ts",
+        "packages/plugin-sdk/bin/navide-plugin.test.ts",
+        "--reporter=json",
+        "--outputFile=/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/commands/node-cold-51.results.json"
+      ],
+      "cwd": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-02/node-control",
+      "exit_code": 0,
+      "pid": 55485,
+      "observer": false,
+      "stdout": {
+        "path": "commands/node-cold-51.stdout",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60556507,
+          "mode": 420,
+          "bytes": 167,
+          "mtime_ns": 1791186575504043552,
+          "ctime_ns": 1791186575504043552,
+          "sha256": "54d44b8a7cad6873413917610a818f8f1b5b4187577c8e5987bcd5909d0acebd"
+        }
+      },
+      "stderr": {
+        "path": "commands/node-cold-51.stderr",
+        "identity": {
+          "kind": "regular",
+          "device": 16777231,
+          "inode": 60556508,
+          "mode": 420,
+          "bytes": 0,
+          "mtime_ns": 1791186552974986716,
+          "ctime_ns": 1791186552974997841,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "env_shape_only": false
+    }
+  ],
+  "case_inventories": [
+    {
+      "label": "bun-sdk-dom-36",
+      "result_identity": {
+        "kind": "regular",
+        "device": 16777231,
+        "inode": 60554799,
+        "mode": 420,
+        "bytes": 12627,
+        "mtime_ns": 1791186517652072960,
+        "ctime_ns": 1791186517652072960,
+        "sha256": "c4f1d84d0db1a5658d851d182117ea5533f6402c357f9435af5de6202bdfd5f9"
+      },
+      "count": 36,
+      "cases": [
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps Host offer location private while mounting only by offerId and host id",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters forwards a receiver close transaction through the public runtime bridge",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters strips close-guard functions from the registration wire and scopes the callback to the receiver",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters rejects a malformed close guard before registering the receiver",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters normalizes a throwing or malformed close-guard decision to refused",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters forwards paired editor targets with opaque source items and preserves legacy target isolation",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters suppresses detail-target callbacks and acknowledgements when disposed before the microtask",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps target ids one-shot and separates highest-seen revisions from last-applied revisions",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters does not acknowledge a guarded close after its disposer cancels a pending decision",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters does not invoke or acknowledge a duplicate guarded-close correlation twice",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters turns an active synchronous close-listener throw into one refusal acknowledgement",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters releases a pending close twice on cancellation and late acceptance without acknowledging",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters releases an accepted close once and ignores duplicate cancellation",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps one cancelled async prepare serialized until its late callback settles",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters suppresses cancellation callback and acknowledgement after close disposer",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes contribution window requests through the fixed capability",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters preserves unavailable contribution results from the Host",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes typed public capabilities and events through the SDK boundary",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters maps legacy broker errors to stable public PluginError codes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters models the Host RESOURCE_LIMIT code instead of flattening it to INTERNAL_ERROR",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters adapts view readiness and open targets through the public SDK",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps the package-local stack for errors created in the renderer",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes backend calls through the private Host bridge without exposing identity fields",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters cancels an in-flight backend call through its exact request id",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters preserves a Host resource-limit code through the public SDK",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters adapts a backend event disposer to the public Disposable contract",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters derives storage identity from PluginContext instead of plugin input",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose freezes editing and saving until the synchronized lease is released",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose refuses a lease during an in-flight write and grants one after it settles",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose returns null for a binary pane",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose returns null for a failed read pane",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose invalidates the lease when its exact pane or path identity changes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady waits for the current load and converts one-based input to zero-based Monaco coordinates",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for invalid position without positioning or writing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for load error without positioning or writing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for binary surface without positioning or writing",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "label": "bun-cold-51",
+      "result_identity": {
+        "kind": "regular",
+        "device": 16777231,
+        "inode": 60555963,
+        "mode": 420,
+        "bytes": 17794,
+        "mtime_ns": 1791186533446425166,
+        "ctime_ns": 1791186533446425166,
+        "sha256": "5fb547a94e31f6a4b18b0a98e7132fc9f25b970736eaefb48dae8b2610b28f64"
+      },
+      "count": 51,
+      "cases": [
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts packages a deterministic frontend-only archive from its explicit file list",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts requires one native backend executable and its exact build-host target",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts signs and verifies the complete archive digest with an ephemeral key",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts refuses to sign with a private key other users can read",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts rejects source-only files and duplicate file-list keys",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts admits a manifest-declared detail target schema outside the frontend/assets/backend roots",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow scaffolds a plugin that validates and packages without a build step",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow generates an owner-only keypair that signs, and never overwrites a key",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow logs in through the loopback redirect, publishes with the stored token, and logs out",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow refuses a callback whose state does not match and stores nothing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow reads the naive UTC expiry the Registry stores, whatever the local time zone",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow warns that --token is visible to other processes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow refuses a plain-http registry off loopback unless --insecure-http is given",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow answers 400 to a login callback whose Host is not the loopback address",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow refuses to publish without a token",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps Host offer location private while mounting only by offerId and host id",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters forwards a receiver close transaction through the public runtime bridge",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters strips close-guard functions from the registration wire and scopes the callback to the receiver",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters rejects a malformed close guard before registering the receiver",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters normalizes a throwing or malformed close-guard decision to refused",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters forwards paired editor targets with opaque source items and preserves legacy target isolation",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters suppresses detail-target callbacks and acknowledgements when disposed before the microtask",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps target ids one-shot and separates highest-seen revisions from last-applied revisions",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters does not acknowledge a guarded close after its disposer cancels a pending decision",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters does not invoke or acknowledge a duplicate guarded-close correlation twice",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters turns an active synchronous close-listener throw into one refusal acknowledgement",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters releases a pending close twice on cancellation and late acceptance without acknowledging",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters releases an accepted close once and ignores duplicate cancellation",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps one cancelled async prepare serialized until its late callback settles",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters suppresses cancellation callback and acknowledgement after close disposer",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes contribution window requests through the fixed capability",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters preserves unavailable contribution results from the Host",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes typed public capabilities and events through the SDK boundary",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters maps legacy broker errors to stable public PluginError codes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters models the Host RESOURCE_LIMIT code instead of flattening it to INTERNAL_ERROR",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters adapts view readiness and open targets through the public SDK",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps the package-local stack for errors created in the renderer",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes backend calls through the private Host bridge without exposing identity fields",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters cancels an in-flight backend call through its exact request id",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters preserves a Host resource-limit code through the public SDK",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters adapts a backend event disposer to the public Disposable contract",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters derives storage identity from PluginContext instead of plugin input",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose freezes editing and saving until the synchronized lease is released",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose refuses a lease during an in-flight write and grants one after it settles",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose returns null for a binary pane",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose returns null for a failed read pane",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose invalidates the lease when its exact pane or path identity changes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady waits for the current load and converts one-based input to zero-based Monaco coordinates",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for invalid position without positioning or writing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for load error without positioning or writing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for binary surface without positioning or writing",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "label": "node-cold-51",
+      "result_identity": {
+        "kind": "regular",
+        "device": 16777231,
+        "inode": 60557246,
+        "mode": 420,
+        "bytes": 17753,
+        "mtime_ns": 1791186575503935719,
+        "ctime_ns": 1791186575503935719,
+        "sha256": "5c690409bc405034fa19075c42eccf844801e66765084aa502c9a6d13197b9cd"
+      },
+      "count": 51,
+      "cases": [
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts packages a deterministic frontend-only archive from its explicit file list",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts requires one native backend executable and its exact build-host target",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts signs and verifies the complete archive digest with an ephemeral key",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts refuses to sign with a private key other users can read",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts rejects source-only files and duplicate file-list keys",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin canonical artifacts admits a manifest-declared detail target schema outside the frontend/assets/backend roots",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow scaffolds a plugin that validates and packages without a build step",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow generates an owner-only keypair that signs, and never overwrites a key",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow logs in through the loopback redirect, publishes with the stored token, and logs out",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow refuses a callback whose state does not match and stores nothing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow reads the naive UTC expiry the Registry stores, whatever the local time zone",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow warns that --token is visible to other processes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow refuses a plain-http registry off loopback unless --insecure-http is given",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow answers 400 to a login callback whose Host is not the loopback address",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/bin/navide-plugin.test.ts",
+          "name": "navide-plugin developer workflow refuses to publish without a token",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps Host offer location private while mounting only by offerId and host id",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters forwards a receiver close transaction through the public runtime bridge",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters strips close-guard functions from the registration wire and scopes the callback to the receiver",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters rejects a malformed close guard before registering the receiver",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters normalizes a throwing or malformed close-guard decision to refused",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters forwards paired editor targets with opaque source items and preserves legacy target isolation",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters suppresses detail-target callbacks and acknowledgements when disposed before the microtask",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps target ids one-shot and separates highest-seen revisions from last-applied revisions",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters does not acknowledge a guarded close after its disposer cancels a pending decision",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters does not invoke or acknowledge a duplicate guarded-close correlation twice",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters turns an active synchronous close-listener throw into one refusal acknowledgement",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters releases a pending close twice on cancellation and late acceptance without acknowledging",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters releases an accepted close once and ignores duplicate cancellation",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps one cancelled async prepare serialized until its late callback settles",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters suppresses cancellation callback and acknowledgement after close disposer",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes contribution window requests through the fixed capability",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters preserves unavailable contribution results from the Host",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes typed public capabilities and events through the SDK boundary",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters maps legacy broker errors to stable public PluginError codes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters models the Host RESOURCE_LIMIT code instead of flattening it to INTERNAL_ERROR",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters adapts view readiness and open targets through the public SDK",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters keeps the package-local stack for errors created in the renderer",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters routes backend calls through the private Host bridge without exposing identity fields",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters cancels an in-flight backend call through its exact request id",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters preserves a Host resource-limit code through the public SDK",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters adapts a backend event disposer to the public Disposable contract",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-sdk/src/index.test.ts",
+          "name": "public plugin SDK adapters derives storage identity from PluginContext instead of plugin input",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose freezes editing and saving until the synchronized lease is released",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose refuses a lease during an in-flight write and grants one after it settles",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose returns null for a binary pane",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose returns null for a failed read pane",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.prepareClose invalidates the lease when its exact pane or path identity changes",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady waits for the current load and converts one-based input to zero-based Monaco coordinates",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for invalid position without positioning or writing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for load error without positioning or writing",
+          "status": "passed"
+        },
+        {
+          "file": "packages/plugin-ui/src/editor/EditorPane.test.ts",
+          "name": "EditorPane.revealPositionWhenReady returns false for binary surface without positioning or writing",
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "control_status": "Fresh true Node22.23.2/pnpm10.0.0 cold51 and 116 declaration comparison. Existing negative Vue/cache/runtime/install/audit/lifecycle/guard controls are hash-bound carryover; no fresh independent consumer install or daily Node fallback.",
+  "historical_integration01_index": {
+    "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/source-integration-01/COMMANDS.json",
+    "bytes": 3955,
+    "sha256": "34c8c7395995e232d97994b79b704982fae4ef559ac378d7d12cf4d9e56f5f03",
+    "role": "Complete immutable prior command index"
+  }
+}
