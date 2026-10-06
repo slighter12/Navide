@@ -122,7 +122,7 @@ export function prepareArtifactInputs(root: string, build: () => void, prepared 
   const inputs = artifactDigest(root, [
     ...builtPackages, 'plugins/navide-mini-ide', 'tests/support/publicPackagesSetup.ts',
     'scripts/bun/vue-tsc.cjs',
-    ...(process.versions.bun ? ['bun.lock'] : []),
+    ...(process.versions.bun ? ['bun.lock', 'scripts/bun-evaluation.mjs'] : []),
     'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc',
     ...readdirSync(root).filter((file) => /^tsconfig.*\.json$/.test(file) || /^\.env(?:\.|$)/.test(file)),
     ...['typescript', 'vue-tsc', 'vite', '@vitejs/plugin-vue'].map((name) => `node_modules/${name}/package.json`),
