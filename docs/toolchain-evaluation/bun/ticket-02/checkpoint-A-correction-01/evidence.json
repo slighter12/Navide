@@ -1,0 +1,157 @@
+{
+  "schema": 1,
+  "status": "WIP; independent review pending; checkpoint A HOLD",
+  "base_HEAD": "7ce08fecafee8f4cd9c8b8f6df7b33a9fdda323f",
+  "base_tree": "b546e223155fb21382c11570157dcadc554e2a5c",
+  "original_separate_Node_baseline": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+  "branch": "eval/issue-2-bun-toolchain",
+  "allowed_paths": [
+    "tests/support/publicPackagesSetup.ts",
+    "docs/toolchain-evaluation/bun/ticket-02/checkpoint-A-correction-01/report.md",
+    "docs/toolchain-evaluation/bun/ticket-02/checkpoint-A-correction-01/evidence.json"
+  ],
+  "source_helper": {
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/tests/support/publicPackagesSetup.ts",
+    "sha256": "cd63ae9d31c8a7fbfc77a27d986521f137ce10f68589a539dbb92b0bc52b9ff8",
+    "bytes": 8291
+  },
+  "current_report": {
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-02/checkpoint-A-correction-01/report.md",
+    "sha256": "91f4ad2b0b925bf3549ed9fcd11b8e295857ce45d5c3e50a76efb21b0d8d3e1e",
+    "bytes": 7748
+  },
+  "current_scope": "Bun-only candidate; original Node/pnpm baseline unaffected; candidate pnpm fresh bootstrap unsupported",
+  "references": {
+    "correction_dispatch": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-A/correction-dispatch-01.md",
+      "sha256": "4856203bf5b8c8d47c8914457f0e4badffe7510844d37772f394a459d89d81f6",
+      "bytes": 6592
+    },
+    "mandatory_identity_erratum": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-A/correction-dispatch-01-identity-erratum.md",
+      "sha256": "ec22fac6e7197df0b9b7e910ade427a565195eb31003965dff3df60516a755cc",
+      "bytes": 1624
+    },
+    "Opus_adversarial_cfe0a38c": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-A/opus-adversarial-round2.md",
+      "sha256": "fd954e6dcf0fac381c5925b8d9326f7d630938ae146c2d37ee10d93c13e200fc",
+      "bytes": 8036
+    },
+    "repro01_anchor": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-repro-01/freeze/anchor.json",
+      "sha256": "8ecaefdcbd62b3818e01a804176acef9731ec346b867dc03db28200627fada9f",
+      "bytes": 1254
+    },
+    "repro01_C1_result": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-repro-01/verification/c1-result.json",
+      "sha256": "65de12a0e6f75708af55f8174c4b933faaaccc6c44738f89880b3076ce19ef9d",
+      "bytes": 1682
+    },
+    "repro01_frozen_pnpm_raw_receipt": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-repro-01/commands/c1-pnpm-install-frozen.json",
+      "sha256": "4658b82fb611e2971c596b6c20f5bd5503b7536822551187b687b9b257444f76",
+      "bytes": 4162
+    },
+    "repro02_anchor": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-repro-02/freeze/anchor.json",
+      "sha256": "94fe296b7658906d429a7ff11b512cba205a2d69cd5e408c167d54d282dc85de",
+      "bytes": 1488
+    },
+    "repro02_install_result": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-repro-02/verification/install-result.json",
+      "sha256": "2cbbdc376a53062c9c471ad6bff28817a9623e65ceed128fc84af6f4cb9674dd",
+      "bytes": 1838
+    },
+    "repro02_Node_raw_receipt": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-repro-02/commands/node-frozen.json",
+      "sha256": "255e9e55966e5ce76623ff03a15fdb7ce33041d24484562010aae4247dcb7908",
+      "bytes": 4149
+    },
+    "repro02_Bun_raw_receipt": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-repro-02/commands/bun-frozen.json",
+      "sha256": "e6360984750c934cc2b86f18f2325fe4fbdab2b8026e4cb502fdb8522535ab87",
+      "bytes": 3979
+    },
+    "current_unobserved_matrix": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-correction-01/verification/unobserved-matrix.json",
+      "sha256": "6a7318955d5ed79e9ae53130bf7f79172f8ed33002be368365e5a00b3982f596",
+      "bytes": 1095
+    },
+    "current_cache_matrix": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-correction-01/verification/cache-correction-result.json",
+      "sha256": "cdb900c5073bf055f37d4330921bcbe23e73cf25c2f6e557ceeb668a09b9d26c",
+      "bytes": 1937
+    },
+    "current_input_policy": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-correction-01/verification/input-lock-policy-after.json",
+      "sha256": "890addea0f6ee2b4cc5f4629a22cbe5be5eb453561bda67fc1d59008d5ad17ad",
+      "bytes": 2549
+    },
+    "current_library_policy": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-correction-01/verification/library-workspace-policy.json",
+      "sha256": "0543b6a4e34c6ee346aa02c4c3a6e0b79a48671f4b9e346c16c2789118ac02fc",
+      "bytes": 1233
+    },
+    "recovery_history": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-correction-01/history/recovery-interruption.md",
+      "sha256": "16f5e74ff399af245867cff8b2eac3747a581368f491a8978bed301e396de36f",
+      "bytes": 1128
+    }
+  },
+  "actual_results": {
+    "unobserved_cases": [
+      36,
+      51,
+      51
+    ],
+    "public_build_node_web_exits": [
+      0,
+      0,
+      0
+    ],
+    "Vue_good_bad_exits": [
+      0,
+      2
+    ],
+    "prior_Node_declaration_parity": 116,
+    "qualified_cold_warm_cases": [
+      51,
+      51
+    ],
+    "warm_build_entries": 0,
+    "direct_sentinel_exits": [
+      73,
+      73
+    ],
+    "guard_warm_exit": 1,
+    "guard_warm_passed_cases": 0,
+    "failed_build_stamp_removed": true,
+    "restored_cases": 51,
+    "original_candidate_pnpm_install_exit": 1,
+    "three_link_variant_Node_Bun_exits": [
+      0,
+      1
+    ]
+  },
+  "instrumentation": "Observed cache controls/negative/restoration share one owned logger; no neutral/unobserved equivalence claimed. Separate unobserved positives were retained, not replayed.",
+  "freeze": {
+    "external_owned_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-02/adaptation-01/checkpoint-A-correction-01",
+    "anchor_path": "freeze/anchor.json",
+    "command_index_path": "COMMANDS.json",
+    "supporting_directory": "supporting/",
+    "complete_all_new_untracked_payload_and_WIP": true,
+    "no_self_referential_predicted_anchor_hash": true
+  },
+  "unchanged_inputs": [
+    "package.json",
+    "pnpm-lock.yaml",
+    "bun.lock",
+    "scripts/bun-evaluation.mjs",
+    "scripts/bun/vue-tsc.cjs",
+    "vitest.config.ts",
+    "all original mock/assertion/case sources"
+  ],
+  "carryover_limits": "No new install/graph/audit/lifecycle claim. Only unchanged consumed tool, manifest, locks, policy and compiler inputs support carryover. Fresh cache evidence replaces old missing-input proofs.",
+  "publication_and_downstream_gates_pending": true,
+  "no_stage_commit_or_acceptance": true
+}
