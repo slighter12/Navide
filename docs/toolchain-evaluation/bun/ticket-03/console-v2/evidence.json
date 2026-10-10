@@ -1,0 +1,199 @@
+{
+  "ticket": "03",
+  "version": "console-v2",
+  "overall": "HOLD-readiness",
+  "console": "successful-bounded-verification",
+  "freeze_name": "freeze-v2",
+  "external_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2",
+  "head": "5a6b78ce70b2ef775a5b5ba201a4474a8574c342",
+  "original_base": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+  "runtime_pins": {
+    "node": "22.23.2",
+    "pnpm": "10.0.0",
+    "bun": "1.4.2",
+    "python": "3.12.11"
+  },
+  "criteria": [
+    {
+      "number": 1,
+      "status": "qualified",
+      "qualification": "Authority/isolation; startup exception"
+    },
+    {
+      "number": 2,
+      "status": "console-pass",
+      "qualification": "Fresh original and paired current aggregate typechecks"
+    },
+    {
+      "number": 3,
+      "status": "console-pass-qualified-observation",
+      "qualification": "Fresh current paired full application builds"
+    },
+    {
+      "number": 4,
+      "status": "console-pass",
+      "qualification": "Real Python/native products"
+    },
+    {
+      "number": 5,
+      "status": "qualified-console-only",
+      "qualification": "Owned Bun identities; not exhaustive daily/startup closure"
+    },
+    {
+      "number": 6,
+      "status": "hold",
+      "qualification": "No new development probe"
+    },
+    {
+      "number": 7,
+      "status": "hold",
+      "qualification": "Readiness absent; recorded console-owned cleanup zero"
+    },
+    {
+      "number": 8,
+      "status": "produced-not-consumer-accepted",
+      "qualification": "1105 products each; 58 declaration byte matches"
+    },
+    {
+      "number": 9,
+      "status": "bound-awaiting-review",
+      "qualification": "Complete raw receipts and additive source/evidence freeze"
+    }
+  ],
+  "references": [
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/commands/index.json",
+      "bytes": 20972,
+      "lines": 559,
+      "sha256": "faf5b89ff8f0579b8c18bbc87b87992aebaf48a0b2c74e9997fec50d58c2fdd8"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/preflight/current-vue-negative-controls.json",
+      "bytes": 4343,
+      "lines": 112,
+      "sha256": "20974e0b7c4aa107a20112e1f6eecb793ba77bc56dc69b4d91a737c8ad3d5893"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/preflight/current-guard-controls.json",
+      "bytes": 852,
+      "lines": 33,
+      "sha256": "1cfaa945f2cb0dc6b109251135f8345f2ea50f787a715f90643451c0b3c5eaae"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/preflight/final-selected-input-verification.json",
+      "bytes": 569,
+      "lines": 22,
+      "sha256": "707eba34c96dda4750da1ef42c4d42713d191894e83336db5222a7f32055e931"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/preflight/runtime-preload-path-correction.json",
+      "bytes": 191,
+      "lines": 5,
+      "sha256": "ac2e3cfbb61f6417a47a7ec50a310f8aa41467f25c54b4566a0994c90bf890ef"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/artifacts/matched-node-ordinary/index.json",
+      "bytes": 7665,
+      "lines": 182,
+      "sha256": "241c7e6b01cb42312ac5af25fbbd9f34407e94f84e662d7324314e86c1e72908"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/artifacts/candidate-ordinary/index.json",
+      "bytes": 7596,
+      "lines": 182,
+      "sha256": "091660f6ab02fd9b1c9d919c1c8692795dc840d7ff49e2706a94dd7712256596"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/artifacts/public-declaration-comparison.json",
+      "bytes": 15026,
+      "lines": 128,
+      "sha256": "6b9be04c7675a8b537f054f258379940a7350401ccf92d55bdd27dce67af1ed5"
+    },
+    {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/startup-exception-proposal.md",
+      "bytes": 1771,
+      "lines": 7,
+      "sha256": "0c2cdcf488b2147278429b7c53fe54ff400814eb5f3a2521075640f66d139449"
+    }
+  ],
+  "source_changes": [
+    {
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/package.json",
+      "bytes": 11028,
+      "lines": 319,
+      "sha256": "9f2163ac0773ce6065719f913156ff8c347049c99ec7a5e873272e46f2916b09"
+    },
+    {
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/scripts/bun-evaluation.mjs",
+      "bytes": 2827,
+      "lines": 70,
+      "sha256": "4564595743378d81b74391e87d2217e075ab47709a88d4e78e171c1ab5979ea3"
+    }
+  ],
+  "report": {
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-03/console-v2/report.md",
+    "bytes": 13376,
+    "lines": 68,
+    "sha256": "d0e6ea8639a060ee2e8dd2d05e304896946011f8b05245bd10da90dc18d65718"
+  },
+  "historical_reports_unchanged": [
+    {
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-03/report.md",
+      "bytes": 13512,
+      "lines": 73,
+      "sha256": "9e4720ca64cf3971cc9979025d1ebec4215c88ee56786978f65edc0b380c166b"
+    },
+    {
+      "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-03/evidence.json",
+      "bytes": 7503,
+      "lines": 225,
+      "sha256": "ec1507fc7a8c9c8e43fa9c68c7e186eb713ef6ab94ab12e230e166a02e48cb2a"
+    }
+  ],
+  "historical_authority": {
+    "a_report": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-A/integrated-correction01-candidate-v2.md",
+      "bytes": 14040,
+      "lines": 109,
+      "sha256": "7ae0f046a89c743c5dec25d6051a8c4b1c02fa2b2d9ae9a5a8eaaf2876301daf"
+    },
+    "ratification": {
+      "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-A/ratification-correction01-v2.json",
+      "bytes": 1915,
+      "lines": 39,
+      "sha256": "e6ba0b2965bae9797896a7414524f06896ee88f0ab1adacb13547fa3bdbb9a1b"
+    }
+  },
+  "a_residuals": [
+    "duplicated configuration",
+    "unsupported candidate pnpm bootstrap",
+    "deduplicated alias scope",
+    "private compiler API and pinned maintenance",
+    "canonical-entrypoint-only pin",
+    "frozen-range semantics",
+    "historical PID40769",
+    "Electron lifecycle gap",
+    "local path publication exposure",
+    "frozen dompurify advisory",
+    "inferred audit-ID mapping"
+  ],
+  "retained_process_failures": "A W1-W5/R1/R2/appendix/coordinator and complete v1 failures; new failed readers, incorrect pnpm attribution corrected, denied preload placement and ignored Bun preload retained",
+  "not_run": [
+    "GUI/VM/readiness",
+    "root Vitest/backend/supplementary suites",
+    "independent consumers and Plugin lifecycle",
+    "fresh install/audit/cache experiments",
+    "performance medians",
+    "release packaging/external CI/Linux/Windows",
+    "manual UI acceptance/production migration"
+  ],
+  "limitations": [
+    "No complete transitive child closure, observer neutrality, every producer environment, per-file telemetry or continuous immutability",
+    "Current same-graph Node controls are not original pnpm bootstrap",
+    "Prior Node116 remains historical attribution; new public comparison covers 58 actual d.ts paths",
+    "Required-version mismatch fixture is not a second executed Bun release"
+  ],
+  "index_modified": false,
+  "commit_or_push": false,
+  "later_ticket_authority": false
+}

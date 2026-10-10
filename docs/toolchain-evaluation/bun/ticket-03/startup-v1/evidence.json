@@ -1,0 +1,2072 @@
+{
+  "analysis": {
+    "correction-01/c01-bundle-diff-detail.json": {
+      "bytes": 11562874,
+      "path": "correction-01/analysis/c01-bundle-diff-detail.json",
+      "sha256": "7ad51762f0e26c7856ece8e983cfa20a6c2e84c91d4f323e116069a4d64e2c87"
+    },
+    "correction-01/c01-bundle-structural-differences.json": {
+      "bytes": 7135,
+      "path": "correction-01/analysis/c01-bundle-structural-differences.json",
+      "sha256": "964e2c2f20eb20efc3bbf7fdadb8d44dc81f126b4edd73af93fd85ec1568dc9a"
+    },
+    "correction-01/c01-bundle-structure-check.json": {
+      "bytes": 2663,
+      "path": "correction-01/analysis/c01-bundle-structure-check.json",
+      "sha256": "70f824b4db100e671a7dcb568c4b7a927c9fd01a5d2f3886142224b5d90ad9d5"
+    },
+    "correction-01/c01-official-artifacts-comparison.json": {
+      "bytes": 4151,
+      "path": "correction-01/analysis/c01-official-artifacts-comparison.json",
+      "sha256": "2bc1fb056a3d63e1285672905eddeec033915bfe5150627e2cd39803fc8277ff"
+    },
+    "correction-01/c01-product-comparison.json": {
+      "bytes": 11283,
+      "path": "correction-01/analysis/c01-product-comparison.json",
+      "sha256": "6b2cb13ae79b6ec5b67c54b89d56646ff99eba33ec8bdcad4cbfd9ade9e3af44"
+    },
+    "correction-01/c01-retrieval-faithfulness.json": {
+      "bytes": 321,
+      "path": "correction-01/analysis/c01-retrieval-faithfulness.json",
+      "sha256": "8ccde8f83231e2edd1dcd60bae06569a4f0f5318c91ad421689d467c6381ae02"
+    },
+    "prior/bun-vs-node-plugin-bundles.json": {
+      "bytes": 46470,
+      "path": "analysis/bun-vs-node-plugin-bundles.json",
+      "sha256": "bc04104a97f57fcc6d6b25d20105238f4ba1682db952caf2d1064e511fb934d7"
+    },
+    "prior/startup-evidence-analysis.json": {
+      "bytes": 7162,
+      "path": "analysis/startup-evidence-analysis.json",
+      "sha256": "13585688482811d44c535646b5d359a562ab04d82f8427ef7f796dce8eff00f6"
+    }
+  },
+  "archived_correction_01_scripts": {
+    "correction_01_layout_note": "correction-01/guest-ssh/ was created but stayed empty and holds no transcripts; the correction-01 SSH transcripts are in correction-01/receipts/*.txt and the invocations in correction-01/host-ssh-log/ssh-invocations.log",
+    "directory": "correction-02/archived-correction-01-scripts/",
+    "files": [
+      {
+        "bytes": 290,
+        "path": "correction-02/archived-correction-01-scripts/c01-a0-summary.py",
+        "sha256": "ba0170da6ea2eb5466ff652b42fb933d170fc18e81b70748beeba14f75a09989"
+      },
+      {
+        "bytes": 909,
+        "path": "correction-02/archived-correction-01-scripts/c01-f9-flags.py",
+        "sha256": "d772592eba2e6c3ec390328e430b18713ad8ca0b875c27b7d8a7ffe961653f26"
+      },
+      {
+        "bytes": 919,
+        "path": "correction-02/archived-correction-01-scripts/c01-f9-flags2.py",
+        "sha256": "802c774c8ce8333ad5b32656ffc233374bfccf4e17400677b919f7a3f3c5d27f"
+      },
+      {
+        "bytes": 1769,
+        "path": "correction-02/archived-correction-01-scripts/c01-probe-summary.py",
+        "sha256": "1fd9b3961c3063e5cadd4f59ee40631cadf3faddc27a313279129cdd321a801c"
+      }
+    ],
+    "listing_receipt": {
+      "bytes": 1165,
+      "path": "correction-02/receipts/c02-guest-script-listing.txt",
+      "sha256": "0aadda1ee0326d667d201cfababe7abe8a28ecfddce6d4cd782e9cdc48a714bb"
+    },
+    "not_retained": "the correction-01 bundle-structure analysis was an inline script (heredoc) rather than a file; its two outputs are retained and this stage's archived producer supersedes it",
+    "verification": "each archived file was retrieved from the guest and is byte-identical to the host-side original that produced the correction-01 receipt"
+  },
+  "bundle_delta_measurement": {
+    "output_json": {
+      "bytes": 414876,
+      "path": "correction-02/analysis/c02-bundle-delta.json",
+      "sha256": "2a6f43d01e817c68abf067d5f16e3638b8f335be87809b897d721782676fb10d"
+    },
+    "output_text": {
+      "bytes": 2425,
+      "path": "correction-02/receipts/c02-bundle-delta.txt",
+      "sha256": "c935e0555daf9eb642897378a853fd48defac9c92878a38a440f044dccffc72c"
+    },
+    "producer": {
+      "bytes": 6446,
+      "path": "correction-02/scripts/c02-bundle-delta-producer.py",
+      "sha256": "aca8d91877b334a625da8efc8b1719ea6a360655aec4664b61408333c3abf190"
+    },
+    "scope": "logical js/css assets under /assets/ (asset path with its trailing content-hash segment removed), A0 (Node) vs C (Bun) product trees",
+    "summary": {
+      "byte_identical": 281,
+      "content_differing": 389,
+      "every_differing_pair_normalized_lengths_equal": true,
+      "every_size_delta_equals_transform_bytes": true,
+      "length_preserving_differing": 381,
+      "logical_assets_per_tree": 670,
+      "observed_size_deltas": [
+        -6
+      ],
+      "size_differing": 8
+    },
+    "transforms": [
+      {
+        "bytes": -2,
+        "from": "if(!!x)",
+        "to": "if(x)"
+      },
+      {
+        "bytes": -4,
+        "from": "new Error(",
+        "to": "Error("
+      }
+    ],
+    "withdrawn": [
+      "the claim that dist-plugins/plans/assets/index.js differs only by minifier naming and content hashes",
+      "reliance on the masked-structure measurement, which masks the names themselves and therefore cannot show name-only differences",
+      "the correction-01 statement that the remaining 4 bytes of the -6 delta come from name-length choices"
+    ]
+  },
+  "candidate_branch_lockfile_gap": {
+    "baseline_evidence": "case-a0-base (frozen base source f4e9fd50) installs with `pnpm install --frozen-lockfile` exit 0 and no repair; case B keeps the disclosed guest-local repair with the label `Node control on the candidate source with the three specifiers restored to link: for pnpm only`",
+    "ci_consequence": "CI jobs that run `pnpm install --frozen-lockfile` on this source would fail",
+    "classification": "candidate-branch compatibility gap accepted at Checkpoint A; documented, NOT repaired; 09 owns the adoption decision (dual bootstrap or lockfile/workspace decision)",
+    "mechanism": [
+      "commit d89016ba (ticket 02) changed the three @navide/plugin-* devDependency specifiers to workspace:* and added bun.lock",
+      "pnpm-lock.yaml was never changed (hash dd08737924d0aea21dad5f0d37dca9f09b4ee0d75def756cea55fa246e0e986b at both f4e9fd50 and HEAD) and still records link:packages/...",
+      "pnpm 10.0.0 therefore fails --frozen-lockfile with ERR_PNPM_OUTDATED_LOCKFILE",
+      "--no-frozen-lockfile fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND because pnpm 10 does not read package.json's `workspaces` field (it says so itself)"
+    ],
+    "raw_receipts": [
+      {
+        "bytes": 1866,
+        "path": "guest/retrieved/unpacked/case-a-original/receipts/a-install.json",
+        "sha256": "7ffedcfdf3bb80ff5c0ee95b6981d6600e114a510112c0b4aec2e651304df1b3"
+      },
+      {
+        "bytes": 1744,
+        "path": "guest/retrieved/unpacked/case-a-original/receipts/a-install-nonfrozen.json",
+        "sha256": "ab60b5884ac93f15c334b616835db1becea02e402502d5672c430062df8db603"
+      },
+      {
+        "bytes": 1835,
+        "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/b-install-frozen.json",
+        "sha256": "4604573851a341f3e9555700548042731ed2ebe7ca74d6ca5fa397c63f071be6"
+      },
+      {
+        "bytes": 1871,
+        "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/c01-a0-install-frozen.json",
+        "sha256": "3325353f96a5c7cb194c4c94dee9efa9f8c51976e0cc5b0842c5645c270f18c3"
+      }
+    ],
+    "repository_changes": {
+      "package.json_specifiers": "unchanged",
+      "pnpm-lock.yaml": "unchanged",
+      "pnpm-workspace.yaml": "not created"
+    }
+  },
+  "cases": {
+    "case-a-original": {
+      "dev_runs": {
+        "dev-a-run2": {
+          "is_primary": true,
+          "probes": {
+            "gui": {
+              "launchctl_managername": "Background",
+              "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-a-original/source/node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/Electron.app\"",
+              "receipt": {
+                "bytes": 544,
+                "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/gui.json",
+                "sha256": "4d816fa39499346cec6ebf16b1e7cd7ca81b98e602fdcef410c5a10d914f9a65"
+              }
+            },
+            "health": {
+              "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T14:13:27.943206+00:00\"}",
+              "receipt": {
+                "bytes": 354,
+                "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/health.json",
+                "sha256": "acb53cbe8b3b86668f849a87deccba15acd9e24fb52566da92652a99f7d1530f"
+              },
+              "status": 200
+            },
+            "plugin_mcp_seam": {
+              "endpoint": "/plan-mcp (client=host, internal token)",
+              "initialize_status": 200,
+              "negative_control_no_credential_status": 200,
+              "plan_tools": [
+                "plan_add_note",
+                "plan_create",
+                "plan_list",
+                "plan_read",
+                "plan_update_stage",
+                "plan_update_todo"
+              ],
+              "receipt": {
+                "bytes": 162140,
+                "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/mcp-probe.json",
+                "sha256": "4018b81ec194c2e50ffb1661c966335487e587df5fb5ced4bcdaa855f389d16c"
+              },
+              "tool_count": 64,
+              "tools_list_bytes": 146226,
+              "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+              "tools_list_status": 200
+            },
+            "processes": {
+              "count": 12,
+              "receipt": {
+                "bytes": 7443,
+                "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/processes.json",
+                "sha256": "c1a50076cc89b64bec511e1c7d15d403db82ffebc2262c349ad02c601a364239"
+              }
+            },
+            "websocket": {
+              "negative_control_no_token": {
+                "close_code": 4403,
+                "opened": true,
+                "outcome": "closed_after_open"
+              },
+              "positive_control_with_token": {
+                "close_code": null,
+                "opened": true,
+                "outcome": "handshake_accepted"
+              },
+              "receipt": {
+                "bytes": 625,
+                "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/ws-probe.json",
+                "sha256": "8e9b786a14a669b8e7f5ae17b856d1a7b8cea054073484ef9730142647c0ade8"
+              }
+            },
+            "ws_token": {
+              "bytes": 43,
+              "exists": true,
+              "mode": "0o600",
+              "receipt": {
+                "bytes": 229,
+                "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/ws-token.json",
+                "sha256": "af4b1d4ad41562695ec009d692cb6c8c0945c664fb5c3aedb901d3de2b00efdf"
+              },
+              "sha256": "a437f4948c49e1a91455e5c1f4a034cfcc60bb7952acd5cc5d7de3ad81050eed",
+              "trimmed_length": 43
+            }
+          },
+          "receipt": {
+            "bytes": 7584,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2.receipt.json",
+            "sha256": "a5a4805528047dde9b573ea0d0d2da04cdf7800c6f3415135ef01e6300fbf1de"
+          },
+          "samples": {
+            "bytes": 4221,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2.samples.tsv",
+            "sha256": "38fa7381b4509200177e2217c8d311591d15ff8e0cd6029602201a85f53ead09"
+          },
+          "summary": {
+            "backend_port": "50964",
+            "bootout_rc": 0,
+            "bootstrap_rc": 0,
+            "case": "case-a-original",
+            "declared_arguments": "-- --user-data-dir=/Users/navide/eval/case-a-original/profile/chromium",
+            "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+            "defunct_awaiting_reap": 0,
+            "ended_utc": "2026-10-10T14:17:55Z",
+            "first_health_200_after_seconds": 35,
+            "first_health_200_utc": "2026-10-10T14:13:29Z",
+            "job_definition_removed": true,
+            "label": "dev-a-run2",
+            "listen_ports_remaining": 0,
+            "owned_processes_remaining": 0,
+            "probe_runtime": {
+              "path": "/Users/navide/eval/case-a-original/tools/node/bin/node",
+              "version_label": "node v22.23.2"
+            },
+            "real_user_config_unchanged": true,
+            "started_utc": "2026-10-10T14:12:54Z",
+            "window_seconds": 301
+          }
+        }
+      },
+      "inventory": {
+        "bytes": 1612,
+        "path": "guest/retrieved/unpacked/case-a-original/logs/inventory.txt",
+        "sha256": "0d3a2913485a781ff2d8f3e93f6f192564b7e4f7f1df51c6e3c90293366eea3f"
+      },
+      "logs_archive": {
+        "bytes": 4602368,
+        "guest_bytes": null,
+        "guest_sha256": "62ad298a3f5477791ea09d86682320033f847afd97a7f58c8da7a51d2a6e71e8",
+        "host_matches_guest": true,
+        "path": "guest/retrieved/logs-receipts.tar",
+        "sha256": "62ad298a3f5477791ea09d86682320033f847afd97a7f58c8da7a51d2a6e71e8"
+      },
+      "probes": {
+        "gui": {
+          "launchctl_managername": "Background",
+          "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-a-original/source/node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/Electron.app\"",
+          "receipt": {
+            "bytes": 544,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/gui.json",
+            "sha256": "4d816fa39499346cec6ebf16b1e7cd7ca81b98e602fdcef410c5a10d914f9a65"
+          }
+        },
+        "health": {
+          "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T14:13:27.943206+00:00\"}",
+          "receipt": {
+            "bytes": 354,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/health.json",
+            "sha256": "acb53cbe8b3b86668f849a87deccba15acd9e24fb52566da92652a99f7d1530f"
+          },
+          "status": 200
+        },
+        "plugin_mcp_seam": {
+          "endpoint": "/plan-mcp (client=host, internal token)",
+          "initialize_status": 200,
+          "negative_control_no_credential_status": 200,
+          "plan_tools": [
+            "plan_add_note",
+            "plan_create",
+            "plan_list",
+            "plan_read",
+            "plan_update_stage",
+            "plan_update_todo"
+          ],
+          "receipt": {
+            "bytes": 162140,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/mcp-probe.json",
+            "sha256": "4018b81ec194c2e50ffb1661c966335487e587df5fb5ced4bcdaa855f389d16c"
+          },
+          "tool_count": 64,
+          "tools_list_bytes": 146226,
+          "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+          "tools_list_status": 200
+        },
+        "processes": {
+          "count": 12,
+          "receipt": {
+            "bytes": 7443,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/processes.json",
+            "sha256": "c1a50076cc89b64bec511e1c7d15d403db82ffebc2262c349ad02c601a364239"
+          }
+        },
+        "websocket": {
+          "negative_control_no_token": {
+            "close_code": 4403,
+            "opened": true,
+            "outcome": "closed_after_open"
+          },
+          "positive_control_with_token": {
+            "close_code": null,
+            "opened": true,
+            "outcome": "handshake_accepted"
+          },
+          "receipt": {
+            "bytes": 625,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/ws-probe.json",
+            "sha256": "8e9b786a14a669b8e7f5ae17b856d1a7b8cea054073484ef9730142647c0ade8"
+          }
+        },
+        "ws_token": {
+          "bytes": 43,
+          "exists": true,
+          "mode": "0o600",
+          "receipt": {
+            "bytes": 229,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a-run2/ws-token.json",
+            "sha256": "af4b1d4ad41562695ec009d692cb6c8c0945c664fb5c3aedb901d3de2b00efdf"
+          },
+          "sha256": "a437f4948c49e1a91455e5c1f4a034cfcc60bb7952acd5cc5d7de3ad81050eed",
+          "trimmed_length": 43
+        }
+      },
+      "product_manifest": {
+        "bytes": 131250,
+        "files": 888,
+        "key_products": {
+          "build/fn-key/navide-fn-key": {
+            "bytes": 68272,
+            "sha256": "1ea71396e8c44e737c47d1b617f377164343109e7df417eb32d5885e9615f4a1"
+          },
+          "build/pane-helper/Navide Pane.app/Contents/MacOS/navide-pane": {
+            "bytes": 66816,
+            "sha256": "bdbe82bc00fb01bd1bfa24fd6c2b096d215b21a3e4b9f00ade38fb69fad6098b"
+          },
+          "dist-plugins/navide-plans/backend/navide-plans": {
+            "bytes": 9424944,
+            "sha256": "a5de95fc8af8006c910c6ec4525c2f2987ef8f8bc575bc9cf8d744679d44c74b"
+          },
+          "out/main/index.js": {
+            "bytes": 2341106,
+            "sha256": "e49f87bf4ccd9fa4f97692ebcaf9441f7b6f011ffc22b0f0cb16f8589b234ff8"
+          },
+          "out/preload/index.js": {
+            "bytes": 29981,
+            "sha256": "e4d69810d0f187d206baa1e2210f2c717386537e6ffa4c3d81d78a67ceb8a09e"
+          }
+        },
+        "path": "guest/retrieved/unpacked/case-a-original.products.sha256",
+        "sha256": "93573745603add4878ed3a0da1aefae537d42472bc0d17b589bc27fed30087bc",
+        "total_bytes": 159634643
+      },
+      "role": "retained history: HEAD source without the six 03 WIP paths, guest-local specifier repair (superseded by case-a0-base as the baseline)",
+      "source_commit": "5a6b78ce70b2ef775a5b5ba201a4474a8574c342 (minus the six WIP paths)",
+      "steps": [
+        {
+          "argv": [
+            "pnpm",
+            "build"
+          ],
+          "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+          "duration_seconds": 84,
+          "exit_code": 0,
+          "label": "a-build-ciheap",
+          "log_bytes": 90810,
+          "log_sha256": "c7aee6c19673d9ed76b3ec43ed721767bf26f2e77191e7eb9c64a94b19895180",
+          "receipt": {
+            "bytes": 1756,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-build-ciheap.json",
+            "sha256": "1a8b3b8b6ca790c6da3d24aaf2e17e3d0b7a78e3540527fbc8351af0e7f2e9cd"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "build"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 18,
+          "exit_code": 134,
+          "label": "a-build",
+          "log_bytes": 9372,
+          "log_sha256": "9acd6fb95398e4cc358e0143de611029a2fff64260205e9019182bbb18e7647a",
+          "receipt": {
+            "bytes": 1701,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-build.json",
+            "sha256": "a071197520cc1e62b61727ee73f861676f3eda201227a3b191d17adde5039f37"
+          }
+        },
+        {
+          "argv": [
+            "node",
+            "node_modules/electron/install.js"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 2401,
+          "exit_code": 0,
+          "label": "a-electron-install",
+          "log_bytes": 2,
+          "log_sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+          "receipt": {
+            "bytes": 925,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-electron-install.json",
+            "sha256": "8aa3bae23f553b9099f2be43ea97701be793f9534df063134cd1bb2570c4044c"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "install",
+            "--frozen-lockfile"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 10,
+          "exit_code": 0,
+          "label": "a-install-frozen",
+          "log_bytes": 2948,
+          "log_sha256": "d680b30929dc6ee988d194363c93cc99b4b763bb9f4c8f314b0ea38ea8bd503c",
+          "receipt": {
+            "bytes": 1752,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-install-frozen.json",
+            "sha256": "72a6d9e690bf04cd3276d94736eca9fda098e6688eda5814aa1aaa4dcc65feb5"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "install",
+            "--no-frozen-lockfile"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 0,
+          "exit_code": 1,
+          "label": "a-install-nonfrozen",
+          "log_bytes": 441,
+          "log_sha256": "e216f6512433f68a014c8a72653bca57c2763b91a9ee825799311cd5b644ec38",
+          "receipt": {
+            "bytes": 1744,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-install-nonfrozen.json",
+            "sha256": "ab60b5884ac93f15c334b616835db1becea02e402502d5672c430062df8db603"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "install",
+            "--frozen-lockfile"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 1,
+          "exit_code": 1,
+          "label": "a-install",
+          "log_bytes": 2165,
+          "log_sha256": "e748161f10f2f3682f20ce81d9b835eaa377cea7606e7de158e8209279cb527d",
+          "receipt": {
+            "bytes": 1866,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-install.json",
+            "sha256": "7ffedcfdf3bb80ff5c0ee95b6981d6600e114a510112c0b4aec2e651304df1b3"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "rebuild",
+            "electron"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 0,
+          "exit_code": 0,
+          "label": "a-rebuild-electron",
+          "log_bytes": 121,
+          "log_sha256": "8840018c8a92dd6b93f37a1b43898dd0b3a69c6898bdda811c4ecd7fd3c0d88c",
+          "receipt": {
+            "bytes": 1021,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-rebuild-electron.json",
+            "sha256": "66a062c674f372dce9802066e469027a630d1c1163a08bfd69d5a68b59611b08"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 40,
+          "exit_code": 0,
+          "label": "a-typecheck",
+          "log_bytes": 3675,
+          "log_sha256": "4ba2bf98559ea6db68a9c64adcde01294225135d12b88e8bada3e33c342c5f37",
+          "receipt": {
+            "bytes": 1693,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-typecheck.json",
+            "sha256": "385f5f81eb11171c9dfe6faf39b753bc75f8ed30806e29bd70ee22ad6060fa1c"
+          }
+        },
+        {
+          "argv": [
+            "uv",
+            "--project",
+            "backend",
+            "sync"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 5,
+          "exit_code": 0,
+          "label": "a-uv-sync",
+          "log_bytes": 2210,
+          "log_sha256": "292330db88734dd4b6541e487f57ecc09f8b43c4018b13d6c3da4996e81af59e",
+          "receipt": {
+            "bytes": 1713,
+            "path": "guest/retrieved/unpacked/case-a-original/receipts/a-uv-sync.json",
+            "sha256": "e6704ae066eaef28a680b7d9ad3433970116b491e50f318a4239778ecd1df1c4"
+          }
+        }
+      ]
+    },
+    "case-a0-base": {
+      "dev_runs": {
+        "dev-a0-run1": {
+          "is_primary": false,
+          "probes": "see receipts",
+          "receipt": {
+            "bytes": 7536,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run1.receipt.json",
+            "sha256": "4ddceece569554d9b5882fc3b0de24e7a95d3afd60af126f815686e1850dfa56"
+          },
+          "samples": {
+            "bytes": 4205,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run1.samples.tsv",
+            "sha256": "c58f053e4d3c0c8d6b7701325faa129ec4c267644bd03e7cc70019da1aed9882"
+          },
+          "summary": {
+            "backend_port": "51378",
+            "bootout_rc": 0,
+            "bootstrap_rc": 0,
+            "case": "case-a0-base",
+            "declared_arguments": "-- --user-data-dir=/Users/navide/eval/case-a0-base/profile/chromium",
+            "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+            "defunct_awaiting_reap": 0,
+            "ended_utc": "2026-10-10T15:00:53Z",
+            "first_health_200_after_seconds": 40,
+            "first_health_200_utc": "2026-10-10T14:56:32Z",
+            "job_definition_removed": true,
+            "label": "dev-a0-run1",
+            "listen_ports_remaining": 0,
+            "owned_processes_remaining": 0,
+            "probe_runtime": {
+              "path": "/Users/navide/eval/case-a0-base/tools/node/bin/node",
+              "version_label": "node v22.23.2"
+            },
+            "real_user_config_unchanged": true,
+            "started_utc": "2026-10-10T14:55:52Z",
+            "window_seconds": 301
+          }
+        },
+        "dev-a0-run2": {
+          "is_primary": true,
+          "probes": {
+            "gui": {
+              "launchctl_managername": "Background",
+              "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-a0-base/source/node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/Electron.app\"",
+              "receipt": {
+                "bytes": 532,
+                "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/gui.json",
+                "sha256": "e1eb00529b3cac62442249b221bc9ac080f0e4ad7d3a19bb3b4147e8e646925c"
+              }
+            },
+            "health": {
+              "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T15:02:11.591651+00:00\"}",
+              "receipt": {
+                "bytes": 354,
+                "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/health.json",
+                "sha256": "50fa3ec020eff89d9c3651d0cf897a520e86f7c53818e5fdc6cb04f806b49be9"
+              },
+              "status": 200
+            },
+            "plugin_mcp_seam": {
+              "endpoint": "/plan-mcp (client=host, internal token)",
+              "initialize_status": 200,
+              "negative_control_no_credential_status": 200,
+              "plan_tools": [
+                "plan_add_note",
+                "plan_create",
+                "plan_list",
+                "plan_read",
+                "plan_update_stage",
+                "plan_update_todo"
+              ],
+              "receipt": {
+                "bytes": 162137,
+                "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/mcp-probe.json",
+                "sha256": "a046b329a9748cc2ddf927cf5b9705d1702459d98b014e6bbcc8c89a8cb79b57"
+              },
+              "tool_count": 64,
+              "tools_list_bytes": 146226,
+              "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+              "tools_list_status": 200
+            },
+            "processes": {
+              "count": 12,
+              "receipt": {
+                "bytes": 7368,
+                "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/processes.json",
+                "sha256": "9a79068569b483b1de2c42011ae2007fc8a9b45e48aadeae717b2281c0765bc1"
+              }
+            },
+            "websocket": {
+              "negative_control_no_token": {
+                "close_code": 4403,
+                "opened": true,
+                "outcome": "closed_after_open"
+              },
+              "positive_control_with_token": {
+                "close_code": null,
+                "opened": true,
+                "outcome": "handshake_accepted"
+              },
+              "receipt": {
+                "bytes": 622,
+                "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/ws-probe.json",
+                "sha256": "ea9136eb25c9e7c7b099adc32c4331558e49942166dde798034a28437fbc997a"
+              }
+            },
+            "ws_token": {
+              "bytes": 43,
+              "exists": true,
+              "mode": "0o600",
+              "receipt": {
+                "bytes": 226,
+                "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/ws-token.json",
+                "sha256": "1425e2bf4997ce4fc5b8617a2c860bab46dc2517a2276579e63ce05f2b8da80d"
+              },
+              "sha256": "ac02ddc425496cfd04a7875c347be39a3579364eb635bed781b503160ccf9705",
+              "trimmed_length": 43
+            }
+          },
+          "receipt": {
+            "bytes": 7535,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2.receipt.json",
+            "sha256": "0679865560e0ffc5ccba15480dc92e6c74799b3877878c6abcfbedc4ea152fed"
+          },
+          "samples": {
+            "bytes": 1666,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2.samples.tsv",
+            "sha256": "ae5be58fbc5ea159583175407be10536918da6efb547acb7c7663b7ba7361a99"
+          },
+          "summary": {
+            "backend_port": "51514",
+            "bootout_rc": 0,
+            "bootstrap_rc": 0,
+            "case": "case-a0-base",
+            "declared_arguments": "-- --user-data-dir=/Users/navide/eval/case-a0-base/profile/chromium",
+            "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+            "defunct_awaiting_reap": 0,
+            "ended_utc": "2026-10-10T15:03:40Z",
+            "first_health_200_after_seconds": 36,
+            "first_health_200_utc": "2026-10-10T15:02:13Z",
+            "job_definition_removed": true,
+            "label": "dev-a0-run2",
+            "listen_ports_remaining": 0,
+            "owned_processes_remaining": 0,
+            "probe_runtime": {
+              "path": "/Users/navide/eval/case-a0-base/tools/node/bin/node",
+              "version_label": "node v22.23.2"
+            },
+            "real_user_config_unchanged": true,
+            "started_utc": "2026-10-10T15:01:37Z",
+            "window_seconds": 123
+          }
+        }
+      },
+      "inventory": {
+        "bytes": 1587,
+        "path": "correction-01/retrieved/unpacked/case-a0-base/logs/inventory.txt",
+        "sha256": "70afa4459ed88c0b3998a46047fc604f45703a768770b4ad27657760fb027232"
+      },
+      "logs_archive": {
+        "bytes": 893952,
+        "guest_bytes": 893952,
+        "guest_sha256": "4ba2c3e548bc9320d7ecbe81c1e5f1a8c9e434ed61806de9991b3590bf50c8a5",
+        "host_matches_guest": true,
+        "path": "correction-01/logs-receipts-a0.tar",
+        "sha256": "4ba2c3e548bc9320d7ecbe81c1e5f1a8c9e434ed61806de9991b3590bf50c8a5"
+      },
+      "probes": {
+        "gui": {
+          "launchctl_managername": "Background",
+          "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-a0-base/source/node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/Electron.app\"",
+          "receipt": {
+            "bytes": 532,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/gui.json",
+            "sha256": "e1eb00529b3cac62442249b221bc9ac080f0e4ad7d3a19bb3b4147e8e646925c"
+          }
+        },
+        "health": {
+          "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T15:02:11.591651+00:00\"}",
+          "receipt": {
+            "bytes": 354,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/health.json",
+            "sha256": "50fa3ec020eff89d9c3651d0cf897a520e86f7c53818e5fdc6cb04f806b49be9"
+          },
+          "status": 200
+        },
+        "plugin_mcp_seam": {
+          "endpoint": "/plan-mcp (client=host, internal token)",
+          "initialize_status": 200,
+          "negative_control_no_credential_status": 200,
+          "plan_tools": [
+            "plan_add_note",
+            "plan_create",
+            "plan_list",
+            "plan_read",
+            "plan_update_stage",
+            "plan_update_todo"
+          ],
+          "receipt": {
+            "bytes": 162137,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/mcp-probe.json",
+            "sha256": "a046b329a9748cc2ddf927cf5b9705d1702459d98b014e6bbcc8c89a8cb79b57"
+          },
+          "tool_count": 64,
+          "tools_list_bytes": 146226,
+          "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+          "tools_list_status": 200
+        },
+        "processes": {
+          "count": 12,
+          "receipt": {
+            "bytes": 7368,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/processes.json",
+            "sha256": "9a79068569b483b1de2c42011ae2007fc8a9b45e48aadeae717b2281c0765bc1"
+          }
+        },
+        "websocket": {
+          "negative_control_no_token": {
+            "close_code": 4403,
+            "opened": true,
+            "outcome": "closed_after_open"
+          },
+          "positive_control_with_token": {
+            "close_code": null,
+            "opened": true,
+            "outcome": "handshake_accepted"
+          },
+          "receipt": {
+            "bytes": 622,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/ws-probe.json",
+            "sha256": "ea9136eb25c9e7c7b099adc32c4331558e49942166dde798034a28437fbc997a"
+          }
+        },
+        "ws_token": {
+          "bytes": 43,
+          "exists": true,
+          "mode": "0o600",
+          "receipt": {
+            "bytes": 226,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run2/ws-token.json",
+            "sha256": "1425e2bf4997ce4fc5b8617a2c860bab46dc2517a2276579e63ce05f2b8da80d"
+          },
+          "sha256": "ac02ddc425496cfd04a7875c347be39a3579364eb635bed781b503160ccf9705",
+          "trimmed_length": 43
+        }
+      },
+      "product_manifest": {
+        "bytes": 131250,
+        "files": 888,
+        "key_products": {
+          "build/fn-key/navide-fn-key": {
+            "bytes": 68272,
+            "sha256": "1ea71396e8c44e737c47d1b617f377164343109e7df417eb32d5885e9615f4a1"
+          },
+          "build/pane-helper/Navide Pane.app/Contents/MacOS/navide-pane": {
+            "bytes": 66816,
+            "sha256": "bdbe82bc00fb01bd1bfa24fd6c2b096d215b21a3e4b9f00ade38fb69fad6098b"
+          },
+          "dist-plugins/navide-plans/backend/navide-plans": {
+            "bytes": 9425712,
+            "sha256": "5c9405b05767ce2dde166fa74e2ff5148a24b61420fadc23d4cd910a815d2258"
+          },
+          "out/main/index.js": {
+            "bytes": 2341106,
+            "sha256": "e49f87bf4ccd9fa4f97692ebcaf9441f7b6f011ffc22b0f0cb16f8589b234ff8"
+          },
+          "out/preload/index.js": {
+            "bytes": 29981,
+            "sha256": "e4d69810d0f187d206baa1e2210f2c717386537e6ffa4c3d81d78a67ceb8a09e"
+          }
+        },
+        "path": "correction-01/retrieved/unpacked/case-a0-base.products.sha256",
+        "sha256": "841bc1368a3819382b7d9f32ed575ae78563ad32059de8af2437daff5cbe0d1a",
+        "total_bytes": 159637308
+      },
+      "products_archive": {
+        "bytes": 160372736,
+        "guest_bytes": 160372736,
+        "guest_sha256": "a55f7cbc38528db626a49b9c86daf4ab2e130a05f4ea3d9675b664e77d95eb51",
+        "host_matches_guest": true,
+        "path": "correction-01/products-a0-base.tar",
+        "sha256": "a55f7cbc38528db626a49b9c86daf4ab2e130a05f4ea3d9675b664e77d95eb51"
+      },
+      "role": "ORIGINAL baseline (correction 01): frozen base source f4e9fd50, no repair, no overlay",
+      "source_commit": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "steps": [
+        {
+          "argv": [
+            "pnpm",
+            "build"
+          ],
+          "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+          "duration_seconds": 85,
+          "exit_code": 0,
+          "label": "c01-a0-build",
+          "log_bytes": 89042,
+          "log_sha256": "895f8b7cb57ea65e88bbac5191ad3d280eada8014b02a98631d349ce3bf8a302",
+          "receipt": {
+            "bytes": 1714,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/c01-a0-build.json",
+            "sha256": "4e61d4156ceaaa9ee7bfc58810c29edb383dae5e4fb948a3c027f86cb14c0812"
+          }
+        },
+        {
+          "argv": [
+            "node",
+            "node_modules/electron/install.js"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 1,
+          "exit_code": 0,
+          "label": "c01-a0-electron-install",
+          "log_bytes": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "receipt": {
+            "bytes": 907,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/c01-a0-electron-install.json",
+            "sha256": "272fc72274a237303434f763d34350edc30da24575bb8b744ba84499ca899de3"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "install",
+            "--frozen-lockfile"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 11,
+          "exit_code": 0,
+          "label": "c01-a0-install-frozen",
+          "log_bytes": 2887,
+          "log_sha256": "f71ac0a3fa4fc5f989858442906502723a108a41d2d3d7b2946b5830be5e8628",
+          "receipt": {
+            "bytes": 1871,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/c01-a0-install-frozen.json",
+            "sha256": "3325353f96a5c7cb194c4c94dee9efa9f8c51976e0cc5b0842c5645c270f18c3"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 43,
+          "exit_code": 0,
+          "label": "c01-a0-typecheck",
+          "log_bytes": 2868,
+          "log_sha256": "56040b9f14ddcbe1416c8585214b29134bc1fca4d9d2aa779467d89f044f14c1",
+          "receipt": {
+            "bytes": 1695,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/c01-a0-typecheck.json",
+            "sha256": "d84664730412bd6f013b286680db38c1be1cf43a366c38e7c817708a222af7f8"
+          }
+        },
+        {
+          "argv": [
+            "uv",
+            "--project",
+            "backend",
+            "sync"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 5,
+          "exit_code": 0,
+          "label": "c01-a0-uv-sync",
+          "log_bytes": 2200,
+          "log_sha256": "485a845fb42b3bcc5b323eaaed3fcbac5a65bb9b1cc14dfdcd687dfc5e1343d8",
+          "receipt": {
+            "bytes": 1724,
+            "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/c01-a0-uv-sync.json",
+            "sha256": "6e54209448f78d70748abb833259dc089b826b7c673d437f1b8e9f9338673bd1"
+          }
+        }
+      ]
+    },
+    "case-b-matched-node": {
+      "dev_runs": {
+        "dev-b-run2": {
+          "is_primary": true,
+          "probes": {
+            "gui": {
+              "launchctl_managername": "Background",
+              "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-b-matched-node/source/node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/Electron.app\"",
+              "receipt": {
+                "bytes": 560,
+                "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/gui.json",
+                "sha256": "14f6f27c785f2f2ad94d668e1971c55b793a9dc506eceaaaa0ff5b79a35ea577"
+              }
+            },
+            "health": {
+              "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T14:18:59.656866+00:00\"}",
+              "receipt": {
+                "bytes": 354,
+                "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/health.json",
+                "sha256": "9f8558d93c95e3007abf0dd1dd51f855fce65e4b83b51e53481f8daf70a507de"
+              },
+              "status": 200
+            },
+            "plugin_mcp_seam": {
+              "endpoint": "/plan-mcp (client=host, internal token)",
+              "initialize_status": 200,
+              "negative_control_no_credential_status": 200,
+              "plan_tools": [
+                "plan_add_note",
+                "plan_create",
+                "plan_list",
+                "plan_read",
+                "plan_update_stage",
+                "plan_update_todo"
+              ],
+              "receipt": {
+                "bytes": 162144,
+                "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/mcp-probe.json",
+                "sha256": "8361ac5e043b30ccefdd440e0f6a858bd50599698e0e48a4c35cd8fc57c4e2fa"
+              },
+              "tool_count": 64,
+              "tools_list_bytes": 146226,
+              "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+              "tools_list_status": 200
+            },
+            "processes": {
+              "count": 12,
+              "receipt": {
+                "bytes": 7533,
+                "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/processes.json",
+                "sha256": "fbf9f5ffb10a1b0c10239bb36ba74beeed7da0efc9eef10cef7a3fe48b811aa8"
+              }
+            },
+            "websocket": {
+              "negative_control_no_token": {
+                "close_code": 4403,
+                "opened": true,
+                "outcome": "closed_after_open"
+              },
+              "positive_control_with_token": {
+                "close_code": null,
+                "opened": true,
+                "outcome": "handshake_accepted"
+              },
+              "receipt": {
+                "bytes": 629,
+                "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/ws-probe.json",
+                "sha256": "3d23940b78077f633758983c4a2d1487a930352c182642b815f1ddb6fdf97404"
+              }
+            },
+            "ws_token": {
+              "bytes": 43,
+              "exists": true,
+              "mode": "0o600",
+              "receipt": {
+                "bytes": 233,
+                "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/ws-token.json",
+                "sha256": "79e39b8fc67d641fb6e9200419953c5514bf0369c4ee9b20e42cda2c65d54d13"
+              },
+              "sha256": "9469ed1226faa49884a307182d0c070db02ef4cd573847fc13c5f80fd4a5d5bc",
+              "trimmed_length": 43
+            }
+          },
+          "receipt": {
+            "bytes": 7676,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2.receipt.json",
+            "sha256": "947fafb301bbb91da19a077ad46edebdea74a80daeea3e1459579f4e73f7847b"
+          },
+          "samples": {
+            "bytes": 4221,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2.samples.tsv",
+            "sha256": "33e46ea7a7cb33020123c27120ab88d2fa9b329412b04ee839616cb165c37319"
+          },
+          "summary": {
+            "backend_port": "51078",
+            "bootout_rc": 0,
+            "bootstrap_rc": 0,
+            "case": "case-b-matched-node",
+            "declared_arguments": "-- --user-data-dir=/Users/navide/eval/case-b-matched-node/profile/chromium",
+            "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+            "defunct_awaiting_reap": 0,
+            "ended_utc": "2026-10-10T14:23:26Z",
+            "first_health_200_after_seconds": 36,
+            "first_health_200_utc": "2026-10-10T14:19:01Z",
+            "job_definition_removed": true,
+            "label": "dev-b-run2",
+            "listen_ports_remaining": 0,
+            "owned_processes_remaining": 0,
+            "probe_runtime": {
+              "path": "/Users/navide/eval/case-b-matched-node/tools/node/bin/node",
+              "version_label": "node v22.23.2"
+            },
+            "real_user_config_unchanged": true,
+            "started_utc": "2026-10-10T14:18:25Z",
+            "window_seconds": 301
+          }
+        }
+      },
+      "inventory": {
+        "bytes": 1616,
+        "path": "guest/retrieved/unpacked/case-b-matched-node/logs/inventory.txt",
+        "sha256": "d30573ebafd95a14ff8a69af590b4ca8bfb291fda6399589cf20a7b1ef77c6e9"
+      },
+      "logs_archive": {
+        "bytes": 4602368,
+        "guest_bytes": null,
+        "guest_sha256": "62ad298a3f5477791ea09d86682320033f847afd97a7f58c8da7a51d2a6e71e8",
+        "host_matches_guest": true,
+        "path": "guest/retrieved/logs-receipts.tar",
+        "sha256": "62ad298a3f5477791ea09d86682320033f847afd97a7f58c8da7a51d2a6e71e8"
+      },
+      "probes": {
+        "gui": {
+          "launchctl_managername": "Background",
+          "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-b-matched-node/source/node_modules/.pnpm/electron@44.4.5/node_modules/electron/dist/Electron.app\"",
+          "receipt": {
+            "bytes": 560,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/gui.json",
+            "sha256": "14f6f27c785f2f2ad94d668e1971c55b793a9dc506eceaaaa0ff5b79a35ea577"
+          }
+        },
+        "health": {
+          "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T14:18:59.656866+00:00\"}",
+          "receipt": {
+            "bytes": 354,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/health.json",
+            "sha256": "9f8558d93c95e3007abf0dd1dd51f855fce65e4b83b51e53481f8daf70a507de"
+          },
+          "status": 200
+        },
+        "plugin_mcp_seam": {
+          "endpoint": "/plan-mcp (client=host, internal token)",
+          "initialize_status": 200,
+          "negative_control_no_credential_status": 200,
+          "plan_tools": [
+            "plan_add_note",
+            "plan_create",
+            "plan_list",
+            "plan_read",
+            "plan_update_stage",
+            "plan_update_todo"
+          ],
+          "receipt": {
+            "bytes": 162144,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/mcp-probe.json",
+            "sha256": "8361ac5e043b30ccefdd440e0f6a858bd50599698e0e48a4c35cd8fc57c4e2fa"
+          },
+          "tool_count": 64,
+          "tools_list_bytes": 146226,
+          "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+          "tools_list_status": 200
+        },
+        "processes": {
+          "count": 12,
+          "receipt": {
+            "bytes": 7533,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/processes.json",
+            "sha256": "fbf9f5ffb10a1b0c10239bb36ba74beeed7da0efc9eef10cef7a3fe48b811aa8"
+          }
+        },
+        "websocket": {
+          "negative_control_no_token": {
+            "close_code": 4403,
+            "opened": true,
+            "outcome": "closed_after_open"
+          },
+          "positive_control_with_token": {
+            "close_code": null,
+            "opened": true,
+            "outcome": "handshake_accepted"
+          },
+          "receipt": {
+            "bytes": 629,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/ws-probe.json",
+            "sha256": "3d23940b78077f633758983c4a2d1487a930352c182642b815f1ddb6fdf97404"
+          }
+        },
+        "ws_token": {
+          "bytes": 43,
+          "exists": true,
+          "mode": "0o600",
+          "receipt": {
+            "bytes": 233,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b-run2/ws-token.json",
+            "sha256": "79e39b8fc67d641fb6e9200419953c5514bf0369c4ee9b20e42cda2c65d54d13"
+          },
+          "sha256": "9469ed1226faa49884a307182d0c070db02ef4cd573847fc13c5f80fd4a5d5bc",
+          "trimmed_length": 43
+        }
+      },
+      "product_manifest": {
+        "bytes": 131250,
+        "files": 888,
+        "key_products": {
+          "build/fn-key/navide-fn-key": {
+            "bytes": 68272,
+            "sha256": "1ea71396e8c44e737c47d1b617f377164343109e7df417eb32d5885e9615f4a1"
+          },
+          "build/pane-helper/Navide Pane.app/Contents/MacOS/navide-pane": {
+            "bytes": 66816,
+            "sha256": "bdbe82bc00fb01bd1bfa24fd6c2b096d215b21a3e4b9f00ade38fb69fad6098b"
+          },
+          "dist-plugins/navide-plans/backend/navide-plans": {
+            "bytes": 9425424,
+            "sha256": "0a4873c8f024952ed0255d7803394f8c19ed3c62d3fe2655652000da0bd8475d"
+          },
+          "out/main/index.js": {
+            "bytes": 2341106,
+            "sha256": "e49f87bf4ccd9fa4f97692ebcaf9441f7b6f011ffc22b0f0cb16f8589b234ff8"
+          },
+          "out/preload/index.js": {
+            "bytes": 29981,
+            "sha256": "e4d69810d0f187d206baa1e2210f2c717386537e6ffa4c3d81d78a67ceb8a09e"
+          }
+        },
+        "path": "guest/retrieved/unpacked/case-b-matched-node.products.sha256",
+        "sha256": "518e68a333c570c32daadb18802c3c22c03893f8b892ebabfae802185fb9a7c5",
+        "total_bytes": 159636520
+      },
+      "role": "Node control on the candidate source with the three specifiers restored to link: for pnpm only",
+      "source_commit": "5a6b78ce70b2ef775a5b5ba201a4474a8574c342 + six WIP paths",
+      "steps": [
+        {
+          "argv": [
+            "pnpm",
+            "build"
+          ],
+          "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+          "duration_seconds": 83,
+          "exit_code": 0,
+          "label": "b-build",
+          "log_bytes": 91043,
+          "log_sha256": "4caa55e9978e8ea40b3bd1d66a0c825b56f8c8c8ac1c111a85a1547e134e5c6b",
+          "receipt": {
+            "bytes": 1770,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/b-build.json",
+            "sha256": "b234b6fe0f0d5678b2ef2451b857cc5ea682aa565ca29af73c8fe47b534f90b7"
+          }
+        },
+        {
+          "argv": [
+            "node",
+            "node_modules/electron/install.js"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 1,
+          "exit_code": 0,
+          "label": "b-electron-install",
+          "log_bytes": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "receipt": {
+            "bytes": 946,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/b-electron-install.json",
+            "sha256": "8bad55d08c781173a229e9e1721de66f61f11076558a2c8c350d1fb147a1c187"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "install",
+            "--frozen-lockfile"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 10,
+          "exit_code": 0,
+          "label": "b-install-frozen-repaired",
+          "log_bytes": 3008,
+          "log_sha256": "5a02f707c73107734adba76603f10ed9d69ef4264d32049728f49c225be65664",
+          "receipt": {
+            "bytes": 1820,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/b-install-frozen-repaired.json",
+            "sha256": "d4e2c4380394ac16fca11e0b522234ef4fbed39f10eda2dcf67d1cf2a15d9e07"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "install",
+            "--frozen-lockfile"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 1,
+          "exit_code": 1,
+          "label": "b-install-frozen",
+          "log_bytes": 2165,
+          "log_sha256": "e748161f10f2f3682f20ce81d9b835eaa377cea7606e7de158e8209279cb527d",
+          "receipt": {
+            "bytes": 1835,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/b-install-frozen.json",
+            "sha256": "4604573851a341f3e9555700548042731ed2ebe7ca74d6ca5fa397c63f071be6"
+          }
+        },
+        {
+          "argv": [
+            "pnpm",
+            "typecheck"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 40,
+          "exit_code": 0,
+          "label": "b-typecheck",
+          "log_bytes": 3762,
+          "log_sha256": "10c5032d872d8dda4969a0fa4f813f79fc553486ac52cb762257f4412ff575ee",
+          "receipt": {
+            "bytes": 1743,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/b-typecheck.json",
+            "sha256": "5023ec76a60995ed43dc565b63ea22d0a1489fcc320dd996a260d593aaaed64d"
+          }
+        },
+        {
+          "argv": [
+            "uv",
+            "--project",
+            "backend",
+            "sync"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 2,
+          "exit_code": 0,
+          "label": "b-uv-sync",
+          "log_bytes": 2222,
+          "log_sha256": "b7159fe32a95b54ebd360d83aa834fbd6624e1d0119428138a381ac1c5e531d8",
+          "receipt": {
+            "bytes": 1762,
+            "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/b-uv-sync.json",
+            "sha256": "c1013ec04146b3c525f818846609a02d6191ea00714d690b42678a12531e38d4"
+          }
+        }
+      ]
+    },
+    "case-c-bun": {
+      "dev_runs": {
+        "dev-c-run2": {
+          "is_primary": true,
+          "probes": {
+            "gui": {
+              "launchctl_managername": "Background",
+              "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-c-bun/source/node_modules/.bun/electron@44.4.5+759ce506b1ed1a42/node_modules/electron/dist/Electron.app\"",
+              "receipt": {
+                "bytes": 483,
+                "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/gui.json",
+                "sha256": "e7a3ed269387acc7e49983ab36d9f376db0a7a92fa2879c5004e964e7e7b84be"
+              }
+            },
+            "health": {
+              "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T14:24:23.853238+00:00\"}",
+              "receipt": {
+                "bytes": 354,
+                "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/health.json",
+                "sha256": "dfd7b64c1673f6766c139892c451eff235680f67c0fd7083142c203cec0295a1"
+              },
+              "status": 200
+            },
+            "plugin_mcp_seam": {
+              "endpoint": "/plan-mcp (client=host, internal token)",
+              "initialize_status": 200,
+              "negative_control_no_credential_status": 200,
+              "plan_tools": [
+                "plan_add_note",
+                "plan_create",
+                "plan_list",
+                "plan_read",
+                "plan_update_stage",
+                "plan_update_todo"
+              ],
+              "receipt": {
+                "bytes": 162135,
+                "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/mcp-probe.json",
+                "sha256": "1d0aa29f2f5dc930ef6ad1bf5a9d98d7eb632db20ef735a04bb0f79c964e7120"
+              },
+              "tool_count": 64,
+              "tools_list_bytes": 146226,
+              "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+              "tools_list_status": 200
+            },
+            "processes": {
+              "count": 12,
+              "receipt": {
+                "bytes": 7352,
+                "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/processes.json",
+                "sha256": "80990968f31ff8c5be4c2aa971b844333a7fa84d50a632df5daac909dc59a244"
+              }
+            },
+            "websocket": {
+              "negative_control_no_token": {
+                "close_code": 4403,
+                "opened": true,
+                "outcome": "closed_after_open"
+              },
+              "positive_control_with_token": {
+                "close_code": null,
+                "opened": true,
+                "outcome": "handshake_accepted"
+              },
+              "receipt": {
+                "bytes": 619,
+                "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/ws-probe.json",
+                "sha256": "7edfc0580a4930108956cd429e369e99f394cea5d1f8515077f8cc36c067d0eb"
+              }
+            },
+            "ws_token": {
+              "bytes": 43,
+              "exists": true,
+              "mode": "0o600",
+              "receipt": {
+                "bytes": 224,
+                "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/ws-token.json",
+                "sha256": "3c3226acf65387b04b68cdb64c8ab24753997a066adca8e3b30770dc839431fa"
+              },
+              "sha256": "07b1d8c91cb481e9f572726a130a420c82e843d3e325545ea5f193cc2fd8e8af",
+              "trimmed_length": 43
+            }
+          },
+          "receipt": {
+            "bytes": 7466,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2.receipt.json",
+            "sha256": "1b2bf9269dc8e4fdd936384d8a6700cc3aa5a838242cf94cda7fb9953b5fded2"
+          },
+          "samples": {
+            "bytes": 4262,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2.samples.tsv",
+            "sha256": "fe0bdf2d8395ff8cd5e5bb238857909ed736bb7302b2f157db2996c1408f6e9f"
+          },
+          "summary": {
+            "backend_port": "51193",
+            "bootout_rc": 0,
+            "bootstrap_rc": 0,
+            "case": "case-c-bun",
+            "declared_arguments": "-- -- --user-data-dir=/Users/navide/eval/case-c-bun/profile/chromium",
+            "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+            "defunct_awaiting_reap": 0,
+            "ended_utc": "2026-10-10T14:28:58Z",
+            "first_health_200_after_seconds": 31,
+            "first_health_200_utc": "2026-10-10T14:24:27Z",
+            "job_definition_removed": true,
+            "label": "dev-c-run2",
+            "listen_ports_remaining": 0,
+            "owned_processes_remaining": 0,
+            "probe_runtime": {
+              "path": "/Users/navide/eval/case-c-bun/tools/bun/bin/bun",
+              "version_label": "bun 1.4.2"
+            },
+            "real_user_config_unchanged": true,
+            "started_utc": "2026-10-10T14:23:56Z",
+            "window_seconds": 302
+          }
+        }
+      },
+      "inventory": {
+        "bytes": 1607,
+        "path": "correction-01/retrieved/unpacked/case-c-bun/logs/inventory.txt",
+        "sha256": "51861af159286617e41d094f8c8bcbbf25efe4761dea3a56d63466fe9eadaa92"
+      },
+      "logs_archive": {
+        "bytes": 729600,
+        "guest_bytes": 729600,
+        "guest_sha256": "e2b5bd9a623884c08d85befbd3c3030683f0028ce9073cf4c00b1bc4a350dcb7",
+        "host_matches_guest": true,
+        "path": "correction-01/logs-receipts-c-c01.tar",
+        "sha256": "e2b5bd9a623884c08d85befbd3c3030683f0028ce9073cf4c00b1bc4a350dcb7"
+      },
+      "probes": {
+        "gui": {
+          "launchctl_managername": "Background",
+          "lsappinfo_match": "bundle path=\"/Users/navide/eval/case-c-bun/source/node_modules/.bun/electron@44.4.5+759ce506b1ed1a42/node_modules/electron/dist/Electron.app\"",
+          "receipt": {
+            "bytes": 483,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/gui.json",
+            "sha256": "e7a3ed269387acc7e49983ab36d9f376db0a7a92fa2879c5004e964e7e7b84be"
+          }
+        },
+        "health": {
+          "body": "{\"status\":\"ok\",\"version\":\"0.2.14\",\"started_at\":\"2026-10-10T14:24:23.853238+00:00\"}",
+          "receipt": {
+            "bytes": 354,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/health.json",
+            "sha256": "dfd7b64c1673f6766c139892c451eff235680f67c0fd7083142c203cec0295a1"
+          },
+          "status": 200
+        },
+        "plugin_mcp_seam": {
+          "endpoint": "/plan-mcp (client=host, internal token)",
+          "initialize_status": 200,
+          "negative_control_no_credential_status": 200,
+          "plan_tools": [
+            "plan_add_note",
+            "plan_create",
+            "plan_list",
+            "plan_read",
+            "plan_update_stage",
+            "plan_update_todo"
+          ],
+          "receipt": {
+            "bytes": 162135,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/mcp-probe.json",
+            "sha256": "1d0aa29f2f5dc930ef6ad1bf5a9d98d7eb632db20ef735a04bb0f79c964e7120"
+          },
+          "tool_count": 64,
+          "tools_list_bytes": 146226,
+          "tools_list_sha256": "e9a6635ee6e21aa06b0294f1c362e1d28b327020f9e29271e3651acd801f4c8c",
+          "tools_list_status": 200
+        },
+        "processes": {
+          "count": 12,
+          "receipt": {
+            "bytes": 7352,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/processes.json",
+            "sha256": "80990968f31ff8c5be4c2aa971b844333a7fa84d50a632df5daac909dc59a244"
+          }
+        },
+        "websocket": {
+          "negative_control_no_token": {
+            "close_code": 4403,
+            "opened": true,
+            "outcome": "closed_after_open"
+          },
+          "positive_control_with_token": {
+            "close_code": null,
+            "opened": true,
+            "outcome": "handshake_accepted"
+          },
+          "receipt": {
+            "bytes": 619,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/ws-probe.json",
+            "sha256": "7edfc0580a4930108956cd429e369e99f394cea5d1f8515077f8cc36c067d0eb"
+          }
+        },
+        "ws_token": {
+          "bytes": 43,
+          "exists": true,
+          "mode": "0o600",
+          "receipt": {
+            "bytes": 224,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c-run2/ws-token.json",
+            "sha256": "3c3226acf65387b04b68cdb64c8ab24753997a066adca8e3b30770dc839431fa"
+          },
+          "sha256": "07b1d8c91cb481e9f572726a130a420c82e843d3e325545ea5f193cc2fd8e8af",
+          "trimmed_length": 43
+        }
+      },
+      "product_manifest": {
+        "bytes": 131250,
+        "files": 888,
+        "key_products": {
+          "build/fn-key/navide-fn-key": {
+            "bytes": 68272,
+            "sha256": "1ea71396e8c44e737c47d1b617f377164343109e7df417eb32d5885e9615f4a1"
+          },
+          "build/pane-helper/Navide Pane.app/Contents/MacOS/navide-pane": {
+            "bytes": 66816,
+            "sha256": "bdbe82bc00fb01bd1bfa24fd6c2b096d215b21a3e4b9f00ade38fb69fad6098b"
+          },
+          "dist-plugins/navide-plans/backend/navide-plans": {
+            "bytes": 9426288,
+            "sha256": "2a109c38af4bb96da408cd2e628772eac576a5df12fefbc387f89a07c6701d47"
+          },
+          "out/main/index.js": {
+            "bytes": 2221531,
+            "sha256": "c31005f22054741ac1f0f984503f85886f4f998ace3e9aee2a5d8159b3d292c7"
+          },
+          "out/preload/index.js": {
+            "bytes": 29981,
+            "sha256": "e4d69810d0f187d206baa1e2210f2c717386537e6ffa4c3d81d78a67ceb8a09e"
+          }
+        },
+        "path": "guest/retrieved/unpacked/case-c-bun.products.sha256",
+        "sha256": "d5f583afb958d2ff6a9d05e708af79b06387f664fb892327ca6eca1a04994946",
+        "total_bytes": 159486767
+      },
+      "products_archive": {
+        "bytes": 160222208,
+        "guest_bytes": 160222208,
+        "guest_sha256": "d3fd357f35d650abe71bb6137c9723c3e703b4619f75e858ad17b38276353c6c",
+        "host_matches_guest": true,
+        "path": "guest/retrieved/products-c-bun.tar",
+        "sha256": "d3fd357f35d650abe71bb6137c9723c3e703b4619f75e858ad17b38276353c6c"
+      },
+      "role": "Bun candidate: current WIP source, Bun 1.4.2 only, no external Node/pnpm/npm/npx on PATH",
+      "source_commit": "5a6b78ce70b2ef775a5b5ba201a4474a8574c342 + six WIP paths",
+      "steps": [
+        {
+          "argv": [
+            "bun",
+            "scripts/bun-evaluation.mjs",
+            "run",
+            "build"
+          ],
+          "declared_environment": "NODE_OPTIONS=--max-old-space-size=4096",
+          "duration_seconds": 59,
+          "exit_code": 0,
+          "label": "c-build",
+          "log_bytes": 88415,
+          "log_sha256": "f3f289c80ec092f5a2d450db5365e92418576e265e7beb945c2609c1c1b8995d",
+          "receipt": {
+            "bytes": 1684,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/c-build.json",
+            "sha256": "cb9fd98202f05f911b5ac0e801594393815a80acadd6dc8a47f116a63daeb3bb"
+          }
+        },
+        {
+          "argv": [
+            "bun",
+            "node_modules/electron/install.js"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 0,
+          "exit_code": 0,
+          "label": "c-electron-install",
+          "log_bytes": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "receipt": {
+            "bytes": 836,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/c-electron-install.json",
+            "sha256": "af734036999569c330455f40d9ebbb4fe26cd4fd47cc0d0fda7ea2a7772483f9"
+          }
+        },
+        {
+          "argv": [
+            "bun",
+            "scripts/bun-evaluation.mjs",
+            "install"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 72,
+          "exit_code": 0,
+          "label": "c-install",
+          "log_bytes": 692,
+          "log_sha256": "d7a44fb38c006f4880cbb7904b125112e7ac0a02efb28908c4ed2879ad213e21",
+          "receipt": {
+            "bytes": 1668,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/c-install.json",
+            "sha256": "8981fb9821d0a0438949132f505a512c9192ae9c19403140ffe7cca7fdf4fca3"
+          }
+        },
+        {
+          "argv": [
+            "bun",
+            "scripts/bun-evaluation.mjs",
+            "run",
+            "typecheck"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 29,
+          "exit_code": 0,
+          "label": "c-typecheck",
+          "log_bytes": 2523,
+          "log_sha256": "d06a423020ddc9ab6ac504f586cc8f139fff85a020dde22c92e5f911c235a126",
+          "receipt": {
+            "bytes": 1663,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/c-typecheck.json",
+            "sha256": "985a94686f9ed8470329a6a9491f85ddad353477d76148443b55e9174367641a"
+          }
+        },
+        {
+          "argv": [
+            "uv",
+            "--project",
+            "backend",
+            "sync"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 42,
+          "exit_code": 0,
+          "label": "c-uv-sync",
+          "log_bytes": 2196,
+          "log_sha256": "ab7d763b5376a39ff34fcbba94d5112c3188d7f0036908851717a7dd4aab31ff",
+          "receipt": {
+            "bytes": 1655,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/c-uv-sync.json",
+            "sha256": "3f0f7638c5b15e16cc450acdd416d869bdb531033948b46448c3297b28552ed2"
+          }
+        },
+        {
+          "argv": [
+            "bun",
+            "run",
+            "probe:identity"
+          ],
+          "declared_environment": null,
+          "duration_seconds": 0,
+          "exit_code": 0,
+          "label": "c01-runtime-identity",
+          "log_bytes": 348,
+          "log_sha256": "d7b92d1e65c78c946172a9947f667172fe47daf5446156a86d5edb00767a047e",
+          "receipt": {
+            "bytes": 1190,
+            "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/c01-runtime-identity.json",
+            "sha256": "23785b97db14fe581dfc7d48759a61fb320fa1a9432473183527f7d3b5d53e78"
+          }
+        }
+      ]
+    }
+  },
+  "correction": {
+    "correction_01": {
+      "anchor_sha256": "a8cd264cba0bf1d957ef15d03012660a4a767b5677c8ac97030febb87e59e813",
+      "dispatch_sha256": "617c0fcb5a902987865ad9cf95c16d9bb93fe29509e56f42bce8ff1a28ccad43",
+      "manifest_sha256": "7d07b129827d91d4d2f0538e1b81bfc2bdfc4636a63c1b8c882f07c7efd800b9"
+    },
+    "correction_02": {
+      "dispatch_sha256": "4ea802b3c4cfd188ee87c245758d44d80645e2586f1513ccc10b4bf6dd22f1af",
+      "findings_addressed": {
+        "P2-1": "the -6 bytes per bundle are attributed to exactly two transforms (if(!!x)->if(x), -2; new Error(->Error(, -4) with a reproducible producer archived; the plans-bundle name/hash-only claim is deleted and the masked-structure measurement is qualified as unable to show name-only differences",
+        "P3-1": "the aborted F6 removal attempt now points at host-ssh-log/ssh-invocations.log (line 18), with the note that its stdout was overwritten by the successful retry",
+        "P3-2": "the four correction-01 guest scripts are archived under correction-02/archived-correction-01-scripts/ (guest and host copies byte-identical); the correction-01 bundle-structure analysis was an inline script that was not retained, and the empty correction-01/guest-ssh/ directory is now described by a pointer note",
+        "P3-3": "the report cites c01-f9-electron-flags.txt as the primary F9 evidence and records c01-f9-sandbox-evidence.txt as superseded, with the one-process sample explained from the raw process tables",
+        "P3-4": "the six-path frozen-input check was re-run and recorded with its real UTC, superseding the hand-written placeholder timestamp"
+      },
+      "re_review_dispatch_sha256": "48b93b1e",
+      "scope": "documentation and evidence only; no guest launches or builds, read-only guest access only to archive scripts"
+    },
+    "prior_deliveries_untouched": true,
+    "prior_delivery_anchor_sha256": "b7cf4e3ec61d32438e631de4fb9aab904edda4320553d21ce82590e35f063e5e",
+    "review_findings_addressed": {
+      "F1": "baseline re-run on the frozen base source f4e9fd50 as case-a0-base; candidate-branch frozen-install gap documented and NOT repaired; report 6.1 re-framed",
+      "F10": "post-incident note for the dev-a3 manual termination added",
+      "F2": "context7 reclassified as a product-shipped, enabled-by-default MCP integration that launches npx",
+      "F3": "bundle-outlier wording corrected to the measured transform-choice/multiplier facts",
+      "F4": "guest real-profile run count corrected to four (dev-a, dev-b, dev-c, dev-a2)",
+      "F5": "runtime-identity probe re-run with a recorded invocation/PATH receipt",
+      "F6": "the leaked Bun temp `node` alias recorded before/after and removed",
+      "F7": "case-a0-base products retrieved and re-verified on the host",
+      "F8": "host-side per-invocation SSH record kept from the start of this stage",
+      "F9": "renderer --no-sandbox/--no-zygote recorded as product-inherent and identical across cases"
+    }
+  },
+  "correction_delivery": {
+    "correction_01_anchor": "correction-01/anchor.json",
+    "correction_01_manifest": "correction-01/manifest.json",
+    "correction_02_anchor": "correction-02/anchor.json",
+    "correction_02_manifest": "correction-02/manifest.json",
+    "note": "each anchor records its own manifest identity and frozen file set; the prior deliveries (b7cf4e3e..., a8cd264c...) stay valid and are untouched",
+    "prior_stage_anchor": "delivery/anchor.json"
+  },
+  "fixed_point": {
+    "baseline_archive": {
+      "bytes": 47687680,
+      "path": "correction-01/tarballs/base-f4e9fd50.tar",
+      "sha256": "e3da8e5c9900c599920634fa1515cb2fdd53b5d15bd95a09225a2e08d8c723b9"
+    },
+    "branch": "eval/issue-2-bun-toolchain",
+    "commit": "5a6b78ce70b2ef775a5b5ba201a4474a8574c342",
+    "original_baseline_commit": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+    "worktree": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain"
+  },
+  "frozen_input_check": {
+    "anchor_file": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-console-v2/freeze-v2/anchor.json",
+    "anchor_sha256": "1fa9ead4d458f8e48378bd464963b1dc5102107b2d6357d0ea27712ef76b4720",
+    "checked_utc": "2026-10-10T12:57:00Z",
+    "frozen_paths": [
+      {
+        "anchor_sha256": "bf2c730b209de590ad0f1ebf2b53d78dd37a43a10da1e46577816f06f3ce7e7c",
+        "current_sha256": "bf2c730b209de590ad0f1ebf2b53d78dd37a43a10da1e46577816f06f3ce7e7c",
+        "path": "docs/toolchain-evaluation/bun/ticket-03/console-v2/evidence.json",
+        "state": "unchanged"
+      },
+      {
+        "anchor_sha256": "d0e6ea8639a060ee2e8dd2d05e304896946011f8b05245bd10da90dc18d65718",
+        "current_sha256": "d0e6ea8639a060ee2e8dd2d05e304896946011f8b05245bd10da90dc18d65718",
+        "path": "docs/toolchain-evaluation/bun/ticket-03/console-v2/report.md",
+        "state": "unchanged"
+      },
+      {
+        "anchor_sha256": "ec1507fc7a8c9c8e43fa9c68c7e186eb713ef6ab94ab12e230e166a02e48cb2a",
+        "current_sha256": "ec1507fc7a8c9c8e43fa9c68c7e186eb713ef6ab94ab12e230e166a02e48cb2a",
+        "path": "docs/toolchain-evaluation/bun/ticket-03/evidence.json",
+        "state": "unchanged"
+      },
+      {
+        "anchor_sha256": "9e4720ca64cf3971cc9979025d1ebec4215c88ee56786978f65edc0b380c166b",
+        "current_sha256": "9e4720ca64cf3971cc9979025d1ebec4215c88ee56786978f65edc0b380c166b",
+        "path": "docs/toolchain-evaluation/bun/ticket-03/report.md",
+        "state": "unchanged"
+      },
+      {
+        "anchor_sha256": "9f2163ac0773ce6065719f913156ff8c347049c99ec7a5e873272e46f2916b09",
+        "current_sha256": "9f2163ac0773ce6065719f913156ff8c347049c99ec7a5e873272e46f2916b09",
+        "path": "package.json",
+        "state": "unchanged"
+      },
+      {
+        "anchor_bytes": 2827,
+        "anchor_sha256": "4564595743378d81b74391e87d2217e075ab47709a88d4e78e171c1ab5979ea3",
+        "current_sha256": "7ccbe18a743c741493db635c94bd230fb45a56f22e7ef7831dd9eeeeab29e88b",
+        "path": "scripts/bun-evaluation.mjs",
+        "pre_edit_bytes_reconstructed": 2827,
+        "pre_edit_sha256_reconstructed": "4564595743378d81b74391e87d2217e075ab47709a88d4e78e171c1ab5979ea3",
+        "state": "authorized single change (dispatch task 4): adds the 'dev' route to the bounded run allowlist"
+      }
+    ],
+    "note": "The pre-edit hash was reconstructed by reversing the single authorized edit in the worktree file and hashing the result; it equals the anchor value and byte count, so the frozen set matched the anchor before the change."
+  },
+  "frozen_input_check_source": {
+    "bytes": 2487,
+    "path": "wip-anchor-check.json",
+    "sha256": "8050507318e07cc98da6e731d986eea5437bfff279fca84c7934190466abcc9a"
+  },
+  "frozen_input_recheck": {
+    "all_match_round3_anchor_except_authorized_edit": true,
+    "checked_utc": "2026-10-10T15:29:47Z",
+    "dispatcher_pre_edit_reconstruction_matches_anchor": true,
+    "producer": "correction-02/scripts/c02-frozen-input-check.py",
+    "record": {
+      "bytes": 3308,
+      "path": "correction-02/frozen-input-check.json",
+      "sha256": "19eb7788b68b812ff196650a8c478101cd489cfb2ad7c4a15c93d62fb3be225e"
+    },
+    "supersedes": "the hand-written checked_utc placeholder inside correction-01/wip-anchor-check.json (that file and its anchor are untouched)"
+  },
+  "generated_utc": "2026-10-10T15:30:59Z",
+  "generator": {
+    "bytes": 26955,
+    "path": "correction-01/scripts/c01-generate-evidence.py",
+    "sha256": "ae9c4be5b013bcc0c28030948097a86aa5874020c04124469da16530acd929f8"
+  },
+  "guest": {
+    "control": "ssh navide@192.168.64.2 with pinned key/known_hosts, BatchMode, no agent identity",
+    "cpu_count": 6,
+    "host_invocation_record": {
+      "bytes": 26507,
+      "path": "correction-01/host-ssh-log/ssh-invocations.log",
+      "sha256": "58c3a17de6df6ce913407343b780cbaa48ef05a5e225a675ace1081ca4719e23"
+    },
+    "identity_receipt": {
+      "bytes": 4606,
+      "path": "guest/retrieved/guest-identity.txt",
+      "sha256": "1faed72af91e61c82ea1c49a1a7eb84804893cef72f09ba0e43df5313e07cb4a"
+    },
+    "identity_receipt_a0": {
+      "bytes": 2440,
+      "path": "correction-01/receipts/c01-a0-identity.txt",
+      "sha256": "15142766075144c3e6b42014550670a367cd55e4909fea8bebaeaccb5de23e36"
+    },
+    "memory_bytes": 12884901888,
+    "name": "navide2-guest (disposable UTM macOS guest, Apple Virtualization)",
+    "os": {
+      "build": "26A434",
+      "kernel": "Darwin 27.0.0 arm64 (VMAPPLE)",
+      "product": "macOS 27.0.1"
+    },
+    "post_run_state": {
+      "bun_temp_aliases_in_case_c": 0,
+      "case_jobs": 0,
+      "case_processes": 0,
+      "listening_ports_of_case_processes": 0
+    }
+  },
+  "harness": {
+    "cleanup_method": "per-pass process selection by job pid tree, job process group, recorded backend pid and case-path match, excluding the runner's own tree; TERM then KILL; remains classified into live / defunct / reaped",
+    "declared_build_environment": "NODE_OPTIONS=--max-old-space-size=4096 (the project's own CI setting) for every build and dev run",
+    "guest_launch_method": "the SSH session runs in the Background domain, so each workflow is handed to launchd's gui/501 domain with a per-run LaunchAgent (launchctl bootstrap gui/501); a probe confirmed the bootstrapped job reports launchctl managername=Aqua",
+    "isolation": "per-case HOME, XDG dirs, caches, npm/bun stores, TMPDIR, AGENT_TEAM_DATA_DIR, Electron cache and an explicit Chromium --user-data-dir",
+    "prior_stage_scripts": "unchanged under ticket-03-startup-01/scripts (see the prior delivery manifest)",
+    "scripts": [
+      "correction-01/scripts/c01-a0-identity-receipt.sh",
+      "correction-01/scripts/c01-analyze-products.py",
+      "correction-01/scripts/c01-extract-base.sh",
+      "correction-01/scripts/c01-freeze-delivery.py",
+      "correction-01/scripts/c01-generate-evidence.py",
+      "correction-01/scripts/c01-runtime-identity.sh",
+      "correction-01/scripts/host-ssh.sh"
+    ]
+  },
+  "limits": [
+    "One guest, one macOS version (27.0.1 arm64); Linux and Windows remain unproven, so no adoption claim follows.",
+    "Case-a0-base is the corrected original baseline; case-a-original and case-b-matched-node carry the disclosed guest-local specifier repair and are retained history/control respectively.",
+    "Byte-level equivalence is bounded by the bundle measurement: of 670 logical js/css assets under /assets/, 281 are byte-identical and 389 content-differing; the 8 size-differing pairs each lose exactly 6 bytes to one if(!!x)->if(x) (-2) and one new Error(->Error( (-4), and applying those two transforms to both sides leaves every content-differing pair with equal length, i.e. all remaining differences (minified names and content-hash tokens) are length-preserving and net 0. Nothing is claimed about the plans bundle beyond that, and the earlier masked-structure comparison cannot show name-only differences, so no name/hash-only statement is relied on.",
+    "Packaged .vsix archives and their .sig are per-build artifacts; even the two universal archives are identical only within the Node cases, and the darwin-arm64 archive differs everywhere.",
+    "Readiness is proven at the HTTP/WebSocket/MCP seams, the process level and the logs; no visual/UX judgement is claimed (no screenshots, no UI automation, no scrollback clearing).",
+    "The candidate-branch compatibility gap is documented, not repaired; 09 owns the adoption question.",
+    "Four probe runs used the guest's real Chromium profile before the explicit --user-data-dir switch was added (dev-a, dev-b, dev-c, dev-a2); the guest home is disposable and credential-free, and the stray directory is left as evidence."
+  ],
+  "no_external_node_in_candidate": {
+    "bun_node_alias_in_temp": {
+      "before_receipt": {
+        "bytes": 1858,
+        "path": "correction-01/receipts/c01-f6-node-alias-before.txt",
+        "sha256": "b18814ac7dd7d88de45d58c3a71e46ac5e7e764d257dbfb8589a536aebd4da38"
+      },
+      "count_after": 0,
+      "count_before": 2,
+      "created_none_by": "the F5 probe re-run",
+      "first_attempt_note": "the first removal attempt ran through the guest's login shell (zsh does not word-split unquoted expansions) and removed nothing; it is recorded at line 18 of correction-01/host-ssh-log/ssh-invocations.log (15:04:47Z, between the listing at 15:04:40Z and the successful POSIX-sh removal at 15:04:55Z). Its own stdout was overwritten when the successful retry's tee wrote the same receipt file, so only the invocation record remains.",
+      "instances_found": [
+        {
+          "path": "/Users/navide/eval/case-c-bun/tmp/navide-bun-runtime-IGJSWD/node",
+          "target": "/Users/navide/eval/case-c-bun/tools/bun/bin/bun",
+          "target_sha256": "35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5"
+        },
+        {
+          "path": "/Users/navide/eval/case-c-bun/tmp/navide-bun-runtime-XCfBvR/node",
+          "target": "/Users/navide/eval/case-c-bun/tools/bun/bin/bun",
+          "target_sha256": "35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5"
+        }
+      ],
+      "observation": "Bun materializes a `node` symlink to itself in the case TMPDIR so that `#!/usr/bin/env node` shims resolve to Bun",
+      "removal_receipt": {
+        "bytes": 1842,
+        "path": "correction-01/receipts/c01-f6-node-alias-removal.txt",
+        "sha256": "e1ccd426a5d4950f9cca4d5116303cfeee6790a10df8a99a4cc72917567a36b0"
+      }
+    },
+    "default_configuration_external_tool_dependency": {
+      "case-c-bun": "backend logs `[backend] MCP 'context7' failed to start: [Errno 2] No such file or directory`; no helper process; application, backend and plugin surface stay healthy",
+      "classification": "feature difference in default product configuration (hidden external-Node dependency of the shipped default configuration, not of build/startup); carried into 04/05/09",
+      "evidence_receipt": {
+        "bytes": 2097,
+        "path": "correction-01/receipts/c01-f2-f9-evidence.txt",
+        "sha256": "d6d7508bc5329069f8dfc0cb0364e911b0f5a290a05e2edaae8b3767a867f06e"
+      },
+      "node_cases": {
+        "case-a-original": "same as case-a0-base",
+        "case-a0-base": "backend logs `[backend] Context7 Documentation MCP Server v4.3.0 running on stdio` and `[backend] MCP 'context7' connected`; the npx-spawned helper appears in the process table",
+        "case-b-matched-node": "same as case-a0-base"
+      },
+      "product_code_changed": false,
+      "product_source": [
+        "backend/agent_team_backend/mcp_settings.py default_mcp_servers(): {name: context7, transport: stdio, command: npx, args: [-y, @upstash/context7-mcp], enabled: true}",
+        "src/renderer/src/data/mcpCatalog.ts: catalog entry with command npx and args [-y, @upstash/context7-mcp]"
+      ]
+    },
+    "path_probe": "see guest/retrieved/guest-identity.txt: case-c-bun PATH resolves bun only; node, npm, npx, pnpm are ABSENT",
+    "permitted_non_javascript_prerequisites": [
+      "Electron 44.4.5 ships its own embedded Chromium/Node runtime (product dependency, binary verified against the package's checksums.json)",
+      "CPython 3.12.11 + uv for the Python backend",
+      "Clang/CLT for native builds"
+    ],
+    "process_probe": "no process in the candidate run executed a Node binary (per-case processes.json)",
+    "runtime_identity_probe": {
+      "argv": [
+        "bun",
+        "run",
+        "probe:identity"
+      ],
+      "cwd": "/Users/navide/eval/case-c-bun/source",
+      "invocation_receipt": null,
+      "method": "a package script invoking bare `node` inside the Bun-run script chain, re-run under correction 01 with the invocation recorded through the step wrapper",
+      "path": "/Users/navide/eval/case-c-bun/tools/bun/bin:/Users/navide/eval/case-c-bun/tools/uv/bin:/usr/bin:/bin:/usr/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "process.argv0": "node",
+      "process.execPath": "/Users/navide/eval/case-c-bun/tools/bun/bin/bun",
+      "process.versions.bun": "1.4.2",
+      "process.versions.node": "26.3.0 (Bun's Node compatibility surface)",
+      "ps_note": "comm reads `node` while the executing binary is Bun, so a process table alone would mislead",
+      "raw_log": {
+        "bytes": 2550,
+        "path": "correction-01/receipts/c01-f5-runtime-identity.txt",
+        "sha256": "25d4121acd054a8bef38c5dc34ab7043ad2b5ac642a967cde830faa9387de74a"
+      },
+      "source_after": {
+        "bun.lock": "812fcf6587ed8801d560d35804714ec47e4db0b936f1a14905f5eeae182cdafe",
+        "package.json": "9f2163ac0773ce6065719f913156ff8c347049c99ec7a5e873272e46f2916b09"
+      },
+      "source_before": {
+        "bun.lock": "812fcf6587ed8801d560d35804714ec47e4db0b936f1a14905f5eeae182cdafe",
+        "package.json": "9f2163ac0773ce6065719f913156ff8c347049c99ec7a5e873272e46f2916b09"
+      }
+    }
+  },
+  "renderer_sandbox": {
+    "observed": {
+      "case-a-original": "same as case-a0-base",
+      "case-a0-base": "4 Electron processes; renderer has --no-sandbox and --no-zygote; browser/gpu/utility do not",
+      "case-b-matched-node": "same as case-a0-base",
+      "case-c-bun": "same as case-a0-base"
+    },
+    "receipt": {
+      "bytes": 1444,
+      "path": "correction-01/receipts/c01-f9-electron-flags.txt",
+      "sha256": "214a889c67a832bf0aa96779714bdd4578fa91691e7775fa82a2e3a8988a95d7"
+    },
+    "statement": "the renderer runs with --no-sandbox --no-zygote in every case because the product sets webPreferences.sandbox: false (src/main/index.ts, main window and dock window); the evaluation adds no sandbox switch of its own",
+    "superseded_measurement": {
+      "explanation_producer": "correction-02/scripts/c02-f9-sample-explanation.py",
+      "explanation_receipt": "correction-02/receipts/c02-f9-superseded-explanation.txt",
+      "receipt": {
+        "bytes": 1993,
+        "path": "correction-01/receipts/c01-f9-sandbox-evidence.txt",
+        "sha256": "41eac0fdcea124a71ceb96dfb7a6a45362779006aa2a6d65238f0ec06f19b38f"
+      },
+      "why_superseded": "it selected processes by the exact string Electron.app/Contents/MacOS/Electron, which only the browser process carries; the gpu and utility helpers run from Electron.app/Contents/Frameworks/Electron Helper.app/ and the renderer from Electron Helper (Renderer).app/, so the selector saw one process and no sandbox switch"
+    }
+  },
+  "source_change": {
+    "authorized_by": "ticket03-startup-01 dispatch task 4 (bounded change to run the real `dev` workflow under Bun)",
+    "change": "adds 'dev' to the bounded run allowlist and widens the refusal message; the guard structure, the argv validation and the Bun-backed node shim are unchanged",
+    "correction_01_source_changes": "none",
+    "file": "scripts/bun-evaluation.mjs",
+    "not_changed": "no sandbox switch, no NAVIDE_SKIP_PLANS_BACKEND_BUILD, no skipped prerequisite, no third-party patch, no test change",
+    "post_edit_sha256": "7ccbe18a743c741493db635c94bd230fb45a56f22e7ef7831dd9eeeeab29e88b",
+    "pre_edit_sha256": "4564595743378d81b74391e87d2217e075ab47709a88d4e78e171c1ab5979ea3"
+  },
+  "stage": "ticket03-startup-01 correction 01 - isolated macOS development startup/readiness (issue 2)",
+  "toolchains": {
+    "case-a-original": [
+      {
+        "name": "node",
+        "sha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+        "version": "v22.23.2"
+      },
+      {
+        "name": "pnpm",
+        "version": "10.0.0"
+      },
+      {
+        "name": "uv",
+        "version": "uv 0.12.23"
+      },
+      {
+        "name": "python",
+        "version": "CPython 3.12.11 (uv-managed)"
+      }
+    ],
+    "case-a0-base": [
+      {
+        "name": "node",
+        "sha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+        "version": "v22.23.2"
+      },
+      {
+        "name": "npm",
+        "version": "10.9.8"
+      },
+      {
+        "name": "npx",
+        "version": "10.9.8"
+      },
+      {
+        "name": "pnpm",
+        "package_verified": "npm registry dist.integrity (sha512) match on the packed tarball",
+        "version": "10.0.0"
+      },
+      {
+        "name": "uv",
+        "sha256": "2f7be1879e3337eef20875c0f80ef033337305d0405efc5d72642d6292f66b3b",
+        "version": "uv 0.12.23"
+      },
+      {
+        "name": "python",
+        "version": "CPython 3.12.11 (uv-managed)"
+      },
+      {
+        "name": "electron",
+        "verified_against": "the package's own checksums.json",
+        "version": "44.4.5",
+        "zip_sha256": "a212eee63ba2f45fd83bd28f77a3e3313a336ad17a4c25adf617942eef5e0e2c"
+      },
+      {
+        "name": "bun",
+        "status": "ABSENT"
+      }
+    ],
+    "case-b-matched-node": [
+      {
+        "name": "node",
+        "sha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+        "version": "v22.23.2"
+      },
+      {
+        "name": "pnpm",
+        "version": "10.0.0"
+      },
+      {
+        "name": "uv",
+        "version": "uv 0.12.23"
+      },
+      {
+        "name": "python",
+        "version": "CPython 3.12.11 (uv-managed)"
+      }
+    ],
+    "case-c-bun": [
+      {
+        "name": "bun",
+        "sha256": "35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5",
+        "version": "1.4.2"
+      },
+      {
+        "name": "uv",
+        "sha256": "2f7be1879e3337eef20875c0f80ef033337305d0405efc5d72642d6292f66b3b",
+        "version": "uv 0.12.23"
+      },
+      {
+        "name": "python",
+        "version": "CPython 3.12.11 (uv-managed)"
+      },
+      {
+        "name": "node/npm/npx/pnpm",
+        "status": "absent from PATH and from /usr/bin, /usr/local/bin, /opt/homebrew"
+      }
+    ]
+  },
+  "unparsed_raw_files": [
+    {
+      "error": "Expecting value: line 1 column 1 (char 0)",
+      "path": "correction-01/retrieved/unpacked/case-a0-base/receipts/dev-a0-run1/ws-probe.json"
+    },
+    {
+      "error": "Expecting ',' delimiter: line 10 column 21 (char 436)",
+      "path": "guest/retrieved/unpacked/case-a-original/receipts/dev-a.probes.json"
+    },
+    {
+      "error": "Expecting ',' delimiter: line 10 column 21 (char 440)",
+      "path": "guest/retrieved/unpacked/case-b-matched-node/receipts/dev-b.probes.json"
+    },
+    {
+      "error": "Expecting ',' delimiter: line 10 column 21 (char 432)",
+      "path": "correction-01/retrieved/unpacked/case-c-bun/receipts/dev-c.probes.json"
+    }
+  ]
+}
