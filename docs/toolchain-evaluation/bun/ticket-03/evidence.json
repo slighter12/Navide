@@ -1,0 +1,225 @@
+{
+  "schema": 1,
+  "ticket": "03",
+  "stage": "E2",
+  "version": "freeze-v1",
+  "recommendation": "HOLD",
+  "classification": "startup environment exception; no Bun product verdict",
+  "evaluation_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03",
+  "source_head": "5a6b78ce70b2ef775a5b5ba201a4474a8574c342",
+  "original_base": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+  "report": {
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-03/report.md",
+    "bytes": 13512,
+    "lines": 73,
+    "sha256": "9e4720ca64cf3971cc9979025d1ebec4215c88ee56786978f65edc0b380c166b"
+  },
+  "criteria": [
+    {
+      "ordinal": 1,
+      "criterion": "authority_snapshot_isolation",
+      "status": "QUALIFIED_PARTIAL"
+    },
+    {
+      "ordinal": 2,
+      "criterion": "aggregate_typechecks",
+      "status": "BASELINE_PASS_CANDIDATE_NOT_RUN"
+    },
+    {
+      "ordinal": 3,
+      "criterion": "builds_and_runtime_observation",
+      "status": "BASELINE_BUILD_PASS_OVERALL_INCOMPLETE"
+    },
+    {
+      "ordinal": 4,
+      "criterion": "native_python_prerequisites",
+      "status": "BASELINE_OUTPUTS_PRESENT_CANDIDATE_NOT_RUN"
+    },
+    {
+      "ordinal": 5,
+      "criterion": "candidate_bun_only_daily",
+      "status": "NOT_ESTABLISHED"
+    },
+    {
+      "ordinal": 6,
+      "criterion": "isolated_dev_launch",
+      "status": "BASELINE_ATTEMPT_CANDIDATE_NOT_RUN"
+    },
+    {
+      "ordinal": 7,
+      "criterion": "readiness_and_owned_cleanup",
+      "status": "HOLD"
+    },
+    {
+      "ordinal": 8,
+      "criterion": "downstream_artifacts",
+      "status": "BASELINE_PRESERVED_CANDIDATE_ABSENT"
+    },
+    {
+      "ordinal": 9,
+      "criterion": "evidence_and_stops",
+      "status": "CONCRETE_HOLD"
+    }
+  ],
+  "evidence": [
+    {
+      "relative_path": "preflight/authority.json",
+      "bytes": 1131,
+      "lines": 28,
+      "sha256": "7ff42bcf4af7e8922ee25bd6c5b805e9033b08f86f571265d61e9f0cbab03d99"
+    },
+    {
+      "relative_path": "preflight/native-session-configuration.json",
+      "bytes": 1043,
+      "lines": 30,
+      "sha256": "4224ff3cc3d4bb74ff50e71e5cd0d14135bd70e8a395d65a625b15a1130d80a2"
+    },
+    {
+      "relative_path": "preflight/packet-verification.json",
+      "bytes": 7864,
+      "lines": 164,
+      "sha256": "f7954e09ef7404c9a8aed1636b2a52b3bf4f26eb2cbc580ff24d007d1f07e831"
+    },
+    {
+      "relative_path": "preflight/isolation-correction-01.json",
+      "bytes": 1680,
+      "lines": 38,
+      "sha256": "42e0c3bc8fa19fb3b1f924b1f4638e402ec4c34dbdb067d3b732488190628a34"
+    },
+    {
+      "relative_path": "preflight/source-copy-final-verification.json",
+      "bytes": 154,
+      "lines": 12,
+      "sha256": "7e61f75a55737a3cdccadd1f1faa7a9ee50469bfe4f058a2b1500be07694d68d"
+    },
+    {
+      "relative_path": "preflight/selected-frozen-input-preservation.json",
+      "bytes": 282,
+      "lines": 6,
+      "sha256": "005e7f04a3bc0f10386456e85ce24417108a1a0be0e3e2417f1ff75525f51dba"
+    },
+    {
+      "relative_path": "preflight/owned-process-observer-smoke.json",
+      "bytes": 485,
+      "lines": 20,
+      "sha256": "06d99d4b27760d8ed066c88380fb1511a2d56d36a73a74ddd57a8c86b443d153"
+    },
+    {
+      "relative_path": "preflight/owned-process-observer-count-diagnostic.json",
+      "bytes": 345,
+      "lines": 22,
+      "sha256": "3b5abf05bd322359afd6fde4e4cd93eb79646c5faab655e620ae638cb5d18acc"
+    },
+    {
+      "relative_path": "preflight/owned-process-observer-smoke-v2.json",
+      "bytes": 730,
+      "lines": 27,
+      "sha256": "5cfa6f9d609891a22a89642230f9166c0dd84ad67c3049c6b2110d3d25590870"
+    },
+    {
+      "relative_path": "preflight/startup-observer-output-qualification.json",
+      "bytes": 696,
+      "lines": 14,
+      "sha256": "66be38e33c9a7ff3cf8f73cebe2d5ff134b2aa94098de3eeaba10ceab4acd589"
+    },
+    {
+      "relative_path": "preflight/failed-read-native-index.json",
+      "bytes": 2601,
+      "lines": 60,
+      "sha256": "01abbe4d88424c83c11b2ea6efe0d63fb09b9846d2f56ad8b3b7d460b6973219"
+    },
+    {
+      "relative_path": "commands/index.json",
+      "bytes": 965,
+      "lines": 24,
+      "sha256": "26eda35df2920580de2760ba31999ec36c25ce09e775926c1e4c05bd0d80c874"
+    },
+    {
+      "relative_path": "commands/baseline-aggregate-typecheck.json",
+      "bytes": 4584,
+      "lines": 69,
+      "sha256": "520aadce0bd791c96e616696b40c8ba41db6ff6215d316983f9b6643d18a622d"
+    },
+    {
+      "relative_path": "commands/baseline-application-build.json",
+      "bytes": 4574,
+      "lines": 69,
+      "sha256": "f8db945d8462330bee4593f7a7d76b101c354e2efa77192fe733b2779bcf95ae"
+    },
+    {
+      "relative_path": "commands/baseline-development-startup.json",
+      "bytes": 59462,
+      "lines": 3098,
+      "sha256": "ce6295cd2c8709737c9370dbafac7677c68c103fdc1b32f33a366bc1bad23c5d"
+    },
+    {
+      "relative_path": "commands/electron-embedded-node-identity.json",
+      "bytes": 5328,
+      "lines": 74,
+      "sha256": "68f6f065b83c37dcac313f4129e9a0356b52c3c4b1eb6eb214f75a0357d6958b"
+    },
+    {
+      "relative_path": "commands/baseline-startup-isolation-probe-v2.json",
+      "bytes": 4953,
+      "lines": 71,
+      "sha256": "d096188a480d660db11dcbacff1fe6f226c6f85d0230380663e5eef8c71552b7"
+    },
+    {
+      "relative_path": "artifacts/baseline/index.json",
+      "bytes": 8785,
+      "lines": 190,
+      "sha256": "b0ce637d6d5b450971d1d351139464f9bc0e30ec4abdb4cc32d7ed1b6e37901f"
+    }
+  ],
+  "frozen_delivery": {
+    "root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03/freeze-v1",
+    "manifest": "manifest.json",
+    "anchor": "anchor.json",
+    "verification": "final-verification.json",
+    "source_wip": "source-wip.tar",
+    "binding": "External anchor SHA-256 binds manifest; final verification and anchor hashes are returned after actual completion. No self-referential hash in the source report."
+  },
+  "source_adaptations": [],
+  "tracked_deliverables": [
+    "docs/toolchain-evaluation/bun/ticket-03/report.md",
+    "docs/toolchain-evaluation/bun/ticket-03/evidence.json"
+  ],
+  "baseline_startup": {
+    "launcher_exit": 0,
+    "bounded_ready": false,
+    "health_requests_credited": 0,
+    "observed_owned_processes": 35,
+    "cleanup_orphaned_owned_processes_terminated": 2,
+    "final_observed_owned_remaining": 0,
+    "all_detached_processes_absent_claimed": false,
+    "fatal_stream": "commands/baseline-development-startup.stderr",
+    "observer_ansi_parse_gap": true,
+    "neutrality_claimed": false
+  },
+  "candidate_product_commands_executed": [],
+  "retained_A": {
+    "report": "checkpoint-A/integrated-correction01-candidate-v2.md",
+    "sha256": "7ae0f046a89c743c5dec25d6051a8c4b1c02fa2b2d9ae9a5a8eaaf2876301daf",
+    "product_residual_count": 11,
+    "process_qualifications": "W1-W5, R1/R2, worker appendix and coordinator failures remain; selected prior controls are not fresh E2 execution."
+  },
+  "not_run": [
+    "candidate typechecks/build/startup",
+    "Vue negative/cache controls (adapter unchanged)",
+    "Vitest/root/artifact/CLI/backend/supplementary tests",
+    "external public consumers",
+    "complete Plugin lifecycle",
+    "performance",
+    "release packaging",
+    "external CI",
+    "Linux",
+    "Windows",
+    "production migration",
+    "visual acceptance"
+  ],
+  "authority_boundaries": [
+    "no commit until exact separate dispatch",
+    "no ticket04/05/09/C dispatch",
+    "no hosted updates or production adoption"
+  ]
+}
