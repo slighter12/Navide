@@ -1,0 +1,179 @@
+{
+  "schema": "navide-bun-evaluation-ticket-evidence/v1",
+  "ticket": "ticket-04-01",
+  "issue": "04-macos-tests-and-plugin-lifecycle",
+  "stage": "frozen-delivery",
+  "version": 1,
+  "generated_utc": "2026-10-10T16:35:00Z",
+  "recommendation": "CONCRETE HOLD for whole-suite parity: baseline green, candidate not green outside the retained Plugin gates. No fix, no adoption recommendation.",
+  "authority": {
+    "dispatch": "coordination/ticket04-01/dispatch.md",
+    "dispatch_sha256": "d2b44e926875d08a5baa41225aa0bd3b6fccb2e6ab4d85d825e06bd4ad2e676c",
+    "worker_session": "01a12674-8e47-75b9-b7bb-107e2e0a9576",
+    "worker_model": "deepseek/deepseek-flash/reasoning-max",
+    "delivery_scope": "frozen delivery only; no stage, commit or push"
+  },
+  "shared_worktree": {
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain",
+    "branch": "eval/issue-2-bun-toolchain",
+    "head": "ee3174aef8f24e94a37aca5b368f8ab0568f5f1f",
+    "status_porcelain_before": [],
+    "status_porcelain_after": ["?? docs/toolchain-evaluation/bun/ticket-04/"],
+    "tracked_diff_sha256_vs_head": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "index_written": false
+  },
+  "evaluation_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-01",
+  "report": "docs/toolchain-evaluation/bun/ticket-04/report.md",
+  "fixed_points": {
+    "baseline": {
+      "commit": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "archive": "base-f4e9fd50.tar",
+      "archive_sha256": "e3da8e5c9900c599920634fa1515cb2fdd53b5d15bd95a09225a2e08d8c723b9",
+      "archive_origin": "ticket-01 frozen baseline archive, re-verified in the guest before extraction"
+    },
+    "candidate": {
+      "commit": "ee3174aef8f24e94a37aca5b368f8ab0568f5f1f",
+      "archive": "head-ee3174ae.tar",
+      "archive_sha256": "41332c32a14c93c6db9bbd4f0b6a001f2c95d468abf942293bed087f34cf7ec4",
+      "archive_origin": "git archive HEAD produced in the shared worktree and transferred to the guest"
+    }
+  },
+  "guest": {
+    "host": "macOS 27.0.1, Darwin arm64, account navide, ticket-03 macOS guest",
+    "access": "retained ticket-03 SSH harness (host-ssh.sh, SHA-256 440e1cde3865d9017eb26906420d87554871f167f74a74b4963447bc4138f05a)",
+    "ssh_invocations": 118,
+    "ssh_log": "host-ssh-log/ssh-invocations.log",
+    "ssh_log_sha256": "01b730c30b0bc5efc7a0514f4e878fa6af61cd9954be19b6a833e8852aa11258",
+    "marker_repository": {
+      "commit": "77c9fcbe5c49ba6540076c589b432d848762af0c",
+      "created_in": ["t04-base-node", "t04-head-bun"],
+      "reason": "git archives carry no .git; the suite's Plans root resolution ascends to the nearest .git",
+      "content_change": "none"
+    }
+  },
+  "cases": {
+    "t04-base-node": {
+      "runtime": "Node v22.23.2",
+      "runtime_binary_sha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+      "package_manager": "pnpm 10.0.0",
+      "package_manager_sha256": "6ce039a469193bba0f13345f9987e842c3d049a0fb567938d08648f541449572",
+      "uv": "0.12.23",
+      "python": "3.12.11",
+      "go": "1.27.2 (SHA-256 76812b213b1b2302c978d28fa52fa92d541704b9e7d9d5db8002c50e4018c4c5)",
+      "external_node_available": ["node", "npm", "npx", "pnpm"],
+      "bun_available": false,
+      "node_modules_store": ".pnpm",
+      "electron": {"version": "44.4.5", "zip_sha256": "a212eee63ba2f45fd83bd28f77a3e3313a336ad17a4c25adf617942eef5e0e2c", "source": "pre-placed verified cache"},
+      "identity_receipt": "retrieved/cases/t04-base-node/receipts/case-identity.txt"
+    },
+    "t04-head-bun": {
+      "runtime": "Bun 1.4.2",
+      "runtime_binary_sha256": "35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5",
+      "package_manager": "bun install (repository guard scripts/bun-evaluation.mjs)",
+      "uv": "0.12.23",
+      "python": "3.12.11",
+      "go": "1.27.2 (SHA-256 76812b213b1b2302c978d28fa52fa92d541704b9e7d9d5db8002c50e4018c4c5)",
+      "external_node_available": [],
+      "external_node_absent_proof": "under the allowlisted PATH: node/npm/npx/pnpm = ABSENT, bun/uv/go present",
+      "node_modules_store": ".bun (no .pnpm store)",
+      "electron": {"version": "44.4.5", "zip_sha256": "a212eee63ba2f45fd83bd28f77a3e3313a336ad17a4c25adf617942eef5e0e2c", "source": "pre-placed verified cache"},
+      "identity_receipt": "retrieved/cases/t04-head-bun/receipts/case-identity.txt"
+    }
+  },
+  "install_route": {
+    "baseline": {"argv": ["pnpm", "install", "--frozen-lockfile"], "exit": 0, "wall_seconds": 11.325},
+    "candidate": {"argv": ["bun", "scripts/bun-evaluation.mjs", "install"], "resolved": "bun install --frozen-lockfile", "exit": 0, "wall_seconds": 4.412},
+    "registry_provenance": {
+      "bunfig_toml": "absent (case source, case home, guest user home)",
+      "npmrc": "absent (guest user home, case root)",
+      "BUN_CONFIG_REGISTRY": "unset",
+      "cache": "<case>/bun-cache scoped package directories",
+      "resolved_registry": "Bun default registry; no registry override was configured anywhere in the case environment"
+    },
+    "lockfiles": {
+      "pnpm-lock.yaml_sha256_both_cases_after_install": "dd08737924d0aea21dad5f0d37dca9f09b4ee0d75def756cea55fa246e0e986b",
+      "bun.lock_sha256_candidate": "812fcf6587ed8801d560d35804714ec47e4db0b936f1a14905f5eeae182cdafe",
+      "mutation_observed": false
+    },
+    "backend_sync": {"argv": ["uv", "--project", "backend", "sync", "--locked"], "exit": 0, "site_packages_entries": 145},
+    "electron_install_script": {"baseline_exit": 0, "candidate_exit": 0, "cache_prepopulated": true, "log_bytes": 0}
+  },
+  "inventory": {
+    "discovery_command": "vitest list --json (baseline: node; candidate: bun)",
+    "baseline": {"files": 835, "by_project": {"unit": 808, "artifacts": 23, "cli": 4}, "listed_tests": 12446, "listed_tests_by_project": {"unit": 12190, "artifacts": 203, "cli": 53}},
+    "candidate": {"files": 835, "by_project": {"unit": 808, "artifacts": 23, "cli": 4}, "listed_tests": 12446, "listed_tests_by_project": {"unit": 12190, "artifacts": 203, "cli": 53}},
+    "identical_file_sets": true,
+    "listed_versus_executed_note": "vitest list omits conditionally-skipped tests, so listed tests (12446) and executed assertions (12470 baseline) differ by the pending set; the pending titles are enumerated in analysis/inventory-comparison.txt",
+    "test_validation_content_changed": false
+  },
+  "baseline_results": {
+    "root_suite": {"argv": ["pnpm", "test:run", "--reporter=default", "--reporter=json"], "exit": 0, "suites": 2931, "tests": 12470, "passed": 12447, "pending": 23, "failed": 0, "wall_seconds": 102.28, "receipt": "retrieved/cases/t04-base-node/receipts/test-run-r2.json"},
+    "root_suite_pre_marker": {"exit": 0, "passed": 12446, "pending": 24, "receipt": "retrieved/cases/t04-base-node/receipts/test-run.json", "note": "recorded before the .git marker existed; retained"},
+    "packaged_lifecycle": {"exit": 0, "files": 3, "suites": 9, "tests": 124, "passed": 124, "receipt": "retrieved/cases/t04-base-node/receipts/packaged-lifecycle-r2.json"},
+    "packaged_lifecycle_pre_marker": {"exit": 1, "tests": 124, "passed": 123, "failed": 1, "failing_test": "Plans packaged backend composition > resolves the Plans root and receives plans.changed through the packaged child", "cause": "plans.resolve_root returned <workspace>/src; no .git in the archive", "receipt": "retrieved/cases/t04-base-node/receipts/packaged-lifecycle.json", "retained": true},
+    "cli": {"exit": 0, "files": 4, "tests": 53, "passed": 53, "receipt": "retrieved/cases/t04-base-node/receipts/cli-vitest.json"},
+    "mini_ide_standalone": {"exit": 0, "files": 3, "tests": 5, "passed": 5, "receipt": "retrieved/cases/t04-base-node/receipts/mini-ide-vitest-r2.json"},
+    "gap_files": {
+      "dev-backend": {"exit": 0, "passed": 7, "skipped": 1},
+      "pluginBackendHost.thirdParty": {"exit": 0, "passed": 12},
+      "pluginBackendSandbox": {"exit": 0, "passed": 19, "skipped": 7},
+      "TokenMonitorApp": {"exit": 0, "passed": 9}
+    }
+  },
+  "candidate_results": {
+    "root_suite": {"argv": ["bun", "scripts/bun-evaluation.mjs", "run", "test:run"], "exit": 1, "runs": 3, "failed_file_set_stable": true, "report_lines": 835, "files_passed": 793, "files_failed": 41, "files_default_skipped": 1, "discovered_files_without_result": ["src/renderer/src/components/__tests__/TokenMonitorApp.test.ts"], "tests_failed": 328, "json_report_written": false, "panic": "int cast: TryFromIntError(PosOverflow)", "panic_position": "after the last file summary line, before the aggregate and the JSON report", "logs": ["retrieved/cases/t04-head-bun/logs/test-run.log", "retrieved/cases/t04-head-bun/logs/test-run-r2.log", "retrieved/cases/t04-head-bun/logs/test-run-r3.log"]},
+    "packaged_lifecycle": {"exit": 0, "files": 3, "suites": 9, "tests": 124, "passed": 124, "receipt": "retrieved/cases/t04-head-bun/receipts/packaged-lifecycle.json", "vitest_json": "retrieved/cases/t04-head-bun/receipts/packaged-vitest.json", "matches_baseline": true},
+    "packaged_lifecycle_prerequisites": {"production_builds": {"argv": ["bun", "scripts/bun-evaluation.mjs", "run", "build:official-plugins"], "exit": 0, "receipt": "retrieved/cases/t04-head-bun/receipts/lifecycle-build.json"}, "fixture_build": {"argv": ["bun", "scripts/build-plans-backend.mjs"], "exit": 0, "outputs": ["navide-plans", "navide-plans-go"], "receipt": "retrieved/cases/t04-head-bun/receipts/lifecycle-fixture.json"}},
+    "cli": {"exit": 0, "files": 4, "tests": 53, "passed": 53, "receipt": "retrieved/cases/t04-head-bun/receipts/cli-vitest.json"},
+    "mini_ide_standalone": {"exit": 1, "files": 3, "tests": 5, "passed": 4, "failed": 1, "failing_file": "plugins/navide-mini-ide/tests/packageBoundary.test.ts", "error": "TS2307: Cannot find module './MiniIdeApp.vue' or its corresponding type declarations"},
+    "gap_files": {
+      "dev-backend": {"exit": 0, "passed": 7, "skipped": 1},
+      "pluginBackendHost.thirdParty": {"exit": 0, "passed": 12},
+      "pluginBackendSandbox": {"exit": 0, "passed": 19, "skipped": 7},
+      "TokenMonitorApp": {"exit": 1, "result": "no result; Bun panic", "wall_seconds": 134.819}
+    }
+  },
+  "failure_classes": {
+    "vitest_module_mocking_interop_direct": {"files": 25, "symptoms": ["empty DOMWrapper / v-if renders (100 messages)", "Cannot destructure property 'send' from null or undefined value (14)", "is not a spy or a call to a spy", "[vitest] No \"settingsGet\" export is defined on the \"@navide/plugin-ui/shared\" mock", "EROFS: read-only file system, mkdir '/app'", "unmet expected \"spy\" to be called expectations including the killProcessTree module mock in src/main/backend.test.ts and src/main/backend-pending.test.ts (the real ./process-tree module is imported instead of the hoisted spy)"]},
+    "vitest_module_mocking_interop_consistent_not_traced": {"files": 12, "note": "assertion mismatches consistent with a missing mock; every file declares vi.mock/vi.hoisted (1-16 calls); mechanism traced in samples only", "example_messages": ["expected 'modelcli --resume abc' to be 'modelcli --resume abc --model opus-9'", "Plugin backend runtime is unavailable.", "Plugin capability runtime is unavailable.", "expected 'error' to be 'recording'", "expected [] to include 'navide.plans'"]},
+    "vue_tsc_under_bun": {"files": 2, "files_list": ["plugins/navide-git/tests/compositionBoundary.test.ts", "plugins/navide-mini-ide/tests/packageBoundary.test.ts"], "error": "packed-consumer vue-tsc TS2307 on .vue imports", "note": "repository typecheck:* scripts avoid this via scripts/bun/vue-tsc.cjs; boundary tests call vue-tsc directly"},
+    "test_helper_requires_pnpm": {"files": 1, "files_list": ["src/main/plugins/pluginExternalWorkspace.test.ts"], "error": "Executable not found in $PATH: \"pnpm\"", "note": "file-local packageManager() helper not covered by the ticket-02 adaptation; harness gap, not a product Bun assertion"},
+    "node_import_preload_not_applied": {"files": 1, "files_list": ["tests/integration/plansBuildScripts.test.ts"], "probe_receipt": "retrieved/cases/t04-head-bun/receipts/win32-preload-probe.txt", "probe_sha256": "8524346ba3804f68d990271322918b6e24bd1d24b7a33ec976b84c86b2faa7cb", "probe_result": {"candidate_with_import_exit": 1, "candidate_without_import_exit": 1, "baseline_with_import_exit": 0}},
+    "bun_panic": {"files": 1, "files_list": ["src/renderer/src/components/__tests__/TokenMonitorApp.test.ts"], "detail": "single-file run panics bun in 134.8 s; the same file passes 9/9 under Node", "crash_header_memory": {"r1": "RSS 3.16 GB / peak 6.43 GB", "r2": "RSS 3.63 GB / peak 6.75 GB", "r3": "RSS 3.52 GB / peak 7.34 GB", "machine": "12.88 GB"}}
+  },
+  "diagnostics": {
+    "isolated_file_runs": {"diag-resume-model": {"failed": 6, "passed": 3}, "diag-usage-badge": {"failed": 68, "passed": 1}, "diag-backend": {"failed": 2, "passed": 22}, "diag-voice": {"failed": 22, "passed": 10}},
+    "parallelism_independent": {"--no-file-parallelism": {"files": 2, "failed": 70, "passed": 3}, "--pool=forks": {"files": 1, "failed": 2, "passed": 2}}
+  },
+  "runtime_identity": {
+    "candidate_observed_js_runtimes": ["/Users/navide/eval/t04-head-bun/tools/bun/bin/bun"],
+    "base_observed_js_runtimes": ["/Users/navide/eval/t04-base-node/tools/node/bin/node"],
+    "runtime_executables_outside_case": [],
+    "remaining_observed_owned": 0,
+    "observation_limits": "sampling-based; processes that exited between samples are not covered"
+  },
+  "source_change": {
+    "by_this_ticket": "none; only the two tracked deliverables below were added",
+    "evaluated_branch_change_set": ["bun.lock (new)", "package.json", "scripts/bun-evaluation.mjs (new)", "scripts/bun/vue-tsc.cjs (new)", "tests/support/publicPackagesSetup.ts (+11/-5)", "vitest.config.ts (+6)", "docs/toolchain-evaluation/bun/** (evaluation records)"],
+    "test_assertions_or_skips_changed": false,
+    "third_party_patch_or_fork": false,
+    "product_source_changed": false
+  },
+  "not_run": ["Linux evaluation (issue 07)", "Windows evaluation (issue 08)", "real application startup or development probe", "release packaging, signing, notarization (issue 09 territory)", "hosted CI", "plugin installation from the public registry", "Electron install from network", "test-performance measurement (issue 06)", "external public-consumer matrix (issue 05)"],
+  "frozen_delivery": {
+    "version": "freeze-v1",
+    "anchor": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-01/freeze/freeze-v1.json",
+    "anchor_sha256_file": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-01/freeze/freeze-v1.sha256",
+    "bindings": ["tracked deliverables", "harness and analysis files", "source archives", "retrieved case-evidence archives", "per-file guest evidence inventory"],
+    "circular_self_hash": false
+  },
+  "tracked_deliverables": ["docs/toolchain-evaluation/bun/ticket-04/report.md", "docs/toolchain-evaluation/bun/ticket-04/evidence.json"],
+  "authority_boundaries": {
+    "stage_commit_push": false,
+    "third_party_patch": false,
+    "test_content_change": false,
+    "timeout_or_retry_on_failure": false,
+    "sandbox_weakening": false,
+    "source_change": false
+  }
+}
