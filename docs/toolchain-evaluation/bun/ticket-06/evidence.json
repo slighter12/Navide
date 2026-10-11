@@ -1,0 +1,2304 @@
+{
+  "authority": {
+    "batch": "01-06 authorization batch covers the benchmark stage (E3)",
+    "delivery_scope": "frozen delivery only; no stage, commit or push",
+    "dependency": "ticket 04 passed with the user-accepted pluginExternalWorkspace residual (coordination/ticket04-adapt-01/user-decision-residual-A.md); ticket 05 passed at 58508e2b",
+    "dispatch": "coordination/ticket06-01/dispatch.md",
+    "dispatch_sha256": "1036b3f5a6a557620ce534c6852a196d627cb1bbf05107fbd562ceb6f1e60e57",
+    "worker_model": "deepseek/deepseek-flash/reasoning-max",
+    "worker_session": "01a12910-c03a-71b0-b64b-e529853be3da"
+  },
+  "authority_boundaries": {
+    "dependency_or_runtime_version_changed": false,
+    "external_node_pnpm_fallback": false,
+    "product_source_changed": false,
+    "sandbox_weakening": false,
+    "stage_commit_push": false,
+    "test_assertions_or_skips_changed": false,
+    "test_inventory_changed": false,
+    "third_party_patch_or_fork": false,
+    "vitest_or_coverage_replaced": false
+  },
+  "cases": {
+    "t06-base-node": {
+      "backend_sync": {
+        "argv": [
+          "/Users/navide/eval/t06-base-node/tools/uv/bin/uv",
+          "--project",
+          "backend",
+          "sync",
+          "--locked"
+        ],
+        "exit_code": 0,
+        "receipt": "retrieved/cases/t06-base-node/receipts/backend-sync.json",
+        "wall_seconds": 271.941
+      },
+      "case_path": "PATH=/Users/navide/eval/t06-base-node/tools/node/bin:/Users/navide/eval/t06-base-node/tools/pnpm/bin:/Users/navide/eval/t06-base-node/tools/go/bin:/Users/navide/eval/t06-base-node/tools/uv/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "electron_zip_sha256": "a212eee63ba2f45fd83bd28f77a3e3313a336ad17a4c25adf617942eef5e0e2c",
+      "fixture_build": {
+        "argv": [
+          "/Users/navide/eval/t06-base-node/tools/node/bin/node",
+          "scripts/build-plans-backend.mjs"
+        ],
+        "exit_code": 0,
+        "receipt": "retrieved/cases/t06-base-node/receipts/fixture-build.json",
+        "wall_seconds": 6.682
+      },
+      "go": "1.27.2",
+      "input_hash_listing": "retrieved/cases/t06-base-node/logs/input-hash-listing.txt",
+      "install": {
+        "argv": [
+          "/Users/navide/eval/t06-base-node/tools/pnpm/bin/pnpm",
+          "install",
+          "--frozen-lockfile"
+        ],
+        "exit_code": 0,
+        "receipt": "retrieved/cases/t06-base-node/receipts/install.json",
+        "wall_seconds": 10.736
+      },
+      "lockfile_sha256_after_prep": {
+        "bun.lock": "ABSENT",
+        "pnpm-lock.yaml": "dd08737924d0aea21dad5f0d37dca9f09b4ee0d75def756cea55fa246e0e986b"
+      },
+      "lockfiles_unchanged_by_install": true,
+      "package_manager": "pnpm 10.0.0 (pnpm.cjs through the case node)",
+      "python": "3.12.11",
+      "resolved_tools": {
+        "bun": "ABSENT",
+        "node": "/Users/navide/eval/t06-base-node/tools/node/bin/node",
+        "npm": "/Users/navide/eval/t06-base-node/tools/node/bin/npm",
+        "npx": "/Users/navide/eval/t06-base-node/tools/node/bin/npx",
+        "pnpm": "/Users/navide/eval/t06-base-node/tools/pnpm/bin/pnpm"
+      },
+      "runtime": "Node 22.23.2 + pnpm 10.0.0",
+      "runtime_binary": "/Users/navide/eval/t06-base-node/tools/node/bin/node",
+      "runtime_binary_sha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+      "uv": "0.12.23"
+    },
+    "t06-head-bun": {
+      "backend_sync": {
+        "argv": [
+          "/Users/navide/eval/t06-head-bun/tools/uv/bin/uv",
+          "--project",
+          "backend",
+          "sync",
+          "--locked"
+        ],
+        "exit_code": 0,
+        "receipt": "retrieved/cases/t06-head-bun/receipts/backend-sync.json",
+        "wall_seconds": 2.324
+      },
+      "case_path": "PATH=/Users/navide/eval/t06-head-bun/tools/bun/bin:/Users/navide/eval/t06-head-bun/tools/go/bin:/Users/navide/eval/t06-head-bun/tools/uv/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "electron_zip_sha256": "a212eee63ba2f45fd83bd28f77a3e3313a336ad17a4c25adf617942eef5e0e2c",
+      "fixture_build": {
+        "argv": [
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun",
+          "scripts/build-plans-backend.mjs"
+        ],
+        "exit_code": 0,
+        "receipt": "retrieved/cases/t06-head-bun/receipts/fixture-build.json",
+        "wall_seconds": 6.091
+      },
+      "go": "1.27.2",
+      "input_hash_listing": "retrieved/cases/t06-head-bun/logs/input-hash-listing.txt",
+      "install": {
+        "argv": [
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun",
+          "scripts/bun-evaluation.mjs",
+          "install"
+        ],
+        "exit_code": 0,
+        "receipt": "retrieved/cases/t06-head-bun/receipts/install.json",
+        "wall_seconds": 7.527
+      },
+      "lockfile_sha256_after_prep": {
+        "bun.lock": "812fcf6587ed8801d560d35804714ec47e4db0b936f1a14905f5eeae182cdafe",
+        "pnpm-lock.yaml": "dd08737924d0aea21dad5f0d37dca9f09b4ee0d75def756cea55fa246e0e986b"
+      },
+      "lockfiles_unchanged_by_install": true,
+      "package_manager": "Bun 1.4.2 install through scripts/bun-evaluation.mjs",
+      "python": "3.12.11",
+      "resolved_tools": {
+        "bun": "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun",
+        "node": "ABSENT",
+        "npm": "ABSENT",
+        "npx": "ABSENT",
+        "pnpm": "ABSENT"
+      },
+      "runtime": "Bun 1.4.2",
+      "runtime_binary": "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun",
+      "runtime_binary_sha256": "35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5",
+      "uv": "0.12.23"
+    }
+  },
+  "caveats": [
+    "End-to-end workflow comparison, not a runtime-only delta: the control runs pnpm with the base package.json and pnpm-lock.yaml, the candidate runs the Bun dispatcher with bun.lock and the branch package.json (workspaces, overrides, Bun-only helper files).",
+    "macOS only, one guest VM, one set of versions; Linux and Windows remain issues 07/08.",
+    "Wall-clock medians over five samples per runtime and condition with recorded dispersion; not a distribution study and no confidence interval is claimed.",
+    "The Bun root workflow keeps the accepted residual failure and exits 1; the gate is performance, correctness parity is ticket 04.",
+    "Bun peak child RSS on the root workload is higher (median 4.35 GiB cold / 4.04 GiB warm vs 2.55 / 2.48 GiB); an observation, not a gate."
+  ],
+  "correction_01": {
+    "anchor": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-06-01/correction-01/anchor.json",
+    "anchor_sha256_file": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-06-01/correction-01/anchor.sha256",
+    "applied": [
+      "P2-1 residual wall-time direction corrected: the file costs Node 5.007-5.315 s (cold) / 5.839-6.889 s (warm) and Bun 0.010-0.020 s, so it favours Bun; the equal-work corrected root ratios -28.93% cold and -30.42% warm were reproduced from the frozen Vitest JSON reports, with the mirror (debit-Node) variant -30.35% / -31.91% also reported",
+      "P2-2 inventory stated explicitly (selected/passed/failed/skipped including the 23 conditionally pending tests with per-file breakdown and gates, identical in both runtimes), and the supplementary-coverage statement corrected: ticket-04 coverage needing env gates the daily workflow does not set (packaged lifecycle) was not timed, and typechecks are not part of the workflow",
+      "P3-1 root warm verification record stated accurately: 5 paths with packages/plugin-sdk/dist not among them and no per-path required flag, plus the fact that the superseded dom-warm/dom-identity records report all_required_present false under the pre-r2 rule",
+      "P3-2 control/candidate input differences disclosed (publicPackagesSetup.ts 64245c77 vs cd63ae9d and four further files; ten files in total across base->HEAD) with the Node-inert qualification",
+      "end-to-end workflow comparison caveat added to the tracked report and this evidence file"
+    ],
+    "kind": "documentation only; no re-measurement, no sample added, removed or re-run",
+    "reviewer_verdict": "PASS WITH QUALIFICATIONS (independent review of the freeze-v1 delivery)",
+    "unchanged": "freeze-v1 anchor and every measurement, receipt, log and frozen report it binds"
+  },
+  "criteria": [
+    {
+      "criterion": "explicit benchmark authorization with the validated baseline/candidate and matched snapshots",
+      "evidence": "coordination/ticket06-01/dispatch.md (01-06 batch); baseline f4e9fd50 control and candidate 58508e2b; 14 of the 15 probed direct dependencies resolve to identical versions (esbuild absent at the probed path on both sides), 24 top-level and 622 store entries on both sides; the ten base->HEAD input differences are disclosed in input_differences",
+      "ordinal": 1,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "same machine, equivalent environment, inventory, build mode, parallelism and prerequisite outputs; runtime identities recorded; no forbidden Node/pnpm fallback",
+      "evidence": "one guest, sequential interleaved cases, default Vitest parallelism, recorded per-sample invocation/env/cache state; Bun case PATH has node/npm/npx/pnpm ABSENT and no node-named executable appears in any observed process tree",
+      "ordinal": 2,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "measure the full root workflow, the SDK single-file suite and the EditorPane single-file suite; keep supplementary coverage mandatory",
+      "evidence": "root run selects all three Vitest projects (836 files, 12,470 tests); SDK packages/plugin-sdk/src/index.test.ts (27 tests); DOM packages/plugin-ui/src/editor/EditorPane.test.ts (9 tests). Every ticket-04 supplementary file is inside the root selection and ran in the timed samples, except the packaged-lifecycle coverage whose env gates the daily workflow does not set (15 conditionally pending tests) and the typechecks, which are not part of the workflow; both are declared as not timed in supplementary_coverage",
+      "ordinal": 3,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "cold/warm defined consistently for both candidates; cold resets only identified generated caches in isolated copies; warm retains equivalent valid outputs; record resets and never delete original workspace caches",
+      "evidence": "cold/warm rules in method; per-sample reset and warm-verification records in every receipt and schedule; all resets happen inside the isolated case copies under /Users/navide/eval/t06-*, never in the repository worktree",
+      "ordinal": 4,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "at least five samples per runtime/workload/condition, real global build/setup and child costs inside wall time, installation measured separately",
+      "evidence": "5 timing samples per runtime/condition plus a warm-up pair, all retained; cold root samples include the artifacts-project globalSetup build; the frozen install is measured separately (10.736 s Node / 7.527 s Bun) and excluded from the gate",
+      "ordinal": 5,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "preserve raw durations, streams, exit codes, inventory, invocation/environment and cache conditions for every sample; failures stay visible",
+      "evidence": "per-sample receipt (argv, cwd, environment, wall time, exit code, log path/bytes/sha256, cache state before/after, child CPU/RSS) and per-sample frozen Vitest JSON; the Bun root failure is reported in every sample",
+      "ordinal": 6,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "compare medians as Bun/baseline - 1; >10% slowdown in any required matched condition fails the gate; comparable or faster passes",
+      "evidence": "all six conditions are faster under Bun (slowdown -0.2576 to -0.4128); no condition exceeds the threshold",
+      "ordinal": 7,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "report dispersion and outliers; add samples when variation prevents a defensible verdict; never cherry-pick",
+      "evidence": "per-sample duration, MAD, stdev and MAD-based outlier flags are reported for every condition; the only flagged samples are sub-millisecond-to-10 ms jitter on ~1 s single-file runs, flagged by the MAD rule because their spread is ~10 ms, and both raw and outlier-excluded medians are given",
+      "ordinal": 8,
+      "status": "SATISFIED"
+    },
+    {
+      "criterion": "deliver an evidence-backed pass/fail/inconclusive result with calculations and limits; no workflow changes to improve the result",
+      "evidence": "PASS verdict with the table; no test, dependency, timeout, assertion, parallelism or workflow change was made (harness scripts only, in the evaluation root)",
+      "ordinal": 9,
+      "status": "SATISFIED"
+    }
+  ],
+  "deviations": [
+    "Runtime-identity probe label runtime-identity failed with exit 127 in the Node case before printing anything: the probe used $CASE_ROOT, which the allowlisted per-command environment does not define. The failure is retained; the probe was fixed to take the case root as an argument and re-run as runtime-identity-r2 (exit 0).",
+    "Cold for the single-file workloads was first implemented as a Vite-transform-cache-only reset and the sdk/cold set ran that way (retrieved/schedules/sdk-cold.json, retained). The cold definition was then made uniform across workloads (adding the artifact stamp, the three package dists and the mini-IDE dist) and every workload was measured again under it; the sdk re-run is sdk-cold-r2.json. The two sdk cold sets agree (medians 1.016 vs 1.056 Node, 0.728 vs 0.784 Bun), which is the evidence that the extra resets are immaterial for a unit-only run. Both sets are delivered, only sdk-cold-r2 is the gate set.",
+    "Warm verification was first written to require the public-package outputs for every workload; the unit single-file workflows do not consume or rebuild them, so sdk-warm and dom-warm under that rule are retained as agreement sets (sdk-warm.json measured 1.043/0.770, dom-warm.json 0.831/0.493) and re-run under the workflow-conditioned rule as sdk-warm-r2.json and dom-warm-r2.json (the gate sets). dom-warm.json's schedule record therefore shows the public-package outputs absent and, because that older rule demanded them, reports all_required_present false in every sample (as do the dom-identity runs); the r2 gate-set records report true for the set they actually require.",
+    "The guest backend uv sync took 271.9 s in the first case and 2.3 s in the second: the first case paid the cold uv/PyPI download of the backend dependencies. It is preparation, not a measured workload, and no measured sample touches uv; it is reported for completeness, not compared.",
+    "One launch command for the warm phase contained a stray \"cd /Users/slighter12/eval 2>/dev/null || cd /Users/navide/eval\" inside the backgrounded subshell (typo). Every path the driver uses is absolute, so no artifact, receipt or state was affected; the invocation is in the host SSH log.",
+    "Spotlight indexing (mds/mdworker_shared) was observed working on the case trees while samples ran. It is shared guest background load that affects both runtimes and is covered by interleaving and by the recorded dispersion; it was not disabled (no sudo, and disabling indexing is outside the authorized scope).",
+    "PyInstaller/Go fixture binaries are rebuilt per case and are not byte-identical between the two cases (ticket-04 observation); each case builds and uses its own fixture before any sample."
+  ],
+  "equal_work_correction": {
+    "cold": {
+      "bun_median": 75.112,
+      "credit_bun_slowdown": -0.28932,
+      "credited_bun_median": 80.271,
+      "credited_bun_walls": [
+        78.845,
+        77.885,
+        82.831,
+        81.304,
+        80.271
+      ],
+      "debit_node_slowdown": -0.30347,
+      "debited_node_median": 107.838,
+      "debited_node_walls": [
+        106.936,
+        104.917,
+        111.213,
+        107.838,
+        112.652
+      ],
+      "method": "per sample: credit_bun = bun_wall + (node_file - bun_file); debit_node = node_wall - (node_file - bun_file); then medians",
+      "node_median": 112.949,
+      "per_sample": {
+        "bun": [
+          {
+            "label": "root-cold-01-bun",
+            "residual_file_seconds": 0.0125,
+            "wall_seconds": 73.851
+          },
+          {
+            "label": "root-cold-02-bun",
+            "residual_file_seconds": 0.0136,
+            "wall_seconds": 72.584
+          },
+          {
+            "label": "root-cold-03-bun",
+            "residual_file_seconds": 0.0103,
+            "wall_seconds": 77.566
+          },
+          {
+            "label": "root-cold-04-bun",
+            "residual_file_seconds": 0.0114,
+            "wall_seconds": 76.193
+          },
+          {
+            "label": "root-cold-05-bun",
+            "residual_file_seconds": 0.0112,
+            "wall_seconds": 75.112
+          }
+        ],
+        "node": [
+          {
+            "label": "root-cold-01-node",
+            "residual_file_seconds": 5.0067,
+            "wall_seconds": 111.93
+          },
+          {
+            "label": "root-cold-02-node",
+            "residual_file_seconds": 5.3148,
+            "wall_seconds": 110.218
+          },
+          {
+            "label": "root-cold-03-node",
+            "residual_file_seconds": 5.2753,
+            "wall_seconds": 116.478
+          },
+          {
+            "label": "root-cold-04-node",
+            "residual_file_seconds": 5.1223,
+            "wall_seconds": 112.949
+          },
+          {
+            "label": "root-cold-05-node",
+            "residual_file_seconds": 5.1703,
+            "wall_seconds": 117.811
+          }
+        ]
+      },
+      "uncorrected_slowdown": -0.33499,
+      "verdict": "PASS (both variants stay far inside the 10% gate)"
+    },
+    "warm": {
+      "bun_median": 61.512,
+      "credit_bun_slowdown": -0.3042,
+      "credited_bun_median": 67.339,
+      "credited_bun_walls": [
+        67.339,
+        67.225,
+        70.159,
+        68.472,
+        67.288
+      ],
+      "debit_node_slowdown": -0.3191,
+      "debited_node_median": 90.339,
+      "debited_node_walls": [
+        83.704,
+        91.553,
+        88.523,
+        93.176,
+        90.339
+      ],
+      "method": "per sample: credit_bun = bun_wall + (node_file - bun_file); debit_node = node_wall - (node_file - bun_file); then medians",
+      "node_median": 96.779,
+      "per_sample": {
+        "bun": [
+          {
+            "label": "root-warm-01-bun",
+            "residual_file_seconds": 0.0126,
+            "wall_seconds": 61.512
+          },
+          {
+            "label": "root-warm-02-bun",
+            "residual_file_seconds": 0.0203,
+            "wall_seconds": 60.356
+          },
+          {
+            "label": "root-warm-03-bun",
+            "residual_file_seconds": 0.017,
+            "wall_seconds": 63.887
+          },
+          {
+            "label": "root-warm-04-bun",
+            "residual_file_seconds": 0.0152,
+            "wall_seconds": 61.908
+          },
+          {
+            "label": "root-warm-05-bun",
+            "residual_file_seconds": 0.0174,
+            "wall_seconds": 60.848
+          }
+        ],
+        "node": [
+          {
+            "label": "root-warm-01-node",
+            "residual_file_seconds": 5.8392,
+            "wall_seconds": 89.531
+          },
+          {
+            "label": "root-warm-02-node",
+            "residual_file_seconds": 6.8888,
+            "wall_seconds": 98.422
+          },
+          {
+            "label": "root-warm-03-node",
+            "residual_file_seconds": 6.2888,
+            "wall_seconds": 94.795
+          },
+          {
+            "label": "root-warm-04-node",
+            "residual_file_seconds": 6.5795,
+            "wall_seconds": 99.74
+          },
+          {
+            "label": "root-warm-05-node",
+            "residual_file_seconds": 6.4574,
+            "wall_seconds": 96.779
+          }
+        ]
+      },
+      "uncorrected_slowdown": -0.36441,
+      "verdict": "PASS (both variants stay far inside the 10% gate)"
+    }
+  },
+  "evaluation_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-06-01",
+  "fixed_points": {
+    "baseline": {
+      "adaptations": "base + the five paths listed under control_adaptations (branch vitest config and the branch test-support/test files), matching the ticket-04 adaptation correction-01 alias-symmetric control",
+      "archive": "tarballs/base-f4e9fd50.tar",
+      "archive_origin": "frozen baseline archive reused from the ticket-01/04/05 rounds, re-verified by SHA-256 in the guest before extraction",
+      "archive_sha256": "e3da8e5c9900c599920634fa1515cb2fdd53b5d15bd95a09225a2e08d8c723b9",
+      "commit": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "role": "Node 22.23.2/pnpm 10.0.0 control source (frozen base)"
+    },
+    "candidate": {
+      "archive": "tarballs/head-58508e2b.tar",
+      "archive_origin": "git archive HEAD in the shared worktree at the start of this round",
+      "archive_sha256": "637913a358357d44e3b3c999e9640a691d1d36dd87da517bf5d20021d07e0bb4",
+      "commit": "58508e2b611cc0dcfc27af1b5c66ffe896b0a7b9",
+      "role": "Bun 1.4.2 candidate source (issue branch HEAD as delivered by ticket 05)"
+    },
+    "control_adaptations": {
+      "archive": "tarballs/adapt-5.tar",
+      "archive_sha256": "481254e7fde7bedde3cfb2f629817aff1d33622f3a14c3bdc0f9c5bfc46612d0",
+      "candidate_paths": {
+        "plugins/navide-git/tests/compositionBoundary.test.ts": "14f31a54af0fd0f50333686a427cf0eec16f50c096fb35d6d49bc82b5a0e3fc0",
+        "plugins/navide-mini-ide/tests/packageBoundary.test.ts": "29dda9a719ce3b5e836a768323a32acb42f00d98c70f90f3fbd3429eb5a6bacd",
+        "tests/integration/plansBuildScripts.test.ts": "06bbb483d72b149cbc57b16fbfd4efe8d4af1b2e47d836d50b94edd8b74e683b",
+        "tests/support/bunMockImporterAnchor.ts": "dd37728180458749ea5d4d68a8d546265b527f3de32ddaba0d8af980bc109ea7",
+        "vitest.config.ts": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a"
+      },
+      "identical_in_control_and_candidate": [
+        "vitest.config.ts",
+        "tests/support/bunMockImporterAnchor.ts",
+        "tests/integration/plansBuildScripts.test.ts",
+        "plugins/navide-mini-ide/tests/packageBoundary.test.ts",
+        "plugins/navide-git/tests/compositionBoundary.test.ts"
+      ],
+      "note": "the branch tree cannot run pnpm install (accepted branch workspace/package.json deviation recorded in ticket 04); the control is therefore base + these files, which is what ticket-04 adaptation correction-01 defined as the alias-symmetric control",
+      "paths": {
+        "plugins/navide-git/tests/compositionBoundary.test.ts": "14f31a54af0fd0f50333686a427cf0eec16f50c096fb35d6d49bc82b5a0e3fc0",
+        "plugins/navide-mini-ide/tests/packageBoundary.test.ts": "29dda9a719ce3b5e836a768323a32acb42f00d98c70f90f3fbd3429eb5a6bacd",
+        "tests/integration/plansBuildScripts.test.ts": "06bbb483d72b149cbc57b16fbfd4efe8d4af1b2e47d836d50b94edd8b74e683b",
+        "tests/support/bunMockImporterAnchor.ts": "dd37728180458749ea5d4d68a8d546265b527f3de32ddaba0d8af980bc109ea7",
+        "vitest.config.ts": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a"
+      },
+      "source_file_hashes": {
+        "candidate_key_listing": {
+          "bun.lock": "812fcf6587ed8801d560d35804714ec47e4db0b936f1a14905f5eeae182cdafe",
+          "package.json": "9f2163ac0773ce6065719f913156ff8c347049c99ec7a5e873272e46f2916b09",
+          "pnpm-lock.yaml": "dd08737924d0aea21dad5f0d37dca9f09b4ee0d75def756cea55fa246e0e986b",
+          "scripts/build-plans-backend.mjs": "4e90ed513108f5ec17f779d39005835bcce52f35f9ccf4cd9ba2e806b01b7876",
+          "scripts/bun-evaluation.mjs": "7ccbe18a743c741493db635c94bd230fb45a56f22e7ef7831dd9eeeeab29e88b",
+          "scripts/bun/vue-tsc.cjs": "e1db20f844f3610ef598a5cc4c7cce1c2bc900018ec261bbe414b45c1c2e3e72",
+          "tests/support/bunMockImporterAnchor.ts": "dd37728180458749ea5d4d68a8d546265b527f3de32ddaba0d8af980bc109ea7",
+          "tests/support/publicPackagesSetup.ts": "cd63ae9d31c8a7fbfc77a27d986521f137ce10f68589a539dbb92b0bc52b9ff8",
+          "vitest.config.ts": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a"
+        },
+        "candidate_listed_files": 8567,
+        "candidate_listing": "retrieved/cases/t06-head-bun/logs/source-file-hashes.txt",
+        "control_key_listing": {
+          "bun.lock": null,
+          "package.json": "313f77d7fb465153e0b6df4d350451f4766f87722372f1a4fc15abe837b8d768",
+          "pnpm-lock.yaml": "dd08737924d0aea21dad5f0d37dca9f09b4ee0d75def756cea55fa246e0e986b",
+          "scripts/build-plans-backend.mjs": "4e90ed513108f5ec17f779d39005835bcce52f35f9ccf4cd9ba2e806b01b7876",
+          "scripts/bun-evaluation.mjs": null,
+          "scripts/bun/vue-tsc.cjs": null,
+          "tests/support/bunMockImporterAnchor.ts": "dd37728180458749ea5d4d68a8d546265b527f3de32ddaba0d8af980bc109ea7",
+          "tests/support/publicPackagesSetup.ts": "64245c77538b4adf562b057a4c54bc62557ae25d846830f1988c233270c07888",
+          "vitest.config.ts": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a"
+        },
+        "control_listed_files": 8506,
+        "control_listing": "retrieved/cases/t06-base-node/logs/source-file-hashes.txt"
+      }
+    }
+  },
+  "frozen_delivery": {
+    "anchor": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-06-01/freeze/freeze-v1.json",
+    "anchor_sha256_file": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-06-01/freeze/freeze-v1.sha256",
+    "bindings": [
+      "the two tracked deliverables (report.md, evidence.json)",
+      "the host harness scripts and the retrieved guest copies",
+      "every schedule, receipt, log and frozen Vitest JSON report for both cases",
+      "the three source archives and the retrieval archive",
+      "the host-side analysis and this file's own inputs",
+      "the host SSH invocation log"
+    ],
+    "circular_self_hash": false,
+    "guest_side_input_listing": "retrieved/post-run-listing.txt and retrieved/cases/*/logs/input-hash-listing.txt (guest shasum output)",
+    "version": "freeze-v1"
+  },
+  "guest": {
+    "access": "retained ticket-03 SSH options through a per-invocation logging wrapper (private key path only is logged)",
+    "cases_root": "/Users/navide/eval",
+    "cpu_count": 6,
+    "disk_root_at_start": "/dev/disk3s1s1   115Gi    13Gi    49Gi    21%    484k  513M    0%   /",
+    "earlier_case_dirs_untouched": true,
+    "host": "disposable UTM guest (Apple Virtualization), macOS 27.0.1 (build 26A434), arm64, 6 CPUs, 12 GiB RAM",
+    "memory_bytes": 12884901888,
+    "new_cases": [
+      "t06-base-node",
+      "t06-head-bun"
+    ],
+    "os": "ProductName:  macOS ProductVersion:  27.0.1 BuildVersion:  26A434",
+    "ssh_invocations": 58,
+    "uname": "Darwin Navides-Virtual-Machine.local 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:00:07 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_VMAPPLE arm64",
+    "vm_limitation": "shared VM on a laptop host: ambient load from the host, guest background services (Spotlight indexing was observed working on the case trees) and the guest disk are outside this experiment's control; samples were interleaved and the guest was otherwise idle (no parallel cases)"
+  },
+  "input_differences": {
+    "complete_base_to_head_difference_excluding_docs": true,
+    "consequences": [
+      "publicPackagesSetup.ts takes the same packageManager() path on Node and keeps the two pnpm-only env vars under a !process.versions.bun guard, so it is inert for Node test behaviour; it does change the artifact-input digest inputs and hashed payload (adds scripts/bun/vue-tsc.cjs, bun.lock, scripts/bun-evaluation.mjs, BUN_OPTIONS, bun: undefined), which affects only the artifact cache stamp",
+      "package.json carries candidate-side overrides, the only difference that could change transitive resolution; direct dependencies were checked and the installed top-level/store entry counts match, but no full transitive-tree equality proof was performed",
+      "the comparison is therefore an end-to-end workflow comparison of the two daily toolchains, not a single-variable runtime swap"
+    ],
+    "files": [
+      {
+        "candidate_sha256": "812fcf6587ed8801d560d35804714ec47e4db0b936f1a14905f5eeae182cdafe",
+        "control_sha256": "ABSENT",
+        "identical": false,
+        "path": "bun.lock"
+      },
+      {
+        "candidate_sha256": "9f2163ac0773ce6065719f913156ff8c347049c99ec7a5e873272e46f2916b09",
+        "control_sha256": "313f77d7fb465153e0b6df4d350451f4766f87722372f1a4fc15abe837b8d768",
+        "identical": false,
+        "path": "package.json"
+      },
+      {
+        "candidate_sha256": "14f31a54af0fd0f50333686a427cf0eec16f50c096fb35d6d49bc82b5a0e3fc0",
+        "control_sha256": "14f31a54af0fd0f50333686a427cf0eec16f50c096fb35d6d49bc82b5a0e3fc0",
+        "identical": true,
+        "path": "plugins/navide-git/tests/compositionBoundary.test.ts"
+      },
+      {
+        "candidate_sha256": "29dda9a719ce3b5e836a768323a32acb42f00d98c70f90f3fbd3429eb5a6bacd",
+        "control_sha256": "29dda9a719ce3b5e836a768323a32acb42f00d98c70f90f3fbd3429eb5a6bacd",
+        "identical": true,
+        "path": "plugins/navide-mini-ide/tests/packageBoundary.test.ts"
+      },
+      {
+        "candidate_sha256": "7ccbe18a743c741493db635c94bd230fb45a56f22e7ef7831dd9eeeeab29e88b",
+        "control_sha256": "ABSENT",
+        "identical": false,
+        "path": "scripts/bun-evaluation.mjs"
+      },
+      {
+        "candidate_sha256": "e1db20f844f3610ef598a5cc4c7cce1c2bc900018ec261bbe414b45c1c2e3e72",
+        "control_sha256": "ABSENT",
+        "identical": false,
+        "path": "scripts/bun/vue-tsc.cjs"
+      },
+      {
+        "candidate_sha256": "06bbb483d72b149cbc57b16fbfd4efe8d4af1b2e47d836d50b94edd8b74e683b",
+        "control_sha256": "06bbb483d72b149cbc57b16fbfd4efe8d4af1b2e47d836d50b94edd8b74e683b",
+        "identical": true,
+        "path": "tests/integration/plansBuildScripts.test.ts"
+      },
+      {
+        "candidate_sha256": "dd37728180458749ea5d4d68a8d546265b527f3de32ddaba0d8af980bc109ea7",
+        "control_sha256": "dd37728180458749ea5d4d68a8d546265b527f3de32ddaba0d8af980bc109ea7",
+        "identical": true,
+        "path": "tests/support/bunMockImporterAnchor.ts"
+      },
+      {
+        "candidate_sha256": "cd63ae9d31c8a7fbfc77a27d986521f137ce10f68589a539dbb92b0bc52b9ff8",
+        "control_sha256": "64245c77538b4adf562b057a4c54bc62557ae25d846830f1988c233270c07888",
+        "identical": false,
+        "path": "tests/support/publicPackagesSetup.ts"
+      },
+      {
+        "candidate_sha256": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a",
+        "control_sha256": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a",
+        "identical": true,
+        "path": "vitest.config.ts"
+      }
+    ],
+    "shared_adaptation_paths": [
+      "vitest.config.ts",
+      "tests/support/bunMockImporterAnchor.ts",
+      "tests/integration/plansBuildScripts.test.ts",
+      "plugins/navide-mini-ide/tests/packageBoundary.test.ts",
+      "plugins/navide-git/tests/compositionBoundary.test.ts"
+    ]
+  },
+  "installation_measured_separately": {
+    "bun": {
+      "argv": [
+        "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun",
+        "scripts/bun-evaluation.mjs",
+        "install"
+      ],
+      "exit_code": 0,
+      "receipt": "retrieved/cases/t06-head-bun/receipts/install.json",
+      "wall_seconds": 7.527
+    },
+    "node": {
+      "argv": [
+        "/Users/navide/eval/t06-base-node/tools/pnpm/bin/pnpm",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "exit_code": 0,
+      "receipt": "retrieved/cases/t06-base-node/receipts/install.json",
+      "wall_seconds": 10.736
+    },
+    "note": "the frozen install runs once per case before any sample, outside the test-workflow wall times; single samples, not the gate"
+  },
+  "inventory": {
+    "dom_single_file": {
+      "bun": "9 passed, 0 failed, 0 skipped, exit 0",
+      "files_selected": 1,
+      "node": "9 passed, 0 failed, 0 skipped, exit 0",
+      "tests_selected": 9
+    },
+    "identical_within_each_runtime_across_all_samples": true,
+    "root_suite": {
+      "bun": {
+        "exit_code": 1,
+        "files_failed": 1,
+        "files_passed": 835,
+        "tests_failed": 1,
+        "tests_passed": 12446,
+        "tests_skipped": 23,
+        "tests_todo": 0
+      },
+      "bun_failure": "src/main/plugins/pluginExternalWorkspace.test.ts - the user-accepted ticket-04 residual. Observed message: Error: Executable not found in $PATH: \"pnpm\" (raised by the file's spawn at line 64 through its own packageManager() helper path runPnpmOrThrow; the shipped tree has no helper branch). Ticket-04 adaptation measured that routing that helper to Bun still does not pass, which is why the residual is accepted as a documented gap. Present in every Bun root sample and counted, not excluded.",
+      "bun_failure_wall_time_direction": "favours Bun: the file itself takes 5.007-5.315 s (cold) and 5.839-6.889 s (warm) on Node, where it really performs the pnpm install/pack work, against 0.010-0.020 s on Bun where the spawn fails immediately; see equal_work_correction for the corrected ratios",
+      "files_selected": 836,
+      "node": {
+        "exit_code": 0,
+        "files_failed": 0,
+        "files_passed": 836,
+        "tests_failed": 0,
+        "tests_passed": 12447,
+        "tests_skipped": 23,
+        "tests_todo": 0
+      },
+      "only_per_file_difference": "src/main/plugins/pluginExternalWorkspace.test.ts is passed on Node and failed on Bun",
+      "per_file_test_counts_identical": true,
+      "selection_identical_in_both_runtimes": true,
+      "skipped_by_file": {
+        "main/plugins/pluginBackendHost.test.ts": {
+          "count": 4,
+          "titles": [
+            "packaged Plans backend Python completes resolve_root and emits plans.changed from the same child",
+            "packaged Plans backend Python settles cancellation, timeout, and child crash without hanging the Host",
+            "packaged Plans backend Go completes resolve_root and emits plans.changed from the same child",
+            "packaged Plans backend Go settles cancellation, timeout, and child crash without hanging the Host"
+          ]
+        },
+        "main/plugins/pluginBackendSandbox.test.ts": {
+          "count": 7,
+          "titles": [
+            "Linux bubblewrap availability (live) matches the CI expectation for this host",
+            "Linux bubblewrap availability (live) refuses cleanly with a clear reason, never runs unsandboxed",
+            "Linux bubblewrap escape suite (live) keeps the backend working inside its own package and data directory",
+            "Linux bubblewrap escape suite (live) hides files outside the package and data directory",
+            "Linux bubblewrap escape suite (live) denies writing outside the data directory",
+            "Linux bubblewrap escape suite (live) has no network, including loopback and DNS",
+            "Linux bubblewrap escape suite (live) records that system binaries can run inside the namespaces"
+          ]
+        },
+        "main/plugins/pluginBackendSupervisor.test.ts": {
+          "count": 6,
+          "titles": [
+            "PluginBackendSupervisor Python passes the shared Backend Wire call and event corpus",
+            "PluginBackendSupervisor Python settles cancellation and timeout in the shared corpus",
+            "PluginBackendSupervisor Python restores the core after child crash and restart",
+            "PluginBackendSupervisor Go passes the shared Backend Wire call and event corpus",
+            "PluginBackendSupervisor Go settles cancellation and timeout in the shared corpus",
+            "PluginBackendSupervisor Go restores the core after child crash and restart"
+          ]
+        },
+        "plugin-sdk/bin/dev-backend.test.ts": {
+          "count": 1,
+          "titles": [
+            "dev-backend on Linux without bubblewrap (live) refuses with a clear message instead of running unsandboxed"
+          ]
+        },
+        "tests/integration/plansPackagedRoundtrip.test.ts": {
+          "count": 5,
+          "titles": [
+            "Plans packaged backend composition resolves the Plans root and receives plans.changed through the packaged child",
+            "Plans packaged backend composition mounts the production PlansApp view and renders the plan list from the packaged child",
+            "Plans packaged backend composition launches the production Plans backend through descriptor/activation/supervisor and completes health and plans.list",
+            "Plans packaged backend composition loads the Host-selected worktree frontend artifact and exercises real review controls",
+            "Plans packaged backend composition mounts the real PlansApp window and persists Review Notes through the packaged child"
+          ]
+        }
+      },
+      "skipped_signature_distinct_values_across_all_root_samples_per_runtime": 1,
+      "skipped_tests_identical_in_both_runtimes": true,
+      "tests_selected": 12470
+    },
+    "sdk_single_file": {
+      "bun": "27 passed, 0 failed, 0 skipped, exit 0",
+      "files_selected": 1,
+      "node": "27 passed, 0 failed, 0 skipped, exit 0",
+      "tests_selected": 27
+    },
+    "source": "the frozen Vitest JSON report of every sample (retrieved/cases/*/vitest-json/*.json)"
+  },
+  "issue": "06-macos-test-performance",
+  "method": {
+    "cold": "before every cold sample the driver removes only experiment-owned generated state in the case copy: node_modules/.vite, node_modules/.vite-temp, the artifact-input stamp, packages/plugin-contracts|plugin-sdk|plugin-ui dist and dist-plugins/navide-mini-ide. Installed dependencies (node_modules content, lockfiles) are never touched; the exact per-sample before/after state is in every receipt (cache_state_before/after) and in the schedule reset record",
+    "environment": "each command runs under the case environment only (HOME/TMPDIR/XDG/caches/AGENT_TEAM_DATA_DIR/PATH from env.json): the Node case PATH resolves node, npm, npx and pnpm and reports bun ABSENT; the Bun case PATH resolves only bun and reports node, npm, npx and pnpm ABSENT",
+    "excluded_from_wall_time": "installation (measured separately) and no other step; the measured wall time is the complete process wall clock including Vitest startup, project setup, package build/globalSetup in the cold condition, child processes and reporting, from process spawn to exit",
+    "gate": "slowdown = bun median / node median - 1; more than 10% fails, exactly 10% does not; comparable or faster passes with no minimum speedup",
+    "harness": {
+      "analysis": "scripts/t06-analyze.py (medians, dispersion, MAD-based outliers, inventory check, gate calculation)",
+      "driver": "scripts/t06-sample.py (interleaved Node/Bun sampling, cold reset or warm verification before every sample, per-sample schedule record)",
+      "runner": "scripts/t06-run.py (cleared allowlisted environment, no-clobber receipts/logs, wall time, exit code, stream digest, cache state before/after, child CPU/RSS)",
+      "scripts_guest_copy_matches_host": "13 of 16 host harness scripts byte-identical to the retrieved guest copies; the three host-only scripts (t06-ssh.sh, t06-exec.sh, t06-analyze.py) never ran in the guest"
+    },
+    "interleaving": "one Node sample and one Bun sample alternate (Node first) for every index, so host or guest drift cannot land on one runtime; the workload is the only thing running (no parallel cases)",
+    "samples": "five timing samples per runtime and condition plus one warm-up pair per warm condition, all retained; observation-enabled identity runs are separate and never used for timing",
+    "warm": "the preceding identical run leaves the same valid prerequisite state; the root workflow requires the transform cache, the artifact stamp and the package/mini-IDE dists (its artifacts project rebuilds them through globalSetup), the single-file unit workflows require the Vite/Vitest transform cache. Verification state is recorded per sample"
+  },
+  "not_run": [
+    "Linux and Windows performance (issues 07/08)",
+    "release packaging, signing, notarization and hosted CI",
+    "application startup and UI acceptance (ticket 03 scope)",
+    "real-plugin installation from a registry",
+    "test-timeout or assertion changes of any kind"
+  ],
+  "report": {
+    "bytes": 28495,
+    "lines": 375,
+    "path": "docs/toolchain-evaluation/bun/ticket-06/report.md",
+    "sha256": "9885ca294601bdfb06f3b1fd4bdb5f6922863f393b407487994950718574e91f"
+  },
+  "results": {
+    "dom/cold": {
+      "gate": {
+        "bun_median": 0.508,
+        "formula": "bun_median / node_median - 1",
+        "node_median": 0.839,
+        "slowdown": -0.3945,
+        "slowdown_without_outliers": -0.3942,
+        "threshold": 0.1,
+        "verdict": "PASS",
+        "verdict_without_outliers": "PASS"
+      },
+      "runtimes": {
+        "bun": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "dom-cold-01-bun",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 9,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 9
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.018,
+          "mad_to_median": 0.0354,
+          "max_seconds": 0.542,
+          "median_seconds": 0.508,
+          "median_without_outliers": 0.508,
+          "min_seconds": 0.49,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 0.96,
+              "child_max_rss_bytes": 227573760,
+              "exit_code": 0,
+              "label": "dom-cold-01-bun",
+              "modified_z": 1.274,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-cold-01-bun.json",
+              "wall_seconds": 0.542
+            },
+            {
+              "child_cpu_seconds": 0.907,
+              "child_max_rss_bytes": 226131968,
+              "exit_code": 0,
+              "label": "dom-cold-02-bun",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-cold-02-bun.json",
+              "wall_seconds": 0.49
+            },
+            {
+              "child_cpu_seconds": 0.936,
+              "child_max_rss_bytes": 217513984,
+              "exit_code": 0,
+              "label": "dom-cold-03-bun",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-cold-03-bun.json",
+              "wall_seconds": 0.508
+            },
+            {
+              "child_cpu_seconds": 0.905,
+              "child_max_rss_bytes": 221347840,
+              "exit_code": 0,
+              "label": "dom-cold-04-bun",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-cold-04-bun.json",
+              "wall_seconds": 0.49
+            },
+            {
+              "child_cpu_seconds": 0.939,
+              "child_max_rss_bytes": 216973312,
+              "exit_code": 0,
+              "label": "dom-cold-05-bun",
+              "modified_z": 0.187,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-cold-05-bun.json",
+              "wall_seconds": 0.513
+            }
+          ],
+          "stdev_seconds": 0.021
+        },
+        "node": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "dom-cold-01-node",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 9,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 9
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.009,
+          "mad_to_median": 0.0107,
+          "max_seconds": 0.943,
+          "median_seconds": 0.839,
+          "median_without_outliers": 0.8385,
+          "min_seconds": 0.83,
+          "n": 5,
+          "outliers": [
+            "dom-cold-01-node"
+          ],
+          "samples": [
+            {
+              "child_cpu_seconds": 1.568,
+              "child_max_rss_bytes": 221642752,
+              "exit_code": 0,
+              "label": "dom-cold-01-node",
+              "modified_z": 7.794,
+              "outlier": true,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-cold-01-node.json",
+              "wall_seconds": 0.943
+            },
+            {
+              "child_cpu_seconds": 1.532,
+              "child_max_rss_bytes": 221200384,
+              "exit_code": 0,
+              "label": "dom-cold-02-node",
+              "modified_z": -0.075,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-cold-02-node.json",
+              "wall_seconds": 0.838
+            },
+            {
+              "child_cpu_seconds": 1.541,
+              "child_max_rss_bytes": 220135424,
+              "exit_code": 0,
+              "label": "dom-cold-03-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-cold-03-node.json",
+              "wall_seconds": 0.839
+            },
+            {
+              "child_cpu_seconds": 1.542,
+              "child_max_rss_bytes": 220577792,
+              "exit_code": 0,
+              "label": "dom-cold-04-node",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-cold-04-node.json",
+              "wall_seconds": 0.83
+            },
+            {
+              "child_cpu_seconds": 1.556,
+              "child_max_rss_bytes": 221364224,
+              "exit_code": 0,
+              "label": "dom-cold-05-node",
+              "modified_z": 1.424,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-cold-05-node.json",
+              "wall_seconds": 0.858
+            }
+          ],
+          "stdev_seconds": 0.047
+        }
+      },
+      "schedule": "retrieved/schedules/dom-cold.json",
+      "warmup_labels": {
+        "bun": [],
+        "node": []
+      }
+    },
+    "dom/warm": {
+      "gate": {
+        "bun_median": 0.488,
+        "formula": "bun_median / node_median - 1",
+        "node_median": 0.831,
+        "slowdown": -0.4128,
+        "slowdown_without_outliers": -0.4128,
+        "threshold": 0.1,
+        "verdict": "PASS",
+        "verdict_without_outliers": "PASS"
+      },
+      "runtimes": {
+        "bun": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "dom-warm-r2-01-bun",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 9,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 9
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.003,
+          "mad_to_median": 0.0061,
+          "max_seconds": 0.495,
+          "median_seconds": 0.488,
+          "median_without_outliers": 0.488,
+          "min_seconds": 0.485,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 0.899,
+              "child_max_rss_bytes": 226820096,
+              "exit_code": 0,
+              "label": "dom-warm-r2-01-bun",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-warm-r2-01-bun.json",
+              "wall_seconds": 0.485
+            },
+            {
+              "child_cpu_seconds": 0.914,
+              "child_max_rss_bytes": 222347264,
+              "exit_code": 0,
+              "label": "dom-warm-r2-02-bun",
+              "modified_z": 1.574,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-warm-r2-02-bun.json",
+              "wall_seconds": 0.495
+            },
+            {
+              "child_cpu_seconds": 0.913,
+              "child_max_rss_bytes": 224575488,
+              "exit_code": 0,
+              "label": "dom-warm-r2-03-bun",
+              "modified_z": 1.349,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-warm-r2-03-bun.json",
+              "wall_seconds": 0.494
+            },
+            {
+              "child_cpu_seconds": 0.899,
+              "child_max_rss_bytes": 222019584,
+              "exit_code": 0,
+              "label": "dom-warm-r2-04-bun",
+              "modified_z": -0.45,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-warm-r2-04-bun.json",
+              "wall_seconds": 0.486
+            },
+            {
+              "child_cpu_seconds": 0.9,
+              "child_max_rss_bytes": 221724672,
+              "exit_code": 0,
+              "label": "dom-warm-r2-05-bun",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/dom-warm-r2-05-bun.json",
+              "wall_seconds": 0.488
+            }
+          ],
+          "stdev_seconds": 0.005
+        },
+        "node": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "dom-warm-r2-01-node",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 9,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 9
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.007,
+          "mad_to_median": 0.0084,
+          "max_seconds": 0.854,
+          "median_seconds": 0.831,
+          "median_without_outliers": 0.831,
+          "min_seconds": 0.819,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 1.528,
+              "child_max_rss_bytes": 220348416,
+              "exit_code": 0,
+              "label": "dom-warm-r2-01-node",
+              "modified_z": 0.578,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-warm-r2-01-node.json",
+              "wall_seconds": 0.837
+            },
+            {
+              "child_cpu_seconds": 1.534,
+              "child_max_rss_bytes": 220463104,
+              "exit_code": 0,
+              "label": "dom-warm-r2-02-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-warm-r2-02-node.json",
+              "wall_seconds": 0.831
+            },
+            {
+              "child_cpu_seconds": 1.501,
+              "child_max_rss_bytes": 220250112,
+              "exit_code": 0,
+              "label": "dom-warm-r2-03-node",
+              "modified_z": -1.156,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-warm-r2-03-node.json",
+              "wall_seconds": 0.819
+            },
+            {
+              "child_cpu_seconds": 1.56,
+              "child_max_rss_bytes": 221937664,
+              "exit_code": 0,
+              "label": "dom-warm-r2-04-node",
+              "modified_z": 2.216,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-warm-r2-04-node.json",
+              "wall_seconds": 0.854
+            },
+            {
+              "child_cpu_seconds": 1.509,
+              "child_max_rss_bytes": 221216768,
+              "exit_code": 0,
+              "label": "dom-warm-r2-05-node",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/dom-warm-r2-05-node.json",
+              "wall_seconds": 0.824
+            }
+          ],
+          "stdev_seconds": 0.014
+        }
+      },
+      "schedule": "retrieved/schedules/dom-warm-r2.json",
+      "warmup_labels": {
+        "bun": [
+          "dom-warm-r2-00-bun"
+        ],
+        "node": [
+          "dom-warm-r2-00-node"
+        ]
+      }
+    },
+    "root/cold": {
+      "gate": {
+        "bun_median": 75.112,
+        "formula": "bun_median / node_median - 1",
+        "node_median": 112.949,
+        "slowdown": -0.335,
+        "slowdown_without_outliers": -0.335,
+        "threshold": 0.1,
+        "verdict": "PASS",
+        "verdict_without_outliers": "PASS"
+      },
+      "runtimes": {
+        "bun": {
+          "exit_codes": [
+            1
+          ],
+          "inventory_first_sample": {
+            "failed_files": [
+              "main/plugins/pluginExternalWorkspace.test.ts"
+            ],
+            "files_failed": 1,
+            "files_passed": 835,
+            "files_reported": 836,
+            "label": "root-cold-01-bun",
+            "success": false,
+            "tests_failed": 1,
+            "tests_passed": 12446,
+            "tests_pending": 23,
+            "tests_todo": 0,
+            "tests_total": 12470
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 1.261,
+          "mad_to_median": 0.0168,
+          "max_seconds": 77.566,
+          "median_seconds": 75.112,
+          "median_without_outliers": 75.112,
+          "min_seconds": 72.584,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 295.418,
+              "child_max_rss_bytes": 4318527488,
+              "exit_code": 1,
+              "label": "root-cold-01-bun",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-cold-01-bun.json",
+              "wall_seconds": 73.851
+            },
+            {
+              "child_cpu_seconds": 295.962,
+              "child_max_rss_bytes": 4410621952,
+              "exit_code": 1,
+              "label": "root-cold-02-bun",
+              "modified_z": -1.352,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-cold-02-bun.json",
+              "wall_seconds": 72.584
+            },
+            {
+              "child_cpu_seconds": 323.461,
+              "child_max_rss_bytes": 5103943680,
+              "exit_code": 1,
+              "label": "root-cold-03-bun",
+              "modified_z": 1.313,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-cold-03-bun.json",
+              "wall_seconds": 77.566
+            },
+            {
+              "child_cpu_seconds": 314.828,
+              "child_max_rss_bytes": 4884578304,
+              "exit_code": 1,
+              "label": "root-cold-04-bun",
+              "modified_z": 0.578,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-cold-04-bun.json",
+              "wall_seconds": 76.193
+            },
+            {
+              "child_cpu_seconds": 313.779,
+              "child_max_rss_bytes": 4665851904,
+              "exit_code": 1,
+              "label": "root-cold-05-bun",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-cold-05-bun.json",
+              "wall_seconds": 75.112
+            }
+          ],
+          "stdev_seconds": 1.947
+        },
+        "node": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 836,
+            "files_reported": 836,
+            "label": "root-cold-01-node",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 12447,
+            "tests_pending": 23,
+            "tests_todo": 0,
+            "tests_total": 12470
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 2.731,
+          "mad_to_median": 0.0242,
+          "max_seconds": 117.811,
+          "median_seconds": 112.949,
+          "median_without_outliers": 112.949,
+          "min_seconds": 110.218,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 464.572,
+              "child_max_rss_bytes": 2655305728,
+              "exit_code": 0,
+              "label": "root-cold-01-node",
+              "modified_z": -0.252,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-cold-01-node.json",
+              "wall_seconds": 111.93
+            },
+            {
+              "child_cpu_seconds": 458.15,
+              "child_max_rss_bytes": 2682765312,
+              "exit_code": 0,
+              "label": "root-cold-02-node",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-cold-02-node.json",
+              "wall_seconds": 110.218
+            },
+            {
+              "child_cpu_seconds": 493.517,
+              "child_max_rss_bytes": 2743713792,
+              "exit_code": 0,
+              "label": "root-cold-03-node",
+              "modified_z": 0.872,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-cold-03-node.json",
+              "wall_seconds": 116.478
+            },
+            {
+              "child_cpu_seconds": 482.494,
+              "child_max_rss_bytes": 2753167360,
+              "exit_code": 0,
+              "label": "root-cold-04-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-cold-04-node.json",
+              "wall_seconds": 112.949
+            },
+            {
+              "child_cpu_seconds": 502.04,
+              "child_max_rss_bytes": 2740191232,
+              "exit_code": 0,
+              "label": "root-cold-05-node",
+              "modified_z": 1.201,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-cold-05-node.json",
+              "wall_seconds": 117.811
+            }
+          ],
+          "stdev_seconds": 3.173
+        }
+      },
+      "schedule": "retrieved/schedules/root-cold.json",
+      "warmup_labels": {
+        "bun": [],
+        "node": []
+      }
+    },
+    "root/warm": {
+      "gate": {
+        "bun_median": 61.512,
+        "formula": "bun_median / node_median - 1",
+        "node_median": 96.779,
+        "slowdown": -0.3644,
+        "slowdown_without_outliers": -0.3644,
+        "threshold": 0.1,
+        "verdict": "PASS",
+        "verdict_without_outliers": "PASS"
+      },
+      "runtimes": {
+        "bun": {
+          "exit_codes": [
+            1
+          ],
+          "inventory_first_sample": {
+            "failed_files": [
+              "main/plugins/pluginExternalWorkspace.test.ts"
+            ],
+            "files_failed": 1,
+            "files_passed": 835,
+            "files_reported": 836,
+            "label": "root-warm-01-bun",
+            "success": false,
+            "tests_failed": 1,
+            "tests_passed": 12446,
+            "tests_pending": 23,
+            "tests_todo": 0,
+            "tests_total": 12470
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.664,
+          "mad_to_median": 0.0108,
+          "max_seconds": 63.887,
+          "median_seconds": 61.512,
+          "median_without_outliers": 61.512,
+          "min_seconds": 60.356,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 291.425,
+              "child_max_rss_bytes": 4335828992,
+              "exit_code": 1,
+              "label": "root-warm-01-bun",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-warm-01-bun.json",
+              "wall_seconds": 61.512
+            },
+            {
+              "child_cpu_seconds": 283.41,
+              "child_max_rss_bytes": 4253859840,
+              "exit_code": 1,
+              "label": "root-warm-02-bun",
+              "modified_z": -1.174,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-warm-02-bun.json",
+              "wall_seconds": 60.356
+            },
+            {
+              "child_cpu_seconds": 304.41,
+              "child_max_rss_bytes": 4428398592,
+              "exit_code": 1,
+              "label": "root-warm-03-bun",
+              "modified_z": 2.413,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-warm-03-bun.json",
+              "wall_seconds": 63.887
+            },
+            {
+              "child_cpu_seconds": 293.054,
+              "child_max_rss_bytes": 4354293760,
+              "exit_code": 1,
+              "label": "root-warm-04-bun",
+              "modified_z": 0.402,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-warm-04-bun.json",
+              "wall_seconds": 61.908
+            },
+            {
+              "child_cpu_seconds": 287.23,
+              "child_max_rss_bytes": 4143382528,
+              "exit_code": 1,
+              "label": "root-warm-05-bun",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/root-warm-05-bun.json",
+              "wall_seconds": 60.848
+            }
+          ],
+          "stdev_seconds": 1.36
+        },
+        "node": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 836,
+            "files_reported": 836,
+            "label": "root-warm-01-node",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 12447,
+            "tests_pending": 23,
+            "tests_todo": 0,
+            "tests_total": 12470
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 1.984,
+          "mad_to_median": 0.0205,
+          "max_seconds": 99.74,
+          "median_seconds": 96.779,
+          "median_without_outliers": 96.779,
+          "min_seconds": 89.531,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 426.437,
+              "child_max_rss_bytes": 2658156544,
+              "exit_code": 0,
+              "label": "root-warm-01-node",
+              "modified_z": -2.464,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-warm-01-node.json",
+              "wall_seconds": 89.531
+            },
+            {
+              "child_cpu_seconds": 475.65,
+              "child_max_rss_bytes": 2665103360,
+              "exit_code": 0,
+              "label": "root-warm-02-node",
+              "modified_z": 0.559,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-warm-02-node.json",
+              "wall_seconds": 98.422
+            },
+            {
+              "child_cpu_seconds": 454.065,
+              "child_max_rss_bytes": 2656616448,
+              "exit_code": 0,
+              "label": "root-warm-03-node",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-warm-03-node.json",
+              "wall_seconds": 94.795
+            },
+            {
+              "child_cpu_seconds": 477.84,
+              "child_max_rss_bytes": 2660663296,
+              "exit_code": 0,
+              "label": "root-warm-04-node",
+              "modified_z": 1.007,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-warm-04-node.json",
+              "wall_seconds": 99.74
+            },
+            {
+              "child_cpu_seconds": 464.305,
+              "child_max_rss_bytes": 2728869888,
+              "exit_code": 0,
+              "label": "root-warm-05-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/root-warm-05-node.json",
+              "wall_seconds": 96.779
+            }
+          ],
+          "stdev_seconds": 3.989
+        }
+      },
+      "schedule": "retrieved/schedules/root-warm.json",
+      "warmup_labels": {
+        "bun": [
+          "root-warm-00-bun"
+        ],
+        "node": [
+          "root-warm-00-node"
+        ]
+      }
+    },
+    "sdk/cold": {
+      "gate": {
+        "bun_median": 0.784,
+        "formula": "bun_median / node_median - 1",
+        "node_median": 1.056,
+        "slowdown": -0.2576,
+        "slowdown_without_outliers": -0.2576,
+        "threshold": 0.1,
+        "verdict": "PASS",
+        "verdict_without_outliers": "PASS"
+      },
+      "runtimes": {
+        "bun": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "sdk-cold-r2-01-bun",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 27,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 27
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.003,
+          "mad_to_median": 0.0038,
+          "max_seconds": 0.796,
+          "median_seconds": 0.784,
+          "median_without_outliers": 0.784,
+          "min_seconds": 0.778,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 0.654,
+              "child_max_rss_bytes": 140886016,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-01-bun",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-cold-r2-01-bun.json",
+              "wall_seconds": 0.784
+            },
+            {
+              "child_cpu_seconds": 0.649,
+              "child_max_rss_bytes": 139968512,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-02-bun",
+              "modified_z": 2.698,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-cold-r2-02-bun.json",
+              "wall_seconds": 0.796
+            },
+            {
+              "child_cpu_seconds": 0.638,
+              "child_max_rss_bytes": 138510336,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-03-bun",
+              "modified_z": -0.45,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-cold-r2-03-bun.json",
+              "wall_seconds": 0.782
+            },
+            {
+              "child_cpu_seconds": 0.67,
+              "child_max_rss_bytes": 138100736,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-04-bun",
+              "modified_z": 0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-cold-r2-04-bun.json",
+              "wall_seconds": 0.787
+            },
+            {
+              "child_cpu_seconds": 0.645,
+              "child_max_rss_bytes": 139870208,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-05-bun",
+              "modified_z": -1.349,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-cold-r2-05-bun.json",
+              "wall_seconds": 0.778
+            }
+          ],
+          "stdev_seconds": 0.007
+        },
+        "node": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "sdk-cold-r2-01-node",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 27,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 27
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.003,
+          "mad_to_median": 0.0028,
+          "max_seconds": 1.059,
+          "median_seconds": 1.056,
+          "median_without_outliers": 1.056,
+          "min_seconds": 1.047,
+          "n": 5,
+          "outliers": [],
+          "samples": [
+            {
+              "child_cpu_seconds": 1.175,
+              "child_max_rss_bytes": 144834560,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-01-node",
+              "modified_z": 0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-cold-r2-01-node.json",
+              "wall_seconds": 1.059
+            },
+            {
+              "child_cpu_seconds": 1.16,
+              "child_max_rss_bytes": 145014784,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-02-node",
+              "modified_z": -2.024,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-cold-r2-02-node.json",
+              "wall_seconds": 1.047
+            },
+            {
+              "child_cpu_seconds": 1.143,
+              "child_max_rss_bytes": 144293888,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-03-node",
+              "modified_z": -0.899,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-cold-r2-03-node.json",
+              "wall_seconds": 1.052
+            },
+            {
+              "child_cpu_seconds": 1.169,
+              "child_max_rss_bytes": 143523840,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-04-node",
+              "modified_z": 0.45,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-cold-r2-04-node.json",
+              "wall_seconds": 1.058
+            },
+            {
+              "child_cpu_seconds": 1.187,
+              "child_max_rss_bytes": 143491072,
+              "exit_code": 0,
+              "label": "sdk-cold-r2-05-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-cold-r2-05-node.json",
+              "wall_seconds": 1.056
+            }
+          ],
+          "stdev_seconds": 0.005
+        }
+      },
+      "schedule": "retrieved/schedules/sdk-cold-r2.json",
+      "warmup_labels": {
+        "bun": [],
+        "node": []
+      }
+    },
+    "sdk/warm": {
+      "gate": {
+        "bun_median": 0.766,
+        "formula": "bun_median / node_median - 1",
+        "node_median": 1.036,
+        "slowdown": -0.2606,
+        "slowdown_without_outliers": -0.2592,
+        "threshold": 0.1,
+        "verdict": "PASS",
+        "verdict_without_outliers": "PASS"
+      },
+      "runtimes": {
+        "bun": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "sdk-warm-r2-01-bun",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 27,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 27
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.004,
+          "mad_to_median": 0.0052,
+          "max_seconds": 0.773,
+          "median_seconds": 0.766,
+          "median_without_outliers": 0.7675000000000001,
+          "min_seconds": 0.734,
+          "n": 5,
+          "outliers": [
+            "sdk-warm-r2-04-bun"
+          ],
+          "samples": [
+            {
+              "child_cpu_seconds": 0.643,
+              "child_max_rss_bytes": 140050432,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-01-bun",
+              "modified_z": 1.18,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-warm-r2-01-bun.json",
+              "wall_seconds": 0.773
+            },
+            {
+              "child_cpu_seconds": 0.628,
+              "child_max_rss_bytes": 138412032,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-02-bun",
+              "modified_z": 0.506,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-warm-r2-02-bun.json",
+              "wall_seconds": 0.769
+            },
+            {
+              "child_cpu_seconds": 0.631,
+              "child_max_rss_bytes": 140378112,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-03-bun",
+              "modified_z": -0.674,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-warm-r2-03-bun.json",
+              "wall_seconds": 0.762
+            },
+            {
+              "child_cpu_seconds": 0.573,
+              "child_max_rss_bytes": 139739136,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-04-bun",
+              "modified_z": -5.396,
+              "outlier": true,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-warm-r2-04-bun.json",
+              "wall_seconds": 0.734
+            },
+            {
+              "child_cpu_seconds": 0.627,
+              "child_max_rss_bytes": 139034624,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-05-bun",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-head-bun/vitest-json/sdk-warm-r2-05-bun.json",
+              "wall_seconds": 0.766
+            }
+          ],
+          "stdev_seconds": 0.016
+        },
+        "node": {
+          "exit_codes": [
+            0
+          ],
+          "inventory_first_sample": {
+            "failed_files": [],
+            "files_failed": 0,
+            "files_passed": 1,
+            "files_reported": 1,
+            "label": "sdk-warm-r2-01-node",
+            "success": true,
+            "tests_failed": 0,
+            "tests_passed": 27,
+            "tests_pending": 0,
+            "tests_todo": 0,
+            "tests_total": 27
+          },
+          "inventory_identical_across_samples": true,
+          "mad_seconds": 0.0,
+          "mad_to_median": 0.0,
+          "max_seconds": 1.055,
+          "median_seconds": 1.036,
+          "median_without_outliers": 1.036,
+          "min_seconds": 1.036,
+          "n": 5,
+          "outliers": [
+            "sdk-warm-r2-01-node",
+            "sdk-warm-r2-03-node"
+          ],
+          "samples": [
+            {
+              "child_cpu_seconds": 1.144,
+              "child_max_rss_bytes": 144228352,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-01-node",
+              "modified_z": "inf",
+              "outlier": true,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-warm-r2-01-node.json",
+              "wall_seconds": 1.045
+            },
+            {
+              "child_cpu_seconds": 1.134,
+              "child_max_rss_bytes": 145358848,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-02-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-warm-r2-02-node.json",
+              "wall_seconds": 1.036
+            },
+            {
+              "child_cpu_seconds": 1.179,
+              "child_max_rss_bytes": 143540224,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-03-node",
+              "modified_z": "inf",
+              "outlier": true,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-warm-r2-03-node.json",
+              "wall_seconds": 1.055
+            },
+            {
+              "child_cpu_seconds": 1.147,
+              "child_max_rss_bytes": 143785984,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-04-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-warm-r2-04-node.json",
+              "wall_seconds": 1.036
+            },
+            {
+              "child_cpu_seconds": 1.139,
+              "child_max_rss_bytes": 144211968,
+              "exit_code": 0,
+              "label": "sdk-warm-r2-05-node",
+              "modified_z": 0.0,
+              "outlier": false,
+              "receipt": null,
+              "vitest_json": "/Users/navide/eval/t06-base-node/vitest-json/sdk-warm-r2-05-node.json",
+              "wall_seconds": 1.036
+            }
+          ],
+          "stdev_seconds": 0.008
+        }
+      },
+      "schedule": "retrieved/schedules/sdk-warm-r2.json",
+      "warmup_labels": {
+        "bun": [
+          "sdk-warm-r2-00-bun"
+        ],
+        "node": [
+          "sdk-warm-r2-00-node"
+        ]
+      }
+    }
+  },
+  "runtime_identity": {
+    "dom": {
+      "bun": {
+        "bun_named_executables": [
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun"
+        ],
+        "case_owned_executables": [
+          "/Users/navide/eval/t06-head-bun/source/node_modules/.bun/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun"
+        ],
+        "exit_code": 0,
+        "foreign_executables": [],
+        "label": "dom-warm-900-bun-identity",
+        "node_named_executables": [],
+        "not_exhaustive_detached_or_fast_child_proof": true,
+        "observation_error_reasons": [],
+        "observed_process_count": 9,
+        "remaining_observed_owned": 0,
+        "samples": 2,
+        "wall_seconds": 0.561
+      },
+      "node": {
+        "bun_named_executables": [],
+        "case_owned_executables": [
+          "/Users/navide/eval/t06-base-node/source/node_modules/.pnpm/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+          "/Users/navide/eval/t06-base-node/tools/node/bin/node"
+        ],
+        "exit_code": 0,
+        "foreign_executables": [],
+        "label": "dom-warm-900-node-identity",
+        "node_named_executables": [
+          "/Users/navide/eval/t06-base-node/tools/node/bin/node"
+        ],
+        "not_exhaustive_detached_or_fast_child_proof": true,
+        "observation_error_reasons": [],
+        "observed_process_count": 8,
+        "remaining_observed_owned": 0,
+        "samples": 4,
+        "wall_seconds": 1.083
+      }
+    },
+    "root": {
+      "bun": {
+        "bun_named_executables": [
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun"
+        ],
+        "case_owned_executables": [
+          "/Users/navide/eval/t06-head-bun/source/node_modules/.bun/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+          "/Users/navide/eval/t06-head-bun/tmp/backend-escape-DYnTeM/package/backend/acme-df",
+          "/Users/navide/eval/t06-head-bun/tmp/backend-escape-IZK4IA/package/backend/acme-df",
+          "/Users/navide/eval/t06-head-bun/tmp/backend-escape-K6Yns1/package/backend/acme-df",
+          "/Users/navide/eval/t06-head-bun/tmp/backend-escape-Ny7ppF/package/backend/acme-df",
+          "/Users/navide/eval/t06-head-bun/tmp/backend-escape-zItfl9/package/backend/acme-df",
+          "/Users/navide/eval/t06-head-bun/tmp/dev-backend-7Mkp6E/plugin/backend/acme-echo",
+          "/Users/navide/eval/t06-head-bun/tmp/fn-key-test-KKs5qA/navide-fn-key",
+          "/Users/navide/eval/t06-head-bun/tmp/navide-plugin-install-F4dBG4/acme.demo/backend/entry",
+          "/Users/navide/eval/t06-head-bun/tmp/third-party-e2e-WPsn3M/package/backend/acme-indexer",
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun",
+          "/Users/navide/eval/t06-head-bun/tools/uv/bin/uv",
+          "/Users/navide/eval/t06-head-bun/uv-python/cpython-3.12.11-macos-aarch64-none/bin/python3.12"
+        ],
+        "exit_code": 1,
+        "foreign_executables": [
+          "/Library/Developer/CommandLineTools/usr/bin/clang",
+          "/bin/bash",
+          "/usr/bin/env",
+          "/usr/bin/sandbox-exec"
+        ],
+        "label": "root-warm-900-bun-identity",
+        "node_named_executables": [],
+        "not_exhaustive_detached_or_fast_child_proof": true,
+        "observation_error_reasons": [
+          "errno:3",
+          "numeric-disappearance"
+        ],
+        "observed_process_count": 477,
+        "remaining_observed_owned": 0,
+        "samples": 169,
+        "wall_seconds": 55.825
+      },
+      "node": {
+        "bun_named_executables": [],
+        "case_owned_executables": [
+          "/Users/navide/eval/t06-base-node/source/node_modules/.pnpm/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+          "/Users/navide/eval/t06-base-node/tmp/backend-escape-8UN8Zi/package/backend/acme-df",
+          "/Users/navide/eval/t06-base-node/tmp/backend-escape-FRXbUq/package/backend/acme-df",
+          "/Users/navide/eval/t06-base-node/tmp/backend-escape-FnDlW9/package/backend/acme-df",
+          "/Users/navide/eval/t06-base-node/tmp/backend-escape-pXcXDL/package/backend/acme-df",
+          "/Users/navide/eval/t06-base-node/tmp/backend-escape-qEh3yn/package/backend/acme-df",
+          "/Users/navide/eval/t06-base-node/tmp/dev-backend-3OmKMl/double-fork/backend/acme-df",
+          "/Users/navide/eval/t06-base-node/tmp/dev-backend-3OmKMl/plugin/backend/acme-echo",
+          "/Users/navide/eval/t06-base-node/tmp/fn-key-test-cbI3JL/navide-fn-key",
+          "/Users/navide/eval/t06-base-node/tmp/sandbox-escape-Rywh6b/package/probe",
+          "/Users/navide/eval/t06-base-node/tmp/third-party-e2e-2DQLFC/package/backend/acme-indexer",
+          "/Users/navide/eval/t06-base-node/tools/node/bin/node",
+          "/Users/navide/eval/t06-base-node/tools/uv/bin/uv",
+          "/Users/navide/eval/t06-base-node/uv-python/cpython-3.12.11-macos-aarch64-none/bin/python3.12"
+        ],
+        "exit_code": 0,
+        "foreign_executables": [
+          "/Library/Developer/CommandLineTools/usr/bin/clang",
+          "/bin/bash",
+          "/bin/sh",
+          "/usr/bin/cc",
+          "/usr/bin/env"
+        ],
+        "label": "root-warm-900-node-identity",
+        "node_named_executables": [
+          "/Users/navide/eval/t06-base-node/tools/node/bin/node"
+        ],
+        "not_exhaustive_detached_or_fast_child_proof": true,
+        "observation_error_reasons": [
+          "errno:3",
+          "numeric-disappearance"
+        ],
+        "observed_process_count": 664,
+        "remaining_observed_owned": 0,
+        "samples": 257,
+        "wall_seconds": 86.951
+      }
+    },
+    "sdk": {
+      "bun": {
+        "bun_named_executables": [
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun"
+        ],
+        "case_owned_executables": [
+          "/Users/navide/eval/t06-head-bun/source/node_modules/.bun/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+          "/Users/navide/eval/t06-head-bun/tools/bun/bin/bun"
+        ],
+        "exit_code": 0,
+        "foreign_executables": [],
+        "label": "sdk-warm-900-bun-identity",
+        "node_named_executables": [],
+        "not_exhaustive_detached_or_fast_child_proof": true,
+        "observation_error_reasons": [],
+        "observed_process_count": 9,
+        "remaining_observed_owned": 0,
+        "samples": 3,
+        "wall_seconds": 0.878
+      },
+      "node": {
+        "bun_named_executables": [],
+        "case_owned_executables": [
+          "/Users/navide/eval/t06-base-node/source/node_modules/.pnpm/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+          "/Users/navide/eval/t06-base-node/tools/node/bin/node"
+        ],
+        "exit_code": 0,
+        "foreign_executables": [],
+        "label": "sdk-warm-900-node-identity",
+        "node_named_executables": [
+          "/Users/navide/eval/t06-base-node/tools/node/bin/node"
+        ],
+        "not_exhaustive_detached_or_fast_child_proof": true,
+        "observation_error_reasons": [],
+        "observed_process_count": 8,
+        "remaining_observed_owned": 0,
+        "samples": 4,
+        "wall_seconds": 1.155
+      }
+    }
+  },
+  "schema": "navide-bun-evaluation-ticket-evidence/v1",
+  "shared_worktree": {
+    "branch": "eval/issue-2-bun-toolchain",
+    "head": "58508e2b611cc0dcfc27af1b5c66ffe896b0a7b9",
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain",
+    "source_changes": "none; this ticket writes only its two tracked deliverables under docs/toolchain-evaluation/bun/ticket-06/",
+    "status_porcelain": []
+  },
+  "stage": "frozen-delivery",
+  "summary": "Bun 1.4.2 is faster than the Node 22.23.2/pnpm 10.0.0 control in all six required workload x cache conditions (median slowdown between -25.8% and -41.3%), so the packet's \">10% test-workflow slowdown fails\" gate is not triggered in any condition. Test content is matched: the root suite selects the same 836 files and 12,470 tests in both runtimes, and the Bun root run carries the one accepted ticket-04 residual failure (pluginExternalWorkspace.test.ts, 12,446 passed / 1 failed) which is kept visible in the timing samples.",
+  "supplementary_coverage": [
+    {
+      "files": [
+        "tests/cli/backendWire.test.ts",
+        "tests/cli/contractReporter.test.ts",
+        "tests/cli/coordination.test.ts",
+        "tests/cli/vendorContracts.test.ts"
+      ],
+      "item": "cli (ticket 04: 4 files / 53 tests)",
+      "selected_in_root_run": true,
+      "timed_in_samples": true
+    },
+    {
+      "files": [
+        "plugins/navide-mini-ide/tests/independence.test.ts",
+        "plugins/navide-mini-ide/tests/manifest.test.ts",
+        "plugins/navide-mini-ide/tests/packageBoundary.test.ts"
+      ],
+      "item": "mini-ide standalone (ticket 04: 3 files / 5 tests, own vitest config)",
+      "note": "ticket 04 ran these through plugins/navide-mini-ide/vitest.config.ts; the root config selects the same three files",
+      "selected_in_root_run": true,
+      "timed_in_samples": true
+    },
+    {
+      "files": [
+        "src/main/plugins/pluginBackendSandbox.test.ts"
+      ],
+      "item": "sandbox (ticket 04: 19 passed + 7 skipped)",
+      "selected_in_root_run": true,
+      "timed_in_samples": true
+    },
+    {
+      "files": [
+        "packages/plugin-sdk/bin/dev-backend.test.ts"
+      ],
+      "item": "dev_backend (ticket 04: 7 passed + 1 skipped)",
+      "selected_in_root_run": true,
+      "timed_in_samples": true
+    },
+    {
+      "files": [
+        "src/main/plugins/pluginBackendHost.thirdParty.test.ts"
+      ],
+      "item": "third_party_seatbelt (ticket 04: 12 passed)",
+      "selected_in_root_run": true,
+      "timed_in_samples": true
+    },
+    {
+      "files": [
+        "tests/integration/plansPackagedRoundtrip.test.ts",
+        "src/main/plugins/pluginBackendHost.test.ts",
+        "src/main/plugins/pluginBackendSupervisor.test.ts"
+      ],
+      "item": "packaged_lifecycle (ticket 04: 3 files / 124 tests with NAVIDE_TEST_ARTIFACTS_PREBUILT=1, NAVIDE_TEST_PACKAGED_PLANS=1, NAVIDE_TEST_PRODUCTION_PLANS_BACKEND=1)",
+      "note": "the files are selected by the root run, but the daily workflow does not set the three gate variables, so 15 of their tests are conditionally pending and the packaged-lifecycle coverage was not executed in any timed sample",
+      "selected_in_root_run": true,
+      "timed_in_samples": false
+    },
+    {
+      "files": [],
+      "item": "typechecks (ticket 04: typecheck:node, typecheck:integration)",
+      "note": "not part of the root Vitest workflow",
+      "selected_in_root_run": false,
+      "timed_in_samples": false
+    }
+  ],
+  "supplementary_samples": {
+    "dom-warm.json": {
+      "condition": "warm",
+      "runtimes": {
+        "bun": {
+          "max": 0.496,
+          "median": 0.493,
+          "min": 0.488,
+          "n": 5
+        },
+        "node": {
+          "max": 0.862,
+          "median": 0.831,
+          "min": 0.813,
+          "n": 5
+        }
+      },
+      "slowdown": -0.4067,
+      "workload": "dom"
+    },
+    "sdk-cold.json": {
+      "condition": "cold",
+      "runtimes": {
+        "bun": {
+          "max": 0.741,
+          "median": 0.728,
+          "min": 0.726,
+          "n": 5
+        },
+        "node": {
+          "max": 1.228,
+          "median": 1.016,
+          "min": 1.008,
+          "n": 5
+        }
+      },
+      "slowdown": -0.2835,
+      "workload": "sdk"
+    },
+    "sdk-warm.json": {
+      "condition": "warm",
+      "runtimes": {
+        "bun": {
+          "max": 0.778,
+          "median": 0.77,
+          "min": 0.761,
+          "n": 5
+        },
+        "node": {
+          "max": 1.049,
+          "median": 1.043,
+          "min": 1.037,
+          "n": 5
+        }
+      },
+      "slowdown": -0.2617,
+      "workload": "sdk"
+    }
+  },
+  "ticket": "ticket-06-01",
+  "tracked_deliverables": [
+    "docs/toolchain-evaluation/bun/ticket-06/report.md",
+    "docs/toolchain-evaluation/bun/ticket-06/evidence.json"
+  ],
+  "version": 1,
+  "warm_verification_record_scope": {
+    "dom-identity.json": {
+      "covered_paths": [
+        "node_modules/.vite",
+        "node_modules/.cache/navide-artifact-inputs.json",
+        "packages/plugin-contracts/dist",
+        "packages/plugin-sdk/dist",
+        "packages/plugin-ui/dist",
+        "dist-plugins/navide-mini-ide"
+      ],
+      "covers_plugin_sdk_dist": true,
+      "has_required_flags": false,
+      "required_paths": null,
+      "verified_false": 2,
+      "verified_true": 0
+    },
+    "dom-warm-r2.json": {
+      "covered_paths": [
+        "node_modules/.vite",
+        "node_modules/.vite-temp",
+        "node_modules/.cache/navide-artifact-inputs.json",
+        "packages/plugin-contracts/dist",
+        "packages/plugin-sdk/dist",
+        "packages/plugin-ui/dist",
+        "dist-plugins/navide-mini-ide"
+      ],
+      "covers_plugin_sdk_dist": true,
+      "has_required_flags": true,
+      "required_paths": [
+        "node_modules/.vite"
+      ],
+      "verified_false": 0,
+      "verified_true": 12
+    },
+    "dom-warm.json": {
+      "covered_paths": [
+        "node_modules/.vite",
+        "node_modules/.cache/navide-artifact-inputs.json",
+        "packages/plugin-contracts/dist",
+        "packages/plugin-sdk/dist",
+        "packages/plugin-ui/dist",
+        "dist-plugins/navide-mini-ide"
+      ],
+      "covers_plugin_sdk_dist": true,
+      "has_required_flags": false,
+      "required_paths": null,
+      "verified_false": 12,
+      "verified_true": 0
+    },
+    "root-identity.json": {
+      "covered_paths": [
+        "node_modules/.vite",
+        "node_modules/.cache/navide-artifact-inputs.json",
+        "packages/plugin-contracts/dist",
+        "packages/plugin-ui/dist",
+        "dist-plugins/navide-mini-ide"
+      ],
+      "covers_plugin_sdk_dist": false,
+      "has_required_flags": false,
+      "required_paths": null,
+      "verified_false": 0,
+      "verified_true": 2
+    },
+    "root-warm.json": {
+      "covered_paths": [
+        "node_modules/.vite",
+        "node_modules/.cache/navide-artifact-inputs.json",
+        "packages/plugin-contracts/dist",
+        "packages/plugin-ui/dist",
+        "dist-plugins/navide-mini-ide"
+      ],
+      "covers_plugin_sdk_dist": false,
+      "has_required_flags": false,
+      "required_paths": null,
+      "verified_false": 0,
+      "verified_true": 12
+    },
+    "sdk-identity.json": {
+      "covered_paths": [
+        "node_modules/.vite"
+      ],
+      "covers_plugin_sdk_dist": false,
+      "has_required_flags": false,
+      "required_paths": null,
+      "verified_false": 0,
+      "verified_true": 2
+    },
+    "sdk-warm-r2.json": {
+      "covered_paths": [
+        "node_modules/.vite",
+        "node_modules/.vite-temp",
+        "node_modules/.cache/navide-artifact-inputs.json",
+        "packages/plugin-contracts/dist",
+        "packages/plugin-sdk/dist",
+        "packages/plugin-ui/dist",
+        "dist-plugins/navide-mini-ide"
+      ],
+      "covers_plugin_sdk_dist": true,
+      "has_required_flags": true,
+      "required_paths": [
+        "node_modules/.vite"
+      ],
+      "verified_false": 0,
+      "verified_true": 12
+    },
+    "sdk-warm.json": {
+      "covered_paths": [
+        "node_modules/.vite"
+      ],
+      "covers_plugin_sdk_dist": false,
+      "has_required_flags": false,
+      "required_paths": null,
+      "verified_false": 0,
+      "verified_true": 12
+    }
+  },
+  "workloads": {
+    "definition": {
+      "dom": "EditorPane Vue/happy-dom single-file suite",
+      "root": "full root non-watch Vitest workflow (all three projects)",
+      "sdk": "public SDK non-DOM single-file suite"
+    },
+    "files": {
+      "dom": "packages/plugin-ui/src/editor/EditorPane.test.ts (single file, Vue/happy-dom)",
+      "root": "vitest run with no positional filter: unit + cli + artifacts projects",
+      "sdk": "packages/plugin-sdk/src/index.test.ts (single file, non-DOM)"
+    },
+    "selection_evidence": "packet evaluation/spec.md performance-method table and ticket-02 strategy evidence name these two files as the initial single-file workloads",
+    "supplementary_coverage": "the root run selects all three projects (unit, cli, artifacts) and its 836-file selection includes every file ticket 04 used for its supplementary gates; coverage ticket 04 ran with environment gates the daily workflow does not set (packaged lifecycle, typechecks) was not executed or timed here and is not claimed as timed - see supplementary_coverage"
+  }
+}
