@@ -1,0 +1,81 @@
+{
+  "class": "documentation and audit correction; no product, test, harness or build change, no re-measurement",
+  "committed_history_untouched": true,
+  "dispatch": {
+    "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/checkpointB-correction-01/correction-03-dispatch.md",
+    "sha256": "23dff226b3609f24b9414d886df1c61fbf32ead50fd120b9a9b23ee3d921d7b9"
+  },
+  "document": "Checkpoint B errata 03",
+  "entries": [
+    {
+      "cb_e10_wording": {
+        "authorizations": "No test change is authorized and user option A is not reopened.",
+        "severity": "P3",
+        "substance": "A future passing gate must address the path actually exercised; fixing Bun's file: non-optional-peer resolution alone cannot repair the shipped helper that still requests pnpm.",
+        "timing": "later - before 07/08 gate design relies on the statement"
+      },
+      "class": "audit-trail pointer and scope correction (round-3 A2)",
+      "committed_file": null,
+      "corrected_statement": "The blanket claim of deviation-01 that 'Nothing existing was edited, moved or deleted by this correction' (restated as 'Nothing else in correction 01 or correction 02 changed') is withdrawn and replaced by an exact inventory in deviation-02: three correction-02 scripts rewritten in place (cb02-forensics.py 9,282 B -> 12,212 B; cb02-recover-artifacts.py 11,372 B -> 14,158 B -> 14,243 B; cb02-freeze-anchor-v2.py 9,133 B -> 9,095 B), two audit-record files replaced after the first anchor-v2 attempt froze them (deviation-01.md 11,630 B aa76509d -> 12,746 B 51b19f68; deviation-01.json 20,665 B e9992b48 -> 22,318 B cd892a2d), and two path moves (scripts/cb02-stablefd.py -> scripts/cb02_stablefd.py; anchor-v2.json/.sha256 -> superseded/anchor-v2-first-attempt.*). No deletions occurred during correction 02. Re-measured: the first anchor-v2 attempt (superseded/anchor-v2-first-attempt.json, b15bd20b) verifies 36 of its 38 bindings; the two failures are exactly the replaced audit records, and everything else, including all of correction 01, still verifies. The two earlier bound versions are published hash-exact and labelled RECONSTRUCTED at recovered/deviation-01.first-anchor.reconstructed.md (aa76509d, 11,630 B) and recovered/deviation-01.first-anchor.reconstructed.json (e9992b48, 20,665 B), each derived twice with both derivations agreeing byte-for-byte. What remains true: no committed report, tracked file or correction-01 delivered artifact was edited, moved or deleted during correction 02, and no product/test/build artifact was touched by any of the three corrections.",
+      "evidence": [
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/deviation-02.md",
+          "role": "audit addendum (sha256 frozen by anchor-v3.json)",
+          "sha256": null
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/deviation-02.revision-02.json",
+          "role": "machine-readable revision 02 (sha256 frozen by anchor-v3.json)",
+          "sha256": null
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/receipts/cb03-reconstruction.txt",
+          "role": "reconstruction receipt with both derivations",
+          "sha256": null
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/recovered/deviation-01.first-anchor.reconstructed.md",
+          "role": "reconstructed first-anchor audit record",
+          "sha256": "aa76509d44adf0872e641443f6acc48209e8bbfcda24dc34f0f10f3923656f2c"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/recovered/deviation-01.first-anchor.reconstructed.json",
+          "role": "reconstructed first-anchor audit record",
+          "sha256": "e9992b48bcb2d89b61bb7288af1124f066e0c4c3d6d6a56f08361a157e62b0c3"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B/sol-round3.md",
+          "role": "round-3 finding A2 and the inverse-transform prescription",
+          "sha256": "debadcb7adf88453afe25feff061b29f9ed6262c01bd7ea81bd8942e1987ac94"
+        }
+      ],
+      "id": "CB-E16",
+      "line": null,
+      "quote": null,
+      "revision_note": {
+        "bytes": 13220,
+        "current_revision": "deviation-02.revision-02.json",
+        "detail": "Its first revision recorded one 64-character hash with a fabricated tail (prefix fa06c6f3783c2c42 real, remainder from no record) - the CB-D08 failure mode repeating; revision 02 (deviation-02.revision-02.json) records the four session-payload hashes verified in full.",
+        "path": "deviation-02.json",
+        "sha256": "5821e8cb440009ae0bb970b78e1c2857354e6c6dc4fc781348e376f0d5e1ab1e",
+        "status": "superseded, left in place"
+      },
+      "severity": "P2",
+      "ticket": "03-06"
+    }
+  ],
+  "fixed_point": {
+    "branch": "eval/issue-2-bun-toolchain",
+    "head": "b5ea6b65713e0ddd385e798ccc2da68d48ff93ca",
+    "worktree": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain"
+  },
+  "issue": "Navide issue 2 - Bun toolchain evaluation (macOS E1-E3, tickets 01-06)",
+  "limitations": [
+    "Documentation and audit only: nothing here changes product source, tests, harness or build outputs, and no measurement was rerun.",
+    "CB-E16 is a pointer; the authoritative details and identities live in deviation-02.*, whose hashes are frozen by anchor-v3.json.",
+    "Under correction-03 strict mode, superseded files are left in place and disclosed rather than edited or deleted."
+  ],
+  "relation_to_earlier_pairs": "Additive. errata-01.* remains bound by anchor f74e06c1...; errata-02.* remains bound by anchor-v2.json 26c9f68c...; all three pairs are bound by anchor-v3.json.",
+  "stage": "Checkpoint B round-3 HOLD correction (append-only addendum to errata 01 and 02)",
+  "supersedes": null
+}

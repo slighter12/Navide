@@ -1,0 +1,97 @@
+{
+  "document": "Checkpoint B errata 02",
+  "class": "documentation and evidence correction; no product, test, harness or build change, no re-measurement",
+  "issue": "Navide issue 2 - Bun toolchain evaluation (macOS E1-E3, tickets 01-06)",
+  "stage": "Checkpoint B round-2 HOLD correction (append-only addendum to errata 01)",
+  "dispatch": {
+    "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/coordination/checkpointB-correction-01/correction-02-dispatch.md",
+    "sha256": "2aa01b40c1e3a998cb8ead1b518b6ea68055318b95bb2ea3321159603942f4ec"
+  },
+  "fixed_point": {
+    "worktree": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain",
+    "branch": "eval/issue-2-bun-toolchain",
+    "head": "b5ea6b65713e0ddd385e798ccc2da68d48ff93ca"
+  },
+  "supersedes": null,
+  "relation_to_errata_01": "Additive. errata-01.md and errata-01.json remain unchanged and stay bound by correction anchor f74e06c1f83839c88c51001aff592d153c5435a8c3b6b8f03171e042d8c939c8; the entries below are new. Both pairs are bound by anchor-v2.json.",
+  "committed_history_untouched": true,
+  "entries": [
+    {
+      "id": "CB-E14",
+      "ticket": "03",
+      "class": "evidence classification repeated outside the report (reviewer N2)",
+      "severity": "P3",
+      "committed_file": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain/docs/toolchain-evaluation/bun/ticket-03/startup-v1/evidence.json",
+      "committed_file_sha256": "2cc308de5e05b24925f7539a21b6c158f6fbfe6cb891156654da243bb727b439",
+      "line": 1829,
+      "section": "limits[2]",
+      "quote": "the 8 size-differing pairs each lose exactly 6 bytes to one if(!!x)->if(x) (-2) and one new Error(->Error( (-4), and applying those two transforms to both sides leaves every content-differing pair with equal length, i.e. all remaining differences (minified names and content-hash tokens) are length-preserving and net 0. Nothing is claimed about the plans bundle beyond that, and the earlier masked-structure comparison cannot show name-only differences, so no name/hash-only statement is relied on.",
+      "corrected_statement": "This repeats the length-only inference that CB-E01 corrects, and it receives the same correction. The byte accounting is unchanged (8 size-differing pairs; the two transforms account for 8 removed `if(!!` -> `if(` and 8 removed `new Error(` -> `Error(` instances, each in exactly those 8 pairs). What the retained token-level measurement adds: after masking the trailing content-hash filename token, 381 of the 389 content-differing pairs are byte-identical; the remaining 8 pairs have equal byte length and differ only in 2101 single-character minified identifier positions (17 distinct directed substitutions, 13 undirected; 2 in property position; 0 keyword/literal/global hits), confirmed by a parse-free byte-run alignment. The two counted transforms are behaviour-preserving; the identifier renames are NOT proven semantically equivalent (no scope analysis). The closing caution of the original sentence ('no name/hash-only statement is relied on') is superseded by that measurement; it remains true only of the earlier masked-structure comparison.",
+      "evidence": [
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/scripts/cb01-bundle-token-producer.py",
+          "sha256": "70acb46d90e72801b49f3eb7c4075df8f8a8ab534d119e2b53425f3bf5a78691"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/analysis/cb01-bundle-token-analysis.json",
+          "sha256": "7a282b4ce9768d979e72834d730d9b6a3b5cacda4daa08125fa4c0e0cb9f8614"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/receipts/cb01-bundle-token-output.txt",
+          "sha256": "e8f6033fc0304b867ba1e13c93966ccd36a52e01c54f4d869a467fec4e1c9b8b"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-03-startup-01/correction-02/analysis/c02-bundle-delta.json",
+          "sha256": "2a6f43d01e817c68abf067d5f16e3638b8f335be87809b897d721782676fb10d"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B/sol-round2.md",
+          "sha256": "e120d5db709817e3c21e56841c27f0bab957f225adb988fe4178d1c9a029f1fb",
+          "role": "independent recomputation of the corrected numbers"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B/opus-round2.md",
+          "sha256": "720b5db1da3b8869a3be09169d9b5e3f113c11ee540faf02322ebbbec1d7b7af",
+          "role": "independent recomputation of the corrected numbers"
+        }
+      ]
+    },
+    {
+      "id": "CB-E15",
+      "ticket": "03-06",
+      "class": "audit-trail pointer and manifest-note correction (reviewer A1/N1)",
+      "severity": "P2",
+      "committed_file": null,
+      "line": null,
+      "quote": null,
+      "corrected_statement": "The correction-01 preservation, read-protocol and overwrite deviations, and the outcomes of the verifiable recovery attempt, are recorded in checkpoint-B-correction-01/deviation-01.md and deviation-01.json. In particular, the note in checkpoint-B-correction-01/manifest.json (ff6f8fe395d4b52049cae6843861af46dd08303ed3637844b1eabe19548a4c68) that says 'no delivered evidence was deleted or rewritten' is incorrect: the __pycache__ bytecode file bound by pre-freeze-01/manifest.json was deleted, and the freeze script bound by that manifest was rewritten; pre-freeze-01/manifest.json now fails 2 of its 7 bindings. That manifest is bound as-is by anchor-v2.json and is not edited; deviation-01 CB-D05 and CB-D06 are the correction. This entry points at that record and does not restate it in full.",
+      "evidence": [
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/deviation-01.md",
+          "sha256": null,
+          "role": "deviation record (sha256 frozen by anchor-v2.json)"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/deviation-01.json",
+          "sha256": null,
+          "role": "machine-readable deviation record (sha256 frozen by anchor-v2.json)"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/receipts/cb02-forensics-v2.json",
+          "sha256": null,
+          "role": "pre-freeze binding re-verification (2 of 7 failing)"
+        },
+        {
+          "path": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/checkpoint-B-correction-01/manifest.json",
+          "sha256": "ff6f8fe395d4b52049cae6843861af46dd08303ed3637844b1eabe19548a4c68",
+          "role": "correction-01 manifest carrying the incorrect note, bound as-is"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Documentation and evidence only: nothing here changes product source, tests, harness, build outputs or the guest, and no measurement was rerun.",
+    "CB-E14 corrects a committed evidence.json limits entry; the committed file itself is history and remains untouched.",
+    "CB-E15 is a pointer; the authoritative deviation details are in deviation-01.md/.json, whose hashes are frozen by anchor-v2.json."
+  ]
+}
