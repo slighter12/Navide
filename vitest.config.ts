@@ -41,6 +41,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Bun-only: recover the calling file for relative vi.mock ids. Inert on Node.
+    setupFiles: ['./tests/support/bunMockImporterAnchor.ts'],
     // Exact mock IDs from EditorPane; let Vite resolve them without a stack importer.
     alias: [
       { find: /^\.\/view\/EditorViewMonaco\.vue$/, replacement: resolve(__dirname, 'packages/plugin-ui/src/editor/view/EditorViewMonaco.vue') },
