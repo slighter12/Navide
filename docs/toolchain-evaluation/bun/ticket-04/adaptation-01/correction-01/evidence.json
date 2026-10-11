@@ -1,0 +1,130 @@
+{
+  "schema": "navide-bun-evaluation-ticket-evidence/v1",
+  "ticket": "ticket-04-adapt-01",
+  "issue": "04-macos-tests-and-plugin-lifecycle",
+  "stage": "correction-01",
+  "version": 1,
+  "summary": "Correction round for the ticket-04 adaptation delivery. P2: every reviewer-identified install shape (sequenced manifest, sequenced bun add, positional bun add/install) still fails on Bun 1.4.2 peer resolution for the private file: dependencies; only a manifest change (overrides/resolutions) installs, which is not an invocation route, so no branch was applied and the residual is restated precisely. P3: the mock-anchor helper gained a non-string guard and lost an unreachable branch; targeted Bun+Node mock sample 41/41 each, typecheck:node exit 0, and both full suites were re-run on the corrected source (Bun 12 446/23/1 with the same single residual; Node 12 447/23/0). Report fixes: alias-asymmetry clause with an empirically alias-symmetric Node control, guest-side final-run hash listing, and receipt-file annotation.",
+  "authority": {
+    "correction_dispatch": "coordination/ticket04-adapt-01/correction-01-dispatch.md",
+    "correction_dispatch_sha256": "856fdcef392edcf15b50b63f494349ab17a8dcecc892af854458aa3894c537c9",
+    "review_verdict_reference": "review dispatch dfbf3f0f (PASS WITH QUALIFICATIONS)",
+    "adaptation_dispatch": "coordination/ticket04-adapt-01/dispatch.md",
+    "adaptation_dispatch_sha256": "4c993d15c2fc693939a04aba0fc7e9486bbbeee0c0cdab0f7b841393c90f864b",
+    "worker_session": "01a128b7-7327-723f-bfa6-75b43e671f1b",
+    "delivery_scope": "correction snapshot only; v1 report, v1 evidence and the v1 anchor are untouched; no stage, commit or push"
+  },
+  "correction_policy": {
+    "v1_frozen_files_modified": false,
+    "new_snapshot_document": "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/correction-01/report.md",
+    "reason": "corrections are new reviewed snapshots, not edits to accepted history"
+  },
+  "worktree": {
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain",
+    "branch": "eval/issue-2-bun-toolchain",
+    "head": "e94c054813a6bb188a80898e4ab89fee78582920",
+    "footprint": "5 paths, +113/-4 lines",
+    "adapted_paths": [
+      {"path": "tests/support/bunMockImporterAnchor.ts", "lines": 81, "sha256": "f76256368270786f7ec09c0257d1549ccf9604849cf680f9d76304199e31ceea", "change_this_round": "+5/-3: typeof path !== 'string' guard for vi.mock(import(...)); dropped the unreachable isAbsolute branch and its import"},
+      {"path": "vitest.config.ts", "lines_added": 2, "sha256": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a", "change_this_round": "none"},
+      {"path": "tests/integration/plansBuildScripts.test.ts", "lines": "+12/-2", "sha256": "06bbb483d72b149cbc57b16fbfd4efe8d4af1b2e47d836d50b94edd8b74e683b", "change_this_round": "none"},
+      {"path": "plugins/navide-mini-ide/tests/packageBoundary.test.ts", "lines": "+9/-1", "sha256": "29dda9a719ce3b5e836a768323a32acb42f00d98c70f90f3fbd3429eb5a6bacd", "change_this_round": "none"},
+      {"path": "plugins/navide-git/tests/compositionBoundary.test.ts", "lines": "+9/-1", "sha256": "14f31a54af0fd0f50333686a427cf0eec16f50c096fb35d6d49bc82b5a0e3fc0", "change_this_round": "none"}
+    ]
+  },
+  "p2_install_shapes": {
+    "setup": "packages packed from the case source with case Bun; case package cache; --offline --ignore-scripts --omit=peer --no-save --cache-dir unless noted",
+    "results": [
+      {"shape": "A", "form": "all three file: deps in the manifest, one bun install (the test's shape)", "exit": 1, "error": "no cached manifest for @navide/plugin-contracts / @navide/plugin-sdk"},
+      {"shape": "B", "form": "sequenced manifest: contracts-only then all three", "exit": "0 then 1"},
+      {"shape": "C", "form": "sequenced bun add: contracts then sdk+ui", "exit": "0 then 1"},
+      {"shape": "D", "form": "positional bun install with empty manifest", "exit": 1},
+      {"shape": "E", "form": "positional bun install --no-save with the deps listed", "exit": 1},
+      {"shape": "F", "form": "bun add all three, then plain install", "exit": "1 then 1"},
+      {"shape": "G", "form": "positional sequenced, contracts then sdk+ui", "exit": "0 then 1"},
+      {"shape": "L", "form": "repeat: contracts-only then contracts+sdk", "exit": "0 then 1"},
+      {"shape": "M", "form": "manifest overrides pinning the three names to the same tarballs", "exit": 0, "note": "manifest change, not an invocation route; nodes installed; .bin/navide-plugin present"},
+      {"shape": "N", "form": "resolutions instead of overrides", "exit": 0},
+      {"shape": "O", "form": "shape M with --prefer-offline", "exit": 0},
+      {"shape": "round-1 online", "form": "--prefer-offline or no --offline", "exit": 1, "error": "GET https://registry.npmjs.org/@navide%2fplugin-contracts - 404"}
+    ],
+    "boundary": "@navide/plugin-sdk's non-optional peer @navide/plugin-contracts is resolved as a registry package in every invocation shape",
+    "decision": "not applied; a manifest-shape change would make the Bun and Node runs exercise different consumer shapes",
+    "site_routability": {
+      "store_path": "routable: bun pm cache prints the install cache dir (caller passes --cache-dir explicitly)",
+      "install": "blocked",
+      "run_check_and_package": "routable: bun run <script> (measured failure was the CLI's own ENOENT on a nonexistent path)",
+      "exec_navide_plugin": "routable: bun x navide-plugin or direct node_modules/.bin with the vitest-style node alias on PATH",
+      "nested_node_children": "routable: a node -e script under bun run executed with process.versions.bun set in a shell with no node on PATH"
+    },
+    "raw_outputs": "correction-01/retrieved/v2/cases/t04a-head-bun/t04a-head-bun/tmp/correction-01/",
+    "scripts": ["correction-01/scripts/probe-p2-install-shapes.sh", "correction-01/scripts/probe-p2b-exec-and-store.sh", "correction-01/scripts/probe-p2c-overrides.sh"]
+  },
+  "p3_helper_guard": {
+    "file": "tests/support/bunMockImporterAnchor.ts",
+    "diff": "+5/-3 (net +2; 79 -> 81 lines)",
+    "sha256": "f76256368270786f7ec09c0257d1549ccf9604849cf680f9d76304199e31ceea",
+    "details": ["typeof path !== 'string' delegates vi.mock(import('./x')) untouched", "removed the unreachable isAbsolute branch and its import"]
+  },
+  "corrected_runs": {
+    "mock_sample_bun": {"argv": ["vitest", "run", "--project", "unit", "<4 files>"], "exit": 0, "files": 4, "tests": 41, "passed": 41, "wall_seconds": 1.225, "receipt": "correction-01/retrieved/v2/cases/t04a-head-bun/t04a-head-bun/receipts/corr-mock-sample-bun-r2.json"},
+    "mock_sample_node": {"exit": 0, "files": 4, "tests": 41, "passed": 41, "wall_seconds": 1.503, "receipt": "correction-01/retrieved/v2/cases/t04a-base-node/t04a-base-node/receipts/corr-mock-sample-node-r2.json"},
+    "typecheck_node_bun": {"argv": ["bun", "scripts/bun-evaluation.mjs", "run", "typecheck:node"], "exit": 0, "receipt": "correction-01/retrieved/v2/cases/t04a-head-bun/t04a-head-bun/receipts/corr-bun-typecheck-node.json"},
+    "full_suite_bun": {"argv": ["bun", "scripts/bun-evaluation.mjs", "run", "test:run", "--reporter=default", "--reporter=json"], "exit": 1, "passed": 12446, "pending": 23, "failed": 1, "files_passed": 834, "files_failed": 1, "files_skipped": 1, "wall_seconds": 71.006, "failed_files": ["src/main/plugins/pluginExternalWorkspace.test.ts"], "json": "correction-01/retrieved/v2/cases/t04a-head-bun/t04a-head-bun/receipts/corr-test-run-vitest.json", "log": "correction-01/retrieved/v2/cases/t04a-head-bun/t04a-head-bun/logs/corr-test-run.log"},
+    "full_suite_node": {"argv": ["pnpm", "test:run", "--reporter=default", "--reporter=json"], "exit": 0, "passed": 12447, "pending": 23, "failed": 0, "files_passed": 835, "files_skipped": 1, "wall_seconds": 109.454, "json": "correction-01/retrieved/v2/cases/t04a-base-node/t04a-base-node/receipts/corr-node-adapted-full-vitest.json"},
+    "full_suite_node_alias_symmetric": {"argv": ["pnpm", "test:run", "--reporter=default", "--reporter=json"], "exit": 0, "passed": 12447, "pending": 23, "failed": 0, "config_sha256": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a", "json": "correction-01/retrieved/v2/cases/t04a-base-node/t04a-base-node/receipts/corr-node-alias-symmetric-vitest.json"},
+    "per_project_corrected": {"unit": "808 files / 12198 assertions / 0 failed / 7 pending", "artifacts": "23 files / 214 assertions / 1 failed (Bun) or 0 (Node) / 11 pending", "cli": "4 files / 53 passed", "outside_discovery": "tests/integration/plansPackagedRoundtrip.test.ts 5 conditionally skipped"}
+  },
+  "runtime_identity": {
+    "candidate": "case Bun 1.4.2 plus case-owned esbuild, uv/Python and fixture children only",
+    "control": "case Node 22.23.2 plus case-owned children only",
+    "external_node_pnpm_observed": [],
+    "remaining_observed_owned": 0
+  },
+  "guest_side_final_run_hashes": {
+    "candidate": "correction-01/retrieved/v2/cases/t04a-head-bun/t04a-head-bun/tmp/correction-01/adapted-source-hashes.txt",
+    "node_control": "correction-01/retrieved/v2/cases/t04a-base-node/t04a-base-node/tmp/correction-01/adapted-source-hashes.txt",
+    "annotated_copy": "correction-01/receipts/adapted-source-hashes-annotated.txt"
+  },
+  "report_fixes": {
+    "alias_asymmetry": {
+      "clause": "the round-1 Node control ran the frozen base config (4ad4e56e...) without the branch's three test.alias entries; the candidate ran the branch config (22edeec3...) with them",
+      "closure": "corr-node-alias-symmetric ran the candidate config byte-for-byte over the frozen pnpm install under Node: 12447 passed / 23 skipped / 0 failed, exit 0",
+      "limit": "an exact branch-tree Node run is unavailable because the branch tree cannot be pnpm-installed (accepted workspaces gap)"
+    },
+    "receipt_annotation": [
+      "retrieved/list/bun-list.json and node-list.json are run receipts of the first list label, not discovery data",
+      "retrieved/list/bun-list-vitest.json and node-list-vitest.json are the vitest list --json discovery output used by the inventory comparison",
+      "retrieved/cases/<case>/receipts/list.json is the run receipt of the first list attempt; the attempt's stdout was overwritten by the receipt of the same label",
+      "retrieved/cases/<case>/receipts/list-r2.json plus tmp/list-vitest.json are the usable second discovery attempt"
+    ]
+  },
+  "deviations": [
+    "First Bun and Node mock-sample runs exited 1: the four mock paths were expanded from a zsh variable without word splitting, so Vitest received one filter argument and matched no file. Re-issued with literal paths; the failed runs are retained.",
+    "The first two correction evidence tarballs missed their members (escaped glob passed literally by zsh); partial, final and v2 tarballs are all retained, with v2 used here.",
+    "The P2 probes ran in the SSH default environment (HOME=/Users/navide, no BUN_INSTALL_CACHE_DIR, no node/bun on PATH) with absolute case paths and --cache-dir; they wrote only under the case tmp/ and read no secret.",
+    "bun pm cache printed the global default /Users/navide/.bun/install/cache in that shell, a consequence of the probe environment; the installer under test passes --cache-dir explicitly.",
+    "The Node case's vitest.config.ts was switched to the branch config for the alias-symmetric control (base variant saved guest-side as vitest.config.base-variant.ts); only corr-* receipts, logs and tmp/correction-01 files were added, and no existing receipt or log was modified."
+  ],
+  "frozen_delivery": {
+    "version": "correction-01-v1",
+    "anchor": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-adapt-01/correction-01/freeze/correction-01-v1.json",
+    "anchor_sha256_file": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-adapt-01/correction-01/freeze/correction-01-v1.sha256",
+    "v1_anchor_untouched": true,
+    "circular_self_hash": false
+  },
+  "tracked_deliverables": [
+    "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/correction-01/report.md",
+    "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/correction-01/evidence.json"
+  ],
+  "authority_boundaries": {
+    "stage_commit_push": false,
+    "v1_frozen_files_modified": false,
+    "test_assertions_or_skips_changed": false,
+    "dependency_or_runtime_version_changed": false,
+    "third_party_patch_or_fork": false,
+    "product_source_changed": false,
+    "sandbox_weakening": false,
+    "external_node_pnpm_fallback": false
+  }
+}

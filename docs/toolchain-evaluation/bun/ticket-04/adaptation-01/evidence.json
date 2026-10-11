@@ -1,0 +1,222 @@
+{
+  "schema": "navide-bun-evaluation-ticket-evidence/v1",
+  "ticket": "ticket-04-adapt-01",
+  "issue": "04-macos-tests-and-plugin-lifecycle",
+  "stage": "frozen-delivery",
+  "version": 1,
+  "summary": "Minimal allowed Bun adaptations turn 40 of ticket 04's 41 failing root-suite files into passes. Residual: src/main/plugins/pluginExternalWorkspace.test.ts (Bun 1.4.2 cannot install a consumer whose file: tarball peers are other file: dependencies; measured minimal repro). Node control on the adapted source is fully green and identical to the frozen baseline. TokenMonitorApp panic explained as a downstream symptom of the unanchored relative vi.mock and resolved by the anchor.",
+  "authority": {
+    "dispatch": "coordination/ticket04-adapt-01/dispatch.md",
+    "dispatch_sha256": "4c993d15c2fc693939a04aba0fc7e9486bbbeee0c0cdab0f7b841393c90f864b",
+    "worker_session": "01a128b7-7327-723f-bfa6-75b43e671f1b",
+    "worker_model": "deepseek/deepseek-flash/reasoning-max",
+    "delivery_scope": "frozen delivery only; no stage, commit or push",
+    "prior_authority": [
+      "coordination/ticket04-01/dispatch.md (environments, guest rules, 01-06 batch grant)",
+      "coordination/ticket03-startup-01/dispatch.md (SSH options and guest boundary)"
+    ]
+  },
+  "shared_worktree": {
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain",
+    "branch": "eval/issue-2-bun-toolchain",
+    "head": "e94c054813a6bb188a80898e4ab89fee78582920",
+    "status_porcelain_before": [],
+    "status_porcelain_after": [
+      " M plugins/navide-git/tests/compositionBoundary.test.ts",
+      " M plugins/navide-mini-ide/tests/packageBoundary.test.ts",
+      " M tests/integration/plansBuildScripts.test.ts",
+      " M vitest.config.ts",
+      "?? docs/toolchain-evaluation/bun/ticket-04/adaptation-01/",
+      "?? tests/support/bunMockImporterAnchor.ts"
+    ],
+    "index_written": false
+  },
+  "evaluation_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-adapt-01",
+  "report": "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/report.md",
+  "fixed_points": {
+    "baseline": {
+      "commit": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+      "archive": "base-f4e9fd50.tar",
+      "archive_sha256": "e3da8e5c9900c599920634fa1515cb2fdd53b5d15bd95a09225a2e08d8c723b9",
+      "archive_origin": "ticket-01 frozen baseline archive, re-verified byte-for-byte in the guest before extraction"
+    },
+    "candidate": {
+      "commit": "e94c054813a6bb188a80898e4ab89fee78582920",
+      "archive": "head-e94c0548.tar",
+      "archive_sha256": "302d56249699fa36510b89a26819d1b639bf1c5a9fa84218f9dba84921fa8941",
+      "archive_origin": "git archive HEAD in the shared worktree before this round's adaptations",
+      "adapted_source": "archive + the five adapted paths below (the candidate case source is exactly this)"
+    }
+  },
+  "adaptive_round_probe": {
+    "attempted_and_reverted": [
+      "scripts/bun/pnpm-compat.cjs (new; never delivered)",
+      "src/main/plugins/pluginExternalWorkspace.test.ts packageManager() Bun branch (reverted)"
+    ],
+    "revert_verified": "git status shows neither path; the test file hash equals its HEAD blob"
+  },
+  "guest": {
+    "host": "macOS 27.0.1 (Darwin 27.0.0), arm64, disposable UTM guest, account navide",
+    "access": "retained ticket-03 SSH options through host-ssh.sh (private key by path only)",
+    "ssh_invocations": 90,
+    "ssh_log": "host-ssh-log/ssh-invocations.log",
+    "cases_root": "/Users/navide/eval",
+    "earlier_case_dirs_untouched": ["t04-base-node", "t04-head-bun", "t04-head-bun (toolchain cache read-only copy)", "case-a0-base", "case-c-bun"]
+  },
+  "cases": {
+    "t04a-head-bun": {
+      "runtime": "Bun 1.4.2",
+      "runtime_binary_sha256": "35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5",
+      "package_manager": "bun install --frozen-lockfile via scripts/bun-evaluation.mjs (exit 0, 0.364 s)",
+      "external_node_pnpm_absent": "node/npm/npx/pnpm all absent under the case PATH (checked with command -v)",
+      "uv": "0.12.23",
+      "python": "3.12.11",
+      "go": "1.27.2",
+      "electron": {"version": "44.4.5", "zip_sha256": "a212eee63ba2f45fd83bd28f77a3e3313a336ad17a4c25adf617942eef5e0e2c"},
+      "marker_commit": "f63dbfb8c0d7515dd60569664395bcde7e3680a6",
+      "backend_sync": {"argv": ["uv", "--project", "backend", "sync", "--locked"], "exit": 0},
+      "fixture_build": {"argv": ["bun", "scripts/build-plans-backend.mjs"], "exit": 0, "outputs": ["navide-plans (9142288 bytes, sha256 07573861ed4338dfb72e93be377c9950dd084da4fd885ef8251adc429e16fdf0)", "navide-plans-go"]},
+      "lockfiles_unchanged": {"bun.lock": "812fcf6587ed8801d560d35804714ec47e4db0b936f1a14905f5eeae182cdafe", "pnpm-lock.yaml": "dd08737924d0aea21dad5f0d37dca9f09b4ee0d75def756cea55fa246e0e986b"}
+    },
+    "t04a-base-node": {
+      "runtime": "Node 22.23.2",
+      "runtime_binary_sha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+      "package_manager": "pnpm 10.0.0 (pnpm install --frozen-lockfile on the frozen base; exit 0, 10.733 s)",
+      "source": "frozen base f4e9fd50 + this round's adapted paths (the three edited test files are byte-identical between base and HEAD; the base config gained only the setupFiles line)",
+      "marker_commit": "8187166400e49f73a23e500717ea5ac98eff1f57",
+      "backend_sync": {"argv": ["uv", "--project", "backend", "sync", "--locked"], "exit": 0},
+      "fixture_build": {"argv": ["pnpm", "run", "build:plans:fixture"], "exit": 0, "outputs": ["navide-plans (9144656 bytes, sha256 44ebd4ff835bc8ec92c99e5623caea873b5c792c49b98c173270c05f2429702d)", "navide-plans-go"]},
+      "note": "the branch tree's own pnpm install is broken (accepted branch gap: package.json workspaces field + workspace: specifiers); both failed attempts are retained in the case receipts"
+    }
+  },
+  "adaptations": [
+    {
+      "path": "tests/support/bunMockImporterAnchor.ts",
+      "kind": "generic Bun-only test-support helper (new file)",
+      "lines": "+79",
+      "sha256": "5fd978f454b0343924f4c1dabaadcf56d4e2f54b7ca225261b0bf4d7d167262f",
+      "why": "Vitest recovers the importer for a relative vi.mock id from a stack frame spelled `at Object.mock (...)`; Bun prints `at mock (...)` so the importer is empty and the mock never matches. The helper recovers the caller file, resolves the id against it, and delegates a pre-anchored id. Absolute/bare specifiers pass through; gated on process.versions.bun so Node is inert."
+    },
+    {
+      "path": "vitest.config.ts",
+      "kind": "test config",
+      "lines": "+2",
+      "sha256": "22edeec3bbf27e5050d8ba272176a1687c13c21b6732ad8a7a7d5e98630e1b5a",
+      "why": "Registers the anchor as setupFiles for every project; one line plus its comment."
+    },
+    {
+      "path": "plugins/navide-mini-ide/tests/packageBoundary.test.ts",
+      "kind": "test-file route (syntax-level)",
+      "lines": "+9/-1",
+      "sha256": "29dda9a719ce3b5e836a768323a32acb42f00d98c70f90f3fbd3429eb5a6bacd",
+      "why": "Under Bun the packed-consumer vue-tsc entry is routed to the repository's existing scripts/bun/vue-tsc.cjs adapter (same installed package); Node keeps the consumer entry. No assertion, case or artifact changed."
+    },
+    {
+      "path": "plugins/navide-git/tests/compositionBoundary.test.ts",
+      "kind": "test-file route (syntax-level)",
+      "lines": "+9/-1",
+      "sha256": "14f31a54af0fd0f50333686a427cf0eec16f50c096fb35d6d49bc82b5a0e3fc0",
+      "why": "Same vue-tsc route."
+    },
+    {
+      "path": "tests/integration/plansBuildScripts.test.ts",
+      "kind": "test-file route (syntax-level)",
+      "lines": "+12/-2",
+      "sha256": "06bbb483d72b149cbc57b16fbfd4efe8d4af1b2e47d836d50b94edd8b74e683b",
+      "why": "Bun accepts Node's --import flag but never applies the preload, so the win32 simulation was inert. Under Bun the identical payload is written as a real preload module inside the fixture and passed with --preload; Node keeps --import. Assertions and cases unchanged."
+    }
+  ],
+  "per_class_results": {
+    "vitest_relative_mock_importer": {"files_before_failed": 37, "files_after_passed": 37, "adaptation": "bunMockImporterAnchor + vitest.config.ts setupFiles"},
+    "vue_tsc_packed_consumer_boundary": {"files_before_failed": 2, "files_after_passed": 2, "adaptation": "vue-tsc route to scripts/bun/vue-tsc.cjs under Bun"},
+    "node_import_windows_simulation": {"files_before_failed": 1, "files_after_passed": 1, "adaptation": "preload file route under Bun"},
+    "test_helper_requires_pnpm": {"files_before_failed": 1, "files_after_failed": 1, "classification": "residual: Bun 1.4.2 peer resolution for file: dependencies"},
+    "tokenmonitor_bun_panic": {"files_before_no_result": 1, "files_after_passed": 1, "classification": "symptom of the unanchored mock; resolved by the anchor (A/B below)"}
+  },
+  "discovery": {
+    "command": "vitest list --json (candidate: bun; control: node/pnpm exec)",
+    "files": {"unit": 808, "artifacts": 23, "cli": 4, "total": 835},
+    "listed_tests": {"unit": 12191, "artifacts": 203, "cli": 53, "total": 12447},
+    "listed_tests_note": "ticket-04's pre-fixture list had unit 12190 (total 12446): the fixture-gated third-party case is omitted while conditionally skipped and appears once the fixture is built. File sets are unchanged.",
+    "file_sets_identical_candidate_vs_control": true,
+    "test_title_sets_identical_candidate_vs_control": true,
+    "identical_to_ticket04_lists": true,
+    "evidence": ["retrieved/list/bun-list-vitest.json", "retrieved/list/node-list-vitest.json"]
+  },
+  "root_suite": {
+    "baseline_ticket04_reused": {"argv": ["pnpm", "test:run", "--reporter=default", "--reporter=json"], "exit": 0, "passed": 12447, "pending": 23, "failed": 0, "source": "frozen base f4e9fd50"},
+    "node_control_adapted": {"argv": ["pnpm", "test:run", "--reporter=default", "--reporter=json"], "exit": 0, "passed": 12447, "pending": 23, "failed": 0, "files_passed": 835, "files_skipped": 1, "wall_seconds": 86.3, "receipt": "retrieved/cases/t04a-base-node/receipts/node-adapted-full-r3.json", "log": "retrieved/cases/t04a-base-node/logs/node-adapted-full-r3.log"},
+    "bun_candidate": {"argv": ["bun", "scripts/bun-evaluation.mjs", "run", "test:run", "--reporter=default", "--reporter=json"], "exit": 1, "passed": 12446, "pending": 23, "failed": 1, "files_passed": 834, "files_failed": 1, "files_skipped": 1, "wall_seconds": 54.2, "panic": false, "receipt": "retrieved/cases/t04a-head-bun/receipts/test-run-r2.json", "log": "retrieved/cases/t04a-head-bun/logs/test-run-r2.log", "json": "retrieved/cases/t04a-head-bun/receipts/test-run-r2-vitest.json"},
+    "pre_fixture_candidate": {"exit": 1, "passed": 12445, "pending": 24, "failed": 1, "note": "run before the fixture build flipped the fixture-gated third-party case; retained", "receipt": "retrieved/cases/t04a-head-bun/receipts/test-run.json"},
+    "candidate_failed_files": ["src/main/plugins/pluginExternalWorkspace.test.ts"],
+    "candidate_failed_tests": ["third-party plugin external workspace installs public packages, validates/types/builds/packages the example, and enforces Host capability denial"]
+  },
+  "supplementary_gates_bun": {
+    "packaged_lifecycle": {"argv": ["vitest", "run", "--project", "artifacts", "tests/integration/plansPackagedRoundtrip.test.ts", "src/main/plugins/pluginBackendHost.test.ts", "src/main/plugins/pluginBackendSupervisor.test.ts"], "env": {"NAVIDE_TEST_ARTIFACTS_PREBUILT": "1", "NAVIDE_TEST_PACKAGED_PLANS": "1", "NAVIDE_TEST_PRODUCTION_PLANS_BACKEND": "1"}, "exit": 0, "files": 3, "tests": 124, "passed": 124, "receipt": "retrieved/cases/t04a-head-bun/receipts/packaged-lifecycle.json", "json": "retrieved/cases/t04a-head-bun/receipts/packaged-vitest.json", "native_children_observed": ["dist-plugins/navide-plans/backend/navide-plans", "dist-test-fixtures/plans/backend/navide-plans", "dist-test-fixtures/plans/backend/navide-plans-go", "esbuild"]},
+    "third_party_seatbelt": {"exit": 0, "passed": 12, "skipped": 0, "receipt": "retrieved/cases/t04a-head-bun/receipts/gap-thirdparty.json"},
+    "sandbox": {"exit": 0, "passed": 19, "skipped": 7, "receipt": "retrieved/cases/t04a-head-bun/receipts/gap-sandbox.json"},
+    "dev_backend": {"exit": 0, "passed": 7, "skipped": 1, "receipt": "retrieved/cases/t04a-head-bun/receipts/gap-files.json"},
+    "cli": {"exit": 0, "files": 4, "passed": 53, "receipt": "retrieved/cases/t04a-head-bun/receipts/cli-standalone.json"},
+    "mini_ide_standalone": {"exit": 0, "files": 3, "passed": 5, "receipt": "retrieved/cases/t04a-head-bun/receipts/mini-ide-standalone.json"},
+    "typechecks": {"typecheck:node": 0, "typecheck:integration": 0, "node_control_equivalents": {"typecheck:node": 0, "typecheck:integration": 0}}
+  },
+  "runtime_identity": {
+    "candidate_observed_js_runtimes": ["/Users/navide/eval/t04a-head-bun/tools/bun/bin/bun"],
+    "external_node_pnpm_observed": [],
+    "remaining_observed_owned": 0,
+    "observation": "t04-run.py per-run process sampling; not exhaustive for processes that exited between samples"
+  },
+  "residual": {
+    "file": "src/main/plugins/pluginExternalWorkspace.test.ts",
+    "classification": "Bun 1.4.2 limitation: a consumer whose file: tarball has a non-optional peer that is also one of the consumer's file: dependencies cannot be installed; Bun looks the peer up on the registry (404 for private names) or fails offline with a missing cached manifest. --omit=peer, bunfig [install] peer = false, and online mode all reproduce.",
+    "minimal_repro": [
+      {"consumer": "@navide/plugin-contracts only (no peers)", "argv": ["bun", "install", "--offline", "--ignore-scripts", "--omit=peer", "--no-save", "--cache-dir", "<case cache>"], "exit": 0},
+      {"consumer": "@navide/plugin-contracts + @navide/plugin-sdk (sdk peers on contracts)", "same argv": true, "exit": 1, "error": "--offline: no cached manifest for \"@navide/plugin-contracts\""},
+      {"online variants": ["--prefer-offline", "no --offline"], "exit": 1, "error": "GET https://registry.npmjs.org/@navide%2fplugin-contracts - 404"}
+    ],
+    "attempted_route_evidence": ["retrieved/cases/t04a-head-bun/logs/target-externalworkspace-r1.log", "retrieved/cases/t04a-head-bun/receipts/target-externalworkspace-r1.json", "retrieved/t04a-head-bun/receipts/probes/"],
+    "required_fix": "a Bun fix or a test redesign (consumer manifest/install shape); both outside this round's authority",
+    "daily_path_consequence": "no Node/pnpm fallback was added; the external consumer-worker substance is issue 05's Node/npm/pnpm matrix"
+  },
+  "tokenmonitor_ab": {
+    "anchor_enabled": {"exit": 0, "tests_passed": 9, "wall_seconds": 0.654, "receipt": "retrieved/cases/t04a-head-bun/receipts/diag-tokenmonitor-alone.json"},
+    "anchor_disabled_guest_copy_only": {"exit": 1, "panic": "int cast: TryFromIntError(PosOverflow)", "wall_seconds": 143.368, "rss": "3.98 GB / peak 6.77 GB", "receipt": "retrieved/cases/t04a-head-bun/receipts/diag-tokenmonitor-no-anchor.json", "log": "retrieved/cases/t04a-head-bun/logs/diag-tokenmonitor-no-anchor.log"},
+    "restore_verified": {"config_hash_match": true, "anchor_hash_match": true},
+    "conclusion": "the panic is downstream of the unanchored relative mock; it disappears with the anchor and needs no test rewrite, timeout change or suppression"
+  },
+  "node_regression": {
+    "full_suite": {"passed": 12447, "pending": 23, "failed": 0, "exit": 0, "note": "identical to the frozen-base baseline numbers"},
+    "targeted_edited_files": {"artifacts_boundary_and_plans": {"files": 3, "tests": 13, "passed": 13, "receipt": "retrieved/cases/t04a-base-node/receipts/node-adapted-artifacts.json"}, "unit_mock_sample": {"files": 3, "tests": 38, "passed": 38, "receipt": "retrieved/cases/t04a-base-node/receipts/node-adapted-unit-sample.json"}}
+  },
+  "deviations": [
+    "Branch-tree pnpm install is broken (accepted gap: package.json workspaces field + workspace: specifiers); the Node control uses the frozen base plus this round's adaptations. Both failed install attempts retained.",
+    "First Node full run failed tests/cli/backendWire.test.ts before the case backend uv sync; retained, re-run green after the sync.",
+    "First comparison had 24 pending instead of 23 because dist-test-fixtures was not built; after the fixture build both cases match ticket 04's 23 pending.",
+    "A pnpm-compat adapter and its test helper branch were written, measured and reverted; neither is in the delivery. The measured failure is retained.",
+    "The first external-consumer probe packed the repository root instead of the target packages (dispatcher pack route takes the package as cwd); only the corrected probe is analysed.",
+    "PyInstaller fixture binaries differ between the two cases (build not byte-reproducible); each case builds and uses its own fixture.",
+    "receipts/list.json was overwritten once by the run receipt of the same label; discovery was re-run into tmp/list-vitest.json + receipts/list-r2.json and only those are used."
+  ],
+  "frozen_delivery": {
+    "version": "freeze-v1",
+    "anchor": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-adapt-01/freeze/freeze-v1.json",
+    "anchor_sha256_file": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-04-adapt-01/freeze/freeze-v1.sha256",
+    "bindings": ["five adapted tracked source paths", "report.md + evidence.json", "harness and probe scripts", "all raw case receipts and logs", "retrieved evidence tarballs and discovery lists", "guest identities"],
+    "circular_self_hash": false
+  },
+  "tracked_deliverables": [
+    "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/report.md",
+    "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/evidence.json"
+  ],
+  "authority_boundaries": {
+    "stage_commit_push": false,
+    "test_assertions_or_skips_changed": false,
+    "test_inventory_changed": false,
+    "dependency_or_runtime_version_changed": false,
+    "third_party_patch_or_fork": false,
+    "product_source_changed": false,
+    "sandbox_weakening": false,
+    "external_node_pnpm_fallback": false
+  },
+  "not_run": ["Linux and Windows evaluation (issues 07/08)", "release packaging, signing, notarization", "hosted CI", "plugin installation from the public registry", "real application startup", "test-performance measurement (issue 06)", "external public-consumer matrix (issue 05)"]
+}
