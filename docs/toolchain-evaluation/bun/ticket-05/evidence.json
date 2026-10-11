@@ -1,0 +1,1579 @@
+{
+  "artifact_diff": {
+    "all_semantically_equivalent": true,
+    "analysis": "analysis/artifact-diff.json",
+    "note": "Tarball container bytes differ between packers (bun pm pack vs pnpm pack); every member is byte-identical except package.json formatting (parsed documents equal) and one recorded mode difference.",
+    "packages": [
+      {
+        "baseline_tarball": {
+          "bytes": 40140,
+          "file": "navide-plugin-contracts-1.0.0.tgz",
+          "sha256": "3724befd44e2706735d4db2bf286fff7a1fa492adcea7c0b490d7f9b00c01dc5"
+        },
+        "candidate_tarball": {
+          "bytes": 38669,
+          "file": "navide-plugin-contracts-1.0.0.tgz",
+          "sha256": "9659df0f842a83d10e3ef72c4f9e8599d2b22a0b5ae98083f58d161a151a9f8a"
+        },
+        "content_differing": [
+          {
+            "baseline_bytes": 754,
+            "baseline_sha256": "1578ceb0e81c82921e1fbd4216f6c6e0e72111c8721c735ff687bd4a0c07bab0",
+            "candidate_bytes": 755,
+            "candidate_sha256": "a35ffe890a32e080e59671ba6181b4977914528e123438d6089a90824940f572",
+            "name": "package/package.json",
+            "semantic_json_equal": true
+          }
+        ],
+        "formatting_only_members": [
+          "package/package.json"
+        ],
+        "identical_members": 52,
+        "members_baseline": 53,
+        "members_candidate": 53,
+        "mode_differing": [],
+        "name": "@navide/plugin-contracts",
+        "only_baseline": [],
+        "only_candidate": [],
+        "semantically_equivalent": true
+      },
+      {
+        "baseline_tarball": {
+          "bytes": 39398,
+          "file": "navide-plugin-sdk-1.0.0.tgz",
+          "sha256": "ffe0b648471cf550fe0ecbbde7e0bccf6a2b9835d2ba62b1603c715c7d925a45"
+        },
+        "candidate_tarball": {
+          "bytes": 38168,
+          "file": "navide-plugin-sdk-1.0.0.tgz",
+          "sha256": "c3bc4e7336a0b7b8706eb6de3a6c54848026b812b45a62c6bf5476130a74817b"
+        },
+        "content_differing": [
+          {
+            "baseline_bytes": 681,
+            "baseline_sha256": "d114a00ce3e89d889a7c8b0ae63aca9e88b16edcb39d785e9a99fc7a4b1305ba",
+            "candidate_bytes": 682,
+            "candidate_sha256": "571db341599794193d464fe7f7854c81b510b5f3eab6276064f2e479da83dde6",
+            "name": "package/package.json",
+            "semantic_json_equal": true
+          }
+        ],
+        "formatting_only_members": [
+          "package/package.json"
+        ],
+        "identical_members": 12,
+        "members_baseline": 13,
+        "members_candidate": 13,
+        "mode_differing": [
+          {
+            "baseline_mode": "0o755",
+            "candidate_mode": "0o777",
+            "name": "package/bin/navide-plugin.mjs"
+          }
+        ],
+        "name": "@navide/plugin-sdk",
+        "only_baseline": [],
+        "only_candidate": [],
+        "semantically_equivalent": true
+      },
+      {
+        "baseline_tarball": {
+          "bytes": 3034490,
+          "file": "navide-plugin-ui-1.0.0.tgz",
+          "sha256": "c54863d322622183c3743d94c39c49ebb0e66134f0e9f02fd6742ea1284f5350"
+        },
+        "candidate_tarball": {
+          "bytes": 3017431,
+          "file": "navide-plugin-ui-1.0.0.tgz",
+          "sha256": "c269f4861304868625c3f45089360657edd0485e31a0eeb0d8f7c7a0c891ff85"
+        },
+        "content_differing": [
+          {
+            "baseline_bytes": 1483,
+            "baseline_sha256": "24c1b6447ecdee419b1a67231ef935df1b3165aabdbf1a1442574bfbddf65dff",
+            "candidate_bytes": 1476,
+            "candidate_sha256": "0ddd143c2b2b72a64b6aa4f1215638622159596615a3b65572a28023b80ea725",
+            "name": "package/package.json",
+            "semantic_json_equal": true
+          }
+        ],
+        "formatting_only_members": [
+          "package/package.json"
+        ],
+        "identical_members": 107,
+        "members_baseline": 108,
+        "members_candidate": 108,
+        "mode_differing": [],
+        "name": "@navide/plugin-ui",
+        "only_baseline": [],
+        "only_candidate": [],
+        "semantically_equivalent": true
+      }
+    ]
+  },
+  "authority": {
+    "batch_grant": "01-06 batch grant including bounded isolated consumer probes; no registry publication, no personal credentials, no external authors projects",
+    "delivery_scope": "frozen delivery only; no stage, commit or push",
+    "dispatch": "coordination/ticket05-01/dispatch.md",
+    "dispatch_sha256": "e3a901fa7e9acfc34521f4aa31c4ecfc68042471186787951b0060c987c5e29d",
+    "worker_model": "deepseek/deepseek-flash/reasoning-max",
+    "worker_session": "01a128ea-8487-775e-be45-a9adac52f0c8"
+  },
+  "cases": {
+    "t05-base-node": {
+      "mode": "build-node",
+      "receipts": [
+        {
+          "argv": [
+            "/Users/navide/eval/t05-base-node/tools/pnpm/bin/pnpm",
+            "install",
+            "--frozen-lockfile"
+          ],
+          "exit_code": 0,
+          "label": "install",
+          "log_path": "<guest>/t05-base-node/logs/install.log",
+          "log_sha256": "27cc6cf39a9cf6a4abf11fcadb4f75b20e9e0c2cc35088feb7899ed8e8db945f",
+          "observed_runtime_executables": [
+            "<guest>/t05-base-node/source/node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild/bin/esbuild",
+            "<guest>/t05-base-node/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 10.177
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-base-node/tools/pnpm/bin/pnpm",
+            "run",
+            "build:public-packages"
+          ],
+          "exit_code": 0,
+          "label": "build-public",
+          "log_path": "<guest>/t05-base-node/logs/build-public.log",
+          "log_sha256": "b94845d798dbd414f64df888944d97744acdaabfc0cfa07ca6f7fd3df25ef8ab",
+          "observed_runtime_executables": [
+            "<guest>/t05-base-node/source/node_modules/.pnpm/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+            "<guest>/t05-base-node/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 9.908
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-base-node/tools/pnpm/bin/pnpm",
+            "pack",
+            "--pack-destination",
+            "/Users/navide/eval/t05-base-node/packs"
+          ],
+          "exit_code": 0,
+          "label": "pack-plugin-contracts",
+          "log_path": "<guest>/t05-base-node/logs/pack-plugin-contracts.log",
+          "log_sha256": "5f265579d333e5e791f1dbf9ac7e103e4e5637c2b3cd7323a5002fe39a4be58b",
+          "observed_runtime_executables": [
+            "<guest>/t05-base-node/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.231
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-base-node/tools/pnpm/bin/pnpm",
+            "pack",
+            "--pack-destination",
+            "/Users/navide/eval/t05-base-node/packs"
+          ],
+          "exit_code": 0,
+          "label": "pack-plugin-sdk",
+          "log_path": "<guest>/t05-base-node/logs/pack-plugin-sdk.log",
+          "log_sha256": "ea8de8f21939a87077278af12a7b5d5dda12c0a1d2cb0ae41e98e7d7941c077d",
+          "observed_runtime_executables": [
+            "<guest>/t05-base-node/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.231
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-base-node/tools/pnpm/bin/pnpm",
+            "pack",
+            "--pack-destination",
+            "/Users/navide/eval/t05-base-node/packs"
+          ],
+          "exit_code": 0,
+          "label": "pack-plugin-ui",
+          "log_path": "<guest>/t05-base-node/logs/pack-plugin-ui.log",
+          "log_sha256": "dbd903f55c77cb86314b9f0af7f0186234511f4f9a39fe7819a2dc7ae400a861",
+          "observed_runtime_executables": [
+            "<guest>/t05-base-node/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.327
+        }
+      ],
+      "role": "build and pack the baseline control",
+      "toolchain": "Node 22.23.2 + pnpm 10.0.0"
+    },
+    "t05-cand-bun": {
+      "mode": "build-bun",
+      "receipts": [
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cand-bun/tools/bun/bin/bun",
+            "scripts/bun-evaluation.mjs",
+            "install"
+          ],
+          "exit_code": 0,
+          "label": "install",
+          "log_path": "<guest>/t05-cand-bun/logs/install.log",
+          "log_sha256": "d69e2a516480fa9f688f747011926fe99b0bf3bdf98ea3ec24584e835d562b5a",
+          "observed_runtime_executables": [
+            "<guest>/t05-cand-bun/tools/bun/bin/bun"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 6.964
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cand-bun/tools/bun/bin/bun",
+            "scripts/bun-evaluation.mjs",
+            "run",
+            "build:public-packages"
+          ],
+          "exit_code": 0,
+          "label": "build-public",
+          "log_path": "<guest>/t05-cand-bun/logs/build-public.log",
+          "log_sha256": "a211f1b36b4e86f3a1ac18c1c589404a8b19936d8b3cf4f8e53c3239525f2777",
+          "observed_runtime_executables": [
+            "<guest>/t05-cand-bun/source/node_modules/.bun/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+            "<guest>/t05-cand-bun/tools/bun/bin/bun"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 7.932
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cand-bun/tools/bun/bin/bun",
+            "/Users/navide/eval/t05-cand-bun/source/scripts/bun-evaluation.mjs",
+            "pack",
+            "--destination",
+            "/Users/navide/eval/t05-cand-bun/packs"
+          ],
+          "exit_code": 0,
+          "label": "pack-plugin-contracts",
+          "log_path": "<guest>/t05-cand-bun/logs/pack-plugin-contracts.log",
+          "log_sha256": "f7cd1a678addb84d55ee907c400c849b7db85634dd1f7e987e7e71a611be7454",
+          "observed_runtime_executables": [
+            "<guest>/t05-cand-bun/tools/bun/bin/bun"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.126
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cand-bun/tools/bun/bin/bun",
+            "/Users/navide/eval/t05-cand-bun/source/scripts/bun-evaluation.mjs",
+            "pack",
+            "--destination",
+            "/Users/navide/eval/t05-cand-bun/packs"
+          ],
+          "exit_code": 0,
+          "label": "pack-plugin-sdk",
+          "log_path": "<guest>/t05-cand-bun/logs/pack-plugin-sdk.log",
+          "log_sha256": "42ee491ed82f92f67f96ecb9564974ab4868039cd7bbc4d6b5b6b6adeba9f79c",
+          "observed_runtime_executables": [
+            "<guest>/t05-cand-bun/tools/bun/bin/bun"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.121
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cand-bun/tools/bun/bin/bun",
+            "/Users/navide/eval/t05-cand-bun/source/scripts/bun-evaluation.mjs",
+            "pack",
+            "--destination",
+            "/Users/navide/eval/t05-cand-bun/packs"
+          ],
+          "exit_code": 0,
+          "label": "pack-plugin-ui",
+          "log_path": "<guest>/t05-cand-bun/logs/pack-plugin-ui.log",
+          "log_sha256": "3c15fb2827ba66856638bf8f10333b6b89d0937b32204ac1b79015b995557385",
+          "observed_runtime_executables": [
+            "<guest>/t05-cand-bun/tools/bun/bin/bun"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.239
+        }
+      ],
+      "role": "build and pack the three public packages",
+      "toolchain": "Bun 1.4.2 only; node/npm/npx/pnpm absent from the case PATH"
+    }
+  },
+  "consumer_matrix": [
+    {
+      "artifacts": "candidate tarballs from t05-cand-bun",
+      "build_check": {
+        "failed": 0,
+        "file_count": 98,
+        "sha256": "64ec721eaf9aaa3d032b0c1ab87f1542c4c2470fd2ab23f4c4214aebb80780aa",
+        "total": 12,
+        "workers": [
+          "css.worker-B4z49cGk.js",
+          "css.worker-C7FogG4G-2AaLhSiJ.js",
+          "editor.worker-iXcRX1Tq-BCCcQG1x.js",
+          "html.worker-C8VxctEJ-CFu9Mgto.js",
+          "html.worker-DtiGdgqp.js",
+          "json.worker-CMC9kgPL-Bmcb2PXM.js",
+          "json.worker-leyajbqV.js",
+          "ts.worker-59MjiAqk.js",
+          "ts.worker-CtTJ3hNN-DEkneNCr.js"
+        ]
+      },
+      "case": "t05-cons-npm-cand",
+      "cli_cases": {
+        "failed": 0,
+        "sha256": "44a3d178a7780935e161f2395a141884787674c7c505ad52c1c33311eab21543",
+        "total": 19
+      },
+      "manager": "npm",
+      "manager_version": "10.9.8",
+      "node": "22.23.2",
+      "probe_results": {
+        "failed": 0,
+        "informational_failures": 1,
+        "sha256": "2915688111141b7fe3eb4fa9775095d38230e19dfc0ce125397a6a4a95a8d1e1",
+        "total": 49
+      },
+      "receipts": [
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-cand/tools/node/bin/npm",
+            "install",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "exit_code": 0,
+          "label": "install",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/install.log",
+          "log_sha256": "30a4cf75db95ae1b8ce911fb62c2fb07ff69337b28d1c171d66696967f4f0e58",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 24.73
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "node --version; npm --version; pnpm --version; command -v node; command -v npm; command -v pnpm; command -v bun || echo BUN_ABSENT"
+          ],
+          "exit_code": 0,
+          "label": "versions",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/versions.log",
+          "log_sha256": "e6634065ad32736aa8121bf21491b1466b883d35ac8a366630eea30c997be4ca",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.362
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-cand/tools/node/bin/node",
+            "scripts/runtime-probes.mjs"
+          ],
+          "exit_code": 0,
+          "label": "probe",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/probe.log",
+          "log_sha256": "3b4603ab913df4751d3fa15653eb91c736420079cdd13f6f23e4c10662c5d29c",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.456
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-cand/project/node_modules/.bin/tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/typecheck.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.937
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-cand/project/node_modules/.bin/vue-tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck-vue",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/typecheck-vue.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.794
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-cand/project/node_modules/.bin/vite",
+            "build"
+          ],
+          "exit_code": 0,
+          "label": "build",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/build.log",
+          "log_sha256": "0204502aaee3cafe1b01ac7c81d94aa9e8448164e4b1f09086b2db8be76c1322",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/project/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 11.089
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-cand/tools/node/bin/node",
+            "scripts/cli-cases.mjs"
+          ],
+          "exit_code": 0,
+          "label": "cli-cases",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/cli-cases.log",
+          "log_sha256": "be9f48bc08ea9cbdbd4e28418b8fe1369f1dd496d4f4ddd880d3bffb718f1f5a",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.957
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "cd cli-work && rm -rf binlink && npm exec --yes=false -- navide-plugin init binlink --id acme.bin-link && npm exec --yes=false -- navide-plugin validate binlink"
+          ],
+          "exit_code": 0,
+          "label": "manager-exec",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/manager-exec.log",
+          "log_sha256": "47999aead0e363ad98e543646fabb2f904045d4dfd911ef09f2e24a274336418",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.853
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-cand/tools/node/bin/npm",
+            "ls",
+            "--depth=0"
+          ],
+          "exit_code": 0,
+          "label": "dependency-tree",
+          "log_path": "<guest>/t05-cons-npm-cand/logs/dependency-tree.log",
+          "log_sha256": "bf15f1c1315cc105a3710a55ef88c243b24afcdc7b2ff4eecac654c532266d44",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.24
+        }
+      ]
+    },
+    {
+      "artifacts": "baseline tarballs from t05-base-node",
+      "build_check": {
+        "failed": 0,
+        "file_count": 98,
+        "sha256": "8f1672a522fad6ba9a45ee4217a5f4e79c932c74a61e494618bb2443d889807e",
+        "total": 12,
+        "workers": [
+          "css.worker-B4z49cGk.js",
+          "css.worker-C7FogG4G-2AaLhSiJ.js",
+          "editor.worker-iXcRX1Tq-BCCcQG1x.js",
+          "html.worker-C8VxctEJ-CFu9Mgto.js",
+          "html.worker-DtiGdgqp.js",
+          "json.worker-CMC9kgPL-Bmcb2PXM.js",
+          "json.worker-leyajbqV.js",
+          "ts.worker-59MjiAqk.js",
+          "ts.worker-CtTJ3hNN-DEkneNCr.js"
+        ]
+      },
+      "case": "t05-cons-npm-base",
+      "cli_cases": {
+        "failed": 0,
+        "sha256": "f572126d653ed8abf0631460c5434a739e0460d9d111bfb6a802cf84a8b3438d",
+        "total": 19
+      },
+      "manager": "npm",
+      "manager_version": "10.9.8",
+      "node": "22.23.2",
+      "probe_results": {
+        "failed": 0,
+        "informational_failures": 1,
+        "sha256": "8063c246be444687eb537949ba5e61621dbe2faa1c5dae4940f0b50048757298",
+        "total": 49
+      },
+      "receipts": [
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-base/tools/node/bin/npm",
+            "install",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "exit_code": 0,
+          "label": "install",
+          "log_path": "<guest>/t05-cons-npm-base/logs/install.log",
+          "log_sha256": "b49ffdf966d90a5ac6b83c4a7597a76bd65387922da4e9fa8fd2c76b06449d39",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/project/node_modules/esbuild/bin/esbuild",
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 20.701
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "node --version; npm --version; pnpm --version; command -v node; command -v npm; command -v pnpm; command -v bun || echo BUN_ABSENT"
+          ],
+          "exit_code": 0,
+          "label": "versions",
+          "log_path": "<guest>/t05-cons-npm-base/logs/versions.log",
+          "log_sha256": "5abe5e7a3ece151edfeab08138f953e557445461c0c3b6f368dfd4aa572d4af6",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.364
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-base/tools/node/bin/node",
+            "scripts/runtime-probes.mjs"
+          ],
+          "exit_code": 0,
+          "label": "probe",
+          "log_path": "<guest>/t05-cons-npm-base/logs/probe.log",
+          "log_sha256": "0684be381408fd54cce546e869ef77b12dad32fe4e6596597dab7f47c49d7e31",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.455
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-base/project/node_modules/.bin/tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck",
+          "log_path": "<guest>/t05-cons-npm-base/logs/typecheck.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.81
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-base/project/node_modules/.bin/vue-tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck-vue",
+          "log_path": "<guest>/t05-cons-npm-base/logs/typecheck-vue.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.797
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-base/project/node_modules/.bin/vite",
+            "build"
+          ],
+          "exit_code": 0,
+          "label": "build",
+          "log_path": "<guest>/t05-cons-npm-base/logs/build.log",
+          "log_sha256": "55ec435bee0115036a7b0d423d4697167fb5fa34ac5f6b13ee2964bbb56c893b",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/project/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 8.897
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-base/tools/node/bin/node",
+            "scripts/cli-cases.mjs"
+          ],
+          "exit_code": 0,
+          "label": "cli-cases",
+          "log_path": "<guest>/t05-cons-npm-base/logs/cli-cases.log",
+          "log_sha256": "be9f48bc08ea9cbdbd4e28418b8fe1369f1dd496d4f4ddd880d3bffb718f1f5a",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.96
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "cd cli-work && rm -rf binlink && npm exec --yes=false -- navide-plugin init binlink --id acme.bin-link && npm exec --yes=false -- navide-plugin validate binlink"
+          ],
+          "exit_code": 0,
+          "label": "manager-exec",
+          "log_path": "<guest>/t05-cons-npm-base/logs/manager-exec.log",
+          "log_sha256": "3df6d43b89a97b8153f4eec1e648d2332e833475f99e2022e2332ff14a13830c",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.572
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-npm-base/tools/node/bin/npm",
+            "ls",
+            "--depth=0"
+          ],
+          "exit_code": 0,
+          "label": "dependency-tree",
+          "log_path": "<guest>/t05-cons-npm-base/logs/dependency-tree.log",
+          "log_sha256": "855d664e52b055775249601f739bc1cd8fcc305245c09a56e707dfe742b7beee",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-npm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.232
+        }
+      ]
+    },
+    {
+      "artifacts": "candidate tarballs from t05-cand-bun",
+      "build_check": {
+        "failed": 0,
+        "file_count": 98,
+        "sha256": "2351f3865e35c06ffc3240d4d3485ebc61eda8d840ba1869ce43028278a05812",
+        "total": 12,
+        "workers": [
+          "css.worker-B4z49cGk.js",
+          "css.worker-C7FogG4G-2AaLhSiJ.js",
+          "editor.worker-iXcRX1Tq-BCCcQG1x.js",
+          "html.worker-C8VxctEJ-CFu9Mgto.js",
+          "html.worker-DtiGdgqp.js",
+          "json.worker-CMC9kgPL-Bmcb2PXM.js",
+          "json.worker-leyajbqV.js",
+          "ts.worker-59MjiAqk.js",
+          "ts.worker-CtTJ3hNN-DEkneNCr.js"
+        ]
+      },
+      "case": "t05-cons-pnpm-cand",
+      "cli_cases": {
+        "failed": 0,
+        "sha256": "017574e851d193aba15be4448d25324f7308517f6af17fe6e4abc6d32194f93a",
+        "total": 19
+      },
+      "manager": "pnpm",
+      "manager_version": "10.0.0",
+      "node": "22.23.2",
+      "probe_results": {
+        "failed": 0,
+        "informational_failures": 1,
+        "sha256": "c5d445ff58fe788c0ccb21f101e208140d69bd400277fefe8ddf0fb380ac9af5",
+        "total": 49
+      },
+      "receipts": [
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-cand/tools/pnpm/bin/pnpm",
+            "install"
+          ],
+          "exit_code": 0,
+          "label": "install",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/install.log",
+          "log_sha256": "cf0dfb3cf314274c4b687966755a8fc730ec8ff76c032b2a7ec25dcd00d99e71",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 4.932
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "node --version; npm --version; pnpm --version; command -v node; command -v npm; command -v pnpm; command -v bun || echo BUN_ABSENT"
+          ],
+          "exit_code": 0,
+          "label": "versions",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/versions.log",
+          "log_sha256": "67f6340cd84f6ee38cc9b8c03a674685803ec62fa61e62ae11675664689a2b5b",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.235
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-cand/tools/node/bin/node",
+            "scripts/runtime-probes.mjs"
+          ],
+          "exit_code": 0,
+          "label": "probe",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/probe.log",
+          "log_sha256": "fd34f42aa75b7ea53c3337e78effaa5d33647c188522f361aa04306aad66b727",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.698
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-cand/project/node_modules/.bin/tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/typecheck.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 1.163
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-cand/project/node_modules/.bin/vue-tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck-vue",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/typecheck-vue.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 1.048
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-cand/project/node_modules/.bin/vite",
+            "build"
+          ],
+          "exit_code": 0,
+          "label": "build",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/build.log",
+          "log_sha256": "cd069ef3042f2a561b0114cbdd6692e84dcb9cb60c4f82c866d081bfede5b94c",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/project/node_modules/.pnpm/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 9.137
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-cand/tools/node/bin/node",
+            "scripts/cli-cases.mjs"
+          ],
+          "exit_code": 0,
+          "label": "cli-cases",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/cli-cases.log",
+          "log_sha256": "be9f48bc08ea9cbdbd4e28418b8fe1369f1dd496d4f4ddd880d3bffb718f1f5a",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 1.045
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "cd cli-work && rm -rf binlink && pnpm exec navide-plugin init binlink --id acme.bin-link && pnpm exec navide-plugin validate binlink"
+          ],
+          "exit_code": 0,
+          "label": "manager-exec",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/manager-exec.log",
+          "log_sha256": "62e01b0624739fa9e1f2121b3c09690ce6eee1b0f78fa5862318ee53e272430a",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.595
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-cand/tools/pnpm/bin/pnpm",
+            "list",
+            "--depth",
+            "0"
+          ],
+          "exit_code": 0,
+          "label": "dependency-tree",
+          "log_path": "<guest>/t05-cons-pnpm-cand/logs/dependency-tree.log",
+          "log_sha256": "255281a85a75143e3b98b2fb613c41dbd9e4494f0d825f6b580277937c57adb0",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-cand/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.23
+        }
+      ]
+    },
+    {
+      "artifacts": "baseline tarballs from t05-base-node",
+      "build_check": {
+        "failed": 0,
+        "file_count": 98,
+        "sha256": "70af367b78313417ca5300bc2d8245f41ce8ea6f202380043bb8b4430132acd9",
+        "total": 12,
+        "workers": [
+          "css.worker-B4z49cGk.js",
+          "css.worker-C7FogG4G-2AaLhSiJ.js",
+          "editor.worker-iXcRX1Tq-BCCcQG1x.js",
+          "html.worker-C8VxctEJ-CFu9Mgto.js",
+          "html.worker-DtiGdgqp.js",
+          "json.worker-CMC9kgPL-Bmcb2PXM.js",
+          "json.worker-leyajbqV.js",
+          "ts.worker-59MjiAqk.js",
+          "ts.worker-CtTJ3hNN-DEkneNCr.js"
+        ]
+      },
+      "case": "t05-cons-pnpm-base",
+      "cli_cases": {
+        "failed": 0,
+        "sha256": "320299e86742687bff3e976473cf2083c316d271c8a4156a495e212e10121646",
+        "total": 19
+      },
+      "manager": "pnpm",
+      "manager_version": "10.0.0",
+      "node": "22.23.2",
+      "probe_results": {
+        "failed": 0,
+        "informational_failures": 1,
+        "sha256": "50615a0cbf6d44c130387930616c4bb1ccc7ae8bad678bef78d3228f94e6f1a7",
+        "total": 49
+      },
+      "receipts": [
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-base/tools/pnpm/bin/pnpm",
+            "install"
+          ],
+          "exit_code": 0,
+          "label": "install",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/install.log",
+          "log_sha256": "2a16d6e78f5daa50007a7da03f3e5ab3df66a1a5a2b62bba6c871e181916fc4a",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 4.871
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "node --version; npm --version; pnpm --version; command -v node; command -v npm; command -v pnpm; command -v bun || echo BUN_ABSENT"
+          ],
+          "exit_code": 0,
+          "label": "versions",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/versions.log",
+          "log_sha256": "406640ec5dd941d553bd5a6e07e2516ca517efd83355d974f7a7377d80fa5742",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.235
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-base/tools/node/bin/node",
+            "scripts/runtime-probes.mjs"
+          ],
+          "exit_code": 0,
+          "label": "probe",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/probe.log",
+          "log_sha256": "caa05d2071069e029c0f1ca61489d50b0b10e7f8e3a67fe80b9965b1ea484cb8",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.709
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-base/project/node_modules/.bin/tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/typecheck.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.909
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-base/project/node_modules/.bin/vue-tsc",
+            "--noEmit",
+            "-p",
+            "tsconfig.json"
+          ],
+          "exit_code": 0,
+          "label": "typecheck-vue",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/typecheck-vue.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 1.05
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-base/project/node_modules/.bin/vite",
+            "build"
+          ],
+          "exit_code": 0,
+          "label": "build",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/build.log",
+          "log_sha256": "3031cae0ac25e604c697d16cfa7ac4be44cef70cd4b71450bc9f7b6226b020d2",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/project/node_modules/.pnpm/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild",
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 9.675
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-base/tools/node/bin/node",
+            "scripts/cli-cases.mjs"
+          ],
+          "exit_code": 0,
+          "label": "cli-cases",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/cli-cases.log",
+          "log_sha256": "be9f48bc08ea9cbdbd4e28418b8fe1369f1dd496d4f4ddd880d3bffb718f1f5a",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.958
+        },
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "rm -rf binlink && pnpm exec navide-plugin init binlink --id acme.bin-link && pnpm exec navide-plugin validate binlink"
+          ],
+          "exit_code": 0,
+          "label": "manager-exec",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/manager-exec.log",
+          "log_sha256": "3128675217c497badd44157f37d1ebdf098020d3296cdfd78c8499e30e0a3ca8",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.627
+        },
+        {
+          "argv": [
+            "/Users/navide/eval/t05-cons-pnpm-base/tools/pnpm/bin/pnpm",
+            "list",
+            "--depth",
+            "0"
+          ],
+          "exit_code": 0,
+          "label": "dependency-tree",
+          "log_path": "<guest>/t05-cons-pnpm-base/logs/dependency-tree.log",
+          "log_sha256": "51320c6e2edae61e4af56f57a8f965f805e4eea3841608825643691c523255c7",
+          "observed_runtime_executables": [
+            "<guest>/t05-cons-pnpm-base/tools/node/bin/node"
+          ],
+          "remaining_observed_owned": 0,
+          "wall_seconds": 0.232
+        }
+      ]
+    }
+  ],
+  "correction_01": {
+    "anchor_note": "anchor.json and anchor.sha256 are written after this evidence file is generated and are recorded by the freeze step; they are not listed above to avoid a self-referential snapshot",
+    "evidence_files": [
+      "correction-01/repro/artifact-diff-v1-repro.stdout.txt",
+      "correction-01/repro/artifact-diff-v1-root/analysis/artifact-diff.json",
+      "correction-01/repro/freeze-v1-reverification.txt",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-base.c01-installed-cli-mode.json",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-base.c01-installed-cli-mode.log",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-cli-cases-v1-repro.json",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-cli-cases-v1-repro.log",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-cli-cases-v2-repro.json",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-cli-cases-v2-repro.log",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-installed-cli-mode.json",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-installed-cli-mode.log",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-probe-v1-repro.json",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-probe-v1-repro.log",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.cli-cases-v2-repro-results.json",
+      "correction-01/repro/reproductions/guest/t05-cons-npm-cand.probe-v1-repro-results.json",
+      "correction-01/repro/reproductions/guest/t05-cons-pnpm-base.c01-installed-cli-mode.json",
+      "correction-01/repro/reproductions/guest/t05-cons-pnpm-base.c01-installed-cli-mode.log",
+      "correction-01/repro/reproductions/guest/t05-cons-pnpm-cand.c01-installed-cli-mode.json",
+      "correction-01/repro/reproductions/guest/t05-cons-pnpm-cand.c01-installed-cli-mode.log",
+      "correction-01/repro/session-recovery/files/artifact-diff.v1.py",
+      "correction-01/repro/session-recovery/files/artifact-diff.v2-final.py",
+      "correction-01/repro/session-recovery/files/cli-cases.v1.mjs",
+      "correction-01/repro/session-recovery/files/cli-cases.v2.mjs",
+      "correction-01/repro/session-recovery/files/cli-cases.v3-final.mjs",
+      "correction-01/repro/session-recovery/files/main.ts.v1.ts",
+      "correction-01/repro/session-recovery/files/main.ts.v2-final.ts",
+      "correction-01/repro/session-recovery/files/runtime-probes.v1-deployed-to-consumers-and-used-by-the-failing-run.mjs",
+      "correction-01/repro/session-recovery/files/runtime-probes.v2-final.mjs",
+      "correction-01/repro/session-recovery/outputs/artifact-diff-v1.stdout.txt",
+      "correction-01/repro/session-recovery/outputs/cli-cases-v1.stdout.txt",
+      "correction-01/repro/session-recovery/outputs/cli-cases-v2.stdout.txt",
+      "correction-01/repro/session-recovery/outputs/probe-v1.stdout.txt",
+      "correction-01/repro/session-recovery/outputs/run1-consumer-setup.stdout.txt",
+      "correction-01/repro/session-recovery/recovery-manifest.json",
+      "correction-01/scripts/c01-freeze.py",
+      "correction-01/scripts/c01-session-recover.py",
+      "correction-01/scripts/c01-verify-freeze-v1.py",
+      "correction-01/superseded/anchor-2c176fb8.json",
+      "correction-01/superseded/anchor-2c176fb8.sha256"
+    ],
+    "evidence_symlinks": [
+      {
+        "path": "correction-01/repro/artifact-diff-v1-root/retrieved",
+        "target": "../../../retrieved"
+      }
+    ],
+    "freeze_v1_untouched": {
+      "anchor_sha256": "aaad420474416846636d1091956c546f5eed240706d1e52795b9fb4cae74c501",
+      "bound_files": 537,
+      "changed": 5,
+      "changed_paths": [
+        "host-ssh-log/ssh-invocations.log (append-only log, correction-01 invocations added)",
+        "scripts/t05-run.py (instructed no-clobber fix)",
+        "scripts/t05-build-evidence.py (corrected evidence wording)",
+        "docs/toolchain-evaluation/bun/ticket-05/report.md (corrected)",
+        "docs/toolchain-evaluation/bun/ticket-05/evidence.json (corrected)"
+      ],
+      "no_raw_evidence_changed": true,
+      "reverification": "correction-01/repro/freeze-v1-reverification.txt",
+      "reverification_producer": "correction-01/scripts/c01-verify-freeze-v1.py",
+      "unchanged": 532,
+      "verified_by_rehash": true,
+      "wording": "the freeze-v1 anchor file is unchanged and still verifies, while 5 of the 537 files it binds changed in correction 01; the phrase \"freeze-v1 was not modified\" was replaced by this precise statement in correction 02"
+    },
+    "harness_change": {
+      "after_sha256": "96a47392569bcf5ba61a873455b315c77ab2113e576eb0501df45e5a1c42ee9a",
+      "before_sha256": "ec1fb975acfc305e50c8208bd8c3cdbf8e3b0dfbf16d6f5e3c318539d2dcec37",
+      "behavior": "log and receipt paths are computed through no_clobber(); an existing path gains an -r2/-r3... suffix and the receipt records paths_renamed_to_avoid_clobber; verified with a host-side unit check",
+      "file": "scripts/t05-run.py",
+      "guest_copy_sha256": "96a47392569bcf5ba61a873455b315c77ab2113e576eb0501df45e5a1c42ee9a"
+    },
+    "installed_cli_mode": {
+      "distinction": "Bun bun pm pack advertises 0o777 for bin/navide-plugin.mjs; pnpm pack writes 0o755; both installing managers normalize the installed file to 0755 and its content is identical in all four consumers and both artifact sets",
+      "observed": "all four consumers: -rwxr-xr-x (0755), 23186 bytes, content sha256 c1ebe9c3fc225902abab8947852e9c2769ed8a69ec146a39c07e4d993ec23b79",
+      "receipts": [
+        "correction-01/repro/reproductions/guest/t05-cons-npm-cand.c01-installed-cli-mode.{json,log}",
+        "correction-01/repro/reproductions/guest/t05-cons-npm-base.c01-installed-cli-mode.{json,log}",
+        "correction-01/repro/reproductions/guest/t05-cons-pnpm-cand.c01-installed-cli-mode.{json,log}",
+        "correction-01/repro/reproductions/guest/t05-cons-pnpm-base.c01-installed-cli-mode.{json,log}"
+      ],
+      "release_packaging_note": "if Bun packing is ever used for publication, normalize archive modes (or revisit the packer behaviour) so published .tgz metadata does not advertise a world-writable mode; not changed here"
+    },
+    "recovery": {
+      "chains_reproduce_on_disk": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "files": [
+        {
+          "bytes": 9011,
+          "file": "runtime-probes.v1-deployed-to-consumers-and-used-by-the-failing-run.mjs",
+          "matches_on_disk": false,
+          "sha256": "489b5c747fcbc37db2934abc46276a0ba55e0c65ec1185d5111a554a6991940f"
+        },
+        {
+          "bytes": 9304,
+          "file": "runtime-probes.v2-final.mjs",
+          "matches_on_disk": true,
+          "sha256": "5481714daa81d748b15631482bf12bf4f757c849c7b3fd9113ebe9de5c162e6f"
+        },
+        {
+          "bytes": 12758,
+          "file": "cli-cases.v1.mjs",
+          "matches_on_disk": false,
+          "sha256": "2b89ddb2594c60e484c572a3ce8939b94d3f72a368158d613868c9df999aeaf7"
+        },
+        {
+          "bytes": 12767,
+          "file": "cli-cases.v2.mjs",
+          "matches_on_disk": false,
+          "sha256": "72d78bcfd1499791465e0d33a7b84c7e68cbc9f26b3c2d84b773d594bcf0403c"
+        },
+        {
+          "bytes": 12844,
+          "file": "cli-cases.v3-final.mjs",
+          "matches_on_disk": true,
+          "sha256": "606bf97ba52b85a166708a3d1f7c8a2395c97f83143caa195b5819e74bdaba71"
+        },
+        {
+          "bytes": 2504,
+          "file": "main.ts.v1.ts",
+          "matches_on_disk": false,
+          "sha256": "755cd6362d09c92a787a0eb8bbc0ab007a147d52b02c8d68ab736c07e63fc316"
+        },
+        {
+          "bytes": 2536,
+          "file": "main.ts.v2-final.ts",
+          "matches_on_disk": true,
+          "sha256": "ecc653f978451f83ab01029a9ac3126dd4ee7c6e69fc8e8ad2698bdccc26fd5d"
+        },
+        {
+          "bytes": 4182,
+          "file": "artifact-diff.v1.py",
+          "matches_on_disk": false,
+          "sha256": "fcde1989615b55c7c5a9db91ab6a04fe05b8cee479046b06d62dd78341348a95"
+        },
+        {
+          "bytes": 5931,
+          "file": "artifact-diff.v2-final.py",
+          "matches_on_disk": true,
+          "sha256": "44d179083ca3605fa5873dd8c9f198deed6e6a95617d12bcddef41f41d6d7b4e"
+        }
+      ],
+      "manifest": "correction-01/repro/session-recovery/recovery-manifest.json",
+      "manifest_sha256": "80b70bbd0133ccff9a4e710d8ee561db72998506c6463a877d6b9def7c383dce",
+      "method": "replay recorded write/edit operations; every edit must match exactly once and the chain must reproduce the current on-disk file byte-for-byte before a snapshot is accepted; no content is reconstructed from memory",
+      "outputs": [
+        {
+          "bytes": 3128,
+          "file": "run1-consumer-setup.stdout.txt",
+          "session_line": 196,
+          "session_timestamp": "2026-10-11T03:11:25.228Z",
+          "sha256": "4114e38b143616d52e9e3b9f7c49d6542f29e9228e73819f581ac9d7dd2de25e"
+        },
+        {
+          "bytes": 4037,
+          "file": "probe-v1.stdout.txt",
+          "session_line": 212,
+          "session_timestamp": "2026-10-11T03:12:52.092Z",
+          "sha256": "5a584c314e80b825365ac3ba9679281ec597e211d8241bd9e768bcd03effd4fb"
+        },
+        {
+          "bytes": 718,
+          "file": "cli-cases-v1.stdout.txt",
+          "session_line": 234,
+          "session_timestamp": "2026-10-11T03:13:44.421Z",
+          "sha256": "803756687021488cb01dafa3525f13f7024308b722c388d4f712cb764609e45e"
+        },
+        {
+          "bytes": 1295,
+          "file": "cli-cases-v2.stdout.txt",
+          "session_line": 238,
+          "session_timestamp": "2026-10-11T03:13:51.043Z",
+          "sha256": "1d2329445b1742d219847c7d911b5d64bc36431d16d1598e5fd7cd8a50979510"
+        },
+        {
+          "bytes": 630,
+          "file": "artifact-diff-v1.stdout.txt",
+          "session_line": 270,
+          "session_timestamp": "2026-10-11T03:15:46.779Z",
+          "sha256": "d3155fb25edbd616efdf1a4cd7a3698e58f768f229a25fc7b8a2e8f26c280772"
+        }
+      ],
+      "script": "correction-01/scripts/c01-session-recover.py",
+      "script_sha256": "b68a931e3867db09a89442be90c0b860b82044196c8b0001f17f0d452d809b3c",
+      "session_file": "/Users/slighter12/.pi/agent/sessions/--Users-slighter12-git-worktrees-Navide-issue-2-bun-toolchain--/2026-10-11T03-03-40-423Z_01a128ea-8487-775e-be45-a9adac52f0c8.jsonl",
+      "session_lines_at_recovery": 359,
+      "session_sha256_at_recovery": "3f47f4dab983b5e51480b202d9d68be62608387cd50650bf5140cc55188fec18"
+    },
+    "reproduction_verdicts": {
+      "artifact_diff_v1": "stdout byte-identical to the recovered v1 output",
+      "cli_cases_v1": "identical to the recovered v1 output except the reproduction file path/name",
+      "cli_cases_v2": "byte-identical to the recovered v2 output",
+      "main_ts_v1": "not run: replaced before any consumer operation; recovered byte-exactly for the record, no outcome exists",
+      "probe_v1": "byte-identical to the recovered v1 output after scratch-path normalization"
+    },
+    "reproductions": [
+      {
+        "argv": [
+          "/Users/navide/eval/t05-cons-npm-cand/tools/node/bin/node",
+          "scripts/runtime-probes-v1-repro.mjs"
+        ],
+        "exit_code": 1,
+        "final_lines": [
+          "FAIL contracts portable verdict: null",
+          "FAIL (info) ui editor node import: Node import not applicable: Unknown file extension \".css\" for /Users/navide/eval/t05-cons-npm-cand/project-c01-probe-v1/node_modules/monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css",
+          "PROBES_TOTAL=48 PROBES_FAILED=1 INFORMATIONAL_FAILURES=1"
+        ],
+        "log_bytes": 4057,
+        "log_sha256": "d531a43118edbb62671d760f1e723b70527b19714ac5369200db5de574300b2c",
+        "run": "t05-cons-npm-cand.c01-probe-v1-repro"
+      },
+      {
+        "argv": [
+          "/Users/navide/eval/t05-cons-npm-cand/tools/node/bin/node",
+          "scripts/cli-cases-v1-repro.mjs"
+        ],
+        "exit_code": 1,
+        "final_lines": [
+          "ReferenceError: dirname is not defined"
+        ],
+        "log_bytes": 591,
+        "log_sha256": "4ac28dd4d8aabd2453b54245b12a98c838193449aaf3ccfb0040882c19eb835f",
+        "run": "t05-cons-npm-cand.c01-cli-cases-v1-repro"
+      },
+      {
+        "argv": [
+          "/Users/navide/eval/t05-cons-npm-cand/tools/node/bin/node",
+          "scripts/cli-cases-v2-repro.mjs"
+        ],
+        "exit_code": 1,
+        "final_lines": [
+          "FAIL package-backend-exact-target: exit=0 expected=exit 0 missing=archive lists the executable backend entry",
+          "CLI_CASES_TOTAL=19 CLI_CASES_FAILED=1"
+        ],
+        "log_bytes": 1145,
+        "log_sha256": "5973457f16fd42327b333c9a8085d6d5bb093a9e50f630c63e248bcc6d0cd92c",
+        "run": "t05-cons-npm-cand.c01-cli-cases-v2-repro"
+      },
+      {
+        "argv": [
+          "python3",
+          "correction-01/repro/session-recovery/files/artifact-diff.v1.py",
+          "<synthetic root>"
+        ],
+        "exit_code": 0,
+        "final_lines": [
+          "ALL_CONTENT_IDENTICAL=False"
+        ],
+        "log_bytes": 630,
+        "log_sha256": "d3155fb25edbd616efdf1a4cd7a3698e58f768f229a25fc7b8a2e8f26c280772",
+        "output_analysis": "correction-01/repro/artifact-diff-v1-root/analysis/artifact-diff.json",
+        "output_analysis_sha256": "d811a226593340450ab555a604bd1a0b1a7f6956b0c38afb7a03ef4cf53f5949",
+        "run": "artifact-diff v1 (host)"
+      }
+    ],
+    "review_verdict": "HOLD on evidence integrity (P1-1, P2-1, P2-2); technical criteria satisfied",
+    "scope": "corrected wording in the tracked report/evidence, recovered overwritten content from the session transcript, fresh reproductions under new labels, no-clobber harness change, installed-mode receipt and release-packaging note"
+  },
+  "correction_02": {
+    "anchor_build_note": "the correction-02 freeze ran twice; the first anchor (4ae5c1f0eb83fd0957c44e0464e23954a752af75984c8f7f9d9ce777e6ca36d5) excluded anchor files by basename and did not bind the correction-01 anchor, so it was discarded; the final anchor binds correction-01/anchor.json and freeze/freeze-v1.json",
+    "anchor_note": "correction-02/anchor.json and anchor.sha256 are written after this evidence file is generated and are recorded by the freeze step; they are not listed above to avoid a self-referential snapshot",
+    "evidence_files": [
+      "correction-02/recovered/recovery-manifest.json",
+      "correction-02/recovered/report.v1.md",
+      "correction-02/recovered/t05-build-evidence.v1.py",
+      "correction-02/repro/freeze-v1-reverification-r2.txt",
+      "correction-02/scripts/c02-freeze.py",
+      "correction-02/scripts/c02-session-recover.py",
+      "correction-02/scripts/c02-verify-freeze-v1.py"
+    ],
+    "evidence_symlinks": [],
+    "preservation_status": [
+      {
+        "chain_reproduces_current_file": true,
+        "delivered_file": "correction-02/recovered/t05-build-evidence.v1.py",
+        "file": "scripts/t05-build-evidence.py v1",
+        "freeze_v1_bytes": 16065,
+        "freeze_v1_sha256": "b9eefbcb1d8f057a72b00adb3df068e3dc1db384f48fa2c7b9188f4ea6583385",
+        "status": "preserved and verified"
+      },
+      {
+        "chain_check_note": "hash gate passes; whole-chain corroboration stops at session line 401 because the recorded edit arguments carry typographic quotes where the file has straight ones",
+        "chain_reproduces_current_file": false,
+        "delivered_file": "correction-02/recovered/report.v1.md",
+        "file": "docs/toolchain-evaluation/bun/ticket-05/report.md v1",
+        "freeze_v1_bytes": 18876,
+        "freeze_v1_sha256": "19265e66699737af6b2275ca6d152adb2b4d0241976934754bc38b8484b9d9ee",
+        "status": "preserved and verified"
+      },
+      {
+        "file": "docs/toolchain-evaluation/bun/ticket-05/evidence.json v1",
+        "freeze_v1_bytes": 49532,
+        "freeze_v1_sha256": "ee0c88aa39ddd44eeca8db60c3a9b2f3cc3e986c6e5dbd238e7a2c4d1d345a0a",
+        "reason": "generated_utc is stamped from the host clock at generation time, so the exact version-1 bytes cannot be regenerated; the generator that produced them is recovered and verified",
+        "status": "not preserved, not reproducible"
+      },
+      {
+        "file": "scripts/t05-run.py v1",
+        "freeze_v1_bytes": 9265,
+        "freeze_v1_sha256": "ec1fb975acfc305e50c8208bd8c3cdbf8e3b0dfbf16d6f5e3c318539d2dcec37",
+        "preserved_at": "retrieved/guest/_t05-scripts/t05-run.py",
+        "status": "preserved"
+      }
+    ],
+    "recovery": {
+      "gate": "content is delivered only if the recovered bytes hash exactly to the freeze-v1 value",
+      "manifest": "correction-02/recovered/recovery-manifest.json",
+      "manifest_sha256": "1c07cabd7febd29f9ac6bef0a83c8ecd00cb8ef532e8766e6675ecf33a098590",
+      "not_preserved_files": [],
+      "script": "correction-02/scripts/c02-session-recover.py",
+      "script_sha256": "088dfcbaf03ec239e18269e140963fd4f7ed98ad3b1d742a5d0a69ae0cafbb76",
+      "session_file": "/Users/slighter12/.pi/agent/sessions/--Users-slighter12-git-worktrees-Navide-issue-2-bun-toolchain--/2026-10-11T03-03-40-423Z_01a128ea-8487-775e-be45-a9adac52f0c8.jsonl",
+      "session_lines_at_recovery": 485,
+      "session_sha256_at_recovery": "4976a9cf52bf5f5c44735a4b764a6977214d40e6f15ca54c6c8c3e152a1c983f",
+      "skipped_failed_calls": [
+        {
+          "call_id": "call_00_qjB7N86ryjOrh3nw4fBq7736",
+          "op": "edit",
+          "reason": "recorded tool result is an error; the call changed nothing",
+          "session_line": 423,
+          "timestamp": "2026-10-11T03:29:00.121Z"
+        }
+      ]
+    },
+    "reverification": {
+      "bound_files": "537",
+      "changed": "5",
+      "correction_01_anchor_unchanged": "True",
+      "file": "correction-02/repro/freeze-v1-reverification-r2.txt",
+      "file_sha256": "872ae072a9857ff8751965c44a2522ce331117eec8024cb39fa93b7bd94361e8",
+      "producer": "correction-02/scripts/c02-verify-freeze-v1.py",
+      "producer_sha256": "d7186f2c646981c51859381b68497427095d1d69e5f902d3f1aedf581db3b23f",
+      "round_1_record_sha256": "975ae053f9a8696e5ac04558aaa402fba4ef0da5ca1d87d762c2d019ba6739a9",
+      "round_1_record_untouched": "correction-01/repro/freeze-v1-reverification.txt",
+      "unchanged": "532"
+    },
+    "review_findings": [
+      "P1-1: scripts/t05-build-evidence.py v1 (b9eefbcb1d8f057a72b00adb3df068e3dc1db384f48fa2c7b9188f4ea6583385, 16065 B) was not preserved",
+      "P2-1: the version-1 preservation status of report.md v1 (19265e66...) and evidence.json v1 (ee0c88aa...) was unstated",
+      "P3-1: the t05-run.py v1 copy location was unnamed",
+      "P3-2: the phrase \"freeze-v1 was not modified\" overstates the case; the anchor is unchanged but 5 bound files changed"
+    ],
+    "scope": "bounded documentation and recovery only; no technical conclusion, receipt or measurement changes"
+  },
+  "deviations": [
+    "Wording note (correction 01): where a receipt or log was overwritten in place, the version-1 account of that run is an UNVERIFIABLE self-report as far as the original artifact is concerned; correction 01 recovers the exact recorded outputs from the worker session transcript and re-runs the failing variants under new labels.",
+    "Deviation 1 (consumer-setup tarball naming): the first t05-consumer-setup.sh run copied tarballs under unscoped names while the frozen consumer package.json references navide-plugin-*.tgz; no install ran against them, the project directories were removed and recreated, and the setup script now keeps the packer name. Version 1's claim that the first run's COPIED lines remain in the host SSH log was FALSE and is withdrawn: the SSH wrapper records invocation argv only (lines 31-43 are the surviving invocation trail), and no evidence-root file captured that run's stdout.",
+    "Deviation 2 (previously unrecorded, added by correction 01): scripts/consumer/scripts/runtime-probes.mjs and scripts/consumer/src/main.ts were edited after the consumer projects existed and the corrected copies were copied over the four consumers' own copies (scp/cp at 03:13:01, SSH log lines 57-66). The superseded consumer copies and the template's earlier revisions no longer exist on disk; main.ts v1 never executed and has no outcome. Both earlier revisions are recovered byte-exactly from the session transcript in correction 01.",
+    "Deviation 3 (probe v1 expectation): the first probe run failed one synthetic expectation (validatePortableArchiveEntries returns null for a clean list, not a {kind} object). The v1 receipt/log were overwritten in place; version 1's account is an UNVERIFIABLE self-report. Correction 01 recovers the exact output and reproduces the run (identical after scratch-path normalization).",
+    "Deviation 4 (cli-cases v1/v2): run 1 failed with ReferenceError: dirname is not defined; run 2 ran 19 cases with one unzip-listing assertion failure (18 pass / 1 fail); run 3 passes 19/19. Both earlier receipts/logs were overwritten in place, so version 1's accounts are UNVERIFIABLE self-reports; correction 01 recovers their exact outputs and reproduces both runs (v2 byte-identical, v1 identical except the repro file path).",
+    "Deviation 5 (artifact-diff first pass): the first pass reported ALL_CONTENT_IDENTICAL=False by treating package.json reformatting as content difference; the corrected pass reports ALL_SEMANTICALLY_EQUIVALENT=True. The original analysis file was overwritten in place, so version 1's account is an UNVERIFIABLE self-report; correction 01 recovers the v1 script and re-runs it against unchanged inputs with byte-identical stdout.",
+    "Deviation 6 (manager cwd difference, observed not a failure): npm exec ran the CLI in the requested cli-work cwd while pnpm exec used the consumer project root (pnpm scaffold landed in project/binlink); both exited 0.",
+    "Deviation 7 (baseline extraction listing, harmless): shasum printed missing-file lines for bun.lock and scripts/bun-evaluation.mjs at the frozen base; the extraction succeeded and the lines are retained in the guest log.",
+    "Deviation 8 (host harness hiccups, no state effect): t05-exec.sh was not executable on its first invocation; one scp used -R and failed before any transfer; the correction-01 session-recovery script needed two marker refinements before selecting exactly the genuine tool results (the first marker also matched the worker's own later inspection output), and its intermediate runs wrote only partial snapshot files, removed before the clean run."
+  ],
+  "evaluation_root": "/Users/slighter12/git/evaluations/Navide/issue-2-bun-toolchain/ticket-05-01",
+  "fixed_points": {
+    "baseline": {
+      "archive": "base-f4e9fd50.tar",
+      "archive_origin": "git archive of the frozen base in the shared worktree; byte-identical to the ticket-01 frozen baseline archive hash",
+      "archive_sha256": "e3da8e5c9900c599920634fa1515cb2fdd53b5d15bd95a09225a2e08d8c723b9",
+      "commit": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f"
+    },
+    "candidate": {
+      "archive": "head-2c2707a3.tar",
+      "archive_origin": "git archive HEAD produced in the shared worktree and transferred to the guest",
+      "archive_sha256": "b931eb9bdd2a1a570fc2c023212fa23b4f4f8216646cab043107a4136bea834e",
+      "commit": "2c2707a3e3cb89cea2a769b7a7b3a41efaf630a5"
+    }
+  },
+  "frozen_delivery": {
+    "correction_01": "correction-01/anchor.json and correction-01/anchor.sha256 (delivered; anchor verified unchanged by the round-2 re-verification)",
+    "correction_02": "correction-02/anchor.json and correction-02/anchor.sha256 (current snapshot for this ticket)",
+    "covers": "this evidence.json, the tracked report, every harness script and consumer template file, both source archives, both artifact provenance files and tarballs, the retrieval archive, the artifact-diff analysis, the raw host SSH log, the correction-01 recovery/reproduction records, and the correction-02 recovered version-1 files and re-verification",
+    "freeze_v1": "freeze/freeze-v1.json and freeze/freeze-v1.sha256 (anchor unchanged; 5 of the 537 files it binds changed in corrections 01/02, each accounted for)"
+  },
+  "gaps": [
+    "macOS only; Linux and Windows consumer evidence remains issues 07/08. No cross-platform claim is made.",
+    "Three published npm packages were exercised (contracts, SDK, UI); plugin .vsix archives and the Desktop Host install/execution lifecycle are not part of this ticket (ticket 04 covers packaged lifecycle cases; no Host install of these artifacts was performed here).",
+    "Registry login/publish network flows were not exercised (no registry publication is authorized); only the local missing-token denial was run.",
+    "Historical released binaries are not covered; only the artifacts built from the recorded candidate and baseline snapshots are.",
+    "A plain Node import of the UI editor bundle is not applicable (monaco-editor ESM imports CSS); the consumer Vite build is the exercised browser-consumption path. Recorded as an informational check in all four consumers.",
+    "Timing data is recorded for completeness only; ticket 06 owns performance measurement.",
+    "One manager version each was exercised (npm 10.9.8 bundled with Node 22.23.2, pnpm 10.0.0); other manager versions are out of scope.",
+    "pnpm 10 ignores the esbuild install script by default (recorded in its install log) while npm runs it; both installs and builds succeeded via the prebuilt platform binaries.",
+    "The SDK tarball ships its bin/*.test.ts sources in both artifact sets (pre-existing `files: [\"dist\",\"bin\"]` behaviour, identical candidate/baseline). Noted, not changed.",
+    "Release-packaging note (correction 01): the Bun-packed tarball advertises mode 0o777 for bin/navide-plugin.mjs (pnpm pack writes 0o755); both installing managers normalize it to 0755 and content is identical, but if Bun packing is ever used for publication the archive modes should be normalized so published metadata does not advertise a world-writable mode."
+  ],
+  "generated_utc": "2026-10-11T03:41:58Z",
+  "guest": {
+    "host": "navide@192.168.64.2 (disposable UTM macOS guest)",
+    "os": "macOS 27.0.1 (26A434) arm64",
+    "retrieval_archive": {
+      "bytes": 12551978,
+      "entries": 578,
+      "guest_side_listing": "retrieved/guest/_t05-scripts/inputs-sha256.txt",
+      "path": "retrieved/guest/_t05-retrieve.tar.gz",
+      "sha256": "d0a463219b444e272e6ae44edcbc25aa6ae1468984a858ba45b2394aa841cb5b"
+    },
+    "ssh": "ticket-03 pinned options via ticket-05-01/scripts/t05-ssh.sh; every invocation logged in host-ssh-log/ssh-invocations.log"
+  },
+  "issue": "05-public-consumer-compatibility",
+  "no_bun_evidence": {
+    "bun_binary_under_consumer_cases": 0,
+    "command_v_bun": "BUN_ABSENT in all four consumer version receipts",
+    "consumer_path_entries": "node/bin:pnpm/bin:/usr/bin:/bin:/usr/sbin:/sbin only",
+    "observed_runtimes": "every consumer receipt observes only the case Node binary (plus the case esbuild child during install/build); no bun executable appears in any observed process tree",
+    "remaining_observed_owned": "zero in all 46 receipts"
+  },
+  "provenance": {
+    "baseline_tarballs": [
+      {
+        "bytes": 40140,
+        "file": "navide-plugin-contracts-1.0.0.tgz",
+        "package": {
+          "name": "@navide/plugin-contracts",
+          "version": "1.0.0"
+        },
+        "sha256": "3724befd44e2706735d4db2bf286fff7a1fa492adcea7c0b490d7f9b00c01dc5"
+      },
+      {
+        "bytes": 39398,
+        "file": "navide-plugin-sdk-1.0.0.tgz",
+        "package": {
+          "name": "@navide/plugin-sdk",
+          "version": "1.0.0"
+        },
+        "sha256": "ffe0b648471cf550fe0ecbbde7e0bccf6a2b9835d2ba62b1603c715c7d925a45"
+      },
+      {
+        "bytes": 3034490,
+        "file": "navide-plugin-ui-1.0.0.tgz",
+        "package": {
+          "name": "@navide/plugin-ui",
+          "version": "1.0.0"
+        },
+        "sha256": "c54863d322622183c3743d94c39c49ebb0e66134f0e9f02fd6742ea1284f5350"
+      }
+    ],
+    "candidate_tarballs": [
+      {
+        "bytes": 38669,
+        "file": "navide-plugin-contracts-1.0.0.tgz",
+        "package": {
+          "name": "@navide/plugin-contracts",
+          "version": "1.0.0"
+        },
+        "sha256": "9659df0f842a83d10e3ef72c4f9e8599d2b22a0b5ae98083f58d161a151a9f8a"
+      },
+      {
+        "bytes": 38168,
+        "file": "navide-plugin-sdk-1.0.0.tgz",
+        "package": {
+          "name": "@navide/plugin-sdk",
+          "version": "1.0.0"
+        },
+        "sha256": "c3bc4e7336a0b7b8706eb6de3a6c54848026b812b45a62c6bf5476130a74817b"
+      },
+      {
+        "bytes": 3017431,
+        "file": "navide-plugin-ui-1.0.0.tgz",
+        "package": {
+          "name": "@navide/plugin-ui",
+          "version": "1.0.0"
+        },
+        "sha256": "c269f4861304868625c3f45089360657edd0485e31a0eeb0d8f7c7a0c891ff85"
+      }
+    ],
+    "consumer_dependency_versions": {
+      "@types/node": "22.20.3",
+      "@vitejs/plugin-vue": "6.0.9",
+      "monaco-editor": "0.55.1",
+      "typescript": "5.9.3",
+      "vite": "6.4.3",
+      "vue": "3.5.34",
+      "vue-i18n": "11.4.5",
+      "vue-tsc": "2.2.12"
+    },
+    "consumer_project_template": "_t05-scripts/consumer/** (frozen with the retrieval archive)"
+  },
+  "recommendation": "PASS for the exercised macOS public-consumer matrix: the packed contracts/SDK/UI artifacts built and packed under Bun-only are consumed identically by independent npm and pnpm consumer projects (install, exports/subpaths, schemas, styles, portable workers, peers, consumer tsc/vue-tsc, consumer Vite build, public Plugin CLI validate/package/sign/verify and its denial cases) and match the Node/pnpm baseline artifacts. macOS-only evidence; Linux/Windows remain 07/08.",
+  "report": "docs/toolchain-evaluation/bun/ticket-05/report.md",
+  "schema": "navide-bun-evaluation-ticket-evidence/v1",
+  "shared_worktree": {
+    "branch": "eval/issue-2-bun-toolchain",
+    "head": "2c2707a3e3cb89cea2a769b7a7b3a41efaf630a5",
+    "index_written": false,
+    "path": "/Users/slighter12/git/worktrees/Navide/issue-2-bun-toolchain",
+    "source_changes_by_this_ticket": "none",
+    "status_porcelain_after": [
+      "?? docs/toolchain-evaluation/bun/ticket-05/"
+    ]
+  },
+  "source_changes": "none (no product, test, script, lockfile or configuration change in this ticket)",
+  "stage": "frozen-delivery",
+  "ticket": "ticket-05-01",
+  "tool_identities": {
+    "bun": {
+      "binary_sha256": "35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5",
+      "revision": "1.4.2+744846f84",
+      "version": "1.4.2"
+    },
+    "electron": {
+      "cache_zip_sha256": "a212eee63ba2f45fd83bd28f77a3e3313a336ad17a4c25adf617942eef5e0e2c",
+      "role": "pre-placed install cache in both build cases; not otherwise exercised",
+      "version": "44.4.5"
+    },
+    "esbuild": {
+      "role": "build child executable observed in both build cases",
+      "version": "0.25.12"
+    },
+    "node": {
+      "binary_sha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+      "version": "22.23.2"
+    },
+    "npm": {
+      "provenance": "bundled with Node 22.23.2 (tools/node/bin/npm)",
+      "version": "10.9.8"
+    },
+    "pnpm": {
+      "pnpm_cjs_sha256": "b276da51dc8ca5b0d3ee3371695b50fc8b3244b281b091c63a3f082a88dadeb9",
+      "version": "10.0.0"
+    },
+    "python": {
+      "role": "case prerequisite copy",
+      "version": "3.12.11"
+    },
+    "uv": {
+      "role": "case prerequisite copy",
+      "version": "0.12.23"
+    }
+  },
+  "version": 1
+}
