@@ -1,4 +1,6 @@
-// Bun compatibility setup: re-anchor relative Vitest mock ids on the caller file.
+// Bun compatibility setup (inert outside Bun), two independent parts:
+//
+// 1. Re-anchor relative Vitest mock ids on the caller file.
 //
 // Vitest resolves a relative `vi.mock('./x')` through the file it recovers from
 // the calling frame (vitest's internal getImporter()). That lookup matches
@@ -10,9 +12,27 @@
 //
 // Bun does print the calling file in the frame, so this setup recovers the
 // importer from that frame and hands Vitest a pre-anchored id. Absolute and
-// bare specifiers are passed through untouched. This file is inert outside Bun.
+// bare specifiers are passed through untouched.
+//
+// 2. Keep `electron-updater` from downloading the Electron binary during tests.
+//
+// electron-updater is a CommonJS package whose `autoUpdater` export is a lazy
+// getter that builds the updater (and so require('electron')) on first read.
+// Node's import leaves that getter unread until the code uses it; Bun's import
+// of a CommonJS module reads every enumerable export at import time. Any test
+// that imports src/main/updater.ts without mocking electron-updater (for
+// example dockQuitProbe.test.ts through src/main/index.ts) therefore evaluates
+// the real `electron` package, which downloads the binary with a synchronous
+// spawnSync when it is not installed. That blocks the event loop for as long as
+// the download takes, so the test timeouts fire late and a stray test body
+// leaks into the next test. With the binary absent, point Electron's own
+// override at a path that does not exist: the package then returns the path
+// string at once and nothing is downloaded. An installed binary, or an override
+// the caller already set, is left alone.
 import { vi } from 'vitest'
-import { statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -78,4 +98,17 @@ if (isBun) {
       return original.call(vi, anchorPath(path), ...rest)
     }
   }
+}
+
+function electronBinaryInstalled(): boolean {
+  try {
+    const dir = dirname(createRequire(import.meta.url).resolve('electron/package.json'))
+    return existsSync(join(dir, 'dist', readFileSync(join(dir, 'path.txt'), 'utf8')))
+  } catch {
+    return false
+  }
+}
+
+if (isBun && !process.env.ELECTRON_OVERRIDE_DIST_PATH && !electronBinaryInstalled()) {
+  process.env.ELECTRON_OVERRIDE_DIST_PATH = join(tmpdir(), 'navide-bun-electron-binary-not-installed')
 }
