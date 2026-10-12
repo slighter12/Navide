@@ -58,6 +58,15 @@ switch (command) {
 const env = { ...process.env }
 let nodeAlias
 let result
+// On Windows a `bun run <script>` child reports Bun's generated node-named shim as
+// `process.execPath`; that shim parses argv with Node semantics, so the re-entry
+// below must use the installed Bun. POSIX keeps execPath unchanged.
+const bunNodeShim = process.platform === 'win32' && /[\\/]bun-node-[^\\/]+[\\/]node(\.exe)?$/i.test(process.execPath)
+const runtime = bunNodeShim ? (typeof Bun !== 'undefined' && typeof Bun.which === 'function' ? Bun.which('bun') : null) : process.execPath
+if (!runtime) {
+  console.error('Could not resolve the installed Bun CLI for the Windows re-entry; refusing an external Node fallback.')
+  process.exit(1)
+}
 try {
   if (command === 'run') {
     // Dependency CLIs using /usr/bin/env node must select this same pinned Bun,
@@ -66,7 +75,7 @@ try {
     symlinkSync(process.execPath, join(nodeAlias, 'node'))
     env.PATH = `${nodeAlias}${delimiter}${env.PATH ?? ''}`
   }
-  result = spawnSync(process.execPath, invocation, { stdio: 'inherit', env })
+  result = spawnSync(runtime, invocation, { stdio: 'inherit', env })
 } finally {
   if (nodeAlias) rmSync(nodeAlias, { recursive: true })
 }
