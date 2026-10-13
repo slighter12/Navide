@@ -10,14 +10,30 @@ use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+#[path = "darwin.rs"]
+mod darwin;
+
+#[path = "adapters.rs"]
+mod adapters;
 #[path = "claude.rs"]
 mod claude;
 #[path = "claude_facts.rs"]
 mod claude_facts;
+#[path = "codex.rs"]
+mod codex;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "initial_retention_test.rs"]
+mod initial_retention_test;
+#[cfg(target_os = "macos")]
+#[path = "opencode.rs"]
+mod opencode;
 
 const CAP: usize = 5 * 1024 * 1024;
 const CHUNK: usize = 16384;
 const MAX_REQUEST: usize = 32 * 1024 * 1024;
+/// Bound for observing the root's exit status (cleanup's root reap; EOF before reap).
+const ROOT_REAP_DEADLINE: Duration = Duration::from_secs(1);
 
 type Table = HashMap<i32, (i32, i32, String)>;
 #[derive(Default)]
@@ -244,6 +260,7 @@ impl Session {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn bounded_command(mut command: Command) -> io::Result<Vec<u8>> {
     let mut child = command
         .stdout(Stdio::piped())
@@ -279,7 +296,12 @@ fn bounded_command(mut command: Command) -> io::Result<Vec<u8>> {
     }
     Ok(bytes)
 }
-fn snapshot() -> io::Result<Table> {
+#[cfg(target_os = "macos")]
+fn snapshot(initial_child: Option<i32>, known: &Table) -> io::Result<Table> {
+    darwin::snapshot(initial_child, known)
+}
+#[cfg(not(target_os = "macos"))]
+fn snapshot(_initial_child: Option<i32>, _known: &Table) -> io::Result<Table> {
     let mut command = Command::new("/bin/ps");
     command
         .args(["-axo", "pid,ppid,pgid,lstart"])
@@ -299,6 +321,7 @@ fn snapshot() -> io::Result<Table> {
     }
     Ok(table)
 }
+#[cfg(any(not(target_os = "macos"), test))]
 fn descendants(table: &Table, pid: i32) -> Table {
     let mut result = Table::new();
     let mut pending = vec![pid];
@@ -311,6 +334,28 @@ fn descendants(table: &Table, pid: i32) -> Table {
         }
     }
     result
+}
+fn known_owned(session: &Session) -> Table {
+    let mut known = session.descendants.clone();
+    if let Some(start) = session.root["start_value"].as_str() {
+        let pid = session.child.id() as i32;
+        known.insert(pid, (0, pid, start.to_owned()));
+    }
+    known
+}
+fn retain_owned(session: &mut Session, table: &Table) {
+    let pid = session.child.id() as i32;
+    #[cfg(target_os = "macos")]
+    session.descendants.extend(
+        table
+            .iter()
+            .filter(|(child, _)| **child != pid)
+            .map(|(&child, entry)| (child, entry.clone())),
+    );
+    #[cfg(not(target_os = "macos"))]
+    if table.contains_key(&pid) {
+        session.descendants.extend(descendants(table, pid));
+    }
 }
 fn identity(pid: i32, entry: &(i32, i32, String)) -> Value {
     json!({"pid":pid,"pgid":entry.1,"start_kind":"posix-lstart","start_value":entry.2})
@@ -347,7 +392,7 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
     let workspace = text(args, "workspace_path")?.to_owned();
     let cwd = text(args, "cwd")?.to_owned();
     let agent = args["agent_key"].as_str().unwrap_or("");
-    if !matches!(agent, "" | "terminal") && agent != claude_facts::KEY {
+    if !matches!(agent, "" | "terminal") && !adapters::integrated(agent) {
         return Err(io::Error::other("agent runtime not integrated"));
     }
     let argv: Vec<String> = args["argv"]
@@ -425,7 +470,7 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
     }
     let mut child = command.spawn()?;
     let pid = child.id() as i32;
-    let table = snapshot().unwrap_or_default();
+    let table = snapshot(Some(pid), &Table::new()).unwrap_or_default();
     let root = if let Some(entry) = table.get(&pid) {
         identity(pid, entry)
     } else if let Some(status) = child.try_wait()? {
@@ -435,7 +480,7 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
         let _ = child.wait();
         return Err(io::Error::other("OWNERSHIP_UNVERIFIED"));
     };
-    let session = Session {
+    let mut session = Session {
         id,
         generation,
         create_id: request.into(),
@@ -459,10 +504,11 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
         closing: None,
         finished: false,
         cleanup_complete: false,
-        descendants: descendants(&table, pid),
+        descendants: Table::new(),
         last_snapshot: Instant::now(),
         exit: None,
     };
+    retain_owned(&mut session, &table);
     let mut event = session.event("owned");
     event["create_id"] = json!(request);
     event["root"] = session.root.clone();
@@ -475,10 +521,8 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
     if session.child.try_wait()?.is_some() && session.descendants.is_empty() {
         return Ok(Vec::new());
     }
-    let before = snapshot()?;
-    if before.contains_key(&pid) {
-        session.descendants.extend(descendants(&before, pid));
-    }
+    let before = snapshot(None, &known_owned(session))?;
+    retain_owned(session, &before);
     let root_live = before
         .get(&pid)
         .is_some_and(|entry| Some(entry.2.as_str()) == session.root["start_value"].as_str());
@@ -506,11 +550,16 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
             }
         }
     }
+    // Signalled owned descendants, confirmed gone before cleanup reports them absent.
+    #[cfg(target_os = "macos")]
+    let mut signalled = Vec::new();
     for (&child, old) in &session.descendants {
         if before.get(&child).is_some_and(|entry| entry.2 == old.2) {
             unsafe {
                 libc::kill(child, signal);
             }
+            #[cfg(target_os = "macos")]
+            signalled.push((child, old.clone()));
         }
     }
     if graceful {
@@ -526,7 +575,9 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
     } else if !force {
         thread::sleep(Duration::from_secs(1));
     }
-    let after = snapshot()?;
+    let after = snapshot(None, &known_owned(session))?;
+    #[cfg(target_os = "macos")]
+    retain_owned(session, &after);
     if after
         .get(&pid)
         .is_some_and(|entry| Some(entry.2.as_str()) == session.root["start_value"].as_str())
@@ -540,9 +591,11 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
             unsafe {
                 libc::kill(child, libc::SIGKILL);
             }
+            #[cfg(target_os = "macos")]
+            signalled.push((child, old.clone()));
         }
     }
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + ROOT_REAP_DEADLINE;
     while session.child.try_wait()?.is_none() {
         // A blocked PTY write can delay even SIGKILL until its master drains.
         session.read(wire, 256 * 1024);
@@ -551,8 +604,27 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
         }
         thread::sleep(Duration::from_millis(5));
     }
-    let final_table = snapshot()?;
-    let survivors = session
+    // proc_pidinfo stops answering (ESRCH) while a killed process is still exiting, so
+    // the snapshot alone cannot prove absence; wait within the same deadline.
+    #[cfg(target_os = "macos")]
+    {
+        signalled.sort_by_key(|(child, _)| *child);
+        signalled.dedup_by_key(|(child, _)| *child);
+    }
+    #[cfg(target_os = "macos")]
+    while signalled
+        .iter()
+        .any(|(child, old)| darwin::owned_not_gone(*child, &old.2))
+        && Instant::now() <= deadline
+    {
+        session.read(wire, 256 * 1024);
+        thread::sleep(Duration::from_millis(5));
+    }
+    let final_table = snapshot(None, &known_owned(session))?;
+    #[cfg(target_os = "macos")]
+    retain_owned(session, &final_table);
+    #[allow(unused_mut)]
+    let mut survivors: Vec<Value> = session
         .descendants
         .iter()
         .filter_map(|(&child, old)| {
@@ -562,9 +634,17 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
                 .map(|entry| identity(child, entry))
         })
         .collect();
+    #[cfg(target_os = "macos")]
+    for (child, old) in &signalled {
+        // Not gone by the deadline: a survivor even if the snapshot no longer sees it.
+        if !final_table.contains_key(child) && darwin::owned_not_gone(*child, &old.2) {
+            survivors.push(identity(*child, old));
+        }
+    }
     Ok(survivors)
 }
 fn session_loop(session_arc: Arc<Mutex<Session>>, wire: Arc<Wire>, sessions: Sessions) {
+    let mut eof_before_reap: Option<Instant> = None;
     loop {
         let mut session = session_arc.lock().unwrap();
         if session.finished {
@@ -589,6 +669,16 @@ fn session_loop(session_arc: Arc<Mutex<Session>>, wire: Arc<Wire>, sessions: Ses
         }
         let status = session.child.try_wait().ok().flatten();
         let closing = session.closing;
+        // A hangup can be read before the root's exit is reapable; cleanup must not signal
+        // descendants while the root is unreaped, so keep draining and reaping first.
+        if session.eof && status.is_none() && closing.is_none() && session.barrier.is_none() {
+            let since = *eof_before_reap.get_or_insert_with(Instant::now);
+            if since.elapsed() < ROOT_REAP_DEADLINE {
+                drop(session);
+                thread::sleep(Duration::from_millis(2));
+                continue;
+            }
+        }
         if (closing.is_some() || session.eof || status.is_some()) && session.barrier.is_none() {
             session.read(&wire, 256 * 1024);
             let survivors = cleanup(&mut session, closing.unwrap_or(false), &wire);
@@ -625,6 +715,10 @@ fn session_loop(session_arc: Arc<Mutex<Session>>, wire: Arc<Wire>, sessions: Ses
             }
             return;
         }
+        // Only a loop that will read next can wake on readability; a paused or fenced
+        // session keeps the plain sleep so unread data cannot spin it.
+        let readable_wait =
+            (session.barrier.is_none() && session.paused.is_none()).then(|| session.fd());
         if session.last_snapshot.elapsed()
             >= Duration::from_secs(if session.started.elapsed() < Duration::from_secs(30) {
                 5
@@ -634,16 +728,23 @@ fn session_loop(session_arc: Arc<Mutex<Session>>, wire: Arc<Wire>, sessions: Ses
         {
             // Probe outside the session lock so input/control remains independent.
             session.last_snapshot = Instant::now();
+            let known = known_owned(&session);
+            #[cfg(not(target_os = "macos"))]
             let pid = session.child.id() as i32;
             drop(session);
-            if let Ok(table) = snapshot() {
+            if let Ok(table) = snapshot(None, &known) {
                 let mut session = session_lock(&session_arc);
-                if !table.get(&pid).is_some_and(|entry| {
-                    Some(entry.2.as_str()) == session.root["start_value"].as_str()
-                }) {
-                    continue; // Keep the last good tree when death races the snapshot.
+                #[cfg(not(target_os = "macos"))]
+                {
+                    if !table.get(&pid).is_some_and(|entry| {
+                        Some(entry.2.as_str()) == session.root["start_value"].as_str()
+                    }) {
+                        continue; // Keep the last good tree when death races the snapshot.
+                    }
+                    session.descendants = descendants(&table, pid);
                 }
-                session.descendants = descendants(&table, pid);
+                #[cfg(target_os = "macos")]
+                retain_owned(&mut session, &table);
                 for (part, values) in session
                     .descendants
                     .iter()
@@ -665,7 +766,21 @@ fn session_loop(session_arc: Arc<Mutex<Session>>, wire: Arc<Wire>, sessions: Ses
         } else {
             drop(session);
         }
-        thread::sleep(Duration::from_millis(2));
+        match readable_wait {
+            // Same 2 ms maximum, but PTY data wakes the loop immediately.
+            Some(fd) => {
+                let mut ready = libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: one initialized pollfd; a closed (-1) fd is ignored by poll.
+                unsafe {
+                    libc::poll(&mut ready, 1, 2);
+                }
+            }
+            None => thread::sleep(Duration::from_millis(2)),
+        }
     }
 }
 fn session_lock(session: &Arc<Mutex<Session>>) -> std::sync::MutexGuard<'_, Session> {
@@ -676,7 +791,7 @@ fn execute(request: &Value, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result
     let op = text(request, "op")?;
     let args = &request["args"];
     if op == "observe" {
-        if args["vendor"] != claude_facts::KEY {
+        if !args["vendor"].as_str().is_some_and(adapters::integrated) {
             return Err(io::Error::other("observer not integrated"));
         }
         let context = if let Some(sid) = request["session_id"].as_str() {
@@ -689,7 +804,7 @@ fn execute(request: &Value, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result
                 .ok_or_else(|| io::Error::other("UNKNOWN_SESSION"))?;
             let session = session.lock().unwrap();
             if request["session_generation"] != session.generation
-                || session.agent_key != claude_facts::KEY
+                || args["vendor"] != session.agent_key
             {
                 return Err(io::Error::other("STALE_SESSION"));
             }
@@ -697,7 +812,7 @@ fn execute(request: &Value, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result
         } else {
             json!({"event":"observed","session_id":null,"session_generation":null,"pane_id":null,"workspace_path":null})
         };
-        let mut result = claude::observe(args)?;
+        let mut result = adapters::observe(args)?;
         result["ownership"] = context;
         return Ok(result);
     }
@@ -947,9 +1062,20 @@ pub fn run() -> io::Result<()> {
         writer.join().unwrap()?;
         return Err(io::Error::other("STARTUP_FAILED"));
     }
-    wire.control(json!({"event":"ready","protocol":option("--ready-protocol").and_then(|s|s.parse::<u32>().ok()).unwrap_or(1),
+    #[allow(unused_mut)]
+    let mut ready = json!({"event":"ready","protocol":option("--ready-protocol").and_then(|s|s.parse::<u32>().ok()).unwrap_or(1),
         "pid":std::process::id(),"owner_pid":option("--owner-pid").and_then(|s|s.parse::<u32>().ok()).unwrap_or(0),
-        "runtime":"navide-cli-runtime","version":env!("CARGO_PKG_VERSION"),"pty_backend":"posix","platform":std::env::consts::OS,"arch":std::env::consts::ARCH}));
+        "runtime":"navide-cli-runtime","version":env!("CARGO_PKG_VERSION"),"pty_backend":"posix","platform":std::env::consts::OS,"arch":std::env::consts::ARCH});
+    #[cfg(target_os = "macos")]
+    match darwin::self_process() {
+        Ok(observation) => ready["self_process"] = observation,
+        Err(error) => {
+            // Observation failure is private evidence, not a new startup policy.
+            ready["self_process_error"] =
+                json!({"operation":"darwin-self-process","errno":error.raw_os_error()});
+        }
+    }
+    wire.control(ready);
     let sessions: Sessions = Arc::new(Mutex::new(Registry::default()));
     let mut last_request = 0u64;
     let mut input_error = None;

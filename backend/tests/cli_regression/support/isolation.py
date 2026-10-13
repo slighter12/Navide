@@ -55,6 +55,11 @@ def isolated_environment(root: Path) -> dict[str, str]:
     return env
 
 
+def install_account_home_guard(root: Path) -> None:
+    from .account_boundary import install_account_home_guard as install
+    install(root)
+
+
 def command_words(args) -> list[str]:
     def split(value):
         lexer = shlex.shlex(value, posix=os.name != "nt", punctuation_chars=";&|()")
@@ -184,6 +189,12 @@ def install_external_guards(root: Path) -> None:
     This process is disposable. The terminal backend wrapper also covers
     Windows ConPTY's native spawn, which does not pass through Popen.
     """
+    if os.environ.get('NAVIDE_REGRESSION_ACCOUNT_GUARD') == '1':
+        install_account_home_guard(root)
+        if os.environ.get('NAVIDE_REGRESSION_KERNEL_MANIFEST_SHA256'):
+            from .difference_entry import validate_kernel_setup
+            from .process_env_guard import install
+            install(root, validate_kernel_setup(root))
     refusals = root / "refusals.jsonl"
 
     def refuse(kind: str, *, executable=None, argv=None) -> None:
@@ -211,9 +222,35 @@ def install_external_guards(root: Path) -> None:
             if any(Path(word).name == "security" for word in command_words(args)):
                 refuse("Keychain executable")
             kwargs["env"] = launch_env(kwargs.get("env"))
+            if os.environ.get('NAVIDE_REGRESSION_ACCOUNT_GUARD') == '1' and any(
+                Path(word).stem.lower() in CLI_NAMES for word in executed_words(args)
+            ):
+                from .fixture_exec import admit_fixture_command
+                admit_fixture_command(root, list(args), kwargs['env'])
+            from .process_env_guard import installed
+            payload_guard = installed()
+            observe = payload_guard is not None and payload_guard._creation_role(args) is not None
+            if observe:
+                payload_guard._check_constructor_reaper()  # BEFORE creating/exposing any target
             super().__init__(args, *rest, **kwargs)
+            if observe:
+                try:
+                    payload_guard._snapshot_new_child(self)
+                except BaseException:
+                    # This unpublished direct child cannot be reused before our
+                    # own wait. Preserve failure, but never leak its lifecycle.
+                    self.terminate()
+                    self.wait(timeout=5)
+                    raise
 
-    subprocess.Popen = GuardedPopen
+    from .process_env_guard import installed
+    payload_guard = installed()
+    if payload_guard is None or payload_guard._constructor_code is None:
+        if payload_guard is not None:
+            payload_guard._constructor_code = GuardedPopen.__init__.__code__
+        subprocess.Popen = GuardedPopen
+    elif subprocess.Popen.__init__.__code__ is not payload_guard._constructor_code:
+        raise PermissionError('changed installed constructor source')
     original_connect = socket.socket.connect
     original_connect_ex = socket.socket.connect_ex
     original_getaddrinfo = socket.getaddrinfo
@@ -306,7 +343,24 @@ def install_external_guards(root: Path) -> None:
 
     from agent_team_backend import cli_runtime
 
+    if os.environ.get('NAVIDE_REGRESSION_ACCOUNT_GUARD') == '1' and os.environ.get('NAVIDE_REGRESSION_KERNEL_MANIFEST_SHA256'):
+        from .difference_entry import validate_kernel_setup
+        runtime_path = cli_runtime.runtime_path
+
+        def bound_runtime_path():
+            identity = validate_kernel_setup(root)['files']['runtime']
+            path = runtime_path()
+            if str(path.resolve(strict=True)) != identity['path']:
+                raise PermissionError('unregistered native runtime path')
+            return path
+
+        cli_runtime.runtime_path = bound_runtime_path
+
     def guarded_native_launch(argv, *, cwd, env):
+        env = launch_env(env)
+        if os.environ.get('NAVIDE_REGRESSION_ACCOUNT_GUARD') == '1':
+            from .fixture_exec import admit_fixture_command
+            admit_fixture_command(root, argv, env)
         if executable := real_cli_in(argv, env, (root,)):
             refuse("real Rust child CLI", executable=executable, argv=argv)
         if not Path(cwd).resolve().is_relative_to(root.resolve()):
@@ -323,3 +377,8 @@ def install_external_guards(root: Path) -> None:
     # store is empty. A scenario needing credentials supplies its own fake.
     from agent_team_backend import credential_vault
     credential_vault._default_security_runner = lambda *_args, **_kwargs: (44, "")
+    if os.environ.get('NAVIDE_REGRESSION_KERNEL_MANIFEST_SHA256'):
+        (root / 'credential-provider.json').write_text(json.dumps({
+            'provider': 'synthetic substituted external account store',
+            'actual_account_queried': False, 'actual_account_absence_measured': False,
+        }))

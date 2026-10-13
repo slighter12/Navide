@@ -51,6 +51,11 @@ class BackendProcess:
         self.env = isolated_environment(root)
         self.env["NAVIDE_REGRESSION_ROOT"] = str(root)
         self.env["NAVIDE_SHUTDOWN_DIAG"] = "1"
+        if os.environ.get('NAVIDE_REGRESSION_ACCOUNT_GUARD') == '1' and os.environ.get('NAVIDE_REGRESSION_KERNEL_MANIFEST_SHA256'):
+            for key in ('NAVIDE_REGRESSION_ACCOUNT_GUARD', 'NAVIDE_REGRESSION_KERNEL_MANIFEST_SHA256',
+                        'NAVIDE_REGRESSION_KERNEL_CANARY', 'NAVIDE_REGRESSION_EXEC_MANIFEST_SHA256'):
+                self.env[key] = os.environ[key]
+            self.env['PATH'] = os.pathsep.join([str(root), self.env['PATH']])
         self.env["PYTHONPATH"] = str(Path(__file__).resolve().parents[3])
         self.process = None
         self.url = ""
@@ -62,11 +67,17 @@ class BackendProcess:
         self.log_path = root / f"{artifact_prefix}backend.log"
 
     async def __aenter__(self):
+        if self.env.get('NAVIDE_REGRESSION_ACCOUNT_GUARD') == '1':
+            from .difference_entry import validate_kernel_setup
+            validate_kernel_setup(self.root)
         self._log = self.log_path.open("w", encoding="utf-8")
         try:
+            command = [sys.executable, "-m", "tests.cli_regression.support.backend_entry"]
+            if self.env.get('NAVIDE_REGRESSION_ACCOUNT_GUARD') == '1':
+                command = [sys.executable, '-I', '-S', str(Path(__file__).with_name('account_bootstrap.py')),
+                           'backend', str(self.root)]
             self.process = subprocess.Popen(
-                [sys.executable, "-m", "tests.cli_regression.support.backend_entry",
-                 "--port", "0", "--log-level", "warning"],
+                [*command, "--port", "0", "--log-level", "warning"],
                 env=self.env, cwd=Path(__file__).resolve().parents[3],
                 stdin=subprocess.PIPE, stdout=self._log, stderr=subprocess.STDOUT, text=True,
             )
@@ -193,7 +204,9 @@ class BackendProcess:
             # Never archive the token or isolated credential files. Each
             # process gets its own directory even inside a parameterized test.
             process_id = self.process.pid if self.process else "not-started"
-            destination = Path(__file__).resolve().parents[4] / "test-results" / "ci" / "cli-regression" / f"{self.root.parent.name}-{process_id}"
+            destination = (self.root / 'backend-exports' / str(process_id)
+                           if self.env.get('NAVIDE_REGRESSION_KERNEL_MANIFEST_SHA256') else
+                           Path(__file__).resolve().parents[4] / "test-results" / "ci" / "cli-regression" / f"{self.root.parent.name}-{process_id}")
             destination.mkdir(parents=True, exist_ok=True)
             for source in (self.log_path, scenario_path, self.root / "refusals.jsonl"):
                 if source.exists():
@@ -238,15 +251,18 @@ class BackendProcess:
 
     @staticmethod
     def _describe_process(process: psutil.Process) -> dict:
-        """Identify a survivor for the assertion message and scenario.json.
+        """Identify an owned survivor for the assertion message and scenario.json.
 
         Call this while the process is still running: after the kill it can be
-        a zombie whose name()/cmdline() no longer resolve.
+        a zombie whose name()/cmdline() no longer resolve. Under the ticket-04
+        process guard an argv read is refused (PermissionError) before any read;
+        the survivor is then reported by its retained birth only.
         """
+        description = {"pid": process.pid, "created": process.create_time()}
         try:
-            return {"pid": process.pid, "name": process.name(), "cmdline": process.cmdline()}
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            return {"pid": process.pid, "name": "", "cmdline": []}
+            return {**description, "name": process.name(), "cmdline": process.cmdline()}
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, PermissionError):
+            return {**description, "name": "", "cmdline": []}
 
     def _reap_surviving_children(self, window_s: float = _REAP_WINDOW_S) -> list[dict]:
         owned = list(self._owned_children.values())

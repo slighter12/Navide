@@ -385,11 +385,37 @@ class RustTerminalService(TerminalService):
                        **({"error": result["error"]} if result.get("error") else {})})
         return result
 
+    async def observe_native(self, vendor: str, parser: str, args: dict, *, pane_id=None) -> dict:
+        await self._ensure_started()
+        session = next((s for s in self._retained.values() if pane_id and s.pane_id == pane_id
+                        and s.agent_key == vendor and not s.closed), None)
+        result = await self._request("observe", {"vendor": vendor, **args}, session)
+        if (result.get("parser") != parser or result.get("path") != args["path"]
+                or result.get("mode") != args["mode"]):
+            raise RuntimeError("PROTOCOL_ERROR: wrong observation parser/path/mode")
+        context = result["ownership"]
+        if session and any(context.get(key) != expected for key, expected in (
+                ("session_id", session.id), ("session_generation", session.generation),
+                ("pane_id", session.pane_id), ("workspace_path", session.cwd))):
+            raise RuntimeError("PROTOCOL_ERROR: wrong observation ownership")
+        if not session and any(context.get(key) is not None for key in (
+                "session_id", "session_generation", "pane_id", "workspace_path")):
+            raise RuntimeError("PROTOCOL_ERROR: historical observation claimed process ownership")
+        self._receipt({**context, "runtime_generation": self._runtime_generation,
+                       **{key: result[key] for key in ("parser", "path", "identity", "mode")},
+                       **({"native_session_id": result["native_session_id"]} if "native_session_id" in result else {}),
+                       "checkpoint": result["checkpoint"], "seen": result["seen"],
+                       "event_count": len(result["events"]),
+                       "native_sessions": sorted({event["session_id"] for event in result["events"]}),
+                       **({"error": result["error"]} if result.get("error") else {})})
+        return result
+
     def create(self, **kwargs):
         raise RuntimeError("Selected Rust runtime requires native async create; no Python fallback")
 
     async def create_async(self, **kwargs) -> RuntimeSession:
-        if kwargs.get("agent_key") not in (None, "", "terminal", "claude"):
+        from .cli_runtime_adapters import NATIVE_VENDORS
+        if kwargs.get("agent_key") not in (None, "", "terminal", *NATIVE_VENDORS):
             raise RuntimeError("Rust agent runtime not yet integrated; no Python fallback")
         await self._ensure_started()
         argv = self._resolve_command(kwargs.get("spawn_command") or kwargs["command"])

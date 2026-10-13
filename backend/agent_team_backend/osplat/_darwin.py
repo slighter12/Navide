@@ -11,11 +11,77 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+
+import psutil
 from collections.abc import Sequence
 from pathlib import Path
 
 from .. import proc_rusage
-from ._posix import PosixTerminalBackend, PosixTerminalHandle, process_tree
+from ._posix import PosixProcessTree, PosixTerminalBackend, PosixTerminalHandle
+from .proctree import children_map, walk_descendants
+from .spec import ProcInfo
+
+
+class DarwinProcessTree(PosixProcessTree):
+    """Real kernel metadata without the setuid ps helper (denied by Seatbelt)."""
+
+    @staticmethod
+    def _metadata(pid: int) -> ProcInfo:
+        process = psutil.Process(pid)
+        born = process.create_time()
+        parent, group = process.ppid(), os.getpgid(pid)
+        # A recycled PID between metadata calls is not a verified identity.
+        if psutil.Process(pid).create_time() != born:
+            raise psutil.NoSuchProcess(pid)
+        local = time.localtime(int(born))
+        weekday = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')[local.tm_wday]
+        month = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')[local.tm_mon - 1]
+        start = (f'{weekday} {month} {local.tm_mday} '
+                 f'{local.tm_hour:02}:{local.tm_min:02}:{local.tm_sec:02} {local.tm_year}')
+        return ProcInfo(parent, group, start)
+
+    def snapshot(self) -> dict[int, ProcInfo]:
+        table = {}
+        deadline = time.monotonic() + 5
+        try:
+            for pid in psutil.pids():
+                if time.monotonic() >= deadline:
+                    return {}  # Same unavailable-snapshot contract; never partial.
+                try:
+                    table[pid] = self._metadata(pid)
+                except (psutil.NoSuchProcess, ProcessLookupError):
+                    continue  # Real exit/recycle races, not access failures.
+        except (psutil.AccessDenied, OSError, ValueError, OverflowError):
+            return {}
+        return table
+
+    def start_time(self, pid: int) -> str:
+        try:
+            return self._metadata(pid).start
+        except (psutil.Error, OSError, ValueError, OverflowError):
+            return ''
+
+    def descendants(self, pid: int) -> list[int]:
+        return walk_descendants(children_map(self.snapshot()), pid)
+
+    def command_of(self, pid: int) -> str | None:
+        try:
+            process = psutil.Process(pid)
+            born = process.create_time()
+            words = process.cmdline()
+            if psutil.Process(pid).create_time() != born:
+                return None  # Unstable probe, not an inspected absence.
+            return ' '.join(words)
+        except psutil.NoSuchProcess:
+            return ''  # Same inspected-gone result as POSIX ps.
+        except (psutil.AccessDenied, OSError):
+            # cmdline needs KERN_PROCARGS2, denied for other users' (e.g. root) processes;
+            # the baseline setuid `ps` still reads it where permitted, else None as before.
+            return super().command_of(pid)
+
+
+process_tree = DarwinProcessTree()
 
 
 class DarwinPaths:
