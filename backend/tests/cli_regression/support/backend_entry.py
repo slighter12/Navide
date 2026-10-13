@@ -5,6 +5,10 @@ import os
 from tests.cli_regression.support.isolation import install_external_guards
 
 install_external_guards(Path(os.environ["NAVIDE_REGRESSION_ROOT"]))
+from tests.cli_regression.support.process_env_guard import installed
+payload_guard = installed()
+if payload_guard is not None:
+    payload_guard.require_loop_bindings()  # Before real MAIN; auto selection stays unchanged.
 if os.environ.get("NAVIDE_REGRESSION_KEYCHAIN_FIXTURE") == "1":
     from tests.cli_regression.support.fixture_keychain import runner
     from agent_team_backend import credential_vault

@@ -1,10 +1,34 @@
-# Ordinary-shell and Claude reference runtime evaluation
+# Ordinary-shell, Claude reference and native-difference runtime evaluation
 
-A standalone Rust executable owns native PTY/process lifecycle for ordinary shells. Python retains authenticated WS/Plugin contracts, application routing, command wrapping, durable ownership and binary output presentation. Default execution is unchanged Python; explicit isolated-harness evaluation selection is `NAVIDE_ACR_EVAL_RUNTIME=rust-shell` with `NAVIDE_REGRESSION_ROOT` set. Selected-Rust failures never spawn a Python PTY. The Claude reference slice additionally composes native JSONL interpretation and its existing shutdown strategy below. Other complete agent integrations, crash recovery, packaging and CI are not delivered by these slices.
+A standalone Rust executable owns native PTY/process lifecycle for ordinary shells. Python retains authenticated WS/Plugin contracts, application routing, command wrapping, durable ownership and binary output presentation. Default execution is unchanged Python; explicit isolated-harness evaluation selection is `NAVIDE_ACR_EVAL_RUNTIME=rust-shell` with `NAVIDE_REGRESSION_ROOT` set. Selected-Rust failures never spawn a Python PTY. The Claude reference slice additionally composes native JSONL interpretation and its existing shutdown strategy below; the ticket-04 slices validate Codex and OpenCode native differences through the same interface. Other complete agent integrations, crash recovery, packaging and CI are not delivered by these slices.
 
 ## Build and applicability
 
 Build explicitly before tests: `cargo build --offline --locked --release --manifest-path native/navide-cli-runtime/Cargo.toml`. The evaluated host uses the already-installed Rust 1.99.0 macOS ARM64 toolchain and cached lockfile dependencies. Tests do not acquire dependencies or build a missing native executable. Native POSIX behavior is actually verified on macOS only; Linux source suitability is not execution evidence. Windows returns unsupported rather than presenting a fake PTY. No ConPTY, three-platform release readiness or adoption claim.
+
+## OpenCode SQLite difference slice (ticket 04)
+
+The explicit isolated Rust selection composes `NativeOpenCodeReader`; default Python readers and shared stores remain unchanged. Vendor-local native `observe` reads the OWN `opencode.db` through the macOS system SQLite C API, using read-only connections and a 250 ms busy timeout for every prepared query. This is a required OS library dependency, not a dependency-free or three-platform adoption claim. SDK `sqlite3.h` and the linker stub are build inputs; the loaded system library may live in the dyld cache. The finite local linkage probe records its loaded name/version/UUID, without full dylib/cache byte closure.
+
+Native code interprets SQLite usage, separate `part.rowid` activity progress, marker lookup, session existence and metadata; Python retains discovery paths, common prompt presentation, the unchanged SQLite checkpoint/anchor spelling, persistent usage/checkpoint ownership and restart dedup. Completed assistant messages are credited; incomplete rows remain pending. Historical activity is skipped on first observation, and only a top-level `step-finish(reason="stop")` settles a turn. BUSY/LOCKED remain numeric SQLite outcomes, not message-text classification or a Python interpretation fallback.
+
+`native OpenCode production-client WAL SQLite and resume syntax variant` in `tests/cli/nativeDifferences.test.ts` is the principal case. It uses the unchanged real resume builder and temporarily replaces only the OpenCode declaration's `resumeArgs` with its existing supported `-s` form, restoring the original reference in `finally`; the shipped `--session` default is unchanged. The synthetic producer publishes pending usage, tool/child non-settlement, top-level completion and a durable restart; the pane carries the renderer's spawn metadata, so stage 1 has no session ID until the existing marker binding detects it.
+
+## Native differences and locality (ticket 04)
+
+Two bounded baseline cases run through the production TS WS client, authenticated Python handlers and stores, the Rust sidecar and the macOS PTY; only the external CLI (a synthetic peer) and its vendor data are substituted:
+
+- **Codex** (`native Codex production-client delayed identification and resume`): the session ID is not known at launch and is identified later from the rollout; both the old `event_msg/user_message.message` and the newer `event_msg/item_completed` `UserMessage.content[].text` prompt formats are read natively (`src/codex.rs`) while Python presentation is unchanged; resume uses `codex resume <id>`; persisted checkpoints survive a backend restart.
+- **OpenCode** (above): no session ID at launch, marker-based delayed identification, WAL SQLite usage/activity with pending, child and completion boundaries, durable restart totals and checkpoint, and the `-s <id>` resume syntax.
+
+Vendor code stays local: `cli_runtime_codex.py`/`cli_runtime_opencode.py` and `src/codex.rs`/`src/opencode.rs` implement interpretation; `cli_runtime_adapters.py` (`NATIVE_VENDORS`), `src/adapters.rs` (`integrated`/`observe`) and the registry's reference wrappers are the only rosters. Shared orchestration gains no vendor branch: `posix.rs` replaced its Claude-only create/observe gates with the roster, `cli_runtime.py` admits the roster and adds a vendor-generic `observe_native`, and the WS handlers, log watcher, attribution and stores are unchanged. New observe modes (`identify`, `has_session`, `usage`, `legacy`, `activity`) map one-to-one to existing reader methods; no new capability kind was introduced.
+
+Coverage and outstanding work, recorded rather than fixed here:
+
+- Child (sub-agent) OpenCode activity keeps the existing empty pane attribution; a resumed explicit-ID shared-database pane has no live-scan file hint until a token event, so its usage is credited at the shutdown flush.
+- On this macOS host the watcher does not report WAL-only appends, and an OpenCode data directory created after backend start is not watched until the next rescan; the fixture publishes every phase by checkpoint and precreates its empty data directory. WAL-only reads, the restart cursor and BUSY/LOCKED/no-data handling are covered by the native sidecar and Rust tests, not by the WS principal.
+- Codex native `turns` is not integrated; the remaining registry vendors (`aider`, `antigravity`, `copilot`, `cursor`, `droid`, `grok`, `kilo`, `kimi`, `mcode`, `muse`, `pi`, `qwen`) have no native composition. Evidence is macOS only; one Rust test pins the host's system SQLite version and UUID.
+- These slices are not complete Codex or OpenCode adoption. The isolation harness under `backend/tests/cli_regression/support/` and `backend/tests/isolation_guard/` is kept for reuse by later validation work.
 
 ## Private protocol 1
 

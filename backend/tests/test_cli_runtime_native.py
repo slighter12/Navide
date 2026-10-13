@@ -236,8 +236,12 @@ def test_native_producer_completes_stdout_after_winch(tmp_path):
     try:
         script = tmp_path / "native_shell_peer.py"
         shutil.copyfile(Path(__file__).parent / "cli_regression/support/native_shell_peer.py", script)
-        sid, generation = native.create(["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)",
-                                         base_python_executable(), "-u", str(script)])
+        plugin = sys.modules.get("owned_pytest_plugin")
+        outer_guarded = plugin is not None and plugin.outer_guard_bound_for_winch()
+        command = [base_python_executable(), "-u", str(script)]
+        if not outer_guarded:
+            command = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)", *command]
+        sid, generation = native.create(command)
         while not native.output.get(sid, b"").endswith(b"\r\n"):
             native.receive()
         start = len(native.output[sid])
@@ -454,3 +458,43 @@ def test_native_reaps_owned_and_detached_tree_without_touching_unrelated_peer(tm
             if unrelated is not None:
                 unrelated.kill()
                 unrelated.wait(timeout=5)
+
+
+def test_native_opencode_wal_usage_and_restart_cursor(tmp_path):
+    """OWN protocol supplement; app/WS principal remains a separate proof."""
+    import sqlite3
+    path = tmp_path / 'opencode.db'
+    writer = sqlite3.connect(path)
+    writer.execute('PRAGMA journal_mode=WAL')
+    writer.execute('PRAGMA wal_autocheckpoint=0')
+    writer.executescript('CREATE TABLE session(id TEXT PRIMARY KEY,parent_id TEXT,directory TEXT,version TEXT);'
+        'CREATE TABLE message(id TEXT PRIMARY KEY,session_id TEXT,data TEXT);'
+        'CREATE TABLE part(id TEXT PRIMARY KEY,session_id TEXT,message_id TEXT,data TEXT,time_created INTEGER);')
+    writer.execute('INSERT INTO session VALUES(?,?,?,?)', ('ses_owned', None, str(tmp_path), 'synthetic'))
+    writer.execute('INSERT INTO message VALUES(?,?,?)', ('msg_owned', 'ses_owned', json.dumps({'role': 'assistant'})))
+    writer.commit()
+    native = NativePeer(tmp_path)
+    def observe(checkpoint):
+        result = native.result(native.send('observe', {'vendor': 'opencode', 'path': str(path), 'mode': 'usage', 'checkpoint': checkpoint, 'seen': []}))
+        chunks = [event for event in native.events if event.get('event') == 'observation']
+        native.events = [event for event in native.events if event.get('event') != 'observation']
+        assert [event['part'] for event in chunks] == list(range(result['observation_parts']))
+        value = json.loads(b''.join(base64.b64decode(event['data_b64'], validate=True) for event in chunks))
+        assert value['parser'] == 'rust-opencode-sqlite-v1' and value['path'] == str(path)
+        return value
+    try:
+        pending = observe({})
+        assert not pending['events'] and pending['checkpoint']['pending'] == [1]
+        complete = {'role': 'assistant', 'time': {'completed': 1700000000000}, 'tokens': {'input': 10, 'output': 5}}
+        writer.execute('UPDATE message SET data=? WHERE id=?', (json.dumps(complete), 'msg_owned'))
+        assert not observe(pending['checkpoint'])['events']  # real uncommitted WAL row remains invisible
+        writer.commit()
+        settled = observe(pending['checkpoint'])
+        assert [(event['input_tokens'], event['output_tokens']) for event in settled['events']] == [(10, 5)]
+        assert not settled['checkpoint']['pending']
+        cursor = json.loads(json.dumps(settled['checkpoint']))
+        assert not observe(cursor)['events']
+        assert native.result(native.send('ping'))['bookkeeping']['live_sessions'] == 0
+    finally:
+        writer.close()
+        native.close()

@@ -91,9 +91,14 @@ def _stale(pattern: re.Pattern[str], allowlist: set[str]) -> set[str]:
 _POSIX_PROGRAM_RE = re.compile(
     r"subprocess\.(?:run|Popen|call|check_output|check_call)\(\s*\[?\s*['\"]/(?:bin|usr|etc|opt|sbin)/"
 )
-#: Offenders today, each with the gate that makes it acceptable. Empty: the
-#: one there was (`/bin/sh -c` in the PATH-probe test) now asks the seam.
-POSIX_PROGRAM_ALLOWLIST: set[str] = set()
+#: Offenders today, each with the gate that makes it acceptable. The one
+#: there was (`/bin/sh -c` in the PATH-probe test) now asks the seam.
+POSIX_PROGRAM_ALLOWLIST: set[str] = {
+    # macOS Seatbelt (`/usr/bin/sandbox-exec`) evaluation tests; each module
+    # skips itself off darwin (`pytest.skip(..., allow_module_level=True)`).
+    "isolation_guard/test_native_guard_preflight.py",
+    "isolation_guard/test_os_startup.py",
+}
 
 
 class TestNoUngatedPosixProgramInTests:
