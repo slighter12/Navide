@@ -1,0 +1,3448 @@
+{
+ "attempts": {
+  "linux": {
+   "attempt_commit": "9faf4fe95140d1ba4fac405f6843413762ebdc7e",
+   "conclusion": "failure",
+   "jobs": [
+    {
+     "completed": "2026-10-13T00:26:21Z",
+     "conclusion": "success",
+     "id": 115066964937,
+     "name": "Isolated development startup readiness",
+     "runner_labels": [
+      "ubuntu-24.04"
+     ],
+     "started": "2026-10-13T00:20:05Z"
+    },
+    {
+     "completed": "2026-10-13T02:57:22Z",
+     "conclusion": "success",
+     "id": 115066965102,
+     "name": "End-to-end test-workflow performance (same machine)",
+     "runner_labels": [
+      "ubuntu-24.04"
+     ],
+     "started": "2026-10-13T00:20:05Z"
+    },
+    {
+     "completed": "2026-10-13T00:26:40Z",
+     "conclusion": "success",
+     "id": 115066965201,
+     "name": "Public artifacts for independent npm and pnpm consumers",
+     "runner_labels": [
+      "ubuntu-24.04"
+     ],
+     "started": "2026-10-13T00:20:05Z"
+    },
+    {
+     "completed": "2026-10-13T00:58:34Z",
+     "conclusion": "failure",
+     "id": 115066965408,
+     "name": "Correctness, builds and inventories (ubuntu-24.04)",
+     "runner_labels": [
+      "ubuntu-24.04"
+     ],
+     "started": "2026-10-13T00:20:06Z"
+    }
+   ],
+   "run_id": 38326714242,
+   "started": "2026-10-13T00:20:03Z",
+   "tag": "eval-bun-ci-07-11",
+   "updated": "2026-10-13T02:57:23Z",
+   "workflow": ".github/workflows/eval-bun-toolchain.yml"
+  },
+  "windows": {
+   "attempt_commit": "8da4b51706c960544abc1d776affa4fde44c93f1",
+   "conclusion": "failure",
+   "jobs": [
+    {
+     "completed": "2026-10-13T00:20:21Z",
+     "conclusion": "success",
+     "id": 115067004105,
+     "name": "Publish the evaluation harness",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T00:20:14Z"
+    },
+    {
+     "completed": "2026-10-13T00:33:19Z",
+     "conclusion": "success",
+     "id": 115067046674,
+     "name": "Isolated development startup readiness",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T00:20:22Z"
+    },
+    {
+     "completed": "2026-10-13T00:32:36Z",
+     "conclusion": "success",
+     "id": 115067046695,
+     "name": "Public artifacts for independent npm and pnpm consumers",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T00:20:23Z"
+    },
+    {
+     "completed": "2026-10-13T02:15:26Z",
+     "conclusion": "success",
+     "id": 115067046701,
+     "name": "Root workflow performance, warm caches (same machine, both runtimes)",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T00:20:23Z"
+    },
+    {
+     "completed": "2026-10-13T00:27:50Z",
+     "conclusion": "success",
+     "id": 115067046708,
+     "name": "Single-file workflow performance (same machine, both runtimes)",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T00:20:23Z"
+    },
+    {
+     "completed": "2026-10-13T02:15:14Z",
+     "conclusion": "success",
+     "id": 115067046760,
+     "name": "Root workflow performance, cold caches (same machine, both runtimes)",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T00:20:24Z"
+    },
+    {
+     "completed": "2026-10-13T01:08:25Z",
+     "conclusion": "failure",
+     "id": 115067046769,
+     "name": "Correctness, builds and inventories (windows-2025)",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T00:20:23Z"
+    }
+   ],
+   "run_id": 38326727409,
+   "started": "2026-10-13T00:20:11Z",
+   "tag": "eval-bun-ci-08-09",
+   "updated": "2026-10-13T02:15:27Z",
+   "workflow": ".github/workflows/eval-bun-toolchain-windows.yml"
+  },
+  "windows_diagnostic": {
+   "attempt_commit": "a4fcc263eb78ad7b8cba9d07e1376bc498394975",
+   "conclusion": "success",
+   "diagnostic_only": true,
+   "jobs": [
+    {
+     "completed": "2026-10-13T14:20:23Z",
+     "conclusion": "success",
+     "id": 115348048812,
+     "name": "Publish the evaluation harness",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T14:20:14Z"
+    },
+    {
+     "completed": "2026-10-13T15:14:13Z",
+     "conclusion": "success",
+     "id": 115348148231,
+     "name": "DIAGNOSTIC (not a measurement) pluginBackendHost stack header (windows-2025)",
+     "runner_labels": [
+      "windows-2025"
+     ],
+     "started": "2026-10-13T14:20:26Z"
+    }
+   ],
+   "note": "success means the diagnostic job executed; it is not a passing Windows evaluation",
+   "run_id": 38412461745,
+   "started": "2026-10-13T14:20:11Z",
+   "tag": "eval-bun-ci-08-10",
+   "updated": "2026-10-13T15:14:14Z",
+   "workflow": ".github/workflows/eval-bun-toolchain-windows.yml"
+  }
+ },
+ "classification": {
+  "linux": {
+   "candidate_only_failures": [
+    {
+     "class": "accepted residual (CB-E10 layer 1)",
+     "count": 1,
+     "file": "src/main/plugins/pluginExternalWorkspace.test.ts"
+    },
+    {
+     "class": "previously recorded Linux-only trust-decision-order finding (readdirSync order), same two tests",
+     "count": 2,
+     "file": "src/main/plugins/pluginIpc.test.ts"
+    }
+   ],
+   "new_bun_incompatibility": false
+  },
+  "windows": {
+   "adaptation_applied": false,
+   "candidate_only_failures": [
+    {
+     "class": "accepted residual (CB-E10 layer 1)",
+     "count": 1,
+     "file": "src/main/plugins/pluginExternalWorkspace.test.ts"
+    },
+    {
+     "class": "NEW: upstream code versus Bun, intermittent, mechanism undiagnosed",
+     "count": 1,
+     "file": "src/main/plugins/pluginBackendHost.test.ts",
+     "runs_failed": [
+      "root-prebuild-bun",
+      "packaged-lifecycle-bun"
+     ],
+     "runs_failed_bun": 2,
+     "runs_of_test_bun": 16,
+     "test": "PluginBackendHost forwards host-only diagnostics and original cause without leaking OS paths to caller"
+    }
+   ],
+   "decision_requested": [
+    "accept as adoption cost",
+    "authorise bounded local diagnosis",
+    "authorise another Windows attempt eval-bun-ci-08-10"
+   ],
+   "new_bun_incompatibility": true,
+   "node_side_items": [
+    {
+     "class": "baseline host-load flake (test duration 7273 ms over the 5 s default)",
+     "file": "src/renderer/src/components/__tests__/windowControlsStacking.test.ts",
+     "run": "root-base"
+    },
+    {
+     "class": "Vitest worker RPC timeout, all tests passed, exit 1",
+     "run": "root-cold-02-base, root-cold-03-base"
+    }
+   ]
+  }
+ },
+ "correction_01": {
+  "dispatch_sha256": "09d1232a8bcb45b458d9bb88b41e0a52ff6234c1bf6f2a96a8e257896a1b4f10",
+  "scope": "documentation only; no new CI attempt, no rerun; workflows unchanged"
+ },
+ "correctness_gate_status": {
+  "gate_clean_result_established": false,
+  "linux": {
+   "accepted_07_09_required_failures": [
+    "root-bun:bun:exit=1"
+   ],
+   "non_success_jobs": [
+    "Correctness, builds and inventories (ubuntu-24.04)"
+   ],
+   "required_failures": [
+    "root-bun:bun:exit=1"
+   ],
+   "run_id": 38326714242,
+   "tests": "accepted residual pluginExternalWorkspace (1) + two known pluginIpc tests (Linux-only trust-decision-order finding)"
+  },
+  "statement": "neither measurement run passed its correctness gate",
+  "why_evaluation_still_compares": [
+   "identical test inventories on both runtimes (0 only-Node, 0 only-Bun); per-test outcomes recorded",
+   "every failing test classified from its own report; none hidden or released (typecheck heap supplemental not triggered)",
+   "typecheck, frozen installs, readiness, consumers and performance jobs completed and recorded on both platforms"
+  ],
+  "windows": {
+   "accepted_08_08_required_failures": [],
+   "non_success_jobs": [
+    "Correctness, builds and inventories (windows-2025)"
+   ],
+   "required_failures": [
+    "root-base:base:exit=1",
+    "root-prebuild-bun:bun:exit=1"
+   ],
+   "run_id": 38326727409,
+   "tests": "residual pluginExternalWorkspace + new pluginBackendHost (Bun, root-prebuild-bun) and a Node-side windowControlsStacking timeout (root-base)"
+  }
+ },
+ "decision": {
+  "head_unchanged": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+  "public_package_graph_changed": false,
+  "public_package_graph_note": "package.json of the three public packages identical; only the lock resolution of plugin-ui devDependency vue moved 3.5.34 to 3.5.43 (peer range ^3.5.13 unchanged)",
+  "typecheck_heap_supplemental_triggered": false
+ },
+ "decision_01": {
+  "analysis": {
+   "attempt": "eval-bun-ci-08-10 (DIAGNOSTIC ONLY)",
+   "bun_vs_node": {
+    "bun_whole_file_plain_B0_B1_B2": {
+     "failed": 21,
+     "rate": 0.07,
+     "runs": 300,
+     "wilson95": [
+      0.0462,
+      0.1046
+     ]
+    },
+    "bun_whole_file_plain_plus_I1": {
+     "failed": 30,
+     "rate": 0.075,
+     "runs": 400,
+     "wilson95": [
+      0.053,
+      0.105
+     ]
+    },
+    "fisher_B3_single_test_vs_B1_whole_file_bun": 0.00675467457524821,
+    "fisher_B3_single_test_vs_pooled_whole_file_plain_bun": 0.0032319510014338663,
+    "fisher_I2_early_read_vs_I1": 0.13997679824089804,
+    "fisher_bun_vs_node_pooled_whole_file_plain": 0.005957645341260227,
+    "node_I1": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 30
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 5.67,
+     "rate": 0.0,
+     "runs": 30,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 15.57,
+     "why": "B1 plus the case-local observing setup file (records at spawn failure and at emitDiagnostic)",
+     "wilson95": [
+      0,
+      0.1135
+     ]
+    },
+    "node_whole_file_plain_B0_B1_B2": {
+     "failed": 0,
+     "runs": 90
+    }
+   },
+   "conditions": {
+    "B0:base": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 30
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 5.69,
+     "rate": 0.0,
+     "runs": 30,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 12.62,
+     "why": "file alone, project artifacts, no prebuilt switch (the root-bun / performance-sample condition)",
+     "wilson95": [
+      0,
+      0.1135
+     ]
+    },
+    "B0:bun": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 96,
+      "1": 4
+     },
+     "failed": 4,
+     "failed_tests_in_failing_runs": {
+      "1": 4
+     },
+     "failing_indices": [
+      2,
+      57,
+      60,
+      93
+     ],
+     "median_wall_failed": 2.7,
+     "median_wall_passed": 2.59,
+     "rate": 0.04,
+     "runs": 100,
+     "target_duration_ms_median_failed": 15.92,
+     "target_duration_ms_median_passed": 10.94,
+     "why": "file alone, project artifacts, no prebuilt switch (the root-bun / performance-sample condition)",
+     "wilson95": [
+      0.0157,
+      0.0984
+     ]
+    },
+    "B1:base": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 30
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 5.42,
+     "rate": 0.0,
+     "runs": 30,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 12.18,
+     "why": "file alone, project artifacts, NAVIDE_TEST_ARTIFACTS_PREBUILT=1 (the root-prebuild condition)",
+     "wilson95": [
+      0,
+      0.1135
+     ]
+    },
+    "B1:bun": {
+     "adjacent_failing_pairs": 2,
+     "exit_codes": {
+      "0": 92,
+      "1": 8
+     },
+     "failed": 8,
+     "failed_tests_in_failing_runs": {
+      "1": 8
+     },
+     "failing_indices": [
+      3,
+      33,
+      34,
+      46,
+      53,
+      54,
+      58,
+      64
+     ],
+     "median_wall_failed": 2.72,
+     "median_wall_passed": 2.59,
+     "rate": 0.08,
+     "runs": 100,
+     "target_duration_ms_median_failed": 16.31,
+     "target_duration_ms_median_passed": 11.02,
+     "why": "file alone, project artifacts, NAVIDE_TEST_ARTIFACTS_PREBUILT=1 (the root-prebuild condition)",
+     "wilson95": [
+      0.0411,
+      0.15
+     ]
+    },
+    "B2:base": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 30
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 5.17,
+     "rate": 0.0,
+     "runs": 30,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 12.15,
+     "why": "file alone, project artifacts, packaged-lifecycle environment",
+     "wilson95": [
+      0,
+      0.1135
+     ]
+    },
+    "B2:bun": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 91,
+      "1": 9
+     },
+     "failed": 9,
+     "failed_tests_in_failing_runs": {
+      "1": 9
+     },
+     "failing_indices": [
+      21,
+      28,
+      47,
+      50,
+      52,
+      76,
+      88,
+      90,
+      92
+     ],
+     "median_wall_failed": 2.86,
+     "median_wall_passed": 2.86,
+     "rate": 0.09,
+     "runs": 100,
+     "target_duration_ms_median_failed": 18.94,
+     "target_duration_ms_median_passed": 10.56,
+     "why": "file alone, project artifacts, packaged-lifecycle environment",
+     "wilson95": [
+      0.0481,
+      0.1623
+     ]
+    },
+    "B3:bun": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 100
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 2.33,
+     "rate": 0.0,
+     "runs": 100,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 18.91,
+     "why": "B1 restricted to the one failing test with -t (test-order independence)",
+     "wilson95": [
+      0,
+      0.037
+     ]
+    },
+    "B5:base": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "1": 10
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 19.64,
+     "rate": 0.0,
+     "runs": 10,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 16.93,
+     "why": "the three packaged-lifecycle files together, packaged-lifecycle environment (exact failing shape)",
+     "wilson95": [
+      0,
+      0.2775
+     ]
+    },
+    "B5:bun": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "1": 20
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 14.69,
+     "rate": 0.0,
+     "runs": 20,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 6.21,
+     "why": "the three packaged-lifecycle files together, packaged-lifecycle environment (exact failing shape)",
+     "wilson95": [
+      0,
+      0.1611
+     ]
+    },
+    "I1:base": {
+     "adjacent_failing_pairs": 0,
+     "exit_codes": {
+      "0": 30
+     },
+     "failed": 0,
+     "failed_tests_in_failing_runs": {},
+     "failing_indices": [],
+     "median_wall_failed": null,
+     "median_wall_passed": 5.67,
+     "rate": 0.0,
+     "runs": 30,
+     "target_duration_ms_median_failed": null,
+     "target_duration_ms_median_passed": 15.57,
+     "why": "B1 plus the case-local observing setup file (records at spawn failure and at emitDiagnostic)",
+     "wilson95": [
+      0,
+      0.1135
+     ]
+    },
+    "I1:bun": {
+     "adjacent_failing_pairs": 1,
+     "exit_codes": {
+      "0": 91,
+      "1": 9
+     },
+     "failed": 9,
+     "failed_tests_in_failing_runs": {
+      "1": 9
+     },
+     "failing_indices": [
+      19,
+      25,
+      30,
+      39,
+      55,
+      58,
+      59,
+      65,
+      82
+     ],
+     "median_wall_failed": 2.59,
+     "median_wall_passed": 2.86,
+     "rate": 0.09,
+     "runs": 100,
+     "target_duration_ms_median_failed": 16.09,
+     "target_duration_ms_median_passed": 11.02,
+     "why": "B1 plus the case-local observing setup file (records at spawn failure and at emitDiagnostic)",
+     "wilson95": [
+      0.0481,
+      0.1623
+     ]
+    },
+    "I2:bun": {
+     "adjacent_failing_pairs": 3,
+     "exit_codes": {
+      "0": 83,
+      "1": 17
+     },
+     "failed": 17,
+     "failed_tests_in_failing_runs": {
+      "1": 17
+     },
+     "failing_indices": [
+      7,
+      25,
+      32,
+      36,
+      43,
+      44,
+      45,
+      57,
+      59,
+      61,
+      63,
+      64,
+      68,
+      73,
+      75,
+      88,
+      97
+     ],
+     "median_wall_failed": 2.58,
+     "median_wall_passed": 2.58,
+     "rate": 0.17,
+     "runs": 100,
+     "target_duration_ms_median_failed": 16.4,
+     "target_duration_ms_median_passed": 12.01,
+     "why": "I1 plus an EARLY read of the thrown error stack (perturbation probe)",
+     "wilson95": [
+      0.1089,
+      0.2555
+     ]
+    }
+   },
+   "elapsed_seconds": 2950.9,
+   "failing_frame_location": {
+    "pluginBackendHost.test.ts:167:33": 47
+   },
+   "failing_message_shape": {
+    "bare-Error-header": 47
+   },
+   "instrumentation_jsonl_uploaded": false,
+   "instrumentation_tallies_from_runner_summary": {
+    "I1:base": {
+     "full-header|sameAsThrown=True|messageBefore=set|delivered_secret=True": 30
+    },
+    "I1:bun": {
+     "bare-Error|sameAsThrown=True|messageBefore=set|delivered_secret=False": 9,
+     "full-header|sameAsThrown=True|messageBefore=set|delivered_secret=True": 91
+    },
+    "I2:bun": {
+     "bare-Error|sameAsThrown=True|messageBefore=set|delivered_secret=False": 17,
+     "full-header|sameAsThrown=True|messageBefore=set|delivered_secret=True": 83
+    }
+   },
+   "repro": {
+    "base": {
+     "exit_code": 0,
+     "result": {
+      "iterations": 1000,
+      "main_thread": {
+       "v1_sync_read": {
+        "full": 1000
+       },
+       "v2_read_after_setImmediate": {
+        "full": 1000
+       },
+       "v3_read_after_gc": {
+        "full": 1000
+       },
+       "v4_promise_runner": {
+        "full": 1000
+       },
+       "v5_wrapped_cause": {
+        "full": 1000
+       },
+       "v6_message_assigned_later": {
+        "full": 1000
+       }
+      },
+      "platform": "win32",
+      "runtime": {
+       "node": "22.23.2"
+      },
+      "worker_thread": {
+       "v1_sync_read": {
+        "full": 1000
+       },
+       "v2_read_after_setImmediate": {
+        "full": 1000
+       },
+       "v3_read_after_gc": {
+        "full": 1000
+       },
+       "v4_promise_runner": {
+        "full": 1000
+       },
+       "v5_wrapped_cause": {
+        "full": 1000
+       },
+       "v6_message_assigned_later": {
+        "full": 1000
+       }
+      }
+     }
+    },
+    "bun": {
+     "exit_code": 0,
+     "result": {
+      "iterations": 1000,
+      "main_thread": {
+       "v1_sync_read": {
+        "full": 1000
+       },
+       "v2_read_after_setImmediate": {
+        "full": 1000
+       },
+       "v3_read_after_gc": {
+        "full": 1000
+       },
+       "v4_promise_runner": {
+        "full": 1000
+       },
+       "v5_wrapped_cause": {
+        "full": 1000
+       },
+       "v6_message_assigned_later": {
+        "full": 1000
+       }
+      },
+      "platform": "win32",
+      "runtime": {
+       "bun": "1.4.2"
+      },
+      "worker_thread": {
+       "v1_sync_read": {
+        "full": 1000
+       },
+       "v2_read_after_setImmediate": {
+        "bare": 1,
+        "full": 999
+       },
+       "v3_read_after_gc": {
+        "full": 1000
+       },
+       "v4_promise_runner": {
+        "full": 1000
+       },
+       "v5_wrapped_cause": {
+        "full": 1000
+       },
+       "v6_message_assigned_later": {
+        "full": 1000
+       }
+      }
+     }
+    }
+   },
+   "test_order_in_file": [
+    "routes a bound view through the matching package version",
+    "creates an independent supervisor and root binding for each view",
+    "forwards a child failure with the Host-bound runtime identity",
+    "forwards host-only diagnostics and original cause without leaking OS paths to caller",
+    "caps bound child process slots and releases a failed root binding",
+    "reports the child slot it can no longer reclaim after a failed close",
+    "rejects a filesystem binding without a Host root resolver",
+    "binds a non-filesystem activation without a Host root resolver",
+    "allows only explicitly adapted backend methods to use an agent Initiator",
+    "binds one headless workspace runtime without a BrowserWindow",
+    "routes the Plans root operation and event through the non-Python fixture",
+    "rejects unbound views and methods outside the Host allowlist",
+    "rejects every call and subscription of a generic package before any child spawn",
+    "requires an exact package version for activation lookup",
+    "fails closed for missing, non-directory, and symlinked package roots",
+    "accepts a real package root reached through a symlinked ancestor",
+    "rejects a timeout above the Host-private bound before child dispatch",
+    "enforces per-view call and subscription limits",
+    "cancels an in-flight call when the view is destroyed",
+    "rejects forged package and view identity at the binding boundary",
+    "settles a view subscription when the Host unbinds the view",
+    "keeps admission closed when revocation drain fails",
+    "revokes one package version and settles its calls and subscriptions",
+    "restarts a failed child after the shared backoff delay",
+    "stops restarting once the failure budget is spent",
+    "does not restart a child whose view was unbound before the delay elapsed",
+    "does not restart a child after the Host started closing",
+    "leaves a failed restart to the next failure report",
+    "keeps a separate restart budget for each view",
+    "reports a child that came back after an automatic restart",
+    "reports a view once when it is unbound",
+    "does not report a restart that failed",
+    "does not report a restart that finished after the view was unbound or the Host closed",
+    "forgets a view's failures once the view is unbound",
+    "reports a spent restart budget to the failure observer",
+    "Python completes resolve_root and emits plans.changed from the same child",
+    "Python settles cancellation, timeout, and child crash without hanging the Host",
+    "Go completes resolve_root and emits plans.changed from the same child",
+    "Go settles cancellation, timeout, and child crash without hanging the Host"
+   ],
+   "warmups": {
+    "base": {
+     "exit_code": 0,
+     "failed_tests": 0,
+     "label": "diag-warmup-base",
+     "report": "ok",
+     "target": "passed",
+     "tests": 39,
+     "wall_seconds": 85.828
+    },
+    "bun": {
+     "exit_code": 0,
+     "failed_tests": 0,
+     "label": "diag-warmup-bun",
+     "report": "ok",
+     "target": "passed",
+     "tests": 39,
+     "wall_seconds": 75.0
+    }
+   }
+  },
+  "b5_note": "B5 counts the target test only; all 30 B5 commands (20 Bun, 10 Node) exited 1 because of the recorded Windows Plans failure",
+  "classification": {
+   "association_not_cause": "single-test (-t) runs 0/100 vs pooled whole-file 21/300 (p about 0.0032); preceding tests required is NOT established; cause not identified",
+   "evidence": [
+    "Bun-only failure rate (47/620 vs Node 0/130)",
+    "populated message with bare Error header on the same thrown object in 26/26 instrumented failures (runner-side tallies)",
+    "standalone worker-thread repro 1 in 6,000 Bun stacks, 0 in 12,000 Node stacks"
+   ],
+   "finding": "Bun-specific stack symptom: Error.stack of an error whose message is set is sometimes a bare \"Error\" line plus frames, without the message",
+   "not_established": [
+    "which Bun component builds the header",
+    "why rarer in the standalone loop than in Vitest runs",
+    "why single-test runs did not fail",
+    "Error.prepareStackTrace state at failure"
+   ],
+   "not_shown": [
+    "harness effect (I1 vs B1 same rate)",
+    "environment-switch dependence (B0/B1/B2 do not separate)"
+   ],
+   "root_mechanism_established": false,
+   "status_by_user_decision_A": "documented known Bun-on-Windows defect carried into ticket 09; no product change; no upstream issue filed"
+  },
+  "dev12_unrecoverable": true,
+  "dev12_unverified": [
+   "Error.prepareStackTrace presence/identity at failure",
+   "property descriptors of stack and message",
+   "stack line 1 and frames of failing stacks",
+   "whether bare header was present at first read in the early-read condition",
+   "per-run record timings"
+  ],
+  "extra": {
+   "bun_failures_total": 47,
+   "bun_runs_total_by_runtime": {
+    "bun_runs": 620,
+    "node_runs": 130
+   },
+   "failing_indices": {
+    "B0:bun": [
+     2,
+     57,
+     60,
+     93
+    ],
+    "B1:bun": [
+     3,
+     33,
+     34,
+     46,
+     53,
+     54,
+     58,
+     64
+    ],
+    "B2:bun": [
+     21,
+     28,
+     47,
+     50,
+     52,
+     76,
+     88,
+     90,
+     92
+    ],
+    "I1:bun": [
+     19,
+     25,
+     30,
+     39,
+     55,
+     58,
+     59,
+     65,
+     82
+    ],
+    "I2:bun": [
+     7,
+     25,
+     32,
+     36,
+     43,
+     44,
+     45,
+     57,
+     59,
+     61,
+     63,
+     64,
+     68,
+     73,
+     75,
+     88,
+     97
+    ]
+   },
+   "first_and_last_run_utc": {
+    "first": "2026-10-13T14:27:37Z",
+    "last": "2026-10-13T15:13:57Z",
+    "runs": 750
+   },
+   "fisher_two_sided": {
+    "B0:bun_vs_B1:bun": 0.3727,
+    "B0:bun_vs_B2:bun": 0.2507,
+    "B1:bun_vs_B2:bun": 1.0,
+    "B1:bun_vs_I1:bun": 1.0,
+    "B1:bun_vs_I2:bun": 0.0856,
+    "B3:bun_vs_B0:bun": 0.1212,
+    "B3:bun_vs_B2:bun": 0.0032,
+    "B3:bun_vs_I2:bun": 0.0
+   },
+   "node_failures_total": 0,
+   "repro_bare_counts": {
+    "base": {
+     "main_thread": {
+      "v1_sync_read": 0,
+      "v2_read_after_setImmediate": 0,
+      "v3_read_after_gc": 0,
+      "v4_promise_runner": 0,
+      "v5_wrapped_cause": 0,
+      "v6_message_assigned_later": 0
+     },
+     "worker_thread": {
+      "v1_sync_read": 0,
+      "v2_read_after_setImmediate": 0,
+      "v3_read_after_gc": 0,
+      "v4_promise_runner": 0,
+      "v5_wrapped_cause": 0,
+      "v6_message_assigned_later": 0
+     }
+    },
+    "bun": {
+     "main_thread": {
+      "v1_sync_read": 0,
+      "v2_read_after_setImmediate": 0,
+      "v3_read_after_gc": 0,
+      "v4_promise_runner": 0,
+      "v5_wrapped_cause": 0,
+      "v6_message_assigned_later": 0
+     },
+     "worker_thread": {
+      "v1_sync_read": 0,
+      "v2_read_after_setImmediate": 1,
+      "v3_read_after_gc": 0,
+      "v4_promise_runner": 0,
+      "v5_wrapped_cause": 0,
+      "v6_message_assigned_later": 0
+     }
+    }
+   },
+   "repro_bare_totals": {
+    "base": {
+     "main_thread": 0,
+     "worker_thread": 0
+    },
+    "bun": {
+     "main_thread": 0,
+     "worker_thread": 1
+    }
+   },
+   "target_not_passed_but_absent": []
+  },
+  "limitations": [
+   "instrumentation JSONL not uploaded (dev-12), unrecoverable; only runner-side tallies",
+   "one diagnostic attempt only",
+   "single runner image and one 49-minute stage"
+  ],
+  "proposed_adaptation": {
+   "generic_helper": "none written or tested; I2 early-read probe did not prevent failures",
+   "mechanical_syntax_edit": "none identified; editing the assertion would change what the test asserts",
+   "possible_future_product_change": "src/main/plugins/pluginBackendSupervisor.ts:1685 build the diagnostic from cause.message as well as cause.stack (recorded by user decision A as possible future change; not applied, not required)",
+   "statement": "no safe/effective in-rule adaptation was identified or tested"
+  },
+  "proposed_adaptation_applied": false
+ },
+ "deviations_files": [
+  "dev-01-authoring-repro.md",
+  "dev-02-expected-v1.md",
+  "dev-03-pycache.md",
+  "dev-03b-pycache.md",
+  "dev-04-dry-run-attempt-script.md",
+  "dev-04b-correction.md",
+  "dev-05-analyzer-inplace-fix.md",
+  "dev-06-analyzer-v3.md",
+  "dev-07-perf-anomalies-v2.md",
+  "dev-08-http429-interruption.md",
+  "dev-09-report-draft.md",
+  "dev-10-diag-authoring.md",
+  "dev-11-derive-v2.md",
+  "dev-12-instr-jsonl-not-uploaded.md",
+  "dev-13-diag-attempt-notes.md",
+  "dev-14-report-rev2-draft.md",
+  "dev-15-freeze-v2-docstring.md",
+  "dev-16-correction-01-notes.md",
+  "dev-17-rev3-draft.md"
+ ],
+ "deviations_statement": "report section \"Deviations and departures from the evidence rules\" lists deletions, in-place edits, side effects outside the raw root (unreachable commits b4757ef7, 0c30a074, 596d53c8), non-descriptor reads, interruptions and losses as deviations; none is claimed as compliant execution",
+ "head": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+ "platforms": {
+  "linux": {
+   "bun_node_named_executables_inside_candidate_case": {},
+   "bun_node_named_executables_outside_candidate_case": {},
+   "bun_observed_executables": {
+    "bun": 876,
+    "esbuild": 15,
+    "navide-plans": 25,
+    "python3.12": 5
+   },
+   "checks_nonzero": [
+    {
+     "case": "bun",
+     "exit_code": 1,
+     "expectation": "zero-or-residual",
+     "heap_oom_signature": null,
+     "label": "root-bun",
+     "residual_gate": "NOT residual-only",
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 285.885
+    },
+    {
+     "case": "bun",
+     "exit_code": 1,
+     "expectation": "record",
+     "heap_oom_signature": null,
+     "label": "c3-space-bun",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 5.662
+    },
+    {
+     "case": "bun",
+     "exit_code": 1,
+     "expectation": "record",
+     "heap_oom_signature": null,
+     "label": "c3-parens-bun",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 5.595
+    },
+    {
+     "case": "bun",
+     "exit_code": 1,
+     "expectation": "record",
+     "heap_oom_signature": null,
+     "label": "c3-both-bun",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 5.606
+    }
+   ],
+   "consumers": {
+    "cons-npm-base": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 10,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    },
+    "cons-npm-bun": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 10,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    },
+    "cons-pnpm-base": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 10,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    },
+    "cons-pnpm-bun": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 10,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    }
+   },
+   "guard": [
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-check-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-install-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-run-141"
+    },
+    {
+     "exit_code": 0,
+     "expected_zero": true,
+     "guidance_present": false,
+     "label": "guard-accept-check-142"
+    }
+   ],
+   "lockfiles_unchanged": {
+    "bun": true,
+    "node": true
+   },
+   "notes": [],
+   "peak_memory": {
+    "gib": 8.098,
+    "kib": 8491220,
+    "label": "base:c3-anchor-regex-probe"
+   },
+   "performance_new": {
+    "dom-cold": {
+     "bun_mad": 0.004,
+     "bun_median": 1.252,
+     "bun_samples": [
+      1.247,
+      1.252,
+      1.252,
+      1.256,
+      1.272
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.01,
+     "node_median": 2.222,
+     "node_samples": [
+      2.21,
+      2.212,
+      2.222,
+      2.223,
+      2.235
+     ],
+     "slowdown": -0.43654
+    },
+    "dom-warm": {
+     "bun_mad": 0.006,
+     "bun_median": 1.256,
+     "bun_samples": [
+      1.249,
+      1.254,
+      1.256,
+      1.262,
+      1.266
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.004,
+     "node_median": 2.209,
+     "node_samples": [
+      2.197,
+      2.2,
+      2.209,
+      2.209,
+      2.213
+     ],
+     "slowdown": -0.43142
+    },
+    "root-cold": {
+     "bun_mad": 1.048,
+     "bun_median": 286.668,
+     "bun_samples": [
+      284.493,
+      285.409,
+      286.668,
+      287.135,
+      287.716
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.983,
+     "node_median": 470.619,
+     "node_samples": [
+      469.375,
+      469.636,
+      470.619,
+      470.708,
+      474.083
+     ],
+     "slowdown": -0.39087
+    },
+    "root-warm": {
+     "bun_mad": 0.068,
+     "bun_median": 239.432,
+     "bun_samples": [
+      237.837,
+      239.306,
+      239.432,
+      239.497,
+      239.5
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.644,
+     "node_median": 413.615,
+     "node_samples": [
+      412.73,
+      413.12,
+      413.615,
+      414.259,
+      415.479
+     ],
+     "slowdown": -0.42112
+    },
+    "sdk-cold": {
+     "bun_mad": 0.002,
+     "bun_median": 1.116,
+     "bun_samples": [
+      1.113,
+      1.114,
+      1.116,
+      1.117,
+      1.119
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.009,
+     "node_median": 1.822,
+     "node_samples": [
+      1.793,
+      1.819,
+      1.822,
+      1.831,
+      1.839
+     ],
+     "slowdown": -0.38749
+    },
+    "sdk-warm": {
+     "bun_mad": 0.006,
+     "bun_median": 1.113,
+     "bun_samples": [
+      1.106,
+      1.107,
+      1.113,
+      1.113,
+      1.119
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.013,
+     "node_median": 1.841,
+     "node_samples": [
+      1.828,
+      1.83,
+      1.841,
+      1.857,
+      1.86
+     ],
+     "slowdown": -0.39544
+    }
+   },
+   "performance_nonzero_samples": [
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-00-bun",
+     "vitest_success": false,
+     "wall_seconds": 288.908,
+     "warmup": true
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-01-bun",
+     "vitest_success": false,
+     "wall_seconds": 287.135,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-02-bun",
+     "vitest_success": false,
+     "wall_seconds": 287.716,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-03-bun",
+     "vitest_success": false,
+     "wall_seconds": 286.668,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-04-bun",
+     "vitest_success": false,
+     "wall_seconds": 284.493,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-05-bun",
+     "vitest_success": false,
+     "wall_seconds": 285.409,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-00-bun",
+     "vitest_success": false,
+     "wall_seconds": 238.511,
+     "warmup": true
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-01-bun",
+     "vitest_success": false,
+     "wall_seconds": 239.5,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-02-bun",
+     "vitest_success": false,
+     "wall_seconds": 239.306,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-03-bun",
+     "vitest_success": false,
+     "wall_seconds": 239.432,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-04-bun",
+     "vitest_success": false,
+     "wall_seconds": 237.837,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-05-bun",
+     "vitest_success": false,
+     "wall_seconds": 239.497,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginExternalWorkspace.test.ts",
+      "/home/runner/work/_temp/t07-eval/t07-head-bun/source/src/main/plugins/pluginIpc.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-90-bun-identity",
+     "vitest_success": false,
+     "wall_seconds": 288.994,
+     "warmup": false
+    }
+   ],
+   "performance_previous": {
+    "dom-cold": {
+     "bun_mad": 0.004,
+     "bun_median": 1.304,
+     "bun_samples": [
+      1.298,
+      1.3,
+      1.304,
+      1.305,
+      1.318
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.015,
+     "node_median": 2.294,
+     "node_samples": [
+      2.256,
+      2.29,
+      2.294,
+      2.309,
+      2.314
+     ],
+     "slowdown": -0.43156
+    },
+    "dom-warm": {
+     "bun_mad": 0.011,
+     "bun_median": 1.3,
+     "bun_samples": [
+      1.289,
+      1.297,
+      1.3,
+      1.321,
+      1.321
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.016,
+     "node_median": 2.299,
+     "node_samples": [
+      2.254,
+      2.283,
+      2.299,
+      2.31,
+      2.317
+     ],
+     "slowdown": -0.43454
+    },
+    "root-cold": {
+     "bun_mad": 1.33,
+     "bun_median": 267.248,
+     "bun_samples": [
+      260.845,
+      266.886,
+      267.248,
+      268.578,
+      273.663
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 2.075,
+     "node_median": 436.053,
+     "node_samples": [
+      432.54,
+      432.651,
+      436.053,
+      436.214,
+      438.128
+     ],
+     "slowdown": -0.38712
+    },
+    "root-warm": {
+     "bun_mad": 1.568,
+     "bun_median": 218.178,
+     "bun_samples": [
+      216.61,
+      217.989,
+      218.178,
+      220.908,
+      221.4
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 4.279,
+     "node_median": 372.197,
+     "node_samples": [
+      367.477,
+      367.669,
+      372.197,
+      375.05,
+      376.476
+     ],
+     "slowdown": -0.41381
+    },
+    "sdk-cold": {
+     "bun_mad": 0.006,
+     "bun_median": 1.165,
+     "bun_samples": [
+      1.159,
+      1.162,
+      1.165,
+      1.181,
+      1.181
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.004,
+     "node_median": 1.88,
+     "node_samples": [
+      1.861,
+      1.876,
+      1.88,
+      1.881,
+      1.919
+     ],
+     "slowdown": -0.38032
+    },
+    "sdk-warm": {
+     "bun_mad": 0.002,
+     "bun_median": 1.148,
+     "bun_samples": [
+      1.146,
+      1.148,
+      1.148,
+      1.152,
+      1.169
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.011,
+     "node_median": 1.886,
+     "node_samples": [
+      1.866,
+      1.88,
+      1.886,
+      1.897,
+      1.898
+     ],
+     "slowdown": -0.3913
+    }
+   },
+   "prep_exit_codes": {
+    "bun": {
+     "prep-backend-sync": 0,
+     "prep-electron-install": 0,
+     "prep-fixture-build": 0,
+     "prep-install": 0,
+     "prep-path-check": 0,
+     "prep-runtime-identity": 0,
+     "prep-uv-python": 0
+    },
+    "node": {
+     "prep-backend-sync": 0,
+     "prep-electron-install": 0,
+     "prep-fixture-build": 0,
+     "prep-install": 0,
+     "prep-path-check": 0,
+     "prep-runtime-identity": 0,
+     "prep-uv-python": 0
+    }
+   },
+   "previous_accepted": {
+    "run_id": 38131404079,
+    "tag": "eval-bun-ci-07-09"
+   },
+   "previous_summary": {
+    "peak_memory": {
+     "gib": 6.791,
+     "kib": 7121192,
+     "label": "base:c3-anchor-regex-probe"
+    },
+    "readiness": {
+     "base": {
+      "backend_failed_logged": null,
+      "backend_port": 43533,
+      "backend_ready_logged": null,
+      "exit_code": -15,
+      "first_health_200_after_seconds": 130.87,
+      "leftover_owned_pids": [],
+      "probes_rc": {
+       "mcp": 0,
+       "ws": 0
+      },
+      "runner_home_unchanged": true,
+      "terminated_by": "SIGTERM",
+      "wall_seconds": 157.63
+     },
+     "bun": {
+      "backend_failed_logged": null,
+      "backend_port": 44587,
+      "backend_ready_logged": null,
+      "exit_code": -15,
+      "first_health_200_after_seconds": 112.69,
+      "leftover_owned_pids": [],
+      "probes_rc": {
+       "mcp": 0,
+       "ws": 0
+      },
+      "runner_home_unchanged": true,
+      "terminated_by": "SIGTERM",
+      "wall_seconds": 139.055
+     },
+     "sandbox_policy": {
+      "kernel.apparmor_restrict_unprivileged_userns": "1",
+      "note": "The evaluation never passes --no-sandbox or any other sandbox switch to the application. The only sandbox-related action is making Electron's own SUID helper binary correctly configured (root-owned, mode 4755), which is what Chromium itself requires on Linux and is what keeps the sandbox enabled; without it Chromium aborts rather than run unsandboxed.",
+      "sandbox_flags_added_to_the_launch": [],
+      "user.max_user_namespaces": "63838"
+     }
+    },
+    "required_failures": [
+     "root-bun:bun:exit=1"
+    ],
+    "root": {
+     "bun:root-bun": {
+      "failed": 3,
+      "files": 836,
+      "passed": 12428,
+      "pending": 39,
+      "sha256": "afa50e5cf825e1d388d2cd27115f5d43f33296590075d024bdd0bbf01b8d19ea",
+      "tests": 12470
+     },
+     "node:root-base": {
+      "failed": 0,
+      "files": 836,
+      "passed": 12431,
+      "pending": 39,
+      "sha256": "943721b971bf81b8e12e30c3686a6f5575a9aeb29cd3292dd222b8ddd297d75e",
+      "tests": 12470
+     }
+    },
+    "root_parity": {
+     "file_sets_identical": true,
+     "files_a": 836,
+     "files_b": 836,
+     "ids_only_a": 0,
+     "ids_only_a_sample": [],
+     "ids_only_b": 0,
+     "ids_only_b_sample": [],
+     "unique_ids_a": 12461,
+     "unique_ids_b": 12461
+    },
+    "supplementary_tests": {
+     "dev-backend": {
+      "bun": [
+       1,
+       8,
+       5,
+       0,
+       3
+      ],
+      "node": [
+       1,
+       8,
+       5,
+       0,
+       3
+      ]
+     },
+     "mini-ide": {
+      "bun": [
+       3,
+       5,
+       5,
+       0,
+       0
+      ],
+      "node": [
+       3,
+       5,
+       5,
+       0,
+       0
+      ]
+     },
+     "minimal-sdk-dom": {
+      "bun": [
+       2,
+       36,
+       36,
+       0,
+       0
+      ],
+      "node": [
+       2,
+       36,
+       36,
+       0,
+       0
+      ]
+     },
+     "packaged-lifecycle": {
+      "bun": [
+       3,
+       124,
+       124,
+       0,
+       0
+      ],
+      "node": [
+       3,
+       124,
+       124,
+       0,
+       0
+      ]
+     }
+    }
+   },
+   "readiness": {
+    "base": {
+     "backend_failed_logged": null,
+     "backend_port": 35617,
+     "backend_ready_logged": null,
+     "exit_code": -15,
+     "first_health_200_after_seconds": 114.54,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "SIGTERM",
+     "wall_seconds": 140.93
+    },
+    "bun": {
+     "backend_failed_logged": null,
+     "backend_port": 43291,
+     "backend_ready_logged": null,
+     "exit_code": -15,
+     "first_health_200_after_seconds": 94.47,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "SIGTERM",
+     "wall_seconds": 120.762
+    },
+    "sandbox_policy": {
+     "kernel.apparmor_restrict_unprivileged_userns": "1",
+     "note": "The evaluation never passes --no-sandbox or any other sandbox switch to the application. The only sandbox-related action is making Electron's own SUID helper binary correctly configured (root-owned, mode 4755), which is what Chromium itself requires on Linux and is what keeps the sandbox enabled; without it Chromium aborts rather than run unsandboxed.",
+     "sandbox_flags_added_to_the_launch": [],
+     "user.max_user_namespaces": "63838"
+    }
+   },
+   "required_failures": [
+    "root-bun:bun:exit=1"
+   ],
+   "root": {
+    "bun:root-bun": {
+     "failed": 3,
+     "failures": [
+      {
+       "duration_ms": 31.168840999999986,
+       "file": "src/main/plugins/pluginExternalWorkspace.test.ts",
+       "first_line": "Error: Executable not found in $PATH: \"pnpm\"",
+       "test": "third-party plugin external workspace installs public packages, validates/types/builds/packages the example, and enforces Host capability denial"
+      },
+      {
+       "duration_ms": 23.289984999999888,
+       "file": "src/main/plugins/pluginIpc.test.ts",
+       "first_line": "Error",
+       "test": "plugins:prepareInstall wire \u2192 verifier mapping skips an expired HTTP 200 candidate and accepts the next valid candidate"
+      },
+      {
+       "duration_ms": 24.004903000000013,
+       "file": "src/main/plugins/pluginIpc.test.ts",
+       "first_line": "AssertionError: expected [ \u2026(2) ] to deeply equal [ \u2026(2) ]",
+       "test": "plugins:prepareInstall wire \u2192 verifier mapping continues trust metadata refresh when the first installed package detail is missing"
+      }
+     ],
+     "files": 936,
+     "passed": 13670,
+     "pending": 39,
+     "sha256": "07d2976bbcf0e929ee2532d39793eb2635b07a69c61e681a97c4e45bc50d6089",
+     "tests": 13712
+    },
+    "node:root-base": {
+     "failed": 0,
+     "failures": [],
+     "files": 936,
+     "passed": 13673,
+     "pending": 39,
+     "sha256": "b8d7f1938ce4cbc5334be089eec11d68c5f6fc35b0f79a8ba243305cae693a04",
+     "tests": 13712
+    }
+   },
+   "root_parity": {
+    "file_sets_identical": true,
+    "files_a": 936,
+    "files_b": 936,
+    "ids_only_a": 0,
+    "ids_only_a_sample": [],
+    "ids_only_b": 0,
+    "ids_only_b_sample": [],
+    "unique_ids_a": 13703,
+    "unique_ids_b": 13703
+   },
+   "root_prebuild_parity": null,
+   "setup": {
+    "sources": {
+     "base": {
+      "expected_rev": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+      "kind": "base+adaptations",
+      "ls_tree_sha256": "6873b6ee5638bb1da8c9d721aa4353d4d06b93c5bc146f0142c9f475cf34bcd7",
+      "ls_tree_sha256_expected_rev": "4c2d35f787bc422557698edfcdf911de40c0b64c23f18e22581f9deaecceed09",
+      "parent": "e2fd9ed51d596c6d907c1305f5763cd9d79cbc23",
+      "removed_workflow_files": [],
+      "rev": "9af042ec3683b21a67da68b2c9e9352b0e612dbf"
+     },
+     "bun": {
+      "expected_rev": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+      "kind": "tag-commit",
+      "ls_tree_sha256": "932b1053144672f0e2e4553bbe45d6a4c518f80de4a5c86f92ba0aebae8f3beb",
+      "ls_tree_sha256_expected_rev": "4c2d35f787bc422557698edfcdf911de40c0b64c23f18e22581f9deaecceed09",
+      "parent": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+      "paths_differing_from_expected_head": [
+       ".github/workflows/eval-bun-toolchain-windows.yml",
+       ".github/workflows/eval-bun-toolchain.yml"
+      ],
+      "removed_workflow_files": [
+       "eval-bun-toolchain.yml"
+      ],
+      "rev": "9faf4fe95140d1ba4fac405f6843413762ebdc7e"
+     }
+    },
+    "tools": {
+     "bun": "1.4.2",
+     "node": "v22.23.2",
+     "pnpm": "10.0.0",
+     "uv": "uv 0.12.23 (x86_64-unknown-linux-gnu)"
+    },
+    "verification": {
+     "base": {
+      "checks": 10,
+      "file_count": 3156,
+      "mismatches": []
+     },
+     "bun": {
+      "checks": 12,
+      "file_count": 3229,
+      "mismatches": []
+     }
+    },
+    "version": {
+     "nproc": 4,
+     "os_release": {
+      "BUG_REPORT_URL": "https://bugs.launchpad.net/ubuntu/",
+      "HOME_URL": "https://www.ubuntu.com/",
+      "ID": "ubuntu",
+      "ID_LIKE": "debian",
+      "LOGO": "ubuntu-logo",
+      "NAME": "Ubuntu",
+      "PRETTY_NAME": "Ubuntu 24.04.5 LTS",
+      "PRIVACY_POLICY_URL": "https://www.ubuntu.com/legal/terms-and-policies/privacy-policy",
+      "SUPPORT_URL": "https://help.ubuntu.com/",
+      "UBUNTU_CODENAME": "noble",
+      "VERSION": "24.04.5 LTS (Noble Numbat)",
+      "VERSION_CODENAME": "noble",
+      "VERSION_ID": "24.04"
+     },
+     "python": "3.12.3",
+     "uname": "Linux runnervmmprz5 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64"
+    }
+   },
+   "supplementary": {
+    "dev-backend": {
+     "bun": {
+      "failed": 0,
+      "files": 1,
+      "passed": 5,
+      "pending": 3,
+      "sha256": "6987e974c39808d5f8e759eb8479a6ff4818088d5e5c891e62cec2d41a41eddb",
+      "tests": 8
+     },
+     "node": {
+      "failed": 0,
+      "files": 1,
+      "passed": 5,
+      "pending": 3,
+      "sha256": "849bde6097b3fea111bc2735bb01f9f1570217c39244b426f8b4d6a56a090818",
+      "tests": 8
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 1,
+      "files_b": 1,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 8,
+      "unique_ids_b": 8
+     }
+    },
+    "mini-ide": {
+     "bun": {
+      "failed": 0,
+      "files": 3,
+      "passed": 5,
+      "pending": 0,
+      "sha256": "5dc903d42b34e472c1399c3394e60223386b877ef980f9f0d896c016f14da2c6",
+      "tests": 5
+     },
+     "node": {
+      "failed": 0,
+      "files": 3,
+      "passed": 5,
+      "pending": 0,
+      "sha256": "1a10bf63563521d91296c4c1386ff66d4330b3901f87eed95d3540ca7422d476",
+      "tests": 5
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 3,
+      "files_b": 3,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 5,
+      "unique_ids_b": 5
+     }
+    },
+    "minimal-sdk-dom": {
+     "bun": {
+      "failed": 0,
+      "files": 2,
+      "passed": 36,
+      "pending": 0,
+      "sha256": "a1ed3c475d2d53ee65b9b20f39f6857487c750c2b1f5954cc311ff19035df33e",
+      "tests": 36
+     },
+     "node": {
+      "failed": 0,
+      "files": 2,
+      "passed": 36,
+      "pending": 0,
+      "sha256": "b99ff9ab1b097affcb353d7c943e7d33042f8677a6c4268c72352115e588e779",
+      "tests": 36
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 2,
+      "files_b": 2,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 36,
+      "unique_ids_b": 36
+     }
+    },
+    "packaged-lifecycle": {
+     "bun": {
+      "failed": 0,
+      "files": 3,
+      "passed": 136,
+      "pending": 0,
+      "sha256": "99653fb43330e3f732d230df4593ea402f5cb1c307506016bf16b8f183e50b0c",
+      "tests": 136
+     },
+     "node": {
+      "failed": 0,
+      "files": 3,
+      "passed": 136,
+      "pending": 0,
+      "sha256": "a6d178ee46553b1410c5939e83a23da996605edb8794609a70ea8f78e5ebe5df",
+      "tests": 136
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 3,
+      "files_b": 3,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 136,
+      "unique_ids_b": 136
+     }
+    }
+   },
+   "typecheck": [
+    {
+     "case": "base",
+     "exit_code": 0,
+     "expectation": "zero",
+     "heap_oom_signature": null,
+     "label": "typecheck-base",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 120.824
+    },
+    {
+     "case": "bun",
+     "exit_code": 0,
+     "expectation": "zero",
+     "heap_oom_signature": null,
+     "label": "typecheck-bun",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 111.493
+    }
+   ]
+  },
+  "windows": {
+   "bun_node_named_executables_inside_candidate_case": {
+    "C:/t08-eval/t08-head-bun/tmp/bun-node-<hash>/node.exe": 1210
+   },
+   "bun_node_named_executables_outside_candidate_case": {},
+   "bun_observed_executables": {
+    "bun.exe": 18,
+    "esbuild.exe": 14,
+    "navide-plans.exe": 8,
+    "node.exe": 1210,
+    "python.exe": 8,
+    "tsc.exe": 2,
+    "vitest.exe": 6
+   },
+   "checks_nonzero": [
+    {
+     "case": "base",
+     "exit_code": 1,
+     "expectation": "zero",
+     "heap_oom_signature": null,
+     "label": "root-base",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 403.75
+    },
+    {
+     "case": "bun",
+     "exit_code": 1,
+     "expectation": "zero-or-residual",
+     "heap_oom_signature": null,
+     "label": "root-bun",
+     "residual_gate": "residual-only",
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 254.297
+    },
+    {
+     "case": "bun",
+     "exit_code": 1,
+     "expectation": "zero-or-residual",
+     "heap_oom_signature": null,
+     "label": "root-prebuild-bun",
+     "residual_gate": "NOT residual-only",
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 215.516
+    },
+    {
+     "case": "base",
+     "exit_code": 1,
+     "expectation": "record",
+     "heap_oom_signature": null,
+     "label": "packaged-lifecycle-base",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 16.531
+    },
+    {
+     "case": "bun",
+     "exit_code": 1,
+     "expectation": "record",
+     "heap_oom_signature": null,
+     "label": "packaged-lifecycle-bun",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 18.187
+    }
+   ],
+   "consumers": {
+    "cons-npm-base": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 9,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    },
+    "cons-npm-bun": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 9,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    },
+    "cons-pnpm-base": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 9,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    },
+    "cons-pnpm-bun": {
+     "cli_failed": 0,
+     "cli_total": 19,
+     "portable_workers": 9,
+     "probe_failed": 1,
+     "probe_total": 49,
+     "runs_exit": {
+      "consumer-cli-cases": 0,
+      "consumer-dependency-tree": 0,
+      "consumer-install": 0,
+      "consumer-manager-bin": 0,
+      "consumer-probes": 0,
+      "consumer-typecheck": 0,
+      "consumer-vite-build": 0,
+      "consumer-vue-tsc": 0
+     }
+    }
+   },
+   "guard": [
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-check-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-install-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-run-141"
+    },
+    {
+     "exit_code": 0,
+     "expected_zero": true,
+     "guidance_present": false,
+     "label": "guard-accept-check-142"
+    }
+   ],
+   "lockfiles_unchanged": {
+    "bun": true,
+    "node": true
+   },
+   "notes": [],
+   "peak_memory": {
+    "note": "Windows has no ru_maxrss; the working-set peak is sampled during commands that enabled observation (0.25 s), the job figure is the kernel job accounting.",
+    "peak_job_committed_memory": {
+     "bytes": 0,
+     "label": null
+    },
+    "peak_single_process_working_set": {
+     "bytes": 4198576128,
+     "label": "bun:mini-ide-bun",
+     "mib": 4004.074
+    }
+   },
+   "performance_new": {
+    "dom-cold": {
+     "bun_mad": 0.031,
+     "bun_median": 1.813,
+     "bun_samples": [
+      1.781,
+      1.796,
+      1.813,
+      1.844,
+      1.875
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.016,
+     "node_median": 3.235,
+     "node_samples": [
+      3.187,
+      3.219,
+      3.235,
+      3.25,
+      3.266
+     ],
+     "slowdown": -0.43957
+    },
+    "dom-warm": {
+     "bun_mad": 0.001,
+     "bun_median": 1.796,
+     "bun_samples": [
+      1.765,
+      1.781,
+      1.796,
+      1.797,
+      1.797
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.0,
+     "node_median": 3.141,
+     "node_samples": [
+      3.14,
+      3.141,
+      3.141,
+      3.141,
+      3.157
+     ],
+     "slowdown": -0.42821
+    },
+    "root-cold": {
+     "bun_mad": 21.328,
+     "bun_median": 405.422,
+     "bun_samples": [
+      372.109,
+      375.797,
+      405.422,
+      425.016,
+      426.75
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 24.593,
+     "node_median": 665.062,
+     "node_samples": [
+      640.469,
+      646.812,
+      665.062,
+      727.422,
+      753.468
+     ],
+     "slowdown": -0.3904
+    },
+    "root-warm": {
+     "bun_mad": 3.203,
+     "bun_median": 326.891,
+     "bun_samples": [
+      318.954,
+      323.688,
+      326.891,
+      327.296,
+      332.329
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 3.437,
+     "node_median": 582.219,
+     "node_samples": [
+      576.891,
+      580.328,
+      582.219,
+      585.656,
+      593.203
+     ],
+     "slowdown": -0.43854
+    },
+    "sdk-cold": {
+     "bun_mad": 0.047,
+     "bun_median": 1.563,
+     "bun_samples": [
+      1.5,
+      1.516,
+      1.563,
+      1.609,
+      1.625
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.048,
+     "node_median": 2.563,
+     "node_samples": [
+      2.515,
+      2.531,
+      2.563,
+      2.907,
+      3.062
+     ],
+     "slowdown": -0.39017
+    },
+    "sdk-warm": {
+     "bun_mad": 0.125,
+     "bun_median": 1.609,
+     "bun_samples": [
+      1.484,
+      1.594,
+      1.609,
+      1.922,
+      2.188
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.11,
+     "node_median": 2.719,
+     "node_samples": [
+      2.5,
+      2.609,
+      2.719,
+      2.75,
+      2.984
+     ],
+     "slowdown": -0.40824
+    }
+   },
+   "performance_nonzero_samples": [
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-00-bun",
+     "vitest_success": false,
+     "wall_seconds": 405.297,
+     "warmup": true
+    },
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-01-bun",
+     "vitest_success": false,
+     "wall_seconds": 405.422,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [
+      "Error: [vitest-worker]: Timeout calling \"onTaskUpdate\"",
+      "vitest summary: 1 unhandled error(s)"
+     ],
+     "exit_code": 1,
+     "failed_files": [],
+     "log_present": true,
+     "runtime": "base",
+     "tag": "root-cold-02-base",
+     "vitest_success": true,
+     "wall_seconds": 753.468,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-02-bun",
+     "vitest_success": false,
+     "wall_seconds": 425.016,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [
+      "Error: [vitest-worker]: Timeout calling \"onTaskUpdate\"",
+      "vitest summary: 1 unhandled error(s)"
+     ],
+     "exit_code": 1,
+     "failed_files": [],
+     "log_present": true,
+     "runtime": "base",
+     "tag": "root-cold-03-base",
+     "vitest_success": true,
+     "wall_seconds": 727.422,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-03-bun",
+     "vitest_success": false,
+     "wall_seconds": 375.797,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-04-bun",
+     "vitest_success": false,
+     "wall_seconds": 372.109,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-cold.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-cold-05-bun",
+     "vitest_success": false,
+     "wall_seconds": 426.75,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-identity.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-90-bun-identity",
+     "vitest_success": false,
+     "wall_seconds": 327.0,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-warm.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-00-bun",
+     "vitest_success": false,
+     "wall_seconds": 418.531,
+     "warmup": true
+    },
+    {
+     "artifact_file": "performance-root-warm.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-01-bun",
+     "vitest_success": false,
+     "wall_seconds": 332.329,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-warm.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-02-bun",
+     "vitest_success": false,
+     "wall_seconds": 327.296,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-warm.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-03-bun",
+     "vitest_success": false,
+     "wall_seconds": 318.954,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-warm.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-04-bun",
+     "vitest_success": false,
+     "wall_seconds": 326.891,
+     "warmup": false
+    },
+    {
+     "artifact_file": "performance-root-warm.json",
+     "cause_lines": [],
+     "exit_code": 1,
+     "failed_files": [
+      "src/main/plugins/pluginExternalWorkspace.test.ts"
+     ],
+     "log_present": true,
+     "runtime": "bun",
+     "tag": "root-warm-05-bun",
+     "vitest_success": false,
+     "wall_seconds": 323.688,
+     "warmup": false
+    }
+   ],
+   "performance_previous": {
+    "dom-cold": {
+     "bun_mad": 0.047,
+     "bun_median": 1.938,
+     "bun_samples": [
+      1.86,
+      1.922,
+      1.938,
+      1.985,
+      2.172
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.047,
+     "node_median": 3.625,
+     "node_samples": [
+      3.5,
+      3.625,
+      3.625,
+      3.672,
+      3.703
+     ],
+     "slowdown": -0.46538
+    },
+    "dom-warm": {
+     "bun_mad": 0.015,
+     "bun_median": 1.859,
+     "bun_samples": [
+      1.844,
+      1.844,
+      1.859,
+      1.875,
+      1.984
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.11,
+     "node_median": 3.594,
+     "node_samples": [
+      3.469,
+      3.484,
+      3.594,
+      3.656,
+      3.968
+     ],
+     "slowdown": -0.48275
+    },
+    "root-cold": {
+     "bun_mad": 1.078,
+     "bun_median": 217.359,
+     "bun_samples": [
+      216.281,
+      216.5,
+      217.359,
+      224.75,
+      225.078
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 1.844,
+     "node_median": 345.312,
+     "node_samples": [
+      336.328,
+      344.344,
+      345.312,
+      347.156,
+      376.11
+     ],
+     "slowdown": -0.37054
+    },
+    "root-warm": {
+     "bun_mad": 1.267,
+     "bun_median": 273.235,
+     "bun_samples": [
+      271.968,
+      273.094,
+      273.235,
+      286.0,
+      287.125
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 1.047,
+     "node_median": 489.063,
+     "node_samples": [
+      488.016,
+      488.172,
+      489.063,
+      502.625,
+      515.094
+     ],
+     "slowdown": -0.44131
+    },
+    "sdk-cold": {
+     "bun_mad": 0.015,
+     "bun_median": 1.516,
+     "bun_samples": [
+      1.5,
+      1.5,
+      1.516,
+      1.516,
+      1.531
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.03,
+     "node_median": 2.671,
+     "node_samples": [
+      2.641,
+      2.656,
+      2.671,
+      2.703,
+      2.844
+     ],
+     "slowdown": -0.43242
+    },
+    "sdk-warm": {
+     "bun_mad": 0.0,
+     "bun_median": 1.516,
+     "bun_samples": [
+      1.516,
+      1.516,
+      1.516,
+      1.532,
+      1.563
+     ],
+     "gate": "PASS",
+     "n_bun": 5,
+     "n_node": 5,
+     "node_mad": 0.016,
+     "node_median": 2.703,
+     "node_samples": [
+      2.671,
+      2.687,
+      2.703,
+      2.704,
+      2.735
+     ],
+     "slowdown": -0.43914
+    }
+   },
+   "prep_exit_codes": {
+    "bun": {
+     "prep-backend-sync": 0,
+     "prep-electron-install": 0,
+     "prep-fixture-build": 0,
+     "prep-install": 0,
+     "prep-path-check": 0,
+     "prep-production-plans-backend": 1,
+     "prep-runtime-identity": 0,
+     "prep-uv-python": 0
+    },
+    "node": {
+     "prep-backend-sync": 0,
+     "prep-electron-install": 0,
+     "prep-fixture-build": 0,
+     "prep-install": 0,
+     "prep-path-check": 0,
+     "prep-production-plans-backend": 1,
+     "prep-runtime-identity": 0,
+     "prep-uv-python": 0
+    }
+   },
+   "previous_accepted": {
+    "run_id": 38177189208,
+    "tag": "eval-bun-ci-08-08"
+   },
+   "previous_summary": {
+    "peak_memory": {
+     "note": "Windows has no ru_maxrss; the working-set peak is sampled during commands that enabled observation (0.25 s), the job figure is the kernel job accounting.",
+     "peak_job_committed_memory": {
+      "bytes": 0,
+      "label": null
+     },
+     "peak_single_process_working_set": {
+      "bytes": 4486160384,
+      "label": "bun:root-bun",
+      "mib": 4278.336
+     }
+    },
+    "readiness": {
+     "base": {
+      "backend_failed_logged": true,
+      "backend_port": 60062,
+      "backend_ready_logged": false,
+      "exit_code": 1,
+      "first_health_200_after_seconds": 140.97,
+      "leftover_owned_pids": [],
+      "probes_rc": {
+       "mcp": 0,
+       "ws": 0
+      },
+      "runner_home_unchanged": true,
+      "terminated_by": "taskkill",
+      "wall_seconds": 196.578
+     },
+     "bun": {
+      "backend_failed_logged": true,
+      "backend_port": 57623,
+      "backend_ready_logged": false,
+      "exit_code": 1,
+      "first_health_200_after_seconds": 104.88,
+      "leftover_owned_pids": [],
+      "probes_rc": {
+       "mcp": 0,
+       "ws": 0
+      },
+      "runner_home_unchanged": true,
+      "terminated_by": "taskkill",
+      "wall_seconds": 161.187
+     },
+     "sandbox_policy": {
+      "sandbox_flags_added_to_the_launch": []
+     }
+    },
+    "required_failures": [],
+    "root": {
+     "bun:root-bun": {
+      "failed": 1,
+      "files": 836,
+      "passed": 12371,
+      "pending": 97,
+      "sha256": "84d358cd95da88c54e1cf78df933660708a506235f2eaacef848b11d5f921e33",
+      "tests": 12469
+     },
+     "bun:root-prebuild-bun": {
+      "failed": 1,
+      "files": 836,
+      "passed": 12371,
+      "pending": 97,
+      "sha256": "5662f1c8ea858244855a5f2df57f391fdcafad5ecc3eed4d869839b0214f9cf8",
+      "tests": 12469
+     },
+     "node:root-base": {
+      "failed": 0,
+      "files": 836,
+      "passed": 12372,
+      "pending": 97,
+      "sha256": "5f4f6b0a8654a0f5fc78eaa88ab38c95942f3d07e4f007df37141f3a73ca093c",
+      "tests": 12469
+     },
+     "node:root-prebuild-base": {
+      "failed": 0,
+      "files": 836,
+      "passed": 12372,
+      "pending": 97,
+      "sha256": "a4ec93b22d963f62eef6855136c03d4b1c781da3c805c8635e65888a947b2c46",
+      "tests": 12469
+     }
+    },
+    "root_parity": {
+     "file_sets_identical": true,
+     "files_a": 836,
+     "files_b": 836,
+     "ids_only_a": 0,
+     "ids_only_a_sample": [],
+     "ids_only_b": 0,
+     "ids_only_b_sample": [],
+     "unique_ids_a": 12460,
+     "unique_ids_b": 12460
+    },
+    "supplementary_tests": {
+     "dev-backend": {
+      "bun": [
+       1,
+       8,
+       4,
+       0,
+       4
+      ],
+      "node": [
+       1,
+       8,
+       4,
+       0,
+       4
+      ]
+     },
+     "mini-ide": {
+      "bun": [
+       3,
+       5,
+       5,
+       0,
+       0
+      ],
+      "node": [
+       3,
+       5,
+       5,
+       0,
+       0
+      ]
+     },
+     "minimal-sdk-dom": {
+      "bun": [
+       2,
+       36,
+       36,
+       0,
+       0
+      ],
+      "node": [
+       2,
+       36,
+       36,
+       0,
+       0
+      ]
+     },
+     "packaged-lifecycle": {
+      "bun": [
+       3,
+       124,
+       111,
+       1,
+       12
+      ],
+      "node": [
+       3,
+       124,
+       111,
+       1,
+       12
+      ]
+     },
+     "windows-sandbox-unit": {
+      "bun": [
+       1,
+       26,
+       12,
+       0,
+       14
+      ],
+      "node": [
+       1,
+       26,
+       12,
+       0,
+       14
+      ]
+     }
+    }
+   },
+   "readiness": {
+    "base": {
+     "backend_failed_logged": true,
+     "backend_port": 52663,
+     "backend_ready_logged": false,
+     "exit_code": 1,
+     "first_health_200_after_seconds": 172.61,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "taskkill",
+     "wall_seconds": 229.719
+    },
+    "bun": {
+     "backend_failed_logged": true,
+     "backend_port": 52144,
+     "backend_ready_logged": false,
+     "exit_code": 1,
+     "first_health_200_after_seconds": 115.61,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "taskkill",
+     "wall_seconds": 172.312
+    },
+    "sandbox_policy": {
+     "sandbox_flags_added_to_the_launch": []
+    }
+   },
+   "required_failures": [
+    "root-base:base:exit=1",
+    "root-prebuild-bun:bun:exit=1"
+   ],
+   "root": {
+    "bun:root-bun": {
+     "failed": 1,
+     "failures": [
+      {
+       "duration_ms": 31.349499999999978,
+       "file": "src/main/plugins/pluginExternalWorkspace.test.ts",
+       "first_line": "Error: Executable not found in $PATH: \"pnpm\"",
+       "test": "third-party plugin external workspace installs public packages, validates/types/builds/packages the example, and enforces Host capability denial"
+      }
+     ],
+     "files": 936,
+     "passed": 13601,
+     "pending": 109,
+     "sha256": "487e83f982c3e9436ab08dfcd2d8a9ed17d7d547d3957aec847e0a91604617b5",
+     "tests": 13711
+    },
+    "bun:root-prebuild-bun": {
+     "failed": 2,
+     "failures": [
+      {
+       "duration_ms": 18.08250000000004,
+       "file": "src/main/plugins/pluginBackendHost.test.ts",
+       "first_line": "AssertionError: expected \"spy\" to be called with arguments: [ StringContaining{\u2026} ]\u001b[90m",
+       "test": "PluginBackendHost forwards host-only diagnostics and original cause without leaking OS paths to caller"
+      },
+      {
+       "duration_ms": 30.761999999999944,
+       "file": "src/main/plugins/pluginExternalWorkspace.test.ts",
+       "first_line": "Error: Executable not found in $PATH: \"pnpm\"",
+       "test": "third-party plugin external workspace installs public packages, validates/types/builds/packages the example, and enforces Host capability denial"
+      }
+     ],
+     "files": 936,
+     "passed": 13600,
+     "pending": 109,
+     "sha256": "a4cbcc5fe874debfa2f1b302e79cce9bac401b246932e8151d4294af62ec82fa",
+     "tests": 13711
+    },
+    "node:root-base": {
+     "failed": 1,
+     "failures": [
+      {
+       "duration_ms": 7273.5177,
+       "file": "src/renderer/src/components/__tests__/windowControlsStacking.test.ts",
+       "first_line": "Error: STACK_TRACE_ERROR",
+       "test": "window controls outrank every overlay is actually scanning something"
+      }
+     ],
+     "files": 936,
+     "passed": 13601,
+     "pending": 109,
+     "sha256": "07a73905c08586116ed4338681b7539bb363c0951d5195ac1ec0d535b9e4f3c2",
+     "tests": 13711
+    },
+    "node:root-prebuild-base": {
+     "failed": 0,
+     "failures": [],
+     "files": 936,
+     "passed": 13602,
+     "pending": 109,
+     "sha256": "59f0ca932e7304b08b32c1c7e020e98f0d94528808719f29d283e5baedabd413",
+     "tests": 13711
+    }
+   },
+   "root_parity": {
+    "file_sets_identical": true,
+    "files_a": 936,
+    "files_b": 936,
+    "ids_only_a": 0,
+    "ids_only_a_sample": [],
+    "ids_only_b": 0,
+    "ids_only_b_sample": [],
+    "unique_ids_a": 13702,
+    "unique_ids_b": 13702
+   },
+   "root_prebuild_parity": {
+    "file_sets_identical": true,
+    "files_a": 936,
+    "files_b": 936,
+    "ids_only_a": 0,
+    "ids_only_a_sample": [],
+    "ids_only_b": 0,
+    "ids_only_b_sample": [],
+    "unique_ids_a": 13702,
+    "unique_ids_b": 13702
+   },
+   "setup": {
+    "sources": {
+     "base": {
+      "expected_rev": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+      "kind": "base+adaptations",
+      "ls_tree_sha256": "6873b6ee5638bb1da8c9d721aa4353d4d06b93c5bc146f0142c9f475cf34bcd7",
+      "ls_tree_sha256_expected_rev": "4c2d35f787bc422557698edfcdf911de40c0b64c23f18e22581f9deaecceed09",
+      "parent": "e2fd9ed51d596c6d907c1305f5763cd9d79cbc23",
+      "removed_workflow_files": [],
+      "rev": "9af042ec3683b21a67da68b2c9e9352b0e612dbf"
+     },
+     "bun": {
+      "expected_rev": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+      "kind": "tag-commit",
+      "ls_tree_sha256": "b3d3e7c35851754889b57f521ec9a96d3794ff2d56603346071a9e5a9cf7ba91",
+      "ls_tree_sha256_expected_rev": "4c2d35f787bc422557698edfcdf911de40c0b64c23f18e22581f9deaecceed09",
+      "parent": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+      "paths_differing_from_expected_head": [
+       ".github/workflows/eval-bun-toolchain-windows.yml",
+       ".github/workflows/eval-bun-toolchain.yml"
+      ],
+      "removed_workflow_files": [
+       "C:\\t08-eval\\t08-head-bun\\source\\.github\\workflows\\eval-bun-toolchain-windows.yml"
+      ],
+      "rev": "8da4b51706c960544abc1d776affa4fde44c93f1"
+     }
+    },
+    "tools": {
+     "bun": "1.4.2",
+     "node": "v22.23.2",
+     "pnpm": "10.0.0",
+     "uv": "uv 0.12.23 (46b84fd0b 2026-10-03 x86_64-pc-windows-msvc)"
+    },
+    "verification": {
+     "base": {
+      "checks": 10,
+      "file_count": 3156,
+      "mismatches": []
+     },
+     "bun": {
+      "checks": 12,
+      "file_count": 3229,
+      "mismatches": []
+     }
+    },
+    "version": {
+     "machine": "AMD64",
+     "nproc": 4,
+     "platform": "Windows-2025Server-10.0.26100-SP0",
+     "python": "3.12.10"
+    }
+   },
+   "supplementary": {
+    "dev-backend": {
+     "bun": {
+      "failed": 0,
+      "files": 1,
+      "passed": 4,
+      "pending": 4,
+      "sha256": "7b501ff9db981e70fe1d355a2f940d13b8ccf3e3b2013d6008daad32bb96c755",
+      "tests": 8
+     },
+     "node": {
+      "failed": 0,
+      "files": 1,
+      "passed": 4,
+      "pending": 4,
+      "sha256": "5937776e982dffcde7e3dc2b6d5e226ad9aca994558a3c78cd889bf8b9a49fdd",
+      "tests": 8
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 1,
+      "files_b": 1,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 8,
+      "unique_ids_b": 8
+     }
+    },
+    "mini-ide": {
+     "bun": {
+      "failed": 0,
+      "files": 3,
+      "passed": 5,
+      "pending": 0,
+      "sha256": "4e631201fb18f9e223ef8e859be7617f9e7fc7ec06fa412c49347e642d9a3bde",
+      "tests": 5
+     },
+     "node": {
+      "failed": 0,
+      "files": 3,
+      "passed": 5,
+      "pending": 0,
+      "sha256": "66cd7f10cc226ad5acdbf550b968dc7fdad98e2c0a72b599090dd9f88179d5e0",
+      "tests": 5
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 3,
+      "files_b": 3,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 5,
+      "unique_ids_b": 5
+     }
+    },
+    "minimal-sdk-dom": {
+     "bun": {
+      "failed": 0,
+      "files": 2,
+      "passed": 36,
+      "pending": 0,
+      "sha256": "3bc9297f9cd3bf066902117d6d822af37d11647c13c72ddfde9eb23cb4063fc4",
+      "tests": 36
+     },
+     "node": {
+      "failed": 0,
+      "files": 2,
+      "passed": 36,
+      "pending": 0,
+      "sha256": "6cfc8ced34f667e566928dc64d6cbdd1bcf649ee7dc13083f341ec1ced99ad8c",
+      "tests": 36
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 2,
+      "files_b": 2,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 36,
+      "unique_ids_b": 36
+     }
+    },
+    "packaged-lifecycle": {
+     "bun": {
+      "failed": 2,
+      "files": 3,
+      "passed": 122,
+      "pending": 12,
+      "sha256": "c969339811edbb0b3788a5bebc1842e6aa473003f2840844322bcdc2f25001d8",
+      "tests": 136
+     },
+     "node": {
+      "failed": 1,
+      "files": 3,
+      "passed": 123,
+      "pending": 12,
+      "sha256": "8e74ff42d08c8c57201f4cdd6da5ef1a97f8a7db3b911b873f73f5abf64472e2",
+      "tests": 136
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 3,
+      "files_b": 3,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 136,
+      "unique_ids_b": 136
+     }
+    },
+    "windows-sandbox-unit": {
+     "bun": {
+      "failed": 0,
+      "files": 1,
+      "passed": 12,
+      "pending": 14,
+      "sha256": "c2f3a8c31a203e1aa81426b6ef4359ab5f56c3a0fa192deee2bc4e6bcfe87c2b",
+      "tests": 26
+     },
+     "node": {
+      "failed": 0,
+      "files": 1,
+      "passed": 12,
+      "pending": 14,
+      "sha256": "603404054016bab1a2df585631e5d645b659cc7e26f6f476a60f0a3df0fac671",
+      "tests": 26
+     },
+     "parity": {
+      "file_sets_identical": true,
+      "files_a": 1,
+      "files_b": 1,
+      "ids_only_a": 0,
+      "ids_only_a_sample": [],
+      "ids_only_b": 0,
+      "ids_only_b_sample": [],
+      "unique_ids_a": 26,
+      "unique_ids_b": 26
+     }
+    }
+   },
+   "typecheck": [
+    {
+     "case": "base",
+     "exit_code": 0,
+     "expectation": "zero",
+     "heap_oom_signature": null,
+     "label": "typecheck-base",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 82.453
+    },
+    {
+     "case": "bun",
+     "exit_code": 0,
+     "expectation": "zero",
+     "heap_oom_signature": null,
+     "label": "typecheck-bun",
+     "residual_gate": null,
+     "supplemental": null,
+     "supplements": null,
+     "wall_seconds": 70.828
+    }
+   ]
+  }
+ },
+ "public_package_lock_graph": {
+  "new": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+  "old": "8c674ca6474e25b161030610c18fe1c6dc928f2a",
+  "packages": {
+   "packages/plugin-contracts": {
+    "declared_dependencies": {},
+    "lock_workspace_entry_identical": true,
+    "name": "@navide/plugin-contracts",
+    "package_json_identical": true,
+    "package_json_sha256_new": "a35ffe890a32e080e59671ba6181b4977914528e123438d6089a90824940f572",
+    "package_json_sha256_old": "a35ffe890a32e080e59671ba6181b4977914528e123438d6089a90824940f572"
+   },
+   "packages/plugin-sdk": {
+    "declared_dependencies": {
+     "@navide/plugin-contracts": {
+      "changed": false,
+      "new_resolution": "@navide/plugin-contracts@workspace:packages/plugin-contracts",
+      "old_resolution": "@navide/plugin-contracts@workspace:packages/plugin-contracts",
+      "range": "^1.0.0"
+     }
+    },
+    "lock_workspace_entry_identical": true,
+    "name": "@navide/plugin-sdk",
+    "package_json_identical": true,
+    "package_json_sha256_new": "571db341599794193d464fe7f7854c81b510b5f3eab6276064f2e479da83dde6",
+    "package_json_sha256_old": "571db341599794193d464fe7f7854c81b510b5f3eab6276064f2e479da83dde6"
+   },
+   "packages/plugin-ui": {
+    "declared_dependencies": {
+     "@navide/plugin-sdk": {
+      "changed": false,
+      "new_resolution": "@navide/plugin-sdk@workspace:packages/plugin-sdk",
+      "old_resolution": "@navide/plugin-sdk@workspace:packages/plugin-sdk",
+      "range": "^1.0.0"
+     },
+     "monaco-editor": {
+      "changed": false,
+      "new_resolution": "monaco-editor@0.55.1",
+      "old_resolution": "monaco-editor@0.55.1",
+      "range": "^0.55.1"
+     },
+     "vue": {
+      "changed": true,
+      "new_resolution": "vue@3.5.43",
+      "old_resolution": "vue@3.5.34",
+      "range": "^3.5.13"
+     },
+     "vue-i18n": {
+      "changed": false,
+      "new_resolution": "vue-i18n@11.4.5",
+      "old_resolution": "vue-i18n@11.4.5",
+      "range": "^10.0.5 || ^11.0.0"
+     }
+    },
+    "lock_workspace_entry_identical": true,
+    "name": "@navide/plugin-ui",
+    "package_json_identical": true,
+    "package_json_sha256_new": "3e9a3aa8b5bbbb8b1cab418dfdc0792735768042eac882b87fa733dbbb39611b",
+    "package_json_sha256_old": "3e9a3aa8b5bbbb8b1cab418dfdc0792735768042eac882b87fa733dbbb39611b"
+   }
+  }
+ },
+ "revision": 3,
+ "revision_1_preserved_at": "rev1-raw/",
+ "revision_2_preserved_at": "rev2-raw/",
+ "schema": "ci-refresh-01/3",
+ "upstream_main": "9af042ec3683b21a67da68b2c9e9352b0e612dbf",
+ "user_decision_A": {
+  "content": "accepted as a documented known Bun-on-Windows defect (about 7% per whole-file run under Bun on Windows, 0 under Node, diagnostic run 38412461745); no product change (pluginBackendSupervisor.ts:1685 robustness change recorded only as a possible future product change); carried into ticket 09 adoption cost; upstream Bun issue filing deferred, no issue filed now",
+  "date": "2026-10-13",
+  "path": "coordination/ci-refresh-01/user-decision-pluginBackendHost-A.md",
+  "sha256": "783633606d672d55d02ddfefcc5cbdec811dda0442d1607817c6e56310a07257"
+ }
+}
