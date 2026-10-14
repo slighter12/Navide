@@ -1,0 +1,2755 @@
+{
+ "schema": "navide-bun-ticket09-recommendation-02/v1",
+ "revision": 4,
+ "correction_03": {
+  "id": "correction-03",
+  "dispatch": "coordination/ticket09-02/correction-03-dispatch.md",
+  "dispatch_sha256": "1e0731bfb0f4c5c02e1b349fd513fef31d911dd46db891221c8cc3605304defe",
+  "finding": "readiness snapshots do not establish the executable path of the node-named child (PATH-by-name check cannot exclude an absolute-path launch; single snapshot; Windows failed start)",
+  "coordinator_decision": "narrow: Linux/Windows broad Bun-only cells -> not-run (not established); sampled correctness-workflow Bun-only stays pass; Windows dev readiness stays blocked",
+  "expected_counts_from_dispatch": {
+   "pass": 23,
+   "not-run": 17,
+   "pass-with-accepted-gap": 2,
+   "fail": 2,
+   "blocked": 1
+  },
+  "previous_generation": {
+   "report.md": {
+    "path": "r3-delivered/report.md",
+    "sha256": "6bcdc17f8ba9d1763c652c9588b87a49fbf0214d10e0ccb9a9687d9db6cbbecc",
+    "bytes": 45114
+   },
+   "evidence.json": {
+    "path": "r3-delivered/evidence.json",
+    "sha256": "72d2123e33f35673748e4cae0f176850704cd6c129ffc0f9d0cc86c6e6313eab",
+    "bytes": 76879
+   }
+  }
+ },
+ "correction_02": {
+  "id": "correction-02",
+  "dispatch": "coordination/ticket09-02/correction-02-dispatch.md",
+  "dispatch_sha256": "d129b9d0c59e32c4866ab822c55f66125d0c291b2eec4aaec9fedbb441163c0f",
+  "finding": "Linux/Windows broad Bun-only cells attributed startup to the sampled correctness job; startup readiness is a separate job",
+  "result": "an at-HEAD readiness child-process receipt exists (one process-table snapshot per platform) and is cited; its limits are stated; the broader row stays pass with narrowed qualifiers; status counts unchanged",
+  "readiness_receipts": {
+   "linux": {
+    "case_root_prefix_ok": true,
+    "process_count": 16,
+    "listed": 16,
+    "single_snapshot": true,
+    "proc_error": null,
+    "scan": null,
+    "node_named_entries": [
+     {
+      "pid": 6174,
+      "ppid": 6173,
+      "image_field": null,
+      "first_token": "node",
+      "first_token_has_path_separator": false,
+      "parent_first_token": "/home/runner/work/_temp/t07-eval/t07-head-bun/tools/bun/bin/bun",
+      "parent_is_bun": true,
+      "parent_ppid_in_snapshot": true
+     }
+    ],
+    "image_basenames": [
+     "bun",
+     "chrome-sandbox",
+     "electron",
+     "esbuild",
+     "node",
+     "python",
+     "python3",
+     "sh",
+     "xvfb"
+    ],
+    "has_executable_path_field": false,
+    "bun_tree_roots": [
+     6170,
+     6173
+    ],
+    "path_check": {
+     "node_absent": true,
+     "npm_absent": true,
+     "npx_absent": true,
+     "pnpm_absent": true
+    },
+    "launch": {
+     "argv_first": "/home/runner/work/_temp/t07-eval/t07-head-bun/tools/bun/bin/bun",
+     "backend_pid": 6724
+    }
+   },
+   "windows": {
+    "case_root_prefix_ok": true,
+    "process_count": 12,
+    "listed": 12,
+    "single_snapshot": true,
+    "proc_error": null,
+    "scan": {
+     "inspected": 147,
+     "system_processes_present": 152,
+     "unreadable": 5
+    },
+    "node_named_entries": [
+     {
+      "pid": 7184,
+      "ppid": 3488,
+      "image_field": "node.exe",
+      "first_token": "node",
+      "first_token_has_path_separator": false,
+      "parent_first_token": "C:\\t08-eval\\t08-head-bun\\source\\node_modules\\.bin\\electron-vite.exe",
+      "parent_is_bun": false,
+      "parent_ppid_in_snapshot": true
+     }
+    ],
+    "image_basenames": [
+     "bun.exe",
+     "electron-vite.exe",
+     "electron.exe",
+     "esbuild.exe",
+     "node.exe",
+     "python.exe"
+    ],
+    "has_executable_path_field": false,
+    "bun_tree_roots": [
+     1376,
+     4368
+    ],
+    "path_check": {
+     "where_node_not_found": true,
+     "not_found_count": 4,
+     "where_bun_found": true
+    },
+    "launch": {
+     "argv_first": "C:\\t08-eval\\t08-head-bun\\tools\\bun\\bin\\bun.exe",
+     "backend_pid": 4136
+    }
+   }
+  },
+  "previous_generation": {
+   "report.md": {
+    "path": "r2-delivered/report.md",
+    "sha256": "dfac1ffa14608c456f0334674f3039eb59ab737cfb5b834012148912fbd484a1",
+    "bytes": 41700
+   },
+   "evidence.json": {
+    "path": "r2-delivered/evidence.json",
+    "sha256": "cbe99eae72b9b0028a8e0e82119682a56e9e2651742e75894d317c4e10d528f4",
+    "bytes": 70573
+   }
+  },
+  "superseded_by": "correction_03 for the rating of the broad Bun-only cells (pass -> not-run); the receipts and limits stay"
+ },
+ "correction": {
+  "id": "correction-01",
+  "dispatch": "coordination/ticket09-02/correction-01-dispatch.md",
+  "dispatch_sha256": "1718ba5b968ab35af8787382ceaad530c85e3592f654897835e77dfc6434620a",
+  "items_applied": [
+   "route label",
+   "macOS clean-and-repeat install split from frozen install",
+   "macOS Bun-only proof limited to workflows observed at HEAD plus a separate broad row",
+   "DEFER accept/reject moved to a governance section",
+   "ci-refresh-01 Linux 1,210 alias discrepancy recorded as a follow-up erratum item"
+  ],
+  "previous_generation_r1": {
+   "report.md": {
+    "path": "r1-delivered/report.md",
+    "sha256": "6b92e176b0c3f4c3e7dcc1ae2bcc36a596fbb17cf85285f5ba1b72606a760c6a",
+    "bytes": 34812
+   },
+   "evidence.json": {
+    "path": "r1-delivered/evidence.json",
+    "sha256": "bc8b326ce86d91bf016238e75ce7b89ff0e9072c80110208e1d63f60debfd979",
+    "bytes": 63973
+   }
+  }
+ },
+ "worker": {
+  "model": "anthropic/claude-sonnet-5-5",
+  "reasoning": "high",
+  "session_id": "01a13783-aee7-7454-818b-9f82fd52100a"
+ },
+ "authority": "report work only; recommends, adopts nothing; no stage/commit/push",
+ "recommendation": {
+  "route": "negative (DEFER) recommendation after the full evaluation, supported by ticket 09 stop/blocker alternative; not the passing normal/adoption route",
+  "route_classification": [
+   {
+    "gate_or_finding": "`pluginExternalWorkspace` fails under Bun on all three platforms (user decision A)",
+    "ticket_and_workflow": "tickets 04, 07, 08 and `rebase-01-test-04`: full root `test:run`",
+    "evidence_ids": "RB4, CIR, T04A",
+    "category": "demonstrated Bun incompatibility (layer 2) plus a shipped test that requires `pnpm` (layer 1); accepted gap, still below a clean pass"
+   },
+   {
+    "gate_or_finding": "Linux `pluginIpc` 2 tests fail under Bun",
+    "ticket_and_workflow": "ticket 07 and ci-refresh-01: full root `test:run`",
+    "evidence_ids": "CIR, T07",
+    "category": "demonstrated Bun behaviour difference (readdir order) that exposes a latent order dependence; no user decision"
+   },
+   {
+    "gate_or_finding": "Windows `pluginBackendHost` fails intermittently under Bun",
+    "ticket_and_workflow": "ticket 08 and ci-refresh-01: full root and packaged lifecycle",
+    "evidence_ids": "CIR",
+    "category": "demonstrated Bun defect on Windows (about 7% per whole-file run); accepted known defect (user decision A)"
+   },
+   {
+    "gate_or_finding": "Windows isolated dev readiness: Electron main process aborts",
+    "ticket_and_workflow": "ticket 08 and ci-refresh-01: isolated development readiness",
+    "evidence_ids": "CIR, T08",
+    "category": "documented execution blocker in the isolated profile, on both runtimes (not a Bun incompatibility)"
+   },
+   {
+    "gate_or_finding": "Windows packaged Plans lifecycle and Windows Node-baseline instability",
+    "ticket_and_workflow": "ticket 08 and ci-refresh-01: packaged lifecycle, root-base",
+    "evidence_ids": "CIR, T08",
+    "category": "failing supported baseline (the Node baseline fails too)"
+   },
+   {
+    "gate_or_finding": "macOS builds, dev readiness, packaged lifecycle, consumers, performance, clean-and-repeat install and broad Bun-only proof at HEAD",
+    "ticket_and_workflow": "tickets 03 to 06 ran pre-rebase only",
+    "evidence_ids": "T02A to T06, RB4",
+    "category": "unavailable platform evidence at HEAD: not-run, not a Bun failure"
+   },
+   {
+    "gate_or_finding": "Linux and Windows broad Bun-only proof for startup",
+    "ticket_and_workflow": "ticket 07/08 and ci-refresh-01: separate isolated-development-readiness job (one process-table snapshot per platform)",
+    "evidence_ids": "CIR, CIRR",
+    "category": "unavailable evidence: not-run; the snapshots record no executable path for the node-named child, a PATH-by-name check cannot exclude an absolute-path launch, one snapshot is not a census, and the Windows snapshot is of a failed start"
+   },
+   {
+    "gate_or_finding": "Dependency security (audit, lifecycle scripts, override effect); isolated release/CI Node exception",
+    "ticket_and_workflow": "no ticket ran it at HEAD (never on Linux or Windows)",
+    "evidence_ids": "-",
+    "category": "unavailable evidence: not-run"
+   },
+   {
+    "gate_or_finding": "Missing execution authority",
+    "ticket_and_workflow": "none claimed: the user autonomy grant covered the evaluation through issue 2",
+    "evidence_ids": "-",
+    "category": "not a stop condition here"
+   }
+  ],
+  "verdict": "defer",
+  "toolchain_on_main": "Node 22.23.2 / pnpm 10.0.0 unchanged",
+  "adopt_bar_met": false,
+  "user_accepted_gaps_waive_bar": false,
+  "deciding_gates": [
+   "full root test:run not green under Bun on any platform (macOS residual only; Linux residual + 2 unaccepted pluginIpc; Windows residual + accepted pluginBackendHost; Node baseline also failed 1 on Windows)",
+   "macOS builds, dev readiness, packaged lifecycle, consumers, performance not-run at HEAD (pre-rebase only, inputs changed)",
+   "dependency-security gate not run at HEAD on any platform; never on Linux/Windows",
+   "Windows dev readiness blocked and packaged lifecycle failing on both runtimes",
+   "primary benefit partly achieved: pnpm-dependent test, evaluation dispatcher with allowlist, dual lockfile"
+  ]
+ },
+ "supersedes": {
+  "path": "docs/toolchain-evaluation/bun/ticket-09/report.md (early-stop route; preserved unedited)",
+  "reason": "user 2026-10-11 small-adaptation rule; corrected E1 pass; tickets 03-08, rebase and CI refresh ran afterwards"
+ },
+ "snapshot": {
+  "head": "0bbb6e0f856ad9bbcaaed9fd02d48aae7db0b05b",
+  "branch": "eval/issue-2-bun-toolchain",
+  "refs": {
+   "b6caf8c8": "b6caf8c8262a66bfb5a470e55403359c0450fd81",
+   "9af042ec": "9af042ec3683b21a67da68b2c9e9352b0e612dbf",
+   "8027cd8a": "8027cd8a747caf7760c708556c155545d463ed17",
+   "f4e9fd50": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f",
+   "8c674ca6": "8c674ca6474e25b161030610c18fe1c6dc928f2a",
+   "5e46f0b6": "5e46f0b6c0725df25b737f9746eff14b6b4d4553",
+   "a23e21b4": "a23e21b4e7f304561d2cd8eeb0a9dc8bb31fa6ed",
+   "e0f3f302": "e0f3f3026e9fce9b4676c0db8fa32a5b26119049",
+   "5a6b78ce": "5a6b78ce70b2ef775a5b5ba201a4474a8574c342",
+   "58508e2b": "58508e2b611cc0dcfc27af1b5c66ffe896b0a7b9",
+   "2c2707a3": "2c2707a3e3cb89cea2a769b7a7b3a41efaf630a5",
+   "e94c0548": "e94c054813a6bb188a80898e4ab89fee78582920",
+   "ee3174ae": "ee3174aef8f24e94a37aca5b368f8ab0568f5f1f",
+   "1ca9538c": "1ca9538c4c64e83e04546f4309e8f5015b000e2b",
+   "d89016ba": "d89016bab788d76b5346d51e83ea9fba535f3a72",
+   "7ce08fec": "7ce08fecafee8f4cd9c8b8f6df7b33a9fdda323f",
+   "b5ea6b65": "b5ea6b65713e0ddd385e798ccc2da68d48ff93ca"
+  },
+  "worktree_clean_before_delivery": true,
+  "head_vs_b6caf8c8": {
+   "changed_paths": [
+    ".github/workflows/eval-bun-toolchain-windows.yml",
+    ".github/workflows/eval-bun-toolchain.yml",
+    "docs/toolchain-evaluation/bun/ci-refresh-01/evidence.json",
+    "docs/toolchain-evaluation/bun/ci-refresh-01/report.md"
+   ],
+   "only_eval_workflows_and_ci_refresh_docs": true
+  },
+  "upstream_delta": {
+   "shortstat_excl_docs": "792 files changed, 111533 insertions(+), 5775 deletions(-)",
+   "package_json_or_lock_changed": true,
+   "merge_sync_9af042ec_vs_8027cd8a_files": 23,
+   "merge_sync_changed_package_or_lock": false,
+   "product_src_changed_8027cd8a_to_9af042ec": [
+    "plugins/navide-git/src/components/GitPane.vue",
+    "plugins/navide-git/src/components/__tests__/GitPane.submenuPlacement.test.ts",
+    "plugins/navide-git/src/lib/__tests__/submenuPlacement.test.ts",
+    "plugins/navide-git/src/lib/submenuPlacement.ts",
+    "plugins/navide-mini-ide/src/components/ExplorerPane.vue",
+    "plugins/navide-mini-ide/src/lib/__tests__/submenuPlacement.test.ts",
+    "plugins/navide-mini-ide/src/lib/submenuPlacement.ts",
+    "src/main/index.ts",
+    "src/main/updater-service.test.ts",
+    "src/main/updater-service.ts",
+    "src/main/updater.ts",
+    "src/main/window-registry.test.ts",
+    "src/main/window-registry.ts",
+    "src/renderer/src/components/GitPane.vue",
+    "src/renderer/src/components/__tests__/gitPaneSubmenuPlacement.test.ts",
+    "src/renderer/src/lib/__tests__/submenuPlacement.test.ts",
+    "src/renderer/src/lib/submenuPlacement.ts"
+   ]
+  },
+  "public_packages": {
+   "manifests_identical_8c674ca6_to_b6caf8c8": true,
+   "src_changed_f4e9fd50_to_9af042ec": [
+    {
+     "path": "packages/plugin-contracts/src/index.ts",
+     "added": "80",
+     "deleted": "3"
+    },
+    {
+     "path": "packages/plugin-contracts/src/schemas/capabilities-v1.json",
+     "added": "27",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-contracts/src/schemas/plugin-manifest-v2.schema.json",
+     "added": "34",
+     "deleted": "1"
+    },
+    {
+     "path": "packages/plugin-ui/src/__snapshots__/terminalMentionMenu.windowLabel.test.ts.snap",
+     "added": "8",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-ui/src/foundation/i18n/__tests__/glossary.test.ts",
+     "added": "113",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-ui/src/foundation/i18n/locales/en-US.json",
+     "added": "1374",
+     "deleted": "142"
+    },
+    {
+     "path": "packages/plugin-ui/src/foundation/i18n/locales/ja-JP.json",
+     "added": "1368",
+     "deleted": "136"
+    },
+    {
+     "path": "packages/plugin-ui/src/foundation/i18n/locales/zh-TW.json",
+     "added": "1371",
+     "deleted": "139"
+    },
+    {
+     "path": "packages/plugin-ui/src/foundation/index.ts",
+     "added": "9",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-ui/src/foundation/truncate/truncate.test.ts",
+     "added": "159",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-ui/src/foundation/truncate/truncate.ts",
+     "added": "245",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-ui/src/terminalMentionMenu.ts",
+     "added": "29",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-ui/src/terminalMentionMenu.windowLabel.test.ts",
+     "added": "74",
+     "deleted": "0"
+    },
+    {
+     "path": "packages/plugin-ui/src/terminalMentionModel.ts",
+     "added": "9",
+     "deleted": "0"
+    }
+   ],
+   "src_changed_8c674ca6_to_b6caf8c8_count": 14
+  },
+  "guard_block": {
+   "old_rev": "1ca9538c4c64e83e04546f4309e8f5015b000e2b",
+   "found_old": true,
+   "found_new": true,
+   "identical": true,
+   "sha256": "f0194265810e2db3f785a967b0383e8128f3b8ae1df14cf139464a6e29fe9729"
+  },
+  "constants": {
+   "bun": "1.4.2",
+   "node": "22.23.2",
+   "pnpm": "10.0.0"
+  },
+  "electron": {
+   "pre_rebase": "44.4.5",
+   "head_lock": "44.6.0"
+  },
+  "classification": [
+   {
+    "evidence": "T01 baseline",
+    "measured_at": "`f4e9fd50`",
+    "class": "P",
+    "inputs_changed": "baseline source replaced by the upstream-based control",
+    "use": "history only"
+   },
+   {
+    "evidence": "T02A E1 guard, install, security",
+    "measured_at": "`e5578080`, `7ce08fec`",
+    "class": "P",
+    "inputs_changed": "guard block byte-identical to the ticket-02 commit (computed); override block and the whole dependency set changed, lock regenerated",
+    "use": "guard rejection kept; security and lifecycle results not carried"
+   },
+   {
+    "evidence": "T03S/T03C builds and dev startup",
+    "measured_at": "`5a6b78ce`",
+    "class": "P",
+    "inputs_changed": "yes: main-process files, Electron, backend, dependencies",
+    "use": "not used at HEAD"
+   },
+   {
+    "evidence": "T04A macOS suite, lifecycle",
+    "measured_at": "`e94c0548`, `2c2707a3`",
+    "class": "P",
+    "inputs_changed": "yes: suite 836 to 936 files, packaged tests 124 to 136, Electron",
+    "use": "root suite replaced by RB4; lifecycle not-run at HEAD"
+   },
+   {
+    "evidence": "T05 macOS consumers",
+    "measured_at": "`2c2707a3`",
+    "class": "P",
+    "inputs_changed": "yes: public package sources and schemas changed (manifests identical)",
+    "use": "not used at HEAD"
+   },
+   {
+    "evidence": "T06 macOS performance",
+    "measured_at": "`58508e2b`",
+    "class": "P",
+    "inputs_changed": "yes: inventory, dependencies",
+    "use": "shown as pre-rebase only"
+   },
+   {
+    "evidence": "CKB checkpoint B",
+    "measured_at": "`b5ea6b65`",
+    "class": "P",
+    "inputs_changed": "review of tickets 03 to 06",
+    "use": "qualifications carried forward"
+   },
+   {
+    "evidence": "T07 Linux 07-09",
+    "measured_at": "`8c674ca6`",
+    "class": "P",
+    "inputs_changed": "superseded by CIR (same findings re-observed at HEAD)",
+    "use": "history"
+   },
+   {
+    "evidence": "T08 Windows 08-08",
+    "measured_at": "pre-rebase",
+    "class": "P",
+    "inputs_changed": "superseded by CIR; CIR records C2/C3/readdir/native-dependency findings as unchanged",
+    "use": "history; Windows-only findings F3 to F10 cited with that limit"
+   },
+   {
+    "evidence": "RBL bun.lock refresh",
+    "measured_at": "`8027cd8a` manifest",
+    "class": "H",
+    "inputs_changed": "lock stays valid: merge did not touch `package.json` or `pnpm-lock.yaml` (computed)",
+    "use": "used"
+   },
+   {
+    "evidence": "RB4 macOS root at HEAD tree",
+    "measured_at": "`b6caf8c8`",
+    "class": "H",
+    "inputs_changed": "none",
+    "use": "used"
+   },
+   {
+    "evidence": "DQ dockquit helper",
+    "measured_at": "`a23e21b4`",
+    "class": "H",
+    "inputs_changed": "part of HEAD",
+    "use": "used"
+   },
+   {
+    "evidence": "CIR Linux 07-11, Windows 08-09/08-10",
+    "measured_at": "`b6caf8c8` tree",
+    "class": "H",
+    "inputs_changed": "HEAD differs from `b6caf8c8` only in 2 workflows and ci-refresh docs (computed)",
+    "use": "used"
+   }
+  ]
+ },
+ "matrix": {
+  "rows": [
+   {
+    "key": "install",
+    "label": "Frozen install at HEAD, lock identity"
+   },
+   {
+    "key": "repro",
+    "label": "Clean-and-repeat install reproducibility at HEAD"
+   },
+   {
+    "key": "version",
+    "label": "Exact-version enforcement"
+   },
+   {
+    "key": "typecheck",
+    "label": "Aggregate typecheck"
+   },
+   {
+    "key": "build",
+    "label": "Builds (public packages, official plugins, application)"
+   },
+   {
+    "key": "dev",
+    "label": "Isolated dev-startup readiness"
+   },
+   {
+    "key": "tests",
+    "label": "Full root test:run"
+   },
+   {
+    "key": "supp",
+    "label": "Supplementary suites (Mini-IDE, dev-backend, SDK/DOM)"
+   },
+   {
+    "key": "lifecycle",
+    "label": "Plugin lifecycle (packaged Plans roundtrip and Host install/execute test cases)"
+   },
+   {
+    "key": "consumers",
+    "label": "Public consumers (npm and pnpm) + public CLI"
+   },
+   {
+    "key": "bunonly",
+    "label": "Bun-only proof for the workflows observed at HEAD (no external Node/npm/pnpm)"
+   },
+   {
+    "key": "bunonly_daily",
+    "label": "Bun-only proof across all daily workflows incl. builds and startup (entrypoints, child processes)"
+   },
+   {
+    "key": "perf",
+    "label": "Performance (>10% slowdown fails)"
+   },
+   {
+    "key": "security",
+    "label": "Dependency security (overrides, lifecycle scripts, audit)"
+   },
+   {
+    "key": "releaseci",
+    "label": "Isolated release/CI Node exception"
+   }
+  ],
+  "cells": {
+   "mac": {
+    "install": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "RB4",
+      "RBL"
+     ],
+     "qualifier": "frozen install exit 0 at HEAD (Bun 3 s; pnpm control 12 s); resolution equality 704 registry ids / 758 layout rows / 33 direct, 0 mismatches",
+     "pre_rebase_status": null
+    },
+    "repro": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T02A"
+     ],
+     "qualifier": "a clean install followed by a repeat/frozen reinstall comparison was not run at HEAD (the lock and manifest inputs changed with the rebase; the RBL equality is lock-versus-lock, not a repeat install); pre-rebase T02A passed it",
+     "pre_rebase_status": "pass"
+    },
+    "version": {
+     "status": "pass",
+     "snapshot_class": "H+P",
+     "evidence_ids": [
+      "RB4",
+      "T02A",
+      "T03S"
+     ],
+     "qualifier": "accept 1.4.2 at HEAD (`check` exit 0); rejection of 1.4.1 and Node before effects measured pre-rebase; guard block byte-identical to ticket-02 commit (computed)",
+     "pre_rebase_status": null
+    },
+    "typecheck": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "RB4"
+     ],
+     "qualifier": "Bun exit 0 in 41 s with no heap option; Node control plain exit 134 (V8 heap OOM), passes only with the 4096 MB supplemental (46 s)",
+     "pre_rebase_status": null
+    },
+    "build": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T03S"
+     ],
+     "qualifier": "exit 0 at 5a6b78ce (guest) but inputs changed (src/main, Electron 44.4.5 to 44.6.0, public package sources); not re-run at HEAD",
+     "pre_rebase_status": "pass"
+    },
+    "dev": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T03S"
+     ],
+     "qualifier": "guest health 200 / WS 4403 control / 64 MCP tools at 5a6b78ce; inputs changed (main-process files, Electron); not re-run at HEAD",
+     "pre_rebase_status": "pass"
+    },
+    "tests": {
+     "status": "pass-with-accepted-gap",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "RB4"
+     ],
+     "qualifier": "Bun exit 1: 935/936 files, 13,688 of 13,712 tests passed, 1 failed (accepted residual), 23 skipped; 13,703 ids identical to Node (exit 0)",
+     "pre_rebase_status": null
+    },
+    "supp": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "RB4"
+     ],
+     "qualifier": "covered inside the 936-file root run (only the residual fails); standalone supplementary configs ran pre-rebase only",
+     "pre_rebase_status": null
+    },
+    "lifecycle": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T04A"
+     ],
+     "qualifier": "124/124 pre-rebase; head root run skips the gated cases (23 pending) and the suite now holds 136 packaged tests",
+     "pre_rebase_status": "pass"
+    },
+    "consumers": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T05"
+     ],
+     "qualifier": "pre-rebase pass; public package sources/schemas changed (14 files) although manifests are byte-identical; not re-run at HEAD",
+     "pre_rebase_status": "pass"
+    },
+    "bunonly": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "RB4"
+     ],
+     "qualifier": "install, typecheck and the root tests ran at HEAD with a controlled PATH (`/usr/bin:/bin:/usr/sbin:/sbin` plus the pinned bun, go and uv directories; identity receipt: no `node` and no `pnpm` on PATH); this limits the pass to those observed workflows",
+     "pre_rebase_status": null
+    },
+    "bunonly_daily": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T03S",
+      "T04A",
+      "T06"
+     ],
+     "qualifier": "entrypoint and child-process proof for builds and startup was observed only pre-rebase and is not established at HEAD",
+     "pre_rebase_status": "pass"
+    },
+    "perf": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T06"
+     ],
+     "qualifier": "pre-rebase pass (slowdown -25.8 to -41.3%) on an 836-file suite; HEAD suite is 936 files; not re-measured",
+     "pre_rebase_status": "pass"
+    },
+    "security": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "T02A"
+     ],
+     "qualifier": "no audit, lifecycle-script or override-effect run at HEAD; pre-rebase evidence was explicitly not a security pass",
+     "pre_rebase_status": null
+    },
+    "releaseci": {
+     "status": "not-run",
+     "snapshot_class": null,
+     "evidence_ids": [],
+     "qualifier": "design allowance only; release and CI workflows are unchanged and were not run with Bun",
+     "pre_rebase_status": null
+    }
+   },
+   "linux": {
+    "install": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "frozen installs exit 0 on both toolchains; both lockfiles byte-identical after install",
+     "pre_rebase_status": null
+    },
+    "repro": {
+     "status": "not-run",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "one clean frozen install per toolchain on a fresh runner with lock-unchanged observed (counted in the install row); a second clean install or frozen-reinstall comparison at HEAD was not run",
+     "pre_rebase_status": null
+    },
+    "version": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "1.4.1 rejected on check/install/run (exit 1, guidance); 1.4.2 accepted",
+     "pre_rebase_status": null
+    },
+    "typecheck": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "exit 0 on both (Bun 111.5 s, Node 120.8 s)",
+     "pre_rebase_status": null
+    },
+    "build": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "exit 0 on both (Bun 218.5 s, Node 302.3 s)",
+     "pre_rebase_status": null
+    },
+    "dev": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "health 200 after 94.5 s (Bun) / 114.5 s (Node) under xvfb; WS 4403 control; MCP exchange; no sandbox flag added",
+     "pre_rebase_status": null
+    },
+    "tests": {
+     "status": "fail",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR",
+      "T07"
+     ],
+     "qualifier": "Bun exit 1: 3 failed of 13,712 = residual (accepted) + 2 pluginIpc readdir-order tests with no user decision; Node 0 failed",
+     "pre_rebase_status": null
+    },
+    "supp": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "SDK/DOM 36/36, Mini-IDE 5/5, dev-backend 5 passed + 3 pending on both",
+     "pre_rebase_status": null
+    },
+    "lifecycle": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "136/136 on both runtimes",
+     "pre_rebase_status": null
+    },
+    "consumers": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "4 consumer cases: 19 CLI cases 0 failed, 49 probes (1 informational failure identical on the Node baseline), 10 portable workers",
+     "pre_rebase_status": null
+    },
+    "bunonly": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "sampled correctness-job workflows (install, typecheck, builds, tests): evidence.json records a sampling-based, non-exhaustive census with no node-named executable; observed bun 876, esbuild 15, navide-plans 25, python3.12 5 (see the discrepancy item in section 12)",
+     "pre_rebase_status": null
+    },
+    "bunonly_daily": {
+     "status": "not-run",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR",
+      "CIRR"
+     ],
+     "qualifier": "Bun-only startup is not established at HEAD. Receipts examined: the readiness job's single process-table snapshot (16 case-owned processes: bun x2, electron-vite under `node` argv0, esbuild, electron, python) and the case prep-path-check. Insufficient because (1) the snapshot records no executable path for its single node-named child (argv0/image name `node` only); (2) PATH-by-name absence of `node`/`npm`/`npx`/`pnpm` in the case's prep-path-check cannot exclude an absolute-path launch of an external node; (3) it is one process-table snapshot, not a census, and the correctness-job census does not cover startup (readiness is a separate job). The sampled correctness-workflow result (install, typecheck, builds, tests) is in the row above",
+     "pre_rebase_status": null
+    },
+    "perf": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "slowdown -38.7 to -43.7% in all 6 conditions, n=5/5 interleaved",
+     "pre_rebase_status": null
+    },
+    "security": {
+     "status": "not-run",
+     "snapshot_class": null,
+     "evidence_ids": [],
+     "qualifier": "no audit, override-effect or lifecycle-script evidence exists for Linux",
+     "pre_rebase_status": null
+    },
+    "releaseci": {
+     "status": "not-run",
+     "snapshot_class": null,
+     "evidence_ids": [],
+     "qualifier": "not exercised",
+     "pre_rebase_status": null
+    }
+   },
+   "windows": {
+    "install": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "frozen installs exit 0 on both toolchains; both lockfiles byte-identical after install",
+     "pre_rebase_status": null
+    },
+    "repro": {
+     "status": "not-run",
+     "snapshot_class": "P",
+     "evidence_ids": [
+      "CIR",
+      "T08"
+     ],
+     "qualifier": "one frozen install per toolchain at HEAD with lock-unchanged observed (counted in the install row); the Windows frozen-install reproduction (T08 F2) is pre-rebase and no repeat comparison was run at HEAD",
+     "pre_rebase_status": "pass"
+    },
+    "version": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "1.4.1 rejected x3 with guidance; 1.4.2 accepted",
+     "pre_rebase_status": null
+    },
+    "typecheck": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "exit 0 on both (Bun 70.8 s, Node 82.5 s)",
+     "pre_rebase_status": null
+    },
+    "build": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR",
+      "T08"
+     ],
+     "qualifier": "exit 0 on both (Bun 201.5 s, Node 215.8 s); production Plans backend preparation exits 1 on both runtimes (recorded, blocked)",
+     "pre_rebase_status": null
+    },
+    "dev": {
+     "status": "blocked",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR",
+      "T08"
+     ],
+     "qualifier": "backend health/WS/MCP seams answer on both runtimes, but the Electron main process aborts (`Failed to get appData path`) under the isolated profile on both; not attributable to Bun",
+     "pre_rebase_status": null
+    },
+    "tests": {
+     "status": "pass-with-accepted-gap",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "Bun: root-bun 1 failed (residual); root-prebuild-bun 2 failed (residual + pluginBackendHost ~7%/run, user decision A); Node root-base also failed 1 (timeout flake); neither run passed its gate",
+     "pre_rebase_status": null
+    },
+    "supp": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "SDK/DOM 36/36, Mini-IDE 5/5, dev-backend 4 passed + 4 pending on both",
+     "pre_rebase_status": null
+    },
+    "lifecycle": {
+     "status": "fail",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR",
+      "T08"
+     ],
+     "qualifier": "of 136 tests Node 123 passed / 1 failed and Bun 122 passed / 2 failed (12 pending): the Plans roundtrip assertion fails on both runtimes (project platform gap); Bun adds pluginBackendHost",
+     "pre_rebase_status": null
+    },
+    "consumers": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "4 consumer cases: 19 CLI cases 0 failed, 49 probes (same 1 informational failure on every case)",
+     "pre_rebase_status": null
+    },
+    "bunonly": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "sampled correctness-job workflows (install, typecheck, builds, tests): a sampling-based, non-exhaustive census; the only node-named executables are Bun-generated shim copies under the candidate tmp dir (1,210 processes, path-verified); no external node/npm/pnpm observed",
+     "pre_rebase_status": null
+    },
+    "bunonly_daily": {
+     "status": "not-run",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR",
+      "CIRR"
+     ],
+     "qualifier": "Bun-only startup is not established at HEAD. Receipts examined: the readiness job's single process-table snapshot (12 case-owned processes: bun.exe x2, electron-vite.exe, `node.exe`, electron.exe, esbuild.exe, python.exe) and the case prep-path-check (`where` finds none of node/npm/npx/pnpm). Insufficient because (1) the snapshot records no executable path for its single node-named child (argv0/image name `node` only); (2) PATH-by-name absence of `node`/`npm`/`npx`/`pnpm` in the case's prep-path-check cannot exclude an absolute-path launch of an external node; (3) it is one process-table snapshot, not a census, and the correctness-job census does not cover startup (readiness is a separate job); (4) it is a failed-start state: the Electron main process aborts in this isolated profile on both runtimes (see the dev-readiness row). The sampled correctness-workflow result (install, typecheck, builds, tests) is in the row above",
+     "pre_rebase_status": null
+    },
+    "perf": {
+     "status": "pass",
+     "snapshot_class": "H",
+     "evidence_ids": [
+      "CIR"
+     ],
+     "qualifier": "slowdown -39.0 to -44.0% in all 6 conditions; 2 Node root-cold samples exited 1 (worker RPC timeout) and stay in the median",
+     "pre_rebase_status": null
+    },
+    "security": {
+     "status": "not-run",
+     "snapshot_class": null,
+     "evidence_ids": [],
+     "qualifier": "no audit, override-effect or lifecycle-script evidence exists for Windows",
+     "pre_rebase_status": null
+    },
+    "releaseci": {
+     "status": "not-run",
+     "snapshot_class": null,
+     "evidence_ids": [],
+     "qualifier": "not exercised",
+     "pre_rebase_status": null
+    }
+   }
+  },
+  "status_counts": {
+   "total": {
+    "pass": 23,
+    "not-run": 17,
+    "pass-with-accepted-gap": 2,
+    "fail": 2,
+    "blocked": 1
+   },
+   "mac": {
+    "pass": 5,
+    "not-run": 9,
+    "pass-with-accepted-gap": 1
+   },
+   "linux": {
+    "pass": 10,
+    "not-run": 4,
+    "fail": 1
+   },
+   "windows": {
+    "pass": 8,
+    "not-run": 4,
+    "blocked": 1,
+    "pass-with-accepted-gap": 1,
+    "fail": 1
+   }
+  },
+  "legend": {
+   "CIR": {
+    "source": "docs/toolchain-evaluation/bun/ci-refresh-01/report.md + evidence.json; raw root ci-refresh-01 (job logs under attempts/)",
+    "class": "H"
+   },
+   "RB4": {
+    "source": "raw rebase-01-test-04 (macOS UTM guest, source b6caf8c8 vs Node control 9af042ec + 7 overlay files)",
+    "class": "H"
+   },
+   "RBL": {
+    "source": "raw rebase-01-lock-refresh (bun.lock refresh, resolution equality vs pnpm-lock at 8027cd8a)",
+    "class": "H"
+   },
+   "DQ": {
+    "source": "docs/toolchain-evaluation/bun/rebase-01/dockquit-adaptation.md (macOS guest; helper now part of HEAD)",
+    "class": "H"
+   },
+   "T02A": {
+    "source": "docs/.../ticket-02/adaptation-01 and checkpoint-A-correction-01 (macOS)",
+    "class": "P"
+   },
+   "T03S": {
+    "source": "docs/.../ticket-03/startup-v1 and console-v2 (macOS guest, 5a6b78ce)",
+    "class": "P"
+   },
+   "T04A": {
+    "source": "docs/.../ticket-04/adaptation-01 + correction-01 (macOS guest, e94c0548/2c2707a3)",
+    "class": "P"
+   },
+   "T05": {
+    "source": "docs/.../ticket-05/report.md (macOS guest consumers, 2c2707a3)",
+    "class": "P"
+   },
+   "T06": {
+    "source": "docs/.../ticket-06/report.md (macOS guest performance, 58508e2b)",
+    "class": "P"
+   },
+   "T07": {
+    "source": "docs/.../ticket-07/report.md (Linux hosted runner, attempt 07-09, 8c674ca6)",
+    "class": "P"
+   },
+   "T08": {
+    "source": "docs/.../ticket-08/report.md (Windows hosted runner, attempt 08-08, pre-rebase)",
+    "class": "P"
+   },
+   "CKB": {
+    "source": "raw checkpoint-B/integrated-report-final.md + docs/.../checkpoint-B/errata-01..03",
+    "class": "P"
+   },
+   "CIRR": {
+    "source": "raw root ci-refresh-01/attempts/*/artifacts/t0{7,8}-readiness/t0{7,8}-head-bun: receipts/dev-bun/probes/processes.json (one process-table snapshot taken at readiness), logs/prep-path-check.log, receipts/dev-bun.launch.json (separate Isolated-development-startup-readiness job, not the correctness job)",
+    "class": "H"
+   }
+  }
+ },
+ "head_measurements": {
+  "macos_root": {
+   "node": {
+    "sha256": "d3a279e54f28f7760675c4eaaf04f2696db6f7d2f868137910602b624591ad07",
+    "bytes": 4361287,
+    "success": true,
+    "files": 936,
+    "file_status": {
+     "passed": 936
+    },
+    "totals": {
+     "numTotalTestSuites": 3264,
+     "numTotalTests": 13712,
+     "numPassedTests": 13689,
+     "numFailedTests": 0,
+     "numPendingTests": 23,
+     "numTodoTests": 0,
+     "numFailedTestSuites": 0,
+     "numPassedTestSuites": 3264
+    },
+    "unique_ids": 13703,
+    "failed": []
+   },
+   "bun": {
+    "sha256": "2f8ead0909bb6114e443271b1276f1258f5699f888fbc988679c8d508d721342",
+    "bytes": 4361235,
+    "success": false,
+    "files": 936,
+    "file_status": {
+     "passed": 935,
+     "failed": 1
+    },
+    "totals": {
+     "numTotalTestSuites": 3264,
+     "numTotalTests": 13712,
+     "numPassedTests": 13688,
+     "numFailedTests": 1,
+     "numPendingTests": 23,
+     "numTodoTests": 0,
+     "numFailedTestSuites": 2,
+     "numPassedTestSuites": 3262
+    },
+    "unique_ids": 13703,
+    "failed": [
+     [
+      "src/main/plugins/pluginExternalWorkspace.test.ts",
+      "third-party plugin external workspace installs public packages, validates/types/builds/packages the example, and enforces Host capability de",
+      "Error: Executable not found in $PATH: \"pnpm\""
+     ]
+    ]
+   },
+   "parity": {
+    "node_only": 0,
+    "bun_only": 0,
+    "common": 13703
+   }
+  },
+  "macos_steps": {
+   "node": {
+    "install_exit": "0",
+    "install_seconds": "12",
+    "install_NODE_OPTIONS": "unset",
+    "typecheck_exit": "134",
+    "typecheck_seconds": "46",
+    "typecheck_NODE_OPTIONS": "unset",
+    "typecheck_supp_exit": "0",
+    "typecheck_supp_seconds": "46",
+    "typecheck_supp_NODE_OPTIONS": "--max-old-space-size=4096",
+    "backend_sync_exit": "0",
+    "backend_sync_seconds": "3",
+    "backend_sync_NODE_OPTIONS": "unset",
+    "fixture_build_exit": "0",
+    "fixture_build_seconds": "7",
+    "fixture_build_NODE_OPTIONS": "unset",
+    "root_exit": "0",
+    "root_seconds": "1287",
+    "root_NODE_OPTIONS": "--max-old-space-size=4096"
+   },
+   "bun": {
+    "check_exit": "0",
+    "check_seconds": "0",
+    "check_NODE_OPTIONS": "unset",
+    "install_exit": "0",
+    "install_seconds": "3",
+    "install_NODE_OPTIONS": "unset",
+    "typecheck_exit": "0",
+    "typecheck_seconds": "41",
+    "typecheck_NODE_OPTIONS": "unset",
+    "backend_sync_exit": "0",
+    "backend_sync_seconds": "5",
+    "backend_sync_NODE_OPTIONS": "unset",
+    "fixture_build_exit": "0",
+    "fixture_build_seconds": "7",
+    "fixture_build_NODE_OPTIONS": "unset",
+    "root_exit": "1",
+    "root_seconds": "78",
+    "root_NODE_OPTIONS": "unset"
+   }
+  },
+  "linux_07_11": {
+   "root": {
+    "bun:root-bun": {
+     "files": 936,
+     "tests": 13712,
+     "passed": 13670,
+     "failed": 3,
+     "pending": 39,
+     "failing": [
+      [
+       "src/main/plugins/pluginExternalWorkspace.test.ts",
+       "Error: Executable not found in $PATH: \"pnpm\""
+      ],
+      [
+       "src/main/plugins/pluginIpc.test.ts",
+       "Error"
+      ],
+      [
+       "src/main/plugins/pluginIpc.test.ts",
+       "AssertionError: expected [ …(2) ] to deeply equal [ …(2) ]"
+      ]
+     ]
+    },
+    "node:root-base": {
+     "files": 936,
+     "tests": 13712,
+     "passed": 13673,
+     "failed": 0,
+     "pending": 39,
+     "failing": []
+    }
+   },
+   "root_parity": {
+    "file_sets_identical": true,
+    "files_a": 936,
+    "files_b": 936,
+    "ids_only_a": 0,
+    "ids_only_a_sample": [],
+    "ids_only_b": 0,
+    "ids_only_b_sample": [],
+    "unique_ids_a": 13703,
+    "unique_ids_b": 13703
+   },
+   "perf": {
+    "dom-cold": {
+     "node_median": 2.222,
+     "bun_median": 1.252,
+     "node_mad": 0.01,
+     "bun_mad": 0.004,
+     "slowdown": -0.43654,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "dom-warm": {
+     "node_median": 2.209,
+     "bun_median": 1.256,
+     "node_mad": 0.004,
+     "bun_mad": 0.006,
+     "slowdown": -0.43142,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "root-cold": {
+     "node_median": 470.619,
+     "bun_median": 286.668,
+     "node_mad": 0.983,
+     "bun_mad": 1.048,
+     "slowdown": -0.39087,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "root-warm": {
+     "node_median": 413.615,
+     "bun_median": 239.432,
+     "node_mad": 0.644,
+     "bun_mad": 0.068,
+     "slowdown": -0.42112,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "sdk-cold": {
+     "node_median": 1.822,
+     "bun_median": 1.116,
+     "node_mad": 0.009,
+     "bun_mad": 0.002,
+     "slowdown": -0.38749,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "sdk-warm": {
+     "node_median": 1.841,
+     "bun_median": 1.113,
+     "node_mad": 0.013,
+     "bun_mad": 0.006,
+     "slowdown": -0.39544,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    }
+   },
+   "peak_memory": {
+    "gib": 8.098,
+    "kib": 8491220,
+    "label": "base:c3-anchor-regex-probe"
+   },
+   "readiness": {
+    "base": {
+     "backend_failed_logged": null,
+     "backend_port": 35617,
+     "backend_ready_logged": null,
+     "exit_code": -15,
+     "first_health_200_after_seconds": 114.54,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "SIGTERM",
+     "wall_seconds": 140.93
+    },
+    "bun": {
+     "backend_failed_logged": null,
+     "backend_port": 43291,
+     "backend_ready_logged": null,
+     "exit_code": -15,
+     "first_health_200_after_seconds": 94.47,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "SIGTERM",
+     "wall_seconds": 120.762
+    },
+    "sandbox_policy": {
+     "kernel.apparmor_restrict_unprivileged_userns": "1",
+     "note": "The evaluation never passes --no-sandbox or any other sandbox switch to the application. The only sandbox-related action is making Electron's own SUID helper binary correctly configured (root-owned, mode 4755), which is what Chromium itself requires on Linux and is what keeps the sandbox enabled; without it Chromium aborts rather than run unsandboxed.",
+     "sandbox_flags_added_to_the_launch": [],
+     "user.max_user_namespaces": "63838"
+    }
+   },
+   "observed_bun_executables": {
+    "bun": 876,
+    "esbuild": 15,
+    "navide-plans": 25,
+    "python3.12": 5
+   },
+   "node_named_inside_candidate": {},
+   "guard": [
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-check-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-install-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-run-141"
+    },
+    {
+     "exit_code": 0,
+     "expected_zero": true,
+     "guidance_present": false,
+     "label": "guard-accept-check-142"
+    }
+   ],
+   "supp": {
+    "dev-backend": {
+     "node": {
+      "files": 1,
+      "tests": 8,
+      "passed": 5,
+      "failed": 0,
+      "pending": 3
+     },
+     "bun": {
+      "files": 1,
+      "tests": 8,
+      "passed": 5,
+      "failed": 0,
+      "pending": 3
+     }
+    },
+    "mini-ide": {
+     "node": {
+      "files": 3,
+      "tests": 5,
+      "passed": 5,
+      "failed": 0,
+      "pending": 0
+     },
+     "bun": {
+      "files": 3,
+      "tests": 5,
+      "passed": 5,
+      "failed": 0,
+      "pending": 0
+     }
+    },
+    "minimal-sdk-dom": {
+     "node": {
+      "files": 2,
+      "tests": 36,
+      "passed": 36,
+      "failed": 0,
+      "pending": 0
+     },
+     "bun": {
+      "files": 2,
+      "tests": 36,
+      "passed": 36,
+      "failed": 0,
+      "pending": 0
+     }
+    },
+    "packaged-lifecycle": {
+     "node": {
+      "files": 3,
+      "tests": 136,
+      "passed": 136,
+      "failed": 0,
+      "pending": 0
+     },
+     "bun": {
+      "files": 3,
+      "tests": 136,
+      "passed": 136,
+      "failed": 0,
+      "pending": 0
+     }
+    }
+   },
+   "consumers": {
+    "cons-npm-base": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 10,
+     "all_runs_exit_0": true
+    },
+    "cons-npm-bun": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 10,
+     "all_runs_exit_0": true
+    },
+    "cons-pnpm-base": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 10,
+     "all_runs_exit_0": true
+    },
+    "cons-pnpm-bun": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 10,
+     "all_runs_exit_0": true
+    }
+   },
+   "lockfiles_unchanged": {
+    "bun": true,
+    "node": true
+   }
+  },
+  "windows_08_09": {
+   "root": {
+    "bun:root-bun": {
+     "files": 936,
+     "tests": 13711,
+     "passed": 13601,
+     "failed": 1,
+     "pending": 109,
+     "failing": [
+      [
+       "src/main/plugins/pluginExternalWorkspace.test.ts",
+       "Error: Executable not found in $PATH: \"pnpm\""
+      ]
+     ]
+    },
+    "bun:root-prebuild-bun": {
+     "files": 936,
+     "tests": 13711,
+     "passed": 13600,
+     "failed": 2,
+     "pending": 109,
+     "failing": [
+      [
+       "src/main/plugins/pluginBackendHost.test.ts",
+       "AssertionError: expected \"spy\" to be called with arguments: [ StringContaining{…"
+      ],
+      [
+       "src/main/plugins/pluginExternalWorkspace.test.ts",
+       "Error: Executable not found in $PATH: \"pnpm\""
+      ]
+     ]
+    },
+    "node:root-base": {
+     "files": 936,
+     "tests": 13711,
+     "passed": 13601,
+     "failed": 1,
+     "pending": 109,
+     "failing": [
+      [
+       "src/renderer/src/components/__tests__/windowControlsStacking.test.ts",
+       "Error: STACK_TRACE_ERROR"
+      ]
+     ]
+    },
+    "node:root-prebuild-base": {
+     "files": 936,
+     "tests": 13711,
+     "passed": 13602,
+     "failed": 0,
+     "pending": 109,
+     "failing": []
+    }
+   },
+   "root_parity": {
+    "file_sets_identical": true,
+    "files_a": 936,
+    "files_b": 936,
+    "ids_only_a": 0,
+    "ids_only_a_sample": [],
+    "ids_only_b": 0,
+    "ids_only_b_sample": [],
+    "unique_ids_a": 13702,
+    "unique_ids_b": 13702
+   },
+   "perf": {
+    "dom-cold": {
+     "node_median": 3.235,
+     "bun_median": 1.813,
+     "node_mad": 0.016,
+     "bun_mad": 0.031,
+     "slowdown": -0.43957,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "dom-warm": {
+     "node_median": 3.141,
+     "bun_median": 1.796,
+     "node_mad": 0.0,
+     "bun_mad": 0.001,
+     "slowdown": -0.42821,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "root-cold": {
+     "node_median": 665.062,
+     "bun_median": 405.422,
+     "node_mad": 24.593,
+     "bun_mad": 21.328,
+     "slowdown": -0.3904,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "root-warm": {
+     "node_median": 582.219,
+     "bun_median": 326.891,
+     "node_mad": 3.437,
+     "bun_mad": 3.203,
+     "slowdown": -0.43854,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "sdk-cold": {
+     "node_median": 2.563,
+     "bun_median": 1.563,
+     "node_mad": 0.048,
+     "bun_mad": 0.047,
+     "slowdown": -0.39017,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    },
+    "sdk-warm": {
+     "node_median": 2.719,
+     "bun_median": 1.609,
+     "node_mad": 0.11,
+     "bun_mad": 0.125,
+     "slowdown": -0.40824,
+     "gate": "PASS",
+     "n_node": 5,
+     "n_bun": 5
+    }
+   },
+   "peak_memory": {
+    "note": "Windows has no ru_maxrss; the working-set peak is sampled during commands that enabled observation (0.25 s), the job figure is the kernel job accounting.",
+    "peak_job_committed_memory": {
+     "bytes": 0,
+     "label": null
+    },
+    "peak_single_process_working_set": {
+     "bytes": 4198576128,
+     "label": "bun:mini-ide-bun",
+     "mib": 4004.074
+    }
+   },
+   "readiness": {
+    "base": {
+     "backend_failed_logged": true,
+     "backend_port": 52663,
+     "backend_ready_logged": false,
+     "exit_code": 1,
+     "first_health_200_after_seconds": 172.61,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "taskkill",
+     "wall_seconds": 229.719
+    },
+    "bun": {
+     "backend_failed_logged": true,
+     "backend_port": 52144,
+     "backend_ready_logged": false,
+     "exit_code": 1,
+     "first_health_200_after_seconds": 115.61,
+     "leftover_owned_pids": [],
+     "probes_rc": {
+      "mcp": 0,
+      "ws": 0
+     },
+     "runner_home_unchanged": true,
+     "terminated_by": "taskkill",
+     "wall_seconds": 172.312
+    },
+    "sandbox_policy": {
+     "sandbox_flags_added_to_the_launch": []
+    }
+   },
+   "observed_bun_executables": {
+    "bun.exe": 18,
+    "esbuild.exe": 14,
+    "navide-plans.exe": 8,
+    "node.exe": 1210,
+    "python.exe": 8,
+    "tsc.exe": 2,
+    "vitest.exe": 6
+   },
+   "node_named_inside_candidate": {
+    "C:/t08-eval/t08-head-bun/tmp/bun-node-<hash>/node.exe": 1210
+   },
+   "guard": [
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-check-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-install-141"
+    },
+    {
+     "exit_code": 1,
+     "expected_zero": false,
+     "guidance_present": true,
+     "label": "guard-reject-run-141"
+    },
+    {
+     "exit_code": 0,
+     "expected_zero": true,
+     "guidance_present": false,
+     "label": "guard-accept-check-142"
+    }
+   ],
+   "supp": {
+    "dev-backend": {
+     "node": {
+      "files": 1,
+      "tests": 8,
+      "passed": 4,
+      "failed": 0,
+      "pending": 4
+     },
+     "bun": {
+      "files": 1,
+      "tests": 8,
+      "passed": 4,
+      "failed": 0,
+      "pending": 4
+     }
+    },
+    "mini-ide": {
+     "node": {
+      "files": 3,
+      "tests": 5,
+      "passed": 5,
+      "failed": 0,
+      "pending": 0
+     },
+     "bun": {
+      "files": 3,
+      "tests": 5,
+      "passed": 5,
+      "failed": 0,
+      "pending": 0
+     }
+    },
+    "minimal-sdk-dom": {
+     "node": {
+      "files": 2,
+      "tests": 36,
+      "passed": 36,
+      "failed": 0,
+      "pending": 0
+     },
+     "bun": {
+      "files": 2,
+      "tests": 36,
+      "passed": 36,
+      "failed": 0,
+      "pending": 0
+     }
+    },
+    "packaged-lifecycle": {
+     "node": {
+      "files": 3,
+      "tests": 136,
+      "passed": 123,
+      "failed": 1,
+      "pending": 12
+     },
+     "bun": {
+      "files": 3,
+      "tests": 136,
+      "passed": 122,
+      "failed": 2,
+      "pending": 12
+     }
+    },
+    "windows-sandbox-unit": {
+     "node": {
+      "files": 1,
+      "tests": 26,
+      "passed": 12,
+      "failed": 0,
+      "pending": 14
+     },
+     "bun": {
+      "files": 1,
+      "tests": 26,
+      "passed": 12,
+      "failed": 0,
+      "pending": 14
+     }
+    }
+   },
+   "consumers": {
+    "cons-npm-base": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 9,
+     "all_runs_exit_0": true
+    },
+    "cons-npm-bun": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 9,
+     "all_runs_exit_0": true
+    },
+    "cons-pnpm-base": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 9,
+     "all_runs_exit_0": true
+    },
+    "cons-pnpm-bun": {
+     "cli_total": 19,
+     "cli_failed": 0,
+     "probe_total": 49,
+     "probe_failed": 1,
+     "portable_workers": 9,
+     "all_runs_exit_0": true
+    }
+   },
+   "prep_exit_codes": {
+    "bun": {
+     "prep-backend-sync": 0,
+     "prep-electron-install": 0,
+     "prep-fixture-build": 0,
+     "prep-install": 0,
+     "prep-path-check": 0,
+     "prep-production-plans-backend": 1,
+     "prep-runtime-identity": 0,
+     "prep-uv-python": 0
+    },
+    "node": {
+     "prep-backend-sync": 0,
+     "prep-electron-install": 0,
+     "prep-fixture-build": 0,
+     "prep-install": 0,
+     "prep-path-check": 0,
+     "prep-production-plans-backend": 1,
+     "prep-runtime-identity": 0,
+     "prep-uv-python": 0
+    }
+   },
+   "lockfiles_unchanged": {
+    "bun": true,
+    "node": true
+   }
+  },
+  "job_log_verdict_lines": {
+   "linux_07_11": [
+    {
+     "label": "typecheck-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 120.824,
+     "verdict": "OK"
+    },
+    {
+     "label": "typecheck-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 111.493,
+     "verdict": "OK"
+    },
+    {
+     "label": "build-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 302.322,
+     "verdict": "OK"
+    },
+    {
+     "label": "build-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 218.487,
+     "verdict": "OK"
+    },
+    {
+     "label": "minimal-sdk-dom-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.558,
+     "verdict": "OK"
+    },
+    {
+     "label": "minimal-sdk-dom-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.543,
+     "verdict": "OK"
+    },
+    {
+     "label": "discovery-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 336.192,
+     "verdict": "OK"
+    },
+    {
+     "label": "discovery-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 172.21,
+     "verdict": "OK"
+    },
+    {
+     "label": "root-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 469.474,
+     "verdict": "OK"
+    },
+    {
+     "label": "root-bun",
+     "case": "bun",
+     "exit": 1,
+     "wall_s": 285.885,
+     "verdict": "FAIL"
+    },
+    {
+     "label": "mini-ide-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 38.656,
+     "verdict": "OK"
+    },
+    {
+     "label": "mini-ide-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 30.435,
+     "verdict": "OK"
+    },
+    {
+     "label": "dev-backend-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 3.309,
+     "verdict": "OK"
+    },
+    {
+     "label": "dev-backend-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.271,
+     "verdict": "OK"
+    },
+    {
+     "label": "packaged-lifecycle-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 18.368,
+     "verdict": "OK"
+    },
+    {
+     "label": "packaged-lifecycle-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 13.753,
+     "verdict": "OK"
+    },
+    {
+     "label": "readdir-order-probe",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 0.028,
+     "verdict": "OK"
+    },
+    {
+     "label": "readdir-order-probe",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 0.008,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-plain-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.199,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-space-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.269,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-parens-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.239,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-both-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.262,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-plain-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.259,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-space-bun",
+     "case": "bun",
+     "exit": 1,
+     "wall_s": 5.662,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-parens-bun",
+     "case": "bun",
+     "exit": 1,
+     "wall_s": 5.595,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-both-bun",
+     "case": "bun",
+     "exit": 1,
+     "wall_s": 5.606,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-anchor-regex-probe",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 0.033,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-anchor-regex-probe",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 0.014,
+     "verdict": "OK"
+    }
+   ],
+   "windows_08_09": [
+    {
+     "label": "typecheck-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 82.453,
+     "verdict": "OK"
+    },
+    {
+     "label": "typecheck-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 70.828,
+     "verdict": "OK"
+    },
+    {
+     "label": "build-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 215.782,
+     "verdict": "OK"
+    },
+    {
+     "label": "build-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 201.516,
+     "verdict": "OK"
+    },
+    {
+     "label": "minimal-sdk-dom-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 18.625,
+     "verdict": "OK"
+    },
+    {
+     "label": "minimal-sdk-dom-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 3.407,
+     "verdict": "OK"
+    },
+    {
+     "label": "root-base",
+     "case": "base",
+     "exit": 1,
+     "wall_s": 403.75,
+     "verdict": "FAIL"
+    },
+    {
+     "label": "root-bun",
+     "case": "bun",
+     "exit": 1,
+     "wall_s": 254.297,
+     "verdict": "FAIL-OR-RESIDUAL(exit"
+    },
+    {
+     "label": "root-prebuild-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 336.234,
+     "verdict": "OK"
+    },
+    {
+     "label": "root-prebuild-bun",
+     "case": "bun",
+     "exit": 1,
+     "wall_s": 215.516,
+     "verdict": "FAIL"
+    },
+    {
+     "label": "mini-ide-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 32.734,
+     "verdict": "OK"
+    },
+    {
+     "label": "mini-ide-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 28.235,
+     "verdict": "OK"
+    },
+    {
+     "label": "dev-backend-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.859,
+     "verdict": "OK"
+    },
+    {
+     "label": "dev-backend-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.297,
+     "verdict": "OK"
+    },
+    {
+     "label": "packaged-lifecycle-base",
+     "case": "base",
+     "exit": 1,
+     "wall_s": 16.531,
+     "verdict": "OK"
+    },
+    {
+     "label": "packaged-lifecycle-bun",
+     "case": "bun",
+     "exit": 1,
+     "wall_s": 18.187,
+     "verdict": "OK"
+    },
+    {
+     "label": "windows-sandbox-unit-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 1.625,
+     "verdict": "OK"
+    },
+    {
+     "label": "windows-sandbox-unit-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.11,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-plain-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 1.875,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-space-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.438,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-parens-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 1.891,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-both-base",
+     "case": "base",
+     "exit": 0,
+     "wall_s": 2.36,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-plain-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.078,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-space-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.265,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-parens-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.157,
+     "verdict": "OK"
+    },
+    {
+     "label": "c3-both-bun",
+     "case": "bun",
+     "exit": 0,
+     "wall_s": 1.484,
+     "verdict": "OK"
+    }
+   ]
+  },
+  "attempts": {
+   "linux": {
+    "tag": "eval-bun-ci-07-11",
+    "run_id": 38326714242,
+    "attempt_commit": "9faf4fe95140d1ba4fac405f6843413762ebdc7e",
+    "conclusion": "failure"
+   },
+   "windows": {
+    "tag": "eval-bun-ci-08-09",
+    "run_id": 38326727409,
+    "attempt_commit": "8da4b51706c960544abc1d776affa4fde44c93f1",
+    "conclusion": "failure"
+   },
+   "windows_diagnostic": {
+    "tag": "eval-bun-ci-08-10",
+    "run_id": 38412461745,
+    "attempt_commit": "a4fcc263eb78ad7b8cba9d07e1376bc498394975",
+    "conclusion": "success"
+   }
+  },
+  "lock_equality": {
+   "registry_identity_count": 704,
+   "registry_layout_addresses": 758,
+   "direct_importer_comparisons": 33,
+   "version_mismatches": 0,
+   "integrity_mismatches": 0,
+   "electron": "44.6.0",
+   "overrides_semantically_equal": true,
+   "overrides_literal_objects_equal": false
+  }
+ },
+ "performance": {
+  "gate": ">10% slowdown fails; slowdown = bun median / node median - 1",
+  "macos_pre_rebase_percent": {
+   "root-cold": -33.5,
+   "root-warm": -36.43,
+   "sdk-cold": -25.76,
+   "sdk-warm": -26.06,
+   "dom-cold": -39.45,
+   "dom-warm": -41.28
+  },
+  "linux_head_percent": {
+   "root-cold": -39.09,
+   "root-warm": -42.11,
+   "sdk-cold": -38.75,
+   "sdk-warm": -39.54,
+   "dom-cold": -43.65,
+   "dom-warm": -43.14
+  },
+  "windows_head_percent": {
+   "root-cold": -39.04,
+   "root-warm": -43.85,
+   "sdk-cold": -39.02,
+   "sdk-warm": -40.82,
+   "dom-cold": -43.96,
+   "dom-warm": -42.82
+  },
+  "macos_pre_rebase_raw": {
+   "root-cold": {
+    "node_median": 112.949,
+    "bun_median": 75.112,
+    "slowdown_pct": -33.5,
+    "node_mad": 2.731,
+    "bun_mad": 1.261,
+    "gate": "PASS"
+   },
+   "root-warm": {
+    "node_median": 96.779,
+    "bun_median": 61.512,
+    "slowdown_pct": -36.43,
+    "node_mad": 1.984,
+    "bun_mad": 0.664,
+    "gate": "PASS"
+   },
+   "sdk-cold": {
+    "node_median": 1.056,
+    "bun_median": 0.784,
+    "slowdown_pct": -25.76,
+    "node_mad": 0.003,
+    "bun_mad": 0.003,
+    "gate": "PASS"
+   },
+   "sdk-warm": {
+    "node_median": 1.036,
+    "bun_median": 0.766,
+    "slowdown_pct": -26.06,
+    "node_mad": 0.0,
+    "bun_mad": 0.004,
+    "gate": "PASS"
+   },
+   "dom-cold": {
+    "node_median": 0.839,
+    "bun_median": 0.508,
+    "slowdown_pct": -39.45,
+    "node_mad": 0.009,
+    "bun_mad": 0.018,
+    "gate": "PASS"
+   },
+   "dom-warm": {
+    "node_median": 0.831,
+    "bun_median": 0.488,
+    "slowdown_pct": -41.28,
+    "node_mad": 0.007,
+    "bun_mad": 0.003,
+    "gate": "PASS"
+   }
+  }
+ },
+ "adoption_costs": {
+  "footprint_vs_upstream_main": [
+   {
+    "path": ".github/workflows/eval-bun-toolchain-windows.yml",
+    "added": 2558,
+    "deleted": 0,
+    "status": "A",
+    "nature": "evaluation-only Windows workflow, tag-triggered; not a product workflow"
+   },
+   {
+    "path": ".github/workflows/eval-bun-toolchain.yml",
+    "added": 3865,
+    "deleted": 0,
+    "status": "A",
+    "nature": "evaluation-only Linux workflow, tag-triggered (eval-bun-ci-*); not a product workflow"
+   },
+   {
+    "path": "bun.lock",
+    "added": 1646,
+    "deleted": 0,
+    "status": "A",
+    "nature": "derived from pnpm-lock.yaml by `bun pm migrate` (+ workspace reconciliation); second authoritative lockfile"
+   },
+   {
+    "path": "package.json",
+    "added": 40,
+    "deleted": 11,
+    "status": "M",
+    "nature": "adds `workspaces`, 16 mirrored `overrides`, `trustedDependencies`, `engines.bun`, `eval:bun`; 3 plugin devDeps `link:` -> `workspace:*`; 7 scripts call `node scripts/bun/vue-tsc.cjs`"
+   },
+   {
+    "path": "plugins/navide-git/tests/compositionBoundary.test.ts",
+    "added": 9,
+    "deleted": 1,
+    "status": "M",
+    "nature": "mechanical: route vue-tsc through the Bun adapter under Bun"
+   },
+   {
+    "path": "plugins/navide-mini-ide/tests/packageBoundary.test.ts",
+    "added": 9,
+    "deleted": 1,
+    "status": "M",
+    "nature": "mechanical: route vue-tsc through the Bun adapter under Bun"
+   },
+   {
+    "path": "scripts/bun-evaluation.mjs",
+    "added": 84,
+    "deleted": 0,
+    "status": "A",
+    "nature": "canonical Bun entrypoint: exact-version guard, allowlist (check/install/run/pack/audit; `dev` allowed, `start` not), private `node` alias, Windows shim re-entry"
+   },
+   {
+    "path": "scripts/bun/vue-tsc.cjs",
+    "added": 27,
+    "deleted": 0,
+    "status": "A",
+    "nature": "owned launcher around private vue-tsc/Volar CommonJS API (Bun fs-interception workaround)"
+   },
+   {
+    "path": "tests/integration/plansBuildScripts.test.ts",
+    "added": 12,
+    "deleted": 2,
+    "status": "M",
+    "nature": "mechanical: Bun `--preload` module instead of Node `--import data:`"
+   },
+   {
+    "path": "tests/support/bunMockImporterAnchor.ts",
+    "added": 114,
+    "deleted": 0,
+    "status": "A",
+    "nature": "Bun-only `vi.mock` relative-id anchor + `ELECTRON_OVERRIDE_DIST_PATH` guard; inert on Node"
+   },
+   {
+    "path": "tests/support/publicPackagesSetup.ts",
+    "added": 11,
+    "deleted": 5,
+    "status": "M",
+    "nature": "Bun branch for pack/build re-entry and artifact-digest inputs"
+   },
+   {
+    "path": "vitest.config.ts",
+    "added": 8,
+    "deleted": 0,
+    "status": "M",
+    "nature": "`setupFiles` entry for the anchor helper + 3 EditorPane mock aliases"
+   }
+  ],
+  "package_json": {
+   "blob_equals_head": true,
+   "packageManager": "pnpm@10.0.0",
+   "engines": {
+    "node": ">=22.12 <23",
+    "bun": "1.4.2"
+   },
+   "workspaces": [
+    "packages/plugin-contracts",
+    "packages/plugin-sdk",
+    "packages/plugin-ui"
+   ],
+   "pnpm_overrides": 16,
+   "top_overrides": 16,
+   "overrides_equal": true,
+   "onlyBuiltDependencies": [
+    "electron",
+    "esbuild"
+   ],
+   "trustedDependencies": [
+    "electron",
+    "esbuild"
+   ],
+   "devDeps_navide": {
+    "@navide/plugin-contracts": "workspace:*",
+    "@navide/plugin-sdk": "workspace:*",
+    "@navide/plugin-ui": "workspace:*"
+   },
+   "scripts_using_pnpm_run": [
+    "build",
+    "build:git",
+    "build:official-plugins",
+    "build:plans",
+    "dev",
+    "typecheck",
+    "typecheck:plugin-git",
+    "typecheck:plugin-mini-ide",
+    "typecheck:plugin-plans"
+   ],
+   "scripts_using_node_vue_tsc": [
+    "build:public-packages",
+    "typecheck",
+    "typecheck:plugin-git",
+    "typecheck:plugin-mini-ide",
+    "typecheck:plugin-plans",
+    "typecheck:public",
+    "typecheck:web"
+   ]
+  },
+  "git_diff_check": {
+   "exit": 2,
+   "flagged_paths": [
+    ".github/workflows/eval-bun-toolchain-windows.yml",
+    ".github/workflows/eval-bun-toolchain.yml",
+    "docs/toolchain-evaluation/bun/ticket-08/report.md"
+   ],
+   "flagged_nonDocs_nonEvalWorkflows": []
+  }
+ },
+ "main_unchanged": {
+  "branches_containing_head_local": [
+   "eval/issue-2-bun-toolchain"
+  ],
+  "branches_containing_head_remote": [
+   "origin/eval/issue-2-bun-toolchain"
+  ],
+  "a23e21b4_ancestor_of_main": false,
+  "a23e21b4_ancestor_of_origin_main": false,
+  "head_ancestor_of_main": false,
+  "head_ancestor_of_origin_main": false,
+  "unreachable_commits_cited_resolve": {
+   "b4757ef7": true,
+   "0c30a074": true,
+   "596d53c8": true
+  }
+ },
+ "user_decisions_cited": [
+  "coordination/ticket04-adapt-01/user-decision-residual-A.md",
+  "coordination/ci-refresh-01/user-decision-pluginBackendHost-A.md",
+  "user adaptation rule 2026-10-11 (project rule), rebase to upstream main, fork-sync merge"
+ ],
+ "evidence_index": {
+  "T01-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-01/report.md",
+   "sha256": "b604bf31dc21b497708c0306a01d27eef863dd308eb8c7c7d5980bd06c3ec62a",
+   "bytes": 20742
+  },
+  "T02-adapt01-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-02/adaptation-01/report.md",
+   "sha256": "e9f675e6e4edbc8139bc7d035982d3f6708ffb33ded8293523622993e1813c8c",
+   "bytes": 19187
+  },
+  "T02-checkpointA-corr01-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-02/checkpoint-A-correction-01/report.md",
+   "sha256": "91f4ad2b0b925bf3549ed9fcd11b8e295857ce45d5c3e50a76efb21b0d8d3e1e",
+   "bytes": 7748
+  },
+  "T03-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-03/report.md",
+   "sha256": "9e4720ca64cf3971cc9979025d1ebec4215c88ee56786978f65edc0b380c166b",
+   "bytes": 13512
+  },
+  "T03-startup-v1-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-03/startup-v1/report.md",
+   "sha256": "1fffd914e701db72988fe62bd392e88784dd60f69a061a93133b11eb7fa57c63",
+   "bytes": 31708
+  },
+  "T03-console-v2-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-03/console-v2/report.md",
+   "sha256": "d0e6ea8639a060ee2e8dd2d05e304896946011f8b05245bd10da90dc18d65718",
+   "bytes": 13376
+  },
+  "T04-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-04/report.md",
+   "sha256": "5a882606ad6f38714e5e2922bb5631d82e35835e7f863e4da6ce59728ff1af2e",
+   "bytes": 24835
+  },
+  "T04-adapt01-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/report.md",
+   "sha256": "923efffa2cfbb206202add44b7409e457f1906fb4ee01c75fa76af794c0cac92",
+   "bytes": 16920
+  },
+  "T04-adapt01-corr01-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-04/adaptation-01/correction-01/report.md",
+   "sha256": "8c1eb7db4000323a01d59e67b624fd38a0c3709ebc20e7d80f44fb76e2b7ea42",
+   "bytes": 14692
+  },
+  "T05-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-05/report.md",
+   "sha256": "9a2381863c29e15aaad6412985ea2558b57e23c25c96d0c21c4baf87629bbde2",
+   "bytes": 35059
+  },
+  "T06-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-06/report.md",
+   "sha256": "9885ca294601bdfb06f3b1fd4bdb5f6922863f393b407487994950718574e91f",
+   "bytes": 28495
+  },
+  "CKB-errata-01": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/checkpoint-B/errata-01.md",
+   "sha256": "431e7426977ad02156347bcd126afceeda9f368ac17a8b9a63398063bd4bcb35",
+   "bytes": 14891
+  },
+  "CKB-errata-02": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/checkpoint-B/errata-02.md",
+   "sha256": "972f257097b3e2fedcb141ca150b98da6b9140c1c47e82725e5606fbd3c66496",
+   "bytes": 4511
+  },
+  "CKB-errata-03": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/checkpoint-B/errata-03.md",
+   "sha256": "7477c6986f6fd720f3a739543fc7e175d7ec9be276a53af2b7cdaba2f43e2cec",
+   "bytes": 4055
+  },
+  "T07-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-07/report.md",
+   "sha256": "8b21e2c1e039b663028ad3b214068f3e9d3e6ebaff95f88a80c837c68258a342",
+   "bytes": 93136
+  },
+  "T08-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-08/report.md",
+   "sha256": "26bf14711dd36cd3a0bc4941cbb78e8606394d20080e655614f370c5001d8e25",
+   "bytes": 184897
+  },
+  "T08-evidence": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-08/evidence.json",
+   "sha256": "63b0a77d9462ee878e761c49aa6b7310022a2c215345af98b80677c01eafa026",
+   "bytes": 353346
+  },
+  "T07-evidence": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-07/evidence.json",
+   "sha256": "fd200210bf16b7cd67d087ba454dee7dbb3a80c97ff693f65ca1c17cfaca5e71",
+   "bytes": 632999
+  },
+  "REBASE-dockquit": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/rebase-01/dockquit-adaptation.md",
+   "sha256": "e6eedc375b88fc9c197a331a31c14ffe133c9b09fb238fbf476da91cd746334d",
+   "bytes": 9057
+  },
+  "CIR-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ci-refresh-01/report.md",
+   "sha256": "5555e37f84bbb2d60e233231867b16af7b6e96aa49cbab5d373e7bc9dda70a31",
+   "bytes": 37001
+  },
+  "CIR-evidence": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ci-refresh-01/evidence.json",
+   "sha256": "68d5aaef9b9928655a8799eba71a7a0953c29f9d17e91e64bf48002f2de206d8",
+   "bytes": 87673
+  },
+  "T09-early-report": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-09/report.md",
+   "sha256": "ee56a36fa8778af0a60582f8b8c4e18c388e7decba58f17e2c840ebd2fda21e5",
+   "bytes": 17201
+  },
+  "T09-early-matrix": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-09/matrix.json",
+   "sha256": "4ca74cdb3360d6bdaa5c4222a3f4b9b1b358140abb7862ed10661f350ec4199e",
+   "bytes": 33471
+  },
+  "T09-early-evidence-index": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/ticket-09/evidence-index.json",
+   "sha256": "3ae268edea7da9f3c019266027772edd8a43377dfcab08a24115f19e088e21c5",
+   "bytes": 21545
+  },
+  "PACKET-09-criteria": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/issues/09-evidence-backed-recommendation.md",
+   "sha256": "18d3ac24505284faf742bb8b9d7daa861b368470c9f76fcb905c540e6189fd14",
+   "bytes": 4802
+  },
+  "PACKET-spec": {
+   "root": "worktree",
+   "path": "docs/toolchain-evaluation/bun/packet/v1/local-sources/evaluation/spec.md",
+   "sha256": "1be894c4c9dc6d73f2119a13c6e9d210b75763ef897d84700f433db0fae7f507",
+   "bytes": 31637
+  },
+  "CKB-integrated-final": {
+   "root": "evaluation-raw-root",
+   "path": "checkpoint-B/integrated-report-final.md",
+   "sha256": "c8a00d9c85b3dc294a0652620e1a9b336944625d0c9c6bc273ebd9da32ab6796",
+   "bytes": 22214
+  },
+  "USER-decision-residual-A": {
+   "root": "evaluation-raw-root",
+   "path": "coordination/ticket04-adapt-01/user-decision-residual-A.md",
+   "sha256": "fc93d110e73f75536fef0408dc98e6d822f32f25f9286a42cc82a0b8c3be4f16",
+   "bytes": 394
+  },
+  "USER-decision-pluginBackendHost-A": {
+   "root": "evaluation-raw-root",
+   "path": "coordination/ci-refresh-01/user-decision-pluginBackendHost-A.md",
+   "sha256": "783633606d672d55d02ddfefcc5cbdec811dda0442d1607817c6e56310a07257",
+   "bytes": 607
+  },
+  "DISPATCH-ticket09-02": {
+   "root": "evaluation-raw-root",
+   "path": "coordination/ticket09-02/dispatch.md",
+   "sha256": "52d3178d087819b98c724646997cd17ea63f229f9fb9de72bd9e6bcfe7410caf",
+   "bytes": 5735
+  },
+  "RB-test01-results": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-01/RESULTS.md",
+   "sha256": "ab8dd8ff775f0940a401112bfd1b2a237ee839ff204233ccf7a6b0bdeced6eab",
+   "bytes": 8426
+  },
+  "RB-test02-results": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-02/RESULTS.md",
+   "sha256": "755667bb0826a3d18e1b2091761207ea6c2f6011f0f01d830e6733e7e1a72032",
+   "bytes": 6149
+  },
+  "RB-test03-results": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-03/RESULTS.md",
+   "sha256": "d7ece0fd2f82cdc2d89879d04ccf82d0f0611dcb3dbf2222fb7024f18d1cdc84",
+   "bytes": 8644
+  },
+  "RB-test04-bun-exits": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-04/retrieved/bun/receipts/exits.txt",
+   "sha256": "fd52b259edf1c2c433344622c8b9b3a3fc3006da4f4c5469c5c3912c1b2f06cf",
+   "bytes": 1295
+  },
+  "RB-test04-node-exits": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-04/retrieved/node/receipts/exits.txt",
+   "sha256": "ad3246985fc24ce99cf908edf77ddfda02f9a91c511c01ad3549f2d5d3c8bce2",
+   "bytes": 1324
+  },
+  "RB-test04-bun-vitest-json": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-04/retrieved/bun/vitest-json/root.json",
+   "sha256": "2f8ead0909bb6114e443271b1276f1258f5699f888fbc988679c8d508d721342",
+   "bytes": 4361235
+  },
+  "RB-test04-node-vitest-json": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-04/retrieved/node/vitest-json/root.json",
+   "sha256": "d3a279e54f28f7760675c4eaaf04f2696db6f7d2f868137910602b624591ad07",
+   "bytes": 4361287
+  },
+  "RB-lockrefresh-completion": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-lock-refresh/33-completion-report.md",
+   "sha256": "43d667f6b124d6352ec250ac6972e245a4bda0146aaa83b5ea9e4478ab74ccfd",
+   "bytes": 3304
+  },
+  "RB-lockrefresh-equality": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-lock-refresh/18-version-equality-result.json",
+   "sha256": "e829291419e18426906ee161979fd3bae04ca193af1526a47dc16cbe845b55db",
+   "bytes": 883
+  },
+  "CIR-joblog-linux-07-11": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-07-11/logs/job-115066965408-Correctness-builds-and-inventories-ubuntu-24.04.log",
+   "sha256": "ed4939ac9a7c5a162cbbdd6e3c4fcf3fa93a1a18039fcfd7e4ce1533b9c1bd59",
+   "bytes": 186119
+  },
+  "CIR-joblog-windows-08-09": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-08-09/logs/job-115067046769-Correctness-builds-and-inventories-windows-2025.log",
+   "sha256": "18ab47fb598d5eb974005be22ee6c8ea55df034bfc521a72d3b41c0da178e916",
+   "bytes": 240451
+  },
+  "EXTRACT-macos-head-root": {
+   "root": "evaluation-raw-root",
+   "path": "ticket-09-02/t04-macos-head-extract.json",
+   "sha256": "59a039e1f009302f4faf2c52320cf23a36309dfd6938e3935f216c3dfbe4a4d0",
+   "bytes": 1291
+  },
+  "CIRR-linux-processes": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-07-11/artifacts/t07-readiness/t07-head-bun/receipts/dev-bun/probes/processes.json",
+   "sha256": "54147d1491924465da0d899388066a6e181659ee9a0987dcdba0dcc933ac9cef",
+   "bytes": 5508
+  },
+  "CIRR-linux-path-check": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-07-11/artifacts/t07-readiness/t07-head-bun/logs/prep-path-check.log",
+   "sha256": "df42569634122c6d458c7aa884f0597990778ba51b2ebc733b9c0f15b0e0f768",
+   "bytes": 287
+  },
+  "CIRR-linux-launch": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-07-11/artifacts/t07-readiness/t07-head-bun/receipts/dev-bun.launch.json",
+   "sha256": "f43c0a0a855997857c8e01c750360ca61d776345bfa9e5cb8fe9a083edb117e4",
+   "bytes": 16636
+  },
+  "CIRR-windows-processes": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-08-09/artifacts/t08-readiness/t08-head-bun/receipts/dev-bun/probes/processes.json",
+   "sha256": "7a90aa6b669faddc030ad0b4fa6381848fdaeee0cec65af5091662d8b3317a6b",
+   "bytes": 5098
+  },
+  "CIRR-windows-path-check": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-08-09/artifacts/t08-readiness/t08-head-bun/logs/prep-path-check.log",
+   "sha256": "f8467b08db27d04bea893a076959f556f40d1a43eebfcc99a1e6282761432229",
+   "bytes": 681
+  },
+  "CIRR-windows-launch": {
+   "root": "evaluation-raw-root",
+   "path": "ci-refresh-01/attempts/eval-bun-ci-08-09/artifacts/t08-readiness/t08-head-bun/receipts/dev-bun.launch.json",
+   "sha256": "a2aaa831a97735a9315a7f79c5917989cdaca497f7b6fc228854fb0578bbf99a",
+   "bytes": 21271
+  },
+  "RB4-bun-identity": {
+   "root": "evaluation-raw-root",
+   "path": "rebase-01-test-04/retrieved/bun/receipts/identity.txt",
+   "sha256": "81cc57e60e156e11de7d922466439d6b0b59ef91419d24a6cb251e01b8c8e351",
+   "bytes": 1633
+  }
+ },
+ "not_authorized": [
+  "adoption",
+  "migration",
+  "publication",
+  "issue filing (including upstream Bun)",
+  "parent issue edits",
+  "main changes",
+  "stage/commit/push"
+ ]
+}
