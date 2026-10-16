@@ -12,12 +12,14 @@ export function redactDiagnostic(text: string): string {
 
 /** A rescue failure must not interrupt persistence or the next repetition. */
 export function saveTrialArtifacts(
-  root: string, prefix: string, receipt: { passed: boolean; failure: string | null },
+  root: string, prefix: string, receipt: { passed: boolean; failure: string | null; evidenceValid?: boolean; harnessRescued?: boolean },
   log: string, rescue?: () => void,
 ): string | null {
   let rescueError: string | null = null
   if (rescue) {
     receipt.passed = false
+    receipt.evidenceValid = false
+    receipt.harnessRescued = true
     rescueError = 'identity rescue required (trial remains failed)'
     try {
       rescue()
@@ -29,7 +31,7 @@ export function saveTrialArtifacts(
   writeFileSync(`${prefix}.json`, redactDiagnostic(JSON.stringify(receipt, null, 2)))
   writeFileSync(`${prefix}.log`, redactDiagnostic(log))
   for (const name of [
-    'resources.jsonl', 'identity.json', 'stores.json', 'refusals.jsonl',
+    'resources.jsonl', 'identity.json', 'stores.json', 'refusals.jsonl', 'runtime-receipts.jsonl',
     'first-identity.json', 'first-backend.log', 'first-scenario.json', 'first-trace.jsonl',
     'restart-identity.json', 'restart-backend.log', 'restart-scenario.json', 'restart-trace.jsonl',
   ]) {

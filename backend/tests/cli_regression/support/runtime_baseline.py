@@ -22,11 +22,32 @@ from .backend_process import BackendProcess
 from .cli_shim import base_python_executable, install_cli_shim
 
 
-async def main(root: Path, count: int, repeat: int):
+ACTUAL_RUNTIME = {"python": "python-native-pty", "rust-shell": "rust-sidecar-native-pty"}
+
+
+def select_runtime(backend: BackendProcess, mode: str) -> None:
+    """Method 8 arm selection through the existing isolated-harness switch; Python leaves it unset as in method 6."""
+    if mode == "rust-shell":
+        backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
+
+
+def is_version_probe(cmdline: list[str]) -> bool:
+    """The backend's synthetic CLI `--version` discovery probe (same in both arms), not a PTY child."""
+    return bool(cmdline) and cmdline[-1] == "--version" and any(word.endswith("baseline_peer.py") for word in cmdline)
+
+
+def classify_component(pid: int, backend_pid: int, executable: str) -> str:
+    if pid == backend_pid:
+        return "backend"
+    return "sidecar" if Path(executable).name == "navide-cli-runtime" else "helper"
+
+
+async def main(root: Path, count: int, repeat: int, mode: str = "python"):
+    assert mode in ACTUAL_RUNTIME, mode
     driver = psutil.Process()
     identity = {"driver": {"pid": driver.pid, "created": driver.create_time()},
                 "platform": platform.platform(), "machine": platform.machine(),
-                "python": sys.version, "selectedRuntime": "python", "actualRuntime": "python-native-pty"}
+                "python": sys.version, "selectedRuntime": mode, "actualRuntime": ACTUAL_RUNTIME[mode]}
     (root / "identity.json").write_text(json.dumps(identity, indent=2), encoding="utf-8")
     # Startup version discovery must see owned shims even after the real
     # login-shell PATH refresh. Production PATH policy/guards stay unchanged.
@@ -35,6 +56,7 @@ async def main(root: Path, count: int, repeat: int):
     for vendor in ("claude", "opencode"):
         install_cli_shim(bin_dir, vendor, [base_python_executable(), "-u", str(Path(__file__).with_name("baseline_peer.py"))])
     backend = BackendProcess(root, artifact_prefix="first-")
+    select_runtime(backend, mode)
     backend.env["PATH"] = str(bin_dir) + os.pathsep + backend.env["PATH"]
     if os.name != "nt":
         for name in (".bash_profile", ".zprofile", ".profile"):
@@ -100,11 +122,15 @@ async def main(root: Path, count: int, repeat: int):
                             if not child.is_running():
                                 continue
                             cpu = child.cpu_times()
+                            executable = child.exe()
+                            command = child.cmdline()
                             counters.append({"pid": child.pid, "created": child.create_time(),
+                                             "ppid": child.ppid(), "component": classify_component(child.pid, process.pid, executable),
+                                             "versionProbe": is_version_probe(command),
                                              "category": "controlled_child" if child.name().lower().startswith("python") and
                                              "baseline_peer.py" in " ".join(child.cmdline()) else "runtime",
                                              "cpuSeconds": cpu.user + cpu.system, "rssBytes": child.memory_info().rss,
-                                             "name": child.name(), "executable": child.exe()})
+                                             "name": child.name(), "executable": executable})
                         except psutil.NoSuchProcess:
                             pass
                     stream.write(json.dumps({"wallMs": time.time_ns() / 1_000_000,
@@ -128,7 +154,7 @@ async def main(root: Path, count: int, repeat: int):
         peers = [peer(workload["vendors"][(index + repeat) % len(workload["vendors"])], index) for index in range(count)]
         endpoint = {"url": backend.url, "shells": shells, "peers": peers,
                     "home": str(root / "home"), "shell": "" if os.name == "nt" else "/bin/bash",
-                    "actualRuntime": "python-native-pty"}
+                    "actualRuntime": ACTUAL_RUNTIME[mode]}
         pending = root / "endpoint.pending.json"
         pending.write_text(json.dumps(endpoint), encoding="utf-8")
         pending.replace(root / "endpoint.json")
@@ -155,6 +181,7 @@ async def main(root: Path, count: int, repeat: int):
         # Restart the actual backend against its own isolated durable state.
         # No reader/checkpoint/store internals are invoked by the driver.
         restarted_owner = BackendProcess(root, artifact_prefix="restart-")
+        select_runtime(restarted_owner, mode)
         restarted_owner.env["PATH"] = str(bin_dir) + os.pathsep + restarted_owner.env["PATH"]
         if os.environ.get("ACR_DIAGNOSE") == "1":
             restarted_owner.env["NAVIDE_BASELINE_TRACE"] = "restart"
@@ -203,7 +230,7 @@ if __name__ == "__main__":
     else:
         root = Path(sys.argv[1])
         try:
-            asyncio.run(main(root, int(sys.argv[2]), int(sys.argv[3])))
+            asyncio.run(main(root, int(sys.argv[2]), int(sys.argv[3]), sys.argv[4] if len(sys.argv) > 4 else "python"))
         finally:
             # Backend exit/refusal must not lose the store-side diagnostic.
             path = root / "share/opencode/opencode.db"

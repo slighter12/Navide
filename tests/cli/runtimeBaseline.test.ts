@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { loadavg, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { expect, it } from 'vitest'
@@ -8,11 +9,36 @@ import { createWsClient, type TerminalOutputFrame } from '../../src/shared/wsCli
 import { buildAgentPaneCommand } from '../../src/main/plugins/agentPaneCommand'
 import { redactDiagnostic, saveTrialArtifacts } from './baselineArtifacts'
 import { hasExactLiveTotals, matchesSessionDetection, runtimeStudyEnabled } from './runtimeBaselineAssertions'
+import { finalizeEvidence } from './runtimeEvidence'
+import { boundedErrorCode, verifyFreeze } from './runtimeFreeze'
+import { checkResourceCoverage, checkRuntimeProof, coldToFirstUsable, matchedOrder, mergeCoverage, type MatchedAttempt, type ProofSample, type ProofTerminal, type RuntimeMode } from './runtimeMatched'
 
 const workload = JSON.parse(readFileSync(resolve('tests/fixtures/cli-regression/runtime-workload.json'), 'utf8'))
 const python = resolve('backend/.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
 const measuring = process.env.ACR_MEASURE === '1'
 const closeWalDiagnostic = process.env.ACR_DIAGNOSE_CLOSE_WAL === '1'
+// Method 8 (matched Python/Rust study) is opt-in; without ACR_MATCHED this runner is exactly method 6.
+const matched = process.env.ACR_MATCHED === '1'
+const matchedMethod = matched ? JSON.parse(readFileSync(resolve('tests/fixtures/cli-regression/runtime-method-8.json'), 'utf8')) : null
+const requestedModes = (process.env.ACR_RUNTIME_MODES ?? 'python,rust-shell').split(',') as RuntimeMode[]
+const evidenceRevision = process.env.ACR_EVIDENCE_REVISION ?? 'correction-r2-check'
+const freezeFile = process.env.ACR_FREEZE_FILE ? resolve(process.env.ACR_FREEZE_FILE) : null
+const bindFreeze = (): { freezeSha256: string | null; checkedInputs: number } => {
+  if (!freezeFile) return { freezeSha256: null, checkedInputs: 0 }
+  const verdict = verifyFreeze(resolve('.'), freezeFile, freezeFile.replace(/\.json$/, '.sha256'))
+  expect(verdict.failures, 'frozen method binding failed; no attempt may run').toEqual([])
+  return verdict
+}
+const actualRuntimeNames: Record<RuntimeMode, string> = { python: 'python-native-pty', 'rust-shell': 'rust-sidecar-native-pty' }
+
+/** Numeric ambient state only (no process names or argv): load average, power source and thermal limit lines. */
+function ambientSnapshot(): Record<string, unknown> {
+  const run = (args: string[]): string => {
+    // Only the matching status lines are kept; a failure records a bounded error code, never message text, argv or output.
+    try { return execFileSync('pmset', args, { timeout: 5000, encoding: 'utf8' }).split('\n').filter((line) => /Now drawing|Speed_Limit|thermal/i.test(line)).join(' | ') } catch (error) { return `unavailable: ${boundedErrorCode(error)}` }
+  }
+  return { loadavg: loadavg(), at: Date.now(), power: run(['-g', 'batt']), thermal: run(['-g', 'therm']) }
+}
 
 async function until(predicate: () => boolean, message: string, timeout = workload.deadlineMs): Promise<void> {
   const deadline = performance.now() + timeout
@@ -25,14 +51,29 @@ async function until(predicate: () => boolean, message: string, timeout = worklo
 it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload through the production WS client and native PTY', async () => {
   expect(existsSync(python), 'run uv --project backend sync --locked').toBe(true)
   expect(measuring && (closeWalDiagnostic || process.env.ACR_DIAGNOSE === '1'), 'diagnostic trace/WAL-close is never a measurement').toBe(false)
-  const reports = resolve('test-results/ci/runtime-baseline', process.env.ACR_EVIDENCE_REVISION ?? 'correction-r2-check')
+  const reports = resolve('test-results/ci/runtime-baseline', evidenceRevision)
   mkdirSync(reports, { recursive: true })
   const failures: string[] = []
-  for (const count of workload.sessionCounts) {
-    for (let repeat = 0; repeat < (measuring ? workload.measurementRepeats : 1); repeat++) {
+  if (matched) {
+    expect(createHash('sha256').update(readFileSync(resolve('tests/fixtures/cli-regression/runtime-workload.json'))).digest('hex'), 'method 8 reuses the unchanged method-6 workload').toBe(matchedMethod.workloadSha256)
+    expect(requestedModes.every((mode) => mode in actualRuntimeNames), `unknown runtime mode in ${requestedModes}`).toBe(true)
+    if (measuring) {
+      expect([...requestedModes].sort(), 'a measured matrix compares both arms').toEqual(['python', 'rust-shell'])
+      expect(freezeFile, 'a measured matrix must be bound to a frozen method (ACR_FREEZE_FILE)').not.toBeNull()
+    }
+  }
+  const repeats = measuring ? workload.measurementRepeats : 1
+  const attempts: MatchedAttempt[] = matched
+    ? matchedOrder(repeats, workload.sessionCounts, requestedModes)
+    : (workload.sessionCounts as number[]).flatMap((count) => Array.from({ length: repeats }, (_, repeat) => ({ repeat, mode: 'python' as RuntimeMode, count })))
+  {
+    for (const { count, repeat, mode } of attempts) {
+      // Every attempt re-verifies all frozen inputs (runner, checker, summariser, binary) and the recorded git state.
+      const freezeBinding = matched ? bindFreeze() : { freezeSha256: null, checkedInputs: 0 }
+      const ambientBefore = matched ? ambientSnapshot() : null
       const root = realpathSync(mkdtempSync(join(tmpdir(), 'navide-runtime-baseline-')))
       const started = performance.now()
-      const driver = spawn(python, ['-m', 'tests.cli_regression.support.runtime_baseline', root, String(count), String(repeat)], {
+      const driver = spawn(python, ['-m', 'tests.cli_regression.support.runtime_baseline', root, String(count), String(repeat), mode], {
         cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
       })
       let log = ''
@@ -92,8 +133,10 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
       }
       type Peer = { pane: string; vendor: string; workspace: string; command: string[]; argv: string[]; wrapped: boolean; commandLine: string }
       type Running = Peer & { tid: string; pid: number; sessionId: string }
-      type Sample = { generation: string; backend: { pid: number; created: number }; wallMs: number; processes: Array<{ pid: number; created: number; category: string }> }
+      type Sample = ProofSample & { generation: string; backend: { pid: number; created: number } }
       const identifiedSessions = new Map<string, string>()
+      const createdTerminals: ProofTerminal[] = []
+      let proof: ReturnType<typeof checkRuntimeProof> | null = null
       let peers: Running[] = []
       let passed = false
       let evidenceValid = false
@@ -105,7 +148,7 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
           return existsSync(join(root, 'endpoint.json'))
         }, 'backend readiness deadline', 35_000)
         const endpoint = JSON.parse(readFileSync(join(root, 'endpoint.json'), 'utf8'))
-        expect(endpoint.actualRuntime).toBe('python-native-pty')
+        expect(endpoint.actualRuntime).toBe(actualRuntimeNames[mode])
         client.connect(endpoint.url)
         await until(() => connections === 1, 'authenticated WS connection deadline')
         record('cold_backend_ready_ms', started)
@@ -120,6 +163,8 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
             metadata: { workspace_path: peer.workspace, session_marker: `at-pane:${peer.pane}`,
               ...(peer.vendor === 'claude' ? { explicit_session_id: peer.pane } : {}) },
           })
+          const terminal: ProofTerminal = { tid: created.terminal_session_id, pane: peer.pane, vendor: peer.vendor, label, createPid: created.pid, peerPid: 0 }
+          createdTerminals.push(terminal)
           record(`${label}_ack_ms`, start)
           const tid = created.terminal_session_id
           await until(() => (output.get(tid) ?? '').includes('BASELINE_READY '), `child READY deadline (${peer.vendor})`)
@@ -136,6 +181,7 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
             if (!observed.injected.skills) baselineWarnings.push(`claude skills injection missing: ${peer.pane}`)
           } else expect(observed.injected).toEqual(peer.vendor === 'opencode' ? { mcp: true, push: true } : {})
           expect(observed.pid).toBeGreaterThan(0)
+          terminal.peerPid = observed.pid
           // Independent literals from baseline_peer.observe(), not inferred from WS data.
           const sessionId = peer.vendor === 'opencode' ? `ses_${peer.pane}` : peer.pane
           if (peer.vendor === 'claude') identifiedSessions.set(peer.pane, sessionId) // Existing explicit-session pin.
@@ -145,6 +191,10 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
         for (const [index, shell] of (endpoint.shells as Peer[]).entries()) {
           const peer = await create(shell, index === 0 ? 'first_shell' : 'warm_shell')
           await request('terminal.kill', { terminal_session_id: peer.tid })
+        }
+        if (matched) {
+          const usable = coldToFirstUsable(latencies)
+          if (usable !== null) (latencies.cold_to_first_usable_ms ??= []).push(usable)
         }
         mark('agent_startup')
         peers = await Promise.all((endpoint.peers as Peer[]).map((peer) => create(peer, 'agent')))
@@ -254,6 +304,11 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
         }
         expect([...dead].sort()).toEqual([...ids].sort())
         record('kill_reap_ms', killStart)
+        if (matched) {
+          // Rust keeps its lazily started sidecar resident after sessions end; method 6 has no phase that shows that cost.
+          mark('empty_started_idle')
+          await delay(workload.idleMs)
+        }
         mark('persistence_restart')
         const restartStart = performance.now()
         driver.stdin.write('restart\n')
@@ -299,15 +354,50 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
             const ioStop = phases.find((phase) => phase.name === 'burst')?.wallMs
             activeSamples = samples.filter((sample) => ioStart !== undefined && ioStop !== undefined && ioStart <= sample.wallMs && sample.wallMs < ioStop).length
             if (phaseOutcomes.input_output === 'passed') expect(activeSamples, 'active I/O requires at least 10 actual CPU/RSS samples').toBeGreaterThanOrEqual(10)
-            evidenceValid = phaseOutcomes.cleanup === 'passed'
+            // Single assignment AFTER every proof step; any exception below (receipt read/parse, executable hash, checker) leaves it false.
+            const final = finalizeEvidence({
+              mode, cleanupPassed: phaseOutcomes.cleanup === 'passed', matched,
+              proofStep: () => {
+                const receiptPath = join(root, 'runtime-receipts.jsonl')
+                const receipts = existsSync(receiptPath) ? readFileSync(receiptPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []
+                const ready = receipts.find((entry) => entry.event === 'ready' && entry.owner_pid === identity.pid)
+                const verdict = checkRuntimeProof({
+                  mode, backend: identity, receipts, samples,
+                  expectedSha256: mode === 'rust-shell' ? (process.env.ACR_EXPECT_SIDECAR_SHA256 ?? null) : null,
+                  recomputedSha256: ready?.executable && existsSync(ready.executable) ? createHash('sha256').update(readFileSync(ready.executable)).digest('hex') : null,
+                  terminals: createdTerminals,
+                  claude: peers.filter((peer) => peer.vendor === 'claude').map((peer) => ({
+                    pane: peer.pane, tid: peer.tid,
+                    activityPassed: observationOutcomes.some((item) => item.pane === peer.pane && item.kind === 'activity' && item.status === 'passed'),
+                    liveTotalsPassed: observationOutcomes.some((item) => item.pane === peer.pane && item.kind === 'live_totals' && item.status === 'passed'),
+                  })),
+                  claudeProjectsDir: join(root, 'home/.claude/projects'),
+                })
+                return mergeCoverage(verdict, checkResourceCoverage({ mode, samples, phases, phaseOutcomes }))
+              },
+            })
+            evidenceValid = final.evidenceValid
+            proof = final.proof
+            if (final.error !== null) {
+              passed = false
+              const detail = redactDiagnostic(final.error)
+              failure = `${failure ?? ''}; runtime proof step: ${detail}`
+              failures.push(`${mode}/${count}/${repeat}: runtime proof step: ${detail}`)
+            } else if (matched && final.proof && !final.proof.ok) {
+              passed = false
+              const detail = redactDiagnostic(final.proof.failures.join('; '))
+              failure = `${failure ?? ''}; runtime proof: ${detail}`
+              failures.push(`${mode}/${count}/${repeat}: runtime proof: ${detail}`)
+            }
           } catch (error) {
             passed = false
+            evidenceValid = false
             const detail = redactDiagnostic(error instanceof Error ? error.message : String(error))
             failure = `${failure ?? ''}; resource proof: ${detail}`
             failures.push(`${count}/${repeat}: resource proof: ${detail}`)
           }
-          const prefix = join(reports, `${measuring ? 'trial' : 'check'}-${count}-${repeat}`)
-          const receipt = { count, repeat, measuring, diagnosticTrace: process.env.ACR_DIAGNOSE === '1', closeWalDiagnostic, passed, failure, evidenceValid, activeSamples, peerIdentities: peers.map(({ vendor, pane, tid, pid, sessionId }) => ({ vendor, pane, tid, pid, fixtureSessionId: sessionId, identifiedSessionId: identifiedSessions.get(pane) ?? null })),  baselineWarnings, latencies, phases, phaseOutcomes, observationFailures, observationOutcomes, tokenSnapshots, events, timeline, output: Object.fromEntries(output), exitCode }
+          const prefix = join(reports, `${measuring ? 'trial' : 'check'}-${matched ? `${mode}-` : ''}${count}-${repeat}`)
+          const receipt = { ...(matched ? { method: 8, methodRevision: matchedMethod.methodRevision, selectedRuntime: mode, expectedSidecarSha256: process.env.ACR_EXPECT_SIDECAR_SHA256 ?? null, evidenceRevision, freezeSha256: freezeBinding.freezeSha256, freezeCheckedInputs: freezeBinding.checkedInputs, createdTerminals, proof, ambientBefore, ambientAfter: ambientSnapshot() } : {}), count, repeat, measuring, diagnosticTrace: process.env.ACR_DIAGNOSE === '1', closeWalDiagnostic, passed, failure, evidenceValid, harnessRescued: false, activeSamples, peerIdentities: peers.map(({ vendor, pane, tid, pid, sessionId }) => ({ vendor, pane, tid, pid, fixtureSessionId: sessionId, identifiedSessionId: identifiedSessions.get(pane) ?? null })),  baselineWarnings, latencies, phases, phaseOutcomes, observationFailures, observationOutcomes, tokenSnapshots, events, timeline, output: Object.fromEntries(output), exitCode }
           const rescueError = saveTrialArtifacts(root, prefix, receipt, log, exitCode === undefined && driver.pid ? () => {
             execFileSync(python, ['-m', 'tests.cli_regression.support.runtime_baseline', '--rescue', root, String(driver.pid)], { cwd: resolve('backend'), timeout: 15_000 })
           } : undefined)
@@ -318,4 +408,4 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
     }
   }
   expect(failures, 'invalid trials are retained, never counted as passing workloads').toEqual([])
-}, 600_000)
+}, matched ? 1_800_000 : 600_000)
