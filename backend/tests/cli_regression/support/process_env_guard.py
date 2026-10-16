@@ -102,10 +102,15 @@ def install(root: Path, document: dict):
                 return None
             argv = list(argv)
             runtime = document['files']['runtime']['path']
-            if (len(argv) == 7 and argv[:3] == [runtime, '--protocol', '1']
+            # The two exact launch forms: the bare probe form, and the Python service's form that
+            # additionally names ITS OWN generation's ownership journal inside the fixture data dir.
+            if (len(argv) in (7, 9) and argv[:3] == [runtime, '--protocol', '1']
                     and argv[3] == '--runtime-generation' and len(argv[4]) == 32
                     and all(c in '0123456789abcdef' for c in argv[4])
-                    and argv[5:] == ['--owner-pid', str(os.getpid())]):
+                    and argv[5:7] == ['--owner-pid', str(os.getpid())]
+                    and (len(argv) == 7 or argv[7:] == [
+                        '--ownership-journal',
+                        str(self.root / 'data' / 'runtime-ownership' / f'{argv[4]}.jsonl')])):
                 return 'runtime'
             target = document['files']['process_env_target']['path']
             python_entries = {interpreter['path'], str(Path(__file__).resolve().parents[3] / '.venv/bin/python')}

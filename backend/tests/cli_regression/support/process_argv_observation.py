@@ -132,9 +132,12 @@ def _runtime_self_row(root, ready, metadata):
     generation = ready.get('runtime_generation')
     expected = [metadata['exe'], '--protocol', '1', '--runtime-generation', generation,
                 '--owner-pid', str(metadata['parent'])]
+    # Exactly two launch forms: bare, or with this generation's own ownership journal in the data dir.
+    journalled = [*expected, '--ownership-journal',
+                  str(root / 'data' / 'runtime-ownership' / f'{generation}.jsonl')]
     if (not isinstance(generation, str) or len(generation) != 32
             or any(c not in '0123456789abcdef' for c in generation)
-            or self_row.get('argv') != expected):
+            or self_row.get('argv') not in (expected, journalled)):
         raise PermissionError('invalid native SELF argv generation')
     for role in ('native-darwin', 'native-posix', 'runtime'):
         identity = document['files'][role]
@@ -219,9 +222,11 @@ def correlate_observation(root, metadata):
         if row['role'] != 'runtime' or row['image'] != document['files']['runtime']:
             raise PermissionError('unregistered created runtime')
         argv = row['argv']
-        if (len(argv) != 7 or argv[:3] != [row['exe'], '--protocol', '1']
-                or argv[3] != '--runtime-generation' or argv[5:] != ['--owner-pid', str(row['parent'])]
-                or len(argv[4]) != 32 or any(c not in '0123456789abcdef' for c in argv[4])):
+        if (len(argv) not in (7, 9) or argv[:3] != [row['exe'], '--protocol', '1']
+                or argv[3] != '--runtime-generation' or argv[5:7] != ['--owner-pid', str(row['parent'])]
+                or len(argv[4]) != 32 or any(c not in '0123456789abcdef' for c in argv[4])
+                or (len(argv) == 9 and argv[7:] != [
+                    '--ownership-journal', str(root / 'data' / 'runtime-ownership' / f'{argv[4]}.jsonl')])):
             raise PermissionError('invalid created runtime argv')
     else:
         raise PermissionError('unknown OWN observation phase')

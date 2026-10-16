@@ -293,6 +293,12 @@ class Project:
         return cls(**d2)
 
 
+class RetirementTargetChanged(Exception):
+    """A retirement's record no longer resolves to the pane id(s) whose terminals were settled
+    (the slot was reassigned, or a same-session pane appeared, while the settlement awaited).
+    Nothing is written; the caller answers an error."""
+
+
 class ProjectStore:
     """Manages the project document (workspace navide.db) + pipeline.log."""
 
@@ -744,19 +750,35 @@ class ProjectStore:
             self.save(project)
         return project
 
+    def slot_pane_id(self, workspace_path: str, *, stage_index: int, slot_label: str) -> str:
+        """The pane id a slot retirement would retire, read without changing anything (a
+        retirement settles that pane's terminals before it touches the record)."""
+        project = self.load_or_create(workspace_path)
+        if stage_index < 0 or stage_index >= len(project.stages):
+            raise IndexError(f"stage_index {stage_index} out of range")
+        pane = self._find_slot_pane(project, stage_index, slot_label)
+        return pane.pane_id if pane is not None else ""
+
     def record_slot_unspawn(
         self,
         workspace_path: str,
         *,
         stage_index: int,
         slot_label: str,
+        expected_pane_id: "str | None" = None,
     ) -> Project:
-        """Mark a pipeline slot as manually removed so it is not auto-restored."""
+        """Mark a pipeline slot as manually removed so it is not auto-restored.
+
+        `expected_pane_id` binds the write to the pane whose terminals the caller settled: if the
+        slot now holds another pane, nothing is written and RetirementTargetChanged is raised."""
         project = self.load_or_create(workspace_path)
         if stage_index < 0 or stage_index >= len(project.stages):
             raise IndexError(f"stage_index {stage_index} out of range")
         stage = project.stages[stage_index]
         pane = self._find_slot_pane(project, stage_index, slot_label)
+        if expected_pane_id is not None and (pane.pane_id if pane is not None else "") != expected_pane_id:
+            raise RetirementTargetChanged(
+                f"slot {stage_index}/{slot_label} now holds another pane than the one settled")
         if pane is None:
             return project
         self._adopt_orphans(project, pane)
@@ -991,12 +1013,30 @@ class ProjectStore:
         )
         return project, True
 
+    @staticmethod
+    def _manual_unspawn_matches(project: "Project", pane_id: str, session_id: str) -> "list[PaneRecord]":
+        sid = session_id.strip()
+        live = [
+            p for p in project.panes
+            if p.origin != "pipeline" and p.spawn_status != "removed"
+        ]
+        matches = [p for p in live if p.pane_id == pane_id]
+        if not matches and sid:
+            matches = [p for p in live if p.session_id == sid]
+        return matches
+
+    def manual_pane_unspawn_targets(self, workspace_path: str, *, pane_id: str, session_id: str = "") -> list[str]:
+        """The pane ids record_manual_pane_unspawn would retire, read without changing anything."""
+        project = self.load_or_create(workspace_path)
+        return [p.pane_id for p in self._manual_unspawn_matches(project, pane_id, session_id)]
+
     def record_manual_pane_unspawn(
         self,
         workspace_path: str,
         *,
         pane_id: str,
         session_id: str = "",
+        settled_pane_ids: "set[str] | None" = None,
     ) -> tuple[Project, list[str]]:
         """Mark a manual pane removed so it isn't re-spawned on the next restart.
 
@@ -1015,14 +1055,10 @@ class ProjectStore:
         so the caller can take down every PTY that just lost its record.
         """
         project = self.load_or_create(workspace_path)
-        sid = session_id.strip()
-        live = [
-            p for p in project.panes
-            if p.origin != "pipeline" and p.spawn_status != "removed"
-        ]
-        matches = [p for p in live if p.pane_id == pane_id]
-        if not matches and sid:
-            matches = [p for p in live if p.session_id == sid]
+        matches = self._manual_unspawn_matches(project, pane_id, session_id)
+        if settled_pane_ids is not None and any(p.pane_id not in settled_pane_ids for p in matches):
+            # Bound to what the caller settled: a match that appeared meanwhile is not retired.
+            raise RetirementTargetChanged("a record matching this close was not among the settled panes")
         if not matches:
             return project, []
         for pane in matches:

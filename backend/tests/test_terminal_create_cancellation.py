@@ -181,36 +181,19 @@ async def test_ack_does_not_wait_for_the_baseline_scan(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("response_order", ["natural", "cancel-first", "create-error-first"])
-async def test_cancel_before_commit_waits_for_the_scan_then_rolls_back(
+async def test_a_cancel_after_commit_is_not_a_cancellation_and_leaves_one_success(
     monkeypatch: pytest.MonkeyPatch,
-    response_order: str,
 ) -> None:
+    """The success/cancel decision is made once, before the success send can yield (review-6
+    R6-1). A cancel that arrives while the success is being sent finds the create committed:
+    it answers cancelled:false, nothing is rolled back, and the create id gets exactly one
+    response, the success. (This replaces the parked-ack case that used to roll back after
+    the success had already been sent, which delivered success and CREATE_CANCELLED for the
+    same create id.)"""
     attribution = BlockingAttribution()
     monkeypatch.setattr(app, "attribution", attribution)
     socket = AckGatedSocket()
     session = make_session(socket)
-    # Both handlers share rollback, but their result frames have no ordering
-    # contract. Exercise either legal completion order before taking the send
-    # lock, so correctness is tied to request identity rather than scheduling.
-    create_error_sent = asyncio.Event()
-    cancel_sent = asyncio.Event()
-    original_send = session.send_json
-
-    async def ordered_send(frame: dict[str, Any]) -> None:
-        is_create_error = frame.get("id") == "create-request" and not frame.get("ok")
-        is_cancel = frame.get("id") == "cancel-request"
-        if response_order == "cancel-first" and is_create_error:
-            await asyncio.wait_for(cancel_sent.wait(), timeout=2)
-        if response_order == "create-error-first" and is_cancel:
-            await asyncio.wait_for(create_error_sent.wait(), timeout=2)
-        await original_send(frame)
-        if is_create_error:
-            create_error_sent.set()
-        if is_cancel:
-            cancel_sent.set()
-
-    monkeypatch.setattr(session, "send_json", ordered_send)
 
     create_task = asyncio.create_task(
         app.handle_message(session, create_message(agent="claude"))
@@ -219,33 +202,52 @@ async def test_cancel_before_commit_waits_for_the_scan_then_rolls_back(
     assert await asyncio.to_thread(attribution.started.wait, 2)
     cancel_task = asyncio.create_task(app.handle_message(session, cancel_message()))
     await asyncio.sleep(0.05)
-    assert attribution.unregistered == []  # rollback is parked behind the scan
-
     attribution.release.set()
-    await _until(lambda: attribution.unregistered == ["pane-1"])
-    # The cancel's own response queues behind the parked ack on the session's
-    # send lock, so the gate opens before either task is awaited.
     socket.gate.set()
     await asyncio.gather(create_task, cancel_task)
 
     terminals = session.terminals  # type: ignore[assignment]
+    assert terminals.killed == []
+    assert attribution.unregistered == []
+    assert app._PTY_OWNERS.get("term-1") is session
+    create_frames = [frame for frame in socket.sent if frame.get("id") == "create-request"]
+    cancel_results = [frame for frame in socket.sent if frame.get("id") == "cancel-request"]
+    assert len(create_frames) == 1 and create_frames[0]["ok"] is True
+    assert len(cancel_results) == 1
+    assert cancel_results[0]["ok"] is True
+    assert cancel_results[0]["payload"]["cancelled"] is False
+    app._PTY_OWNERS.pop("term-1", None)
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_during_the_success_send_waits_for_the_scan_then_rolls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The remaining route by which a create is rolled back after its attribution scan began:
+    the connection dies while the (already committed) success is being sent. The rollback is
+    parked behind the in-flight scan, then unregisters, kills the term and drops its owner."""
+    attribution = BlockingAttribution()
+    monkeypatch.setattr(app, "attribution", attribution)
+    session = make_session(RecordingSocket(fail=True))
+
+    create_task = asyncio.create_task(
+        app.handle_message(session, create_message(agent="claude"))
+    )
+    assert await asyncio.to_thread(attribution.started.wait, 2)
+    await asyncio.sleep(0.05)
+    assert attribution.unregistered == []  # rollback is parked behind the scan
+
+    attribution.release.set()
+    await asyncio.wait_for(create_task, timeout=5)
+
+    terminals = session.terminals  # type: ignore[assignment]
+    assert session.dead is True
     assert terminals.killed == [("term-1", True)]
     assert attribution.registered == ["pane-1"]
     assert attribution.scanned == ["pane-1"]
     assert attribution.unregistered == ["pane-1"]
     assert "term-1" not in app._PTY_OWNERS
     assert terminals._sessions == {}
-    create_errors = [frame for frame in socket.sent if frame.get("id") == "create-request" and frame.get("ok") is False]
-    cancel_results = [frame for frame in socket.sent if frame.get("id") == "cancel-request"]
-    assert len(create_errors) == 1
-    assert create_errors[0]["error"]["code"] == "CREATE_CANCELLED"
-    assert len(cancel_results) == 1
-    assert cancel_results[0]["ok"] is True
-    assert cancel_results[0]["payload"]["cancelled"] is True
-    if response_order == "cancel-first":
-        assert socket.sent.index(cancel_results[0]) < socket.sent.index(create_errors[0])
-    elif response_order == "create-error-first":
-        assert socket.sent.index(create_errors[0]) < socket.sent.index(cancel_results[0])
 
 @pytest.mark.asyncio
 async def test_send_failure_marks_dead_and_rolls_back_uncommitted_terminal() -> None:
@@ -289,6 +291,41 @@ async def test_handler_cancellation_before_commit_rolls_back(
     assert session.terminals.killed == [("term-1", True)]  # type: ignore[attr-defined]
     assert attribution.unregistered == ["pane-1"]
     assert "term-1" not in app._PTY_OWNERS
+
+@pytest.mark.asyncio
+async def test_handler_cancelled_during_committed_send_leaves_no_cached_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review-7 hygiene: a handler task cancelled while its committed success is being sent rolls the
+    term back; the transaction must not keep `committed`/`response_payload`, or a same-generation
+    retry on a still-usable session would be answered with the cached success of a killed term."""
+    attribution = BlockingAttribution()
+    monkeypatch.setattr(app, "attribution", attribution)
+    socket = AckGatedSocket()
+    session = make_session(socket)
+    create_task = asyncio.create_task(
+        app.handle_message(session, create_message(agent="claude"))
+    )
+    await asyncio.wait_for(socket.parked.wait(), timeout=2)
+    assert await asyncio.to_thread(attribution.started.wait, 2)
+    transaction = session._terminal_create_transactions[("pane-1", "gen-1")]
+
+    create_task.cancel()
+    attribution.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await create_task
+
+    assert session.terminals.killed == [("term-1", True)]  # type: ignore[attr-defined]
+    assert not transaction.get("committed"), "a rolled-back create is still marked committed"
+    assert "response_payload" not in transaction, "a rolled-back create still caches its success"
+    socket.gate.set()
+    socket.sent.clear()
+    await app.handle_message(session, create_message(agent="claude"))
+    replies = [m for m in socket.sent if m.get("id") == "create-request"]
+    assert replies, "the retry was not answered"
+    assert not (replies[-1].get("ok") and (replies[-1].get("payload") or {}).get("terminal_session_id") == "term-1"), \
+        "the retry was answered with the cached success of the killed term"
+    assert app._PTY_OWNERS.get("term-1") is not session
 
 @pytest.mark.asyncio
 async def test_repeated_cancel_is_idempotent() -> None:
@@ -418,25 +455,22 @@ async def test_a_spawn_that_never_starts_announces_nothing_and_keeps_no_channel(
     assert push_delivery.get("pane-1") is None
 
 @pytest.mark.asyncio
-async def test_a_cancelled_create_takes_the_channel_with_it(
+async def test_a_rolled_back_create_takes_the_channel_with_it(
     push_events: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A create rolled back after its push channel was wired (here: the connection died during
+    the committed success send) takes the channel with it."""
     attribution = BlockingAttribution()
     monkeypatch.setattr(app, "attribution", attribution)
-    socket = AckGatedSocket()
-    session = make_session(socket)
+    session = make_session(RecordingSocket(fail=True))
 
     create_task = asyncio.create_task(
         app.handle_message(session, create_message(agent="qwen"))
     )
-    await asyncio.wait_for(socket.parked.wait(), timeout=2)
-    cancel_task = asyncio.create_task(app.handle_message(session, cancel_message()))
-    await asyncio.sleep(0)
     attribution.release.set()
-    await _until(lambda: attribution.unregistered == ["pane-1"])
-    socket.gate.set()
-    await asyncio.gather(create_task, cancel_task)
+    await asyncio.wait_for(create_task, timeout=5)
 
+    assert session.dead is True
     assert push_delivery.get("pane-1") is None
 
 @pytest.mark.asyncio
@@ -503,3 +537,24 @@ async def test_terminal_service_create_rolls_back_post_popen_setup_failure(
     assert killed == [(9876, True)]
     with pytest.raises(OSError):
         os.fstat(opened[0])
+
+@pytest.mark.asyncio
+async def test_release_pty_answers_an_error_when_the_panes_terminal_cannot_be_verifiably_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review-8 R8-1: a release that cannot verify the pane's terminal is closed must not report
+    the pane released (the Rebuild then aborts instead of starting a second CLI)."""
+    session = make_session()
+    terminals = session.terminals
+
+    async def unverified_kill(term_id: str, force: bool = False) -> None:
+        raise RuntimeError("CLEANUP_FAILED: native cleanup incomplete")
+
+    monkeypatch.setattr(terminals, "live_session_ids_for_pane", lambda pane: ["term-x"] if pane == "pane-9" else [], raising=False)
+    monkeypatch.setattr(terminals, "kill", unverified_kill)
+    await app.handle_message(session, {"id": "rel-1", "type": "manual_pane.release_pty", "payload": {"pane_id": "pane-9"}})
+
+    replies = [m for m in session.websocket.sent if m.get("id") == "rel-1"]  # type: ignore[attr-defined]
+    assert len(replies) == 1
+    assert replies[0].get("ok") is not True, replies[0]
+    assert replies[0]["error"]["code"] == "PANE_RELEASE_UNRESOLVED", replies[0]

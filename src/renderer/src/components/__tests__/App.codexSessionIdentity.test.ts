@@ -93,7 +93,7 @@ function harness() {
     paneResumeSessionId: (pane: Pane) => pane.pinnedSessionId || '',
     rebuildingPanes: new Set<string>(), stagesApi: { stages: { value: [] } },
     isPaneMuted: () => false, setPaneMuted: vi.fn(), persistPaneMuted: vi.fn(),
-    onKill: vi.fn(async () => {}), rekeyLineage: vi.fn(),
+    onKill: vi.fn(async () => true), rekeyLineage: vi.fn(),
     autoNameSourceOf: () => undefined, persistedMessagingName: () => '',
     dropPersistedMessagingName: vi.fn(), isLocalWorkspace: () => true,
     workspaceRestoreSession: () => ({}), explicitRestoreDecision: () => 'fresh',

@@ -276,6 +276,8 @@ import {
   type RestoreSessionTrigger,
   type WorkspaceRestoreSession,
 } from './lib/resumeBehavior'
+import { shouldQueuePtyLostResume } from './lib/ptyLostRecovery'
+import { settlePaneTerminals } from './lib/paneRetirement'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
 import { cliPermissionKey, parseCliPermissionMode, skipPermissionFlagFor } from '@navide/plugin-shell'
 import { chooseLaunchCommand, cliCommandKey, cliEnvKey, spawnEnvOverride, type LaunchCommandSource } from '@navide/plugin-shell'
@@ -3115,7 +3117,7 @@ function standaloneTaskDeps(): StandaloneTaskInjectionDeps {
     waitForQuiet: (id, quietMs, timeoutMs) => waitForQuiet(id, quietMs, timeoutMs),
     paneAlive: (id) => paneAlive(id),
     injectPane: (id, text, label, preserveNewlines) => injectPane(id, text, label, preserveNewlines),
-    onKill: (id) => onKill(id),
+    onKill: async (id) => { await onKill(id) },
   }
 }
 
@@ -7608,7 +7610,10 @@ async function closeFocusedPane(paneId: string): Promise<void> {
   await onKill(paneId)
 }
 
-async function onKill(paneId: string, opts: { markRemoved?: boolean, force?: boolean, keepInList?: boolean } = {}): Promise<void> {
+// The backend may wait for an in-flight create's own disposition (60 s) before answering.
+const PANE_RELEASE_TIMEOUT_MS = 90_000
+
+async function onKill(paneId: string, opts: { markRemoved?: boolean, force?: boolean, keepInList?: boolean } = {}): Promise<boolean> {
   const markRemoved = opts.markRemoved ?? true
   const force = opts.force ?? true
   const keepInList = opts.keepInList ?? false
@@ -7626,47 +7631,57 @@ async function onKill(paneId: string, opts: { markRemoved?: boolean, force?: boo
   }
   if (activeQuestion.value?.paneId === paneId) activeQuestion.value = null
   const ref = paneRefs[paneId]
-  if (ref?.sessionId) {
-    try {
-      await ref.kill({ force: force })
-    } catch (err) {
-      // The pane leaves the list either way — keeping it would strand the
-      // workspace on a pane the user already dismissed. But a swallowed failure
-      // here is exactly how a PTY outlives its own pane record, so it is
-      // recorded instead of dropped; the backend's unspawn path kills what this
-      // missed.
-      recordDiagnostic({
-        level: 'warn',
-        code: 'pane.killFailed',
-        message: `terminal kill failed while closing pane: ${String(err)}`,
-        paneId,
-      })
-      // A caller that keeps the record sends no unspawn, so nothing else would
-      // sweep what this missed: ask for the same sweep a kept-record workspace
-      // close asks for.
-      if (!markRemoved) await sendQuiet<{ ok: boolean }>('manual_pane.release_pty', { pane_id: paneId })
-    }
-  }
-  if (markRemoved && pane?.origin === 'pipeline' && pane.slotLabel && stageIndex >= 0) {
-    await sendQuiet<ProjectPayload>('pipeline.slot_unspawn', {
-      workspace_path: pane.workspacePath,
-      stage_index: stageIndex,
-      slot_label: pane.slotLabel,
+  // One rule for every retirement path (lib/paneRetirement.ts): the pane's own kill is a
+  // best-effort first step; the backend's settlement answer — which settles in-flight creates and
+  // published sessions for the pane, with verified cleanup, BEFORE it touches any record — is the
+  // proof. Unspawn when the record goes away; the pipeline slot by its address; otherwise
+  // (a kept record, or nothing to address) a release.
+  const slotAddress = markRemoved && pane?.origin === 'pipeline' && pane.slotLabel && stageIndex >= 0
+  const settled = await settlePaneTerminals({
+    killOwn: ref?.sessionId ? () => ref.kill({ force }) : undefined,
+    onKillFailed: (err) => recordDiagnostic({
+      level: 'warn',
+      code: 'pane.killFailed',
+      message: `terminal kill failed while closing pane: ${String(err)}`,
+      paneId,
+    }),
+    settle: (): Promise<object | null> => {
+      if (slotAddress && pane) {
+        return sendQuiet<ProjectPayload>('pipeline.slot_unspawn', {
+          workspace_path: pane.workspacePath,
+          stage_index: stageIndex,
+          slot_label: pane.slotLabel,
+        }, PANE_RELEASE_TIMEOUT_MS)
+      }
+      // Mirrors the manual_pane.spawn side, which persists every non-pipeline pane:
+      // mcp-spawned panes are recorded on spawn, so they must be cleared on close too.
+      // Gating this on origin === 'manual' left them at spawn_status 'spawned', and a
+      // workspace switch resurrected them as placeholders.
+      if (markRemoved && pane != null && pane.origin !== 'pipeline') {
+        return sendQuiet<ProjectPayload>('manual_pane.unspawn', {
+          workspace_path: pane.workspacePath,
+          pane_id: pane.id,
+          // session_id is stable across restarts (pane_id is regenerated each launch);
+          // sending it lets the backend remove the right record even if the id drifted,
+          // so a removed CLI can't resurrect on the next restart.
+          session_id: pane.pinnedSessionId ?? '',
+        }, PANE_RELEASE_TIMEOUT_MS)
+      }
+      return sendQuiet<{ ok: boolean }>('manual_pane.release_pty', { pane_id: paneId }, PANE_RELEASE_TIMEOUT_MS)
+    },
+  })
+  if (!settled) {
+    // Not proven gone: the pane keeps its seat, its terminal ref and its record, and stays
+    // actionable (close or Rebuild again retries the settlement).
+    recordDiagnostic({
+      level: 'warn',
+      code: 'pane.releaseUnresolved',
+      message: 'the backend could not prove this pane\'s terminal settled; the pane and its record are kept',
+      paneId,
     })
-  }
-  // Mirrors the manual_pane.spawn side, which persists every non-pipeline pane:
-  // mcp-spawned panes are recorded on spawn, so they must be cleared on close too.
-  // Gating this on origin === 'manual' left them at spawn_status 'spawned', and a
-  // workspace switch resurrected them as placeholders.
-  if (opts.markRemoved !== false && pane != null && pane.origin !== 'pipeline') {
-    await sendQuiet<ProjectPayload>('manual_pane.unspawn', {
-      workspace_path: pane.workspacePath,
-      pane_id: pane.id,
-      // session_id is stable across restarts (pane_id is regenerated each launch);
-      // sending it lets the backend remove the right record even if the id drifted,
-      // so a removed CLI can't resurrect on the next restart.
-      session_id: pane.pinnedSessionId ?? '',
-    })
+    notifyRestore.toast(i18n.global.t('pane.terminal.rebuild-probe-failed'), { type: 'error' })
+    syncViews()
+    return false
   }
   const histEntry = spawnHistory.value.find((e) => e.paneId === paneId)
   if (histEntry && !histEntry.removedAt) {
@@ -7735,6 +7750,7 @@ async function onKill(paneId: string, opts: { markRemoved?: boolean, force?: boo
     releaseStageSlot(stageIndex, paneId, `pane "${pane.slotLabel || paneId.slice(0, 8)}" closed`)
   }
   syncViews()
+  return true
 }
 
 /** Recover a render-corrupted pane: kill it and re-spawn the same CLI session
@@ -7805,13 +7821,16 @@ let ptyLostFlushTimer: number | null = null
  * rebuildPaneViaResume rather than growing a second resume path.
  */
 function onPanePtyLost(paneId: string): void {
-  if (!normalizeAutoResumeOnReconnect(settingsGet(AUTO_RESUME_ON_RECONNECT_SETTING_KEY, true))) return
   // Decide visibility now rather than at flush time. The debounce window is
   // exactly when someone staring at a frozen app clicks around, and in the
   // sidebar/spotlight layouts onScreenPaneIds is only the focused pane — read
   // 1.2 s later it would resume whichever pane they had landed on instead of
   // the ones that actually lost their PTY.
-  if (!onScreenPaneIds.value.has(paneId)) return
+  if (!shouldQueuePtyLostResume({
+    autoResume: normalizeAutoResumeOnReconnect(settingsGet(AUTO_RESUME_ON_RECONNECT_SETTING_KEY, true)),
+    onScreenPaneIds: onScreenPaneIds.value,
+    paneId,
+  })) return
   pendingPtyLostPanes.add(paneId)
   if (ptyLostFlushTimer !== null) window.clearTimeout(ptyLostFlushTimer)
   ptyLostFlushTimer = window.setTimeout(() => { void flushPtyLostResumes() }, PTY_LOST_BATCH_MS)
@@ -8065,7 +8084,8 @@ async function rebuildPaneViaResume(
     // Preserve layout order: keep the old pane as a dummy to avoid layout
     // reflow, then swap the replacement pane into its slot.
     if (explicitPin) accountFollow.remove(paneId)
-    await onKill(paneId, { markRemoved: false, force: true, keepInList: true })
+    // No replacement unless the backend proved the old terminal settled (onKill surfaces why).
+    if (!(await onKill(paneId, { markRemoved: false, force: true, keepInList: true }))) return 'probe-failed'
     const newId = await spawnPane({
       agentKey: snap.agentKey,
       customName: snap.customName,
@@ -8706,7 +8726,7 @@ async function rebuildPaneClean(paneId: string): Promise<void> {
   }
   for (const key of lockKeys) rebuildingPanes.add(key)
   try {
-    await onKill(paneId, { markRemoved: false, force: true, keepInList: true })
+    if (!(await onKill(paneId, { markRemoved: false, force: true, keepInList: true }))) return
     const newId = await spawnPane({
       agentKey: snap.agentKey,
       customName: snap.customName,
@@ -9901,7 +9921,10 @@ registerCommand('ui.pane.close', async (args) => {
         childCount: panes.value.filter((p) => p.spawnedBy === paneId).length,
       })
     : []
-  await onKill(paneId)
+  // A close whose terminal was not proven settled keeps the pane: the caller is told, not shown success.
+  if (!(await onKill(paneId))) {
+    throw new Error(`ui.pane.close: pane ${paneId} was kept — its terminal could not be proven closed`)
+  }
   return advisories.length ? { advisories } : {}
 })
 registerCommand('ui.pane.focus', (args) => {
@@ -12430,7 +12453,8 @@ async function onPipelineRestart(payload: { task: string; workspacePath: string;
   activeQuestion.value = null
   // Kill any pipeline-origin panes still hanging around so we get a clean grid.
   for (const p of [...panes.value]) {
-    if (p.origin === 'pipeline') await onKill(p.id, { markRemoved: false })
+    // A pane whose terminal was not proven settled stays, and the restart does not start over it.
+    if (p.origin === 'pipeline' && !(await onKill(p.id, { markRemoved: false }))) return
   }
   pipelineLog(
     payload.fromNodeId
@@ -13036,7 +13060,9 @@ async function activateStage(index: number): Promise<void> {
     // never muted. Cleared here, while the pane is still in the list, because
     // onKill itself never touches the persisted flag.
     for (const paneId of unrealizedPaneIds) persistPaneMuted(paneId, false)
-    await Promise.all(unrealizedPaneIds.map((paneId) => onKill(paneId, { markRemoved: false })))
+    const retired = await Promise.all(unrealizedPaneIds.map((paneId) => onKill(paneId, { markRemoved: false })))
+    // The slots are refilled below: never over a placeholder whose terminal was not proven settled.
+    if (retired.includes(false)) return
   }
 
   // Reset completion tracker in case it was partially consumed
@@ -16858,7 +16884,8 @@ async function reclaimIdlePane(paneId: string): Promise<boolean> {
   // keepInList: true — the pane keeps its seat, name and group.
   // force: false — a graceful signal lets the CLI finish writing its transcript,
   // which is the thing the resume depends on.
-  await onKill(paneId, { markRemoved: false, keepInList: true, force: false })
+  // Its terminal not proven settled: the pane stays as it is.
+  if (!(await onKill(paneId, { markRemoved: false, keepInList: true, force: false }))) return false
   if (histEntry && !alreadyRemoved) histEntry.removedAt = undefined
   // onKill leaves the pane object in place; turn it back into the placeholder
   // the cold-restore path builds.
@@ -18760,11 +18787,16 @@ async function closeWorkspace(path: string): Promise<void> {
       //
       // force stays at its default, unlike below: nothing offers to resume a
       // slot whose run is over, so there is no transcript worth waiting for.
-      await onKill(pane.id, { markRemoved: false })
-      await sendQuiet<ProjectPayload>('pipeline.slot_unspawn_by_pane', {
+      // The first pane not proven settled stops the close: it and the rest stay open.
+      if (!(await onKill(pane.id, { markRemoved: false }))) return
+      const slotRetired = await sendQuiet<ProjectPayload>('pipeline.slot_unspawn_by_pane', {
         workspace_path: pane.workspacePath,
         pane_id: pane.id,
-      })
+      }, PANE_RELEASE_TIMEOUT_MS)
+      if (!slotRetired) {
+        notifyRestore.toast(i18n.global.t('pane.terminal.rebuild-probe-failed'), { type: 'error' })
+        return
+      }
       continue
     }
     // onKill drops the persisted handle, and the restore reads it back as the
@@ -18779,15 +18811,10 @@ async function closeWorkspace(path: string): Promise<void> {
     // currentWorkspace watch empties it on every switch), and this loop always
     // runs against another one — the close switches away first. onKill's
     // removedAt stamp therefore never finds an entry to set.
-    await onKill(pane.id, { markRemoved: false, force: false })
+    // onKill settles the pane through the backend (its release reaches a pane that never
+    // realized, and a process a failed kill left up); not proven ⇒ the close stops here.
+    if (!(await onKill(pane.id, { markRemoved: false, force: false }))) return
     if (messagingName) persistMessagingName(pane.id, messagingName)
-    // onKill can only kill through the pane's own terminal ref: a pane that
-    // never realized has none, and a kill that failed leaves the process up.
-    // The unspawn this no longer sends is what used to sweep both, so the
-    // sweep is asked for on its own. A kill that worked closes the session
-    // before it answers, so this then finds nothing — it cannot turn the
-    // graceful signal above into a SIGKILL.
-    await sendQuiet<{ ok: boolean }>('manual_pane.release_pty', { pane_id: pane.id })
   }
   workspaceOrder.value = workspaceOrder.value.filter((w) => normWs(w) !== normWs(path))
   persistExtraWorkspaces()

@@ -56,7 +56,7 @@ import type {
   TerminalAgentProfileResolver,
   WrappedLineGroup,
 } from '@navide/plugin-ui'
-import type { TerminalDockPort, TerminalInputOptions, TerminalSpawnOptions } from '../ports/terminalDock'
+import type { TerminalCreateRequest, TerminalDockPort, TerminalInputOptions, TerminalSpawnOptions } from '../ports/terminalDock'
 
 export { encodeShiftEnter }
 export type { TerminalAgentProfile, TerminalAgentProfileResolver }
@@ -505,7 +505,8 @@ interface UseTerminalOptions {
    *  every PTY, and the ownerless janitor eventually reaps the rest. Reported
    *  rather than handled here because resuming is the owner's job: only App
    *  knows the agent, the session id, and how to build the vendor's resume
-   *  command. */
+   *  command. Also reported when the Agent CLI Runtime dies under a live
+   *  backend (`terminal.exit` with reason `runtime_lost`). */
   onPtyLostWhileDisconnected?: () => void
   /** A file picked from the ⌘-click picker that the host could not open.
    *  Reported rather than shown here, like onClipboardFailure. */
@@ -2436,6 +2437,10 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
       const color = crashState.open ? 31 : 33
       term.writeln(`\r\n\x1b[${color}m[session] ${error.value || formatTerminalExit(payload)}\x1b[0m`)
       cleanupSession()
+      // The Agent CLI Runtime died under a live backend: the PTY is as gone as
+      // after a backend restart, so hand the pane to the same conversation
+      // recovery owner. Nothing is sent to the backend from here.
+      if (payload.reason === 'runtime_lost') opts?.onPtyLostWhileDisconnected?.()
     })
   }
 
@@ -2611,38 +2616,164 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
   // pendingSpawn — which does not exist until this line.
   watch(displayStatus, onLeftUserPrompt)
   let activeCreateGeneration: string | null = null
-  let pendingCreateCancel: Promise<boolean> | null = null
-  const createCancelRequests = new Map<string, Promise<boolean>>()
+  let pendingCreateCancel: Promise<void> | null = null
 
   function newCreateGeneration(): string {
     return crypto.randomUUID()
   }
 
-  function requestCreateCancel(generation: string): Promise<boolean> {
+  // ── Ownership of a cancelled create ─────────────────────────────────────────
+  // A cancel's verdict lives in `payload.cancelled`, not in the envelope's `ok`:
+  // `{ok: true, payload: {cancelled: false}}` means the backend had already
+  // COMMITTED the create and its success (carrying the only terminal id) is on
+  // the wire. A verdict is evidence only about the connection it was answered
+  // on: an answer carries the epoch current when it ARRIVED (a request queued
+  // during a reconnect is dispatched on the next connection; a response can only
+  // arrive on the connection that is open), and a create remembers the epoch it
+  // was dispatched on, or none when it was queued while disconnected.
+  type CreateOutcome = { kind: 'term'; id: string } | { kind: 'refused' } | { kind: 'lost' }
+  interface CreateRecord {
+    epoch: number
+    request: TerminalCreateRequest
+    outcome: Promise<CreateOutcome>
+    resolve: (outcome: CreateOutcome) => void
+  }
+  type CancelAnswer = { epoch: number; ok: boolean; verdict: 'cancelled' | 'committed' | 'unresolved' }
+  let connectionEpoch = 0
+  watch(() => terminalPort.status.value, (now, before) => {
+    if (now === 'connected' && before !== 'connected') connectionEpoch += 1
+  }, { flush: 'sync' })
+  const createRecords = new Map<string, CreateRecord>()
+  const createCancelRequests = new Map<string, Promise<CancelAnswer>>()
+  const createSettlements = new Map<string, Promise<void>>()
+  // Set when a create may have left a live terminal this pane cannot name or
+  // close: no further create is sent from this pane (see fenceCreate).
+  let createFence: string | null = null
+
+  function recordCreate(generation: string, request: TerminalCreateRequest): CreateRecord {
+    let resolve!: (outcome: CreateOutcome) => void
+    let settled = false
+    const outcome = new Promise<CreateOutcome>((res) => { resolve = res })
+    const record: CreateRecord = {
+      epoch: terminalPort.status.value === 'connected' ? connectionEpoch : -1,
+      request,
+      outcome,
+      resolve: (value) => { if (!settled) { settled = true; resolve(value) } },
+    }
+    createRecords.set(generation, record)
+    return record
+  }
+
+  function requestCreateCancel(generation: string): Promise<CancelAnswer> {
     const existing = createCancelRequests.get(generation)
     if (existing) return existing
-    const request = terminalPort.cancelCreate(paneId, generation).then((response) => response.ok, () => false)
+    const request = terminalPort.cancelCreate(paneId, generation).then((response): CancelAnswer => {
+      const epoch = connectionEpoch
+      const cancelled = (response.payload as { cancelled?: unknown } | null | undefined)?.cancelled
+      if (!response.ok) return { epoch, ok: false, verdict: 'unresolved' }
+      return { epoch, ok: true, verdict: cancelled === true ? 'cancelled' : cancelled === false ? 'committed' : 'unresolved' }
+    }, (): CancelAnswer => ({ epoch: -1, ok: false, verdict: 'unresolved' }))
     createCancelRequests.set(generation, request)
     return request
   }
 
-  async function requireCreateCancel(request: Promise<boolean>): Promise<void> {
-    if (!await request) throw new Error('terminal create cancellation failed')
+  function fenceCreate(reason: string): never {
+    const message = `terminal create unresolved: ${reason}. This pane is fenced and will not start another `
+      + 'terminal itself; Rebuild or close it, which has the backend release (and verifiably clean) what it left.'
+    createFence = message
+    if (!isDisposed) {
+      status.value = 'error'
+      error.value = message
+      term.writeln(`\r\n\x1b[31m[error] ${message}\x1b[0m`)
+    }
+    throw new Error(message)
   }
 
-  /** Invalidate the current create locally, then wait for backend rollback. */
+  /** Close an adopted terminal through the existing identity-verified kill. */
+  async function closeAdoptedTerm(id: string): Promise<void> {
+    let reply: { ok?: unknown } | null = null
+    try {
+      reply = await terminalPort.kill(id, true) as { ok?: unknown }
+    } catch {
+      reply = null
+    }
+    if (!reply || reply.ok !== true) fenceCreate(`the cancelled create's terminal ${id} could not be verifiably closed`)
+  }
+
+  /** Resolve a cancelled (or failed) create's ownership. Resolves only when the target cannot be
+   *  running: never sent, a proof on the create's own connection, an error answer for the create,
+   *  or its adopted terminal closed by the verified kill. Otherwise fences the pane and throws. */
+  async function settleCreate(generation: string): Promise<void> {
+    const record = createRecords.get(generation)
+    const answer = await requestCreateCancel(generation)
+    if (!record) {
+      // Never sent (_doCreate refuses to send an invalidated generation): nothing to own; the
+      // acknowledged cancel only tombstones the generation on the backend, as before.
+      if (!answer.ok) throw new Error('terminal create cancellation failed')
+      return
+    }
+    if (answer.verdict === 'cancelled' && answer.epoch === record.epoch) {
+      // Proven on the create's own connection. A contradicting late success is still closed.
+      void record.outcome.then((outcome) => {
+        if (outcome.kind === 'term') void closeAdoptedTerm(outcome.id).catch(() => {})
+      })
+      return
+    }
+    const outcome = await record.outcome
+    if (outcome.kind === 'term') return closeAdoptedTerm(outcome.id)
+    if (outcome.kind === 'refused') return
+    // The response was lost. Only the create's own connection can still name the terminal: the
+    // backend answers a same-generation create of a committed transaction with its cached success.
+    if (connectionEpoch === record.epoch) {
+      let replay: Awaited<ReturnType<typeof terminalPort.create>> | null = null
+      try {
+        replay = await terminalPort.create(record.request, TERMINAL_CREATE_TIMEOUT_MS)
+      } catch {
+        replay = null
+      }
+      const id = replay?.ok ? replay.payload?.terminal_session_id : undefined
+      if (id) return closeAdoptedTerm(id)
+    }
+    fenceCreate('its response was lost and its terminal, if any, cannot be named')
+  }
+
+  function ensureCreateSettled(generation: string): Promise<void> {
+    const existing = createSettlements.get(generation)
+    if (existing) return existing
+    const settlement = settleCreate(generation)
+    createSettlements.set(generation, settlement)
+    return settlement
+  }
+
+  /** Invalidate the current create locally, then wait until its ownership is resolved. */
   async function cancelPendingCreate(): Promise<void> {
     const generation = activeCreateGeneration
     if (!generation) {
-      if (pendingCreateCancel) await requireCreateCancel(pendingCreateCancel)
+      if (pendingCreateCancel) await pendingCreateCancel
       return
     }
     activeCreateGeneration = null
     pendingSpawn.value = null
-    const request = requestCreateCancel(generation)
-    pendingCreateCancel = request
-    await requireCreateCancel(request)
-    if (pendingCreateCancel === request) pendingCreateCancel = null
+    const settlement = ensureCreateSettled(generation)
+    pendingCreateCancel = settlement
+    void settlement.catch(() => {}).finally(() => {
+      if (pendingCreateCancel === settlement) pendingCreateCancel = null
+    })
+    const answer = await requestCreateCancel(generation)
+    if (answer.verdict === 'unresolved' && createRecords.has(generation)) {
+      // No proof either way: report the failure now. The settlement keeps resolving ownership
+      // (adopting a late success, or fencing) and gates every later create from this pane.
+      throw new Error('terminal create cancellation failed')
+    }
+    await settlement
+  }
+
+  /** Before a new create: wait for every cancelled create's ownership, and refuse while fenced. */
+  async function awaitCreateOwnership(): Promise<void> {
+    for (const settlement of Array.from(createSettlements.values())) {
+      try { await settlement } catch { /* a failure fences; checked below */ }
+    }
+    if (createFence) throw new Error(createFence)
   }
 
   // Create the PTY for a parked spawn, but only when the container has a real,
@@ -2770,7 +2901,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
       if (activeCreateGeneration !== createGeneration || isDisposed) return
       stallReason.value = null  // past every silent exit — the create is going out
       createInFlight = true
-      const resp = await terminalPort.create({
+      const request: TerminalCreateRequest = {
         paneId,
         createGeneration,
         agentKey: opts.agentKey ?? null,
@@ -2790,12 +2921,22 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
         replacesTerminalId: replacesPtyId || null,
         quotaTransactionId: opts.quotaTransactionId,
         quotaOriginalPaneId: opts.quotaOriginalPaneId,
-      }, TERMINAL_CREATE_TIMEOUT_MS)
-      // A cancellation or replacement can land while the RPC is in flight.
-      // The backend cancellation owns rollback; a late result must never bind
-      // its PTY or overwrite the newer pane state.
+      }
+      const record = recordCreate(createGeneration, request)
+      let resp: Awaited<ReturnType<typeof terminalPort.create>>
+      try {
+        resp = await terminalPort.create(request, TERMINAL_CREATE_TIMEOUT_MS)
+      } catch (err) {
+        record.resolve({ kind: 'lost' })
+        throw err
+      }
+      const createdId = resp.ok ? resp.payload?.terminal_session_id : undefined
+      record.resolve(createdId ? { kind: 'term', id: createdId } : { kind: 'refused' })
+      // A cancellation or replacement can land while the RPC is in flight. A late
+      // result must never bind its PTY or overwrite the newer pane state; a late
+      // SUCCESS is adopted and closed by the create's settlement.
       if (isDisposed || activeCreateGeneration !== createGeneration) {
-        void requestCreateCancel(createGeneration)
+        void ensureCreateSettled(createGeneration).catch(() => {})
         return
       }
       if (!resp.ok || !resp.payload) {
@@ -2811,6 +2952,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
         return
       }
       activeCreateGeneration = null
+      createRecords.delete(createGeneration)
       startingStartedAt.value = null
       sessionId.value = resp.payload.terminal_session_id
       rememberSessionId(sessionId.value)  // enable reattach after a reload
@@ -2845,10 +2987,16 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
       // rejected: this pane never reached terminal.create at all.
       if (throttled && !slotHeld) stallReason.value = 'resume-queue-timeout'
       activeCreateGeneration = null
-      void requestCreateCancel(createGeneration)
       status.value = 'error'
       error.value = String((err as Error).message ?? err)
       term.writeln(`\r\n\x1b[31m[error] ${error.value}\x1b[0m`)
+      // A create that may have committed out of sight is resolved (or fenced) like a cancelled one;
+      // a later cancelPendingCreate waits for (and reports) that resolution.
+      const settlement = ensureCreateSettled(createGeneration)
+      pendingCreateCancel = settlement
+      void settlement.catch(() => {}).finally(() => {
+        if (pendingCreateCancel === settlement) pendingCreateCancel = null
+      })
     } finally {
       createInFlight = false
       if (slotHeld) releaseResumeSpawnSlot()
@@ -2960,9 +3108,11 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
   })
 
   async function spawn(opts: SpawnOptions): Promise<void> {
-    if (status.value === 'starting' || status.value === 'running') {
-      throw new Error('terminal already running')
-    }
+    const busy = (): boolean => status.value === 'starting' || status.value === 'running'
+    if (busy()) throw new Error('terminal already running')
+    // No replacement create while a cancelled create's terminal may still be live.
+    await awaitCreateOwnership()
+    if (busy()) throw new Error('terminal already running')
     isStopped.value = false
     runningLatched.value = false
     turnCompleteAt.value = 0

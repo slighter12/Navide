@@ -255,6 +255,7 @@ async function load(opts: Options = {}) {
       if (killOpts.keepInList !== true) {
         panes.value = panes.value.filter((p) => p.id !== paneId)
       }
+      return true  // onKill answers whether the pane was retired
     }),
     linearPipelineDag().dag,
   )
