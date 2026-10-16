@@ -10,6 +10,30 @@ import threading
 from urllib.parse import parse_qs, urlparse
 
 
+def claude_injection(extra: list[str], pane: str, root: Path) -> dict:
+    """Validate the owned launch flags the backend appends for Claude and report which were present.
+
+    Order is MCP config, optional managed-skills view directory, optional
+    convenience settings file; every path must stay inside the isolated root.
+    """
+    assert len(extra) >= 2 and extra[0] == "--mcp-config"
+    config = json.loads(extra[1])
+    endpoint = urlparse(config["mcpServers"]["navide"]["url"])
+    query = parse_qs(endpoint.query)
+    assert endpoint.hostname == "127.0.0.1" and query["pane"] == [pane] and query.get("t")
+    rest = extra[2:]
+    skills = bool(rest[:2]) and rest[0] == "--add-dir"
+    if skills:
+        assert Path(rest[1]).is_relative_to(root)
+        rest = rest[2:]
+    settings = bool(rest[:2]) and rest[0] == "--settings"
+    if settings:
+        assert Path(rest[1]).is_relative_to(root)
+        rest = rest[2:]
+    assert not rest, "unexpected injected Claude flags"
+    return {"mcp": True, "skills": bool(skills), "settings": settings}
+
+
 # All inputs are synthetic. This process deliberately imports no application
 # modules: readers, persistence and lifecycle remain in the actual backend.
 def main():
@@ -50,14 +74,7 @@ def main():
     injected = {}
     extra = sys.argv[7:]
     if vendor == "claude":
-        assert len(extra) in (2, 4) and extra[0] == "--mcp-config"
-        config = json.loads(extra[1])
-        endpoint = urlparse(config["mcpServers"]["navide"]["url"])
-        query = parse_qs(endpoint.query)
-        assert endpoint.hostname == "127.0.0.1" and query["pane"] == [pane] and query.get("t")
-        if len(extra) == 4:
-            assert extra[2] == "--add-dir" and Path(extra[3]).is_relative_to(root)
-        injected = {"mcp": True, "skills": len(extra) == 4}
+        injected = claude_injection(extra, pane, root)
     elif vendor == "opencode":
         assert len(extra) == 4 and extra[0] == "--port" and extra[2:] == ["--hostname", "127.0.0.1"]
         assert 0 < int(extra[1]) < 65536

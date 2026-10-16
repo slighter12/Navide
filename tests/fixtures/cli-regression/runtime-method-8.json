@@ -1,0 +1,15 @@
+{
+  "version": 8,
+  "methodRevision": "matched-method-8",
+  "basedOn": "correction-r2-method-6",
+  "workloadFile": "runtime-workload.json",
+  "workloadSha256": "5ccb73dbd75d39c66c3f2df70335c4eb65baef8bf88659d9ef47a4e8517b000c",
+  "modes": ["python", "rust-shell"],
+  "additions": [
+    "runtime mode and sidecar component labelling",
+    "empty_started_idle phase after kill",
+    "derived cold_to_first_usable_ms",
+    "repeat-major interleaved arm order",
+    "per-trial runtime proof bundle"
+  ]
+}

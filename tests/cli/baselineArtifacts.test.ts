@@ -56,3 +56,33 @@ it.each(['identity', 'timeout'])('persists an actual %s rescue failure without p
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it('copies the redacted sidecar receipts of a Rust-arm trial next to the trial receipt', () => {
+  const root = mkdtempSync(join(tmpdir(), 'baseline-receipts-test-'))
+  try {
+    writeFileSync(join(root, 'runtime-receipts.jsonl'), '{"event":"ready","note":"Authorization: Bearer SYNTHETIC_AUTH_SENTINEL"}\n')
+    saveTrialArtifacts(root, join(root, 'trial'), { passed: true, failure: null }, '')
+    const copied = readFileSync(join(root, 'trial-runtime-receipts.jsonl'), 'utf8')
+    expect(copied).toContain('"event":"ready"')
+    expect(copied).not.toContain('SYNTHETIC_AUTH_SENTINEL')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('records a harness rescue structurally and invalidates the evidence', () => {
+  const root = mkdtempSync(join(tmpdir(), 'baseline-rescue-test-'))
+  try {
+    const receipt: { passed: boolean; failure: string | null; evidenceValid?: boolean; harnessRescued?: boolean } = { passed: true, failure: null, evidenceValid: true }
+    saveTrialArtifacts(root, join(root, 'trial'), receipt, '', () => undefined)
+    expect(receipt.harnessRescued).toBe(true)
+    expect(receipt.evidenceValid).toBe(false)
+    expect(JSON.parse(readFileSync(join(root, 'trial.json'), 'utf8'))).toMatchObject({ harnessRescued: true, evidenceValid: false, passed: false })
+    const clean: { passed: boolean; failure: string | null; evidenceValid?: boolean; harnessRescued?: boolean } = { passed: true, failure: null, evidenceValid: true }
+    saveTrialArtifacts(root, join(root, 'clean'), clean, '')
+    expect(clean.harnessRescued).toBeUndefined()
+    expect(clean.evidenceValid).toBe(true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
