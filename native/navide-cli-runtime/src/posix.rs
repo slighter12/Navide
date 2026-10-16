@@ -42,11 +42,140 @@ struct Registry {
     reserved: std::collections::HashSet<String>,
     workers: HashMap<String, mpsc::SyncSender<Value>>,
     settled: VecDeque<String>,
-    cancelled: std::collections::HashSet<String>,
+    /// One cancellation state machine per create request still without a final answer or
+    /// still published: the only source of a cancel verdict (see `CreatePhase`).
+    creates: HashMap<String, CreatePhase>,
     last_request: u64,
     worker_count: Arc<AtomicUsize>,
 }
 type Sessions = Arc<Mutex<Registry>>;
+
+/// The verdict of a native `cancel` for a create request.
+#[derive(Debug, PartialEq)]
+enum CancelVerdict {
+    /// The ownership gate has not opened and will refuse: the target can never execute.
+    Prevented,
+    /// The gate opened (or an ungated spawn began): the target may be running.
+    Released,
+    /// The created session is published under this id.
+    Registered(String),
+    /// The create's answer was already produced and its record is gone.
+    Unknown,
+}
+
+/// Where a create stands with respect to its target's first instruction. Every transition and
+/// every verdict happens under the registry lock, so a verdict can never describe a state the
+/// create has already left.
+#[derive(Debug, PartialEq)]
+enum CreatePhase {
+    /// Read and admitted, ownership gate still closed.
+    Queued,
+    /// A cancel won before the release: admission or the gate will refuse.
+    Cancelled,
+    /// The gate opened (or an ungated spawn began); `true` once a cancel arrived.
+    Released(bool),
+    /// Published as this session id.
+    Registered(String),
+}
+
+/// At most this many creates may be cancelled before their request is read.
+const EARLY_CANCELS: usize = 256;
+
+impl Registry {
+    /// The stdin loop routed a create request to its worker.
+    fn note_create(&mut self, request: &str) {
+        self.creates
+            .entry(request.to_owned())
+            .or_insert(CreatePhase::Queued);
+    }
+    /// The create worker admits the request (before any spawn). An ungated create can run
+    /// from here on, so it is released at admission.
+    fn admit_create(&mut self, request: &str, gated: bool) -> Result<(), &'static str> {
+        if self.creates.get(request) == Some(&CreatePhase::Cancelled) {
+            self.creates.remove(request);
+            return Err("CREATE_CANCELLED");
+        }
+        let phase = if gated {
+            CreatePhase::Queued
+        } else {
+            CreatePhase::Released(false)
+        };
+        self.creates.insert(request.to_owned(), phase);
+        Ok(())
+    }
+    /// Under the caller's lock, immediately before the gate byte is written.
+    fn release_gate(&mut self, request: &str) -> bool {
+        if self.creates.get(request) == Some(&CreatePhase::Cancelled) {
+            self.creates.remove(request);
+            return false;
+        }
+        self.creates
+            .insert(request.to_owned(), CreatePhase::Released(false));
+        true
+    }
+    /// The gate byte could not be written after `release_gate` allowed it: the target is still
+    /// gated and its spawn is about to fail.
+    fn release_failed(&mut self, request: &str) {
+        self.creates.insert(request.to_owned(), CreatePhase::Queued);
+    }
+    /// `spawn` returned; the phase stays `Released` until the session is published.
+    fn spawn_returned(&mut self, _request: &str) {}
+    /// The create failed or was refused after admission: its answer is an error.
+    fn create_failed(&mut self, request: &str) {
+        self.creates.remove(request);
+    }
+    /// Publish the created session; true when a cancel arrived after the release.
+    fn register_create(&mut self, request: &str, session_id: &str) -> bool {
+        let cancel = matches!(self.creates.get(request), Some(CreatePhase::Released(true)));
+        self.creates.insert(
+            request.to_owned(),
+            CreatePhase::Registered(session_id.to_owned()),
+        );
+        cancel
+    }
+    /// A settled session leaves the registry, and with it its create record.
+    fn evict_create(&mut self, session_id: &str) {
+        self.creates
+            .retain(|_, phase| *phase != CreatePhase::Registered(session_id.to_owned()));
+    }
+    /// The single cancellation verdict for `target`.
+    fn cancel_verdict(&mut self, target: &str) -> Result<CancelVerdict, &'static str> {
+        Ok(match self.creates.get_mut(target) {
+            Some(phase @ CreatePhase::Queued) => {
+                *phase = CreatePhase::Cancelled;
+                CancelVerdict::Prevented
+            }
+            Some(CreatePhase::Cancelled) => CancelVerdict::Prevented,
+            Some(CreatePhase::Released(cancel)) => {
+                *cancel = true;
+                CancelVerdict::Released
+            }
+            Some(CreatePhase::Registered(sid)) => CancelVerdict::Registered(sid.clone()),
+            None => {
+                // A create not read yet can still be refused at admission; one whose answer
+                // was already produced has no record and is never "prevented".
+                let unread = target
+                    .strip_prefix('r')
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .is_some_and(|n| n > self.last_request);
+                if !unread {
+                    return Ok(CancelVerdict::Unknown);
+                }
+                let early = self
+                    .creates
+                    .values()
+                    .filter(|p| **p == CreatePhase::Cancelled)
+                    .count();
+                if early >= EARLY_CANCELS {
+                    return Err("cancel admission full");
+                }
+                self.creates
+                    .insert(target.to_owned(), CreatePhase::Cancelled);
+                CancelVerdict::Prevented
+            }
+        })
+    }
+}
 
 struct Queue {
     control: VecDeque<Value>,
@@ -57,6 +186,9 @@ struct Queue {
 }
 struct Wire {
     generation: String,
+    /// Durable ownership journal (`--ownership-journal`), when the owner asked for one.
+    journal: Option<std::path::PathBuf>,
+    owner_pid: u32,
     queue: Mutex<Queue>,
     changed: Condvar,
 }
@@ -153,7 +285,6 @@ impl Wire {
 struct Session {
     id: String,
     generation: String,
-    create_id: String,
     pane: String,
     workspace: String,
     agent_key: String,
@@ -357,6 +488,20 @@ fn retain_owned(session: &mut Session, table: &Table) {
         session.descendants.extend(descendants(table, pid));
     }
 }
+/// Append one identity record and fsync it. The line is a single `write`, so an
+/// abrupt death of this process leaves either the whole line or none of it.
+fn journal_append(path: &std::path::Path, record: &Value) -> io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut line = serde_json::to_vec(record).map_err(io::Error::other)?;
+    line.push(b'\n');
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(&line)?;
+    file.sync_all()
+}
 fn identity(pid: i32, entry: &(i32, i32, String)) -> Value {
     json!({"pid":pid,"pgid":entry.1,"start_kind":"posix-lstart","start_value":entry.2})
 }
@@ -385,7 +530,98 @@ fn dimension(value: &Value, key: &str) -> io::Result<u16> {
         .and_then(|n| u16::try_from(n).ok())
         .ok_or_else(|| io::Error::other(format!("invalid {key}")))
 }
-fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
+static SPAWN_LOCK: Mutex<()> = Mutex::new(());
+
+fn cloexec_pipe() -> io::Result<(i32, i32)> {
+    let mut fds = [0i32; 2];
+    // SAFETY: valid two-element output array.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    for fd in fds {
+        // SAFETY: descriptors just created and owned here.
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+            let error = io::Error::last_os_error();
+            close_fds(&fds);
+            return Err(error);
+        }
+    }
+    Ok((fds[0], fds[1]))
+}
+fn close_fds(fds: &[i32]) {
+    for &fd in fds {
+        if fd >= 0 {
+            // SAFETY: closing descriptors owned by this call path; errors are not actionable.
+            unsafe { libc::close(fd) };
+        }
+    }
+}
+/// Owner half of the ownership gate: learn the gated child's pid, take its identity, make it
+/// durable, and only then release the child. Any failure returns before the release.
+struct GateContext<'a> {
+    journal: &'a std::path::Path,
+    wire: &'a Wire,
+    argv0: &'a str,
+    id: &'a str,
+    generation: &'a str,
+    sessions: &'a Sessions,
+    request: &'a str,
+}
+fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Table, Value)> {
+    let GateContext {
+        journal,
+        wire,
+        argv0,
+        id,
+        generation,
+        sessions,
+        request,
+    } = *ctx;
+    let mut buffer = [0u8; 4];
+    let mut got = 0;
+    while got < 4 {
+        // SAFETY: valid owned descriptor and in-bounds buffer slice.
+        let n = unsafe { libc::read(report_r, buffer[got..].as_mut_ptr().cast(), 4 - got) };
+        if n < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+            continue;
+        }
+        if n <= 0 {
+            return Err(io::Error::other(
+                "OWNERSHIP_JOURNAL_FAILED: child never reported",
+            ));
+        }
+        got += n as usize;
+    }
+    let pid = i32::from_ne_bytes(buffer);
+    let table = snapshot(Some(pid), &Table::new())
+        .map_err(|_| io::Error::other("OWNERSHIP_JOURNAL_FAILED: identity unavailable"))?;
+    let root = table
+        .get(&pid)
+        .map(|entry| identity(pid, entry))
+        .filter(|root| root["start_value"].as_str().is_some_and(|v| !v.is_empty()))
+        .ok_or_else(|| io::Error::other("OWNERSHIP_JOURNAL_FAILED: identity unavailable"))?;
+    let record = json!({"journal":1,"pid":pid,"pgid":root["pgid"],"start_kind":root["start_kind"],
+        "start_value":root["start_value"],"argv0":argv0,"session_id":id,"session_generation":generation,
+        "runtime_generation":wire.generation,"owner_pid":wire.owner_pid});
+    journal_append(journal, &record).map_err(|error| {
+        io::Error::other(format!("OWNERSHIP_JOURNAL_FAILED: {}", error.kind() as u32))
+    })?;
+    // The cancellation check and the release are one step under the registry lock: a cancel
+    // either lands before it (the target then never executes; the answer to the cancel is
+    // "prevented") or after it (answered "released": the target may already be running).
+    let mut registry = sessions.lock().unwrap_or_else(|e| e.into_inner());
+    if !registry.release_gate(request) {
+        return Err(io::Error::other("CREATE_CANCELLED"));
+    }
+    // SAFETY: valid owned descriptor, one-byte static buffer.
+    if unsafe { libc::write(gate_w, b"G".as_ptr().cast(), 1) } != 1 {
+        registry.release_failed(request);
+        return Err(io::Error::other("OWNERSHIP_JOURNAL_FAILED: gate release"));
+    }
+    drop(registry);
+    Ok((table, root))
+}
+fn spawn(args: &Value, wire: &Wire, request: &str, sessions: &Sessions) -> io::Result<Session> {
     let id = text(args, "session_id")?.to_owned();
     let generation = text(args, "session_generation")?.to_owned();
     let pane = text(args, "pane_id")?.to_owned();
@@ -455,9 +691,30 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
         .stdin(Stdio::from(slave.try_clone()?))
         .stdout(Stdio::from(slave.try_clone()?))
         .stderr(Stdio::from(slave));
-    // SAFETY: only async-signal-safe native calls between fork and exec; no locks/allocations.
+    // Ownership gate (only when the owner asked for a journal): the root must not execute its
+    // target before its identity is durable. The forked child reports its pid and then BLOCKS on a
+    // gate pipe before exec; the owner records the identity, appends+fsyncs the journal and only
+    // then releases the gate. EOF on the gate (owner dead, or journal refused) makes the child
+    // fail its own spawn, so no target ever runs unnamed. Pipe creation and the spawn are
+    // serialised process-wide so no concurrent fork can inherit the gate's write end (which would
+    // keep the gate open after the owner's death).
+    let gated = wire.journal.is_some();
+    let _spawn_lock = gated.then(|| SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
+    let (mut report_r, mut report_w, mut gate_r, mut gate_w) = (-1, -1, -1, -1);
+    if gated {
+        (report_r, report_w) = cloexec_pipe()?;
+        match cloexec_pipe() {
+            Ok(pair) => (gate_r, gate_w) = pair,
+            Err(error) => {
+                close_fds(&[report_r, report_w]);
+                return Err(error);
+            }
+        }
+    }
+    // SAFETY: only async-signal-safe native calls between fork and exec (setsid, signal, ioctl,
+    // close, getpid, write, read on plain integers); no locks, no allocation, no std I/O.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -465,25 +722,94 @@ fn spawn(args: &Value, wire: &Wire, request: &str) -> io::Result<Session> {
             libc::signal(libc::SIGXFSZ, libc::SIG_DFL);
             // Preserve baseline's best-effort controlling-terminal claim.
             libc::ioctl(0, libc::TIOCSCTTY as _, 0);
+            if report_w >= 0 {
+                // Only the owner may hold the gate's write end: drop this fork's copies.
+                libc::close(gate_w);
+                libc::close(report_r);
+                let pid = libc::getpid();
+                if libc::write(report_w, (&pid as *const i32).cast(), 4) != 4 {
+                    return Err(io::Error::last_os_error());
+                }
+                let mut byte = 0u8;
+                loop {
+                    let n = libc::read(gate_r, (&mut byte as *mut u8).cast(), 1);
+                    if n == 1 && byte == b'G' {
+                        break;
+                    }
+                    if n < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                        continue;
+                    }
+                    // EOF or anything else: the owner is gone or refused. Never exec.
+                    return Err(io::Error::from_raw_os_error(libc::ECANCELED));
+                }
+            }
             Ok(())
         });
     }
-    let mut child = command.spawn()?;
-    let pid = child.id() as i32;
-    let table = snapshot(Some(pid), &Table::new()).unwrap_or_default();
-    let root = if let Some(entry) = table.get(&pid) {
-        identity(pid, entry)
-    } else if let Some(status) = child.try_wait()? {
-        json!({"pid":pid,"pgid":pid,"start_kind":"posix-lstart","start_value":null,"early_status":status.code().or(status.signal().map(|n| -n))})
+    let (child, table, root) = if gated {
+        let journal = wire.journal.as_deref().unwrap_or(std::path::Path::new(""));
+        let (id_ref, generation_ref, argv0) = (&id, &generation, &argv[0]);
+        let (spawned, verdict) = thread::scope(|scope| {
+            let watcher = scope.spawn(move || {
+                // Owner side of the gate: every path below ends by closing the gate's write end
+                // (released only by the explicit `G`), so a refusal or panic means EOF.
+                let verdict = gate_owner(
+                    report_r,
+                    gate_w,
+                    &GateContext {
+                        journal,
+                        wire,
+                        argv0,
+                        id: id_ref,
+                        generation: generation_ref,
+                        sessions,
+                        request,
+                    },
+                );
+                close_fds(&[report_r, gate_w]);
+                verdict
+            });
+            let spawned = command.spawn();
+            // The parent's copies of the child-side ends are no longer needed; closing the report
+            // write end also lets the watcher observe a child that died before reporting.
+            close_fds(&[report_w, gate_r]);
+            (spawned, watcher.join())
+        });
+        let verdict = match verdict {
+            Ok(verdict) => verdict,
+            Err(_) => Err(io::Error::other(
+                "OWNERSHIP_JOURNAL_FAILED: watcher panicked",
+            )),
+        };
+        match (spawned, verdict) {
+            (Ok(child), Ok((table, root))) => (child, table, root),
+            (Ok(mut child), Err(error)) => {
+                // Cannot happen (the gate is released only after success); stay safe regardless.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+            (Err(_), Err(error)) => return Err(error),
+            (Err(error), Ok(_)) => return Err(error), // exec failed after a durable record: stale row only
+        }
     } else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(io::Error::other("OWNERSHIP_UNVERIFIED"));
+        let mut child = command.spawn()?;
+        let pid = child.id() as i32;
+        let table = snapshot(Some(pid), &Table::new()).unwrap_or_default();
+        let root = if let Some(entry) = table.get(&pid) {
+            identity(pid, entry)
+        } else if let Some(status) = child.try_wait()? {
+            json!({"pid":pid,"pgid":pid,"start_kind":"posix-lstart","start_value":null,"early_status":status.code().or(status.signal().map(|n| -n))})
+        } else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::other("OWNERSHIP_UNVERIFIED"));
+        };
+        (child, table, root)
     };
     let mut session = Session {
         id,
         generation,
-        create_id: request.into(),
         pane,
         workspace,
         agent_key: args["agent_key"].as_str().unwrap_or("").to_owned(),
@@ -712,6 +1038,7 @@ fn session_loop(session_arc: Arc<Mutex<Session>>, wire: Arc<Wire>, sessions: Ses
                 let id = registry.settled.pop_front().unwrap();
                 registry.sessions.remove(&id);
                 registry.reserved.remove(&id);
+                registry.evict_create(&id);
             }
             return;
         }
@@ -830,58 +1157,61 @@ fn execute(request: &Value, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result
     }
     if op == "cancel" {
         let target = text(args, "target_id")?;
-        let candidates: Vec<_> = sessions
-            .lock()
-            .unwrap()
-            .sessions
-            .values()
-            .cloned()
-            .collect();
-        let session = candidates
-            .into_iter()
-            .find(|s| s.lock().unwrap().create_id == target);
-        if let Some(session) = session {
-            let mut session = session.lock().unwrap();
-            if session.active {
-                return Ok(json!({"state":"settled"}));
-            }
-            session.closing = Some(true);
-            session.active = true;
-            return Ok(json!({"state":"cleanup-started"}));
-        }
+        // One lock: the verdict and the state it describes cannot diverge.
         let mut registry = sessions.lock().unwrap();
-        // At most admitted create cancellations, not a lifetime request-ID history.
-        if registry.cancelled.len() >= 256 {
-            return Err(io::Error::other("cancel admission full"));
+        let session = match registry.cancel_verdict(target).map_err(io::Error::other)? {
+            CancelVerdict::Prevented => return Ok(json!({"state":"prevented"})),
+            CancelVerdict::Released => return Ok(json!({"state":"released"})),
+            CancelVerdict::Unknown => return Ok(json!({"state":"unknown"})),
+            CancelVerdict::Registered(sid) => registry.sessions.get(&sid).cloned(),
+        };
+        drop(registry);
+        let Some(session) = session else {
+            return Ok(json!({"state":"unknown"}));
+        };
+        let mut session = session.lock().unwrap();
+        if session.active {
+            return Ok(json!({"state":"settled"}));
         }
-        registry.cancelled.insert(target.into());
-        return Ok(json!({"state":"prevented"}));
+        session.closing = Some(true);
+        session.active = true;
+        return Ok(json!({"state":"cleanup-started"}));
     }
     if op == "create" {
         let id = text(args, "session_id")?.to_owned();
+        let request_id = text(request, "id")?;
+        let gated = wire.journal.is_some();
         let mut all = sessions.lock().unwrap();
         if !all.reserved.insert(id.clone()) {
+            all.create_failed(request_id);
             return Err(io::Error::other("duplicate create"));
         }
-        let request_id = text(request, "id")?;
-        if all.cancelled.remove(request_id) {
-            return Err(io::Error::other("CREATE_CANCELLED"));
+        if let Err(code) = all.admit_create(request_id, gated) {
+            all.create_failed(request_id);
+            return Err(io::Error::other(code));
         }
         drop(all);
         // Reservation is retained; native spawn/probes never hold the global registry lock.
-        let mut session = spawn(args, wire, request_id)?;
-        if sessions.lock().unwrap().cancelled.remove(request_id) {
+        let spawned = spawn(args, wire, request_id, sessions);
+        sessions.lock().unwrap().spawn_returned(request_id);
+        let mut session = match spawned {
+            Ok(session) => session,
+            Err(error) => {
+                sessions.lock().unwrap().create_failed(request_id);
+                return Err(error);
+            }
+        };
+        let result = json!({"session_id":session.id,"session_generation":session.generation,
+            "state":if session.root["early_status"].is_null() {"owned"} else {"exited"},"root":session.root,"exit":null});
+        // Publication and the cancellation check are one critical section.
+        let mut registry = sessions.lock().unwrap();
+        if registry.register_create(request_id, &id) {
             session.closing = Some(true);
             session.active = true;
         }
-        let result = json!({"session_id":session.id,"session_generation":session.generation,
-            "state":if session.root["early_status"].is_null() {"owned"} else {"exited"},"root":session.root,"exit":null});
         let session = Arc::new(Mutex::new(session));
-        sessions
-            .lock()
-            .unwrap()
-            .sessions
-            .insert(id, session.clone());
+        registry.sessions.insert(id, session.clone());
+        drop(registry);
         let wire = wire.clone();
         let sessions = sessions.clone();
         thread::spawn(move || session_loop(session, wire, sessions));
@@ -1044,6 +1374,10 @@ pub fn run() -> io::Result<()> {
         option("--runtime-generation").ok_or_else(|| io::Error::other("generation required"))?;
     let wire = Arc::new(Wire {
         generation,
+        journal: option("--ownership-journal").map(std::path::PathBuf::from),
+        owner_pid: option("--owner-pid")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0),
         queue: Mutex::new(Queue {
             control: VecDeque::new(),
             output: HashMap::new(),
@@ -1065,7 +1399,7 @@ pub fn run() -> io::Result<()> {
     #[allow(unused_mut)]
     let mut ready = json!({"event":"ready","protocol":option("--ready-protocol").and_then(|s|s.parse::<u32>().ok()).unwrap_or(1),
         "pid":std::process::id(),"owner_pid":option("--owner-pid").and_then(|s|s.parse::<u32>().ok()).unwrap_or(0),
-        "runtime":"navide-cli-runtime","version":env!("CARGO_PKG_VERSION"),"pty_backend":"posix","platform":std::env::consts::OS,"arch":std::env::consts::ARCH});
+        "runtime":"navide-cli-runtime","version":env!("CARGO_PKG_VERSION"),"pty_backend":"posix","ownership_gate":wire.journal.is_some(),"platform":std::env::consts::OS,"arch":std::env::consts::ARCH});
     #[cfg(target_os = "macos")]
     match darwin::self_process() {
         Ok(observation) => ready["self_process"] = observation,
@@ -1129,6 +1463,11 @@ pub fn run() -> io::Result<()> {
         };
         let sender = if let Some(sid) = sid {
             let mut registry = sessions.lock().unwrap();
+            if request["op"] == "create" {
+                if let Some(request_id) = request["id"].as_str() {
+                    registry.note_create(request_id);
+                }
+            }
             if request["op"] == "create"
                 && !registry.workers.contains_key(sid)
                 && !registry.sessions.contains_key(sid)
@@ -1242,4 +1581,141 @@ pub fn run() -> io::Result<()> {
         return Err(error);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod ownership_journal_tests {
+    use super::*;
+
+    #[test]
+    fn appended_records_are_whole_lines_that_survive_reopening() {
+        let dir = std::env::temp_dir().join(format!("navide-journal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("g.jsonl");
+        let _ = std::fs::remove_file(&path);
+        journal_append(&path, &json!({"journal":1,"pid":10,"start_value":"a"})).unwrap();
+        journal_append(&path, &json!({"journal":1,"pid":11,"start_value":"b"})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1]["pid"], 11);
+        assert!(text.ends_with('\n'));
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unwritable_journal_is_an_error_not_silence() {
+        let missing = std::path::Path::new("/nonexistent-navide-dir/g.jsonl");
+        assert!(journal_append(missing, &json!({"journal":1})).is_err());
+    }
+}
+
+#[cfg(test)]
+mod cancel_state_tests {
+    use super::*;
+
+    fn queued(gated: bool) -> Registry {
+        // As the stdin loop does: the request counter is recorded before the create is routed.
+        let mut registry = Registry {
+            last_request: 7,
+            ..Registry::default()
+        };
+        registry.note_create("r7");
+        registry.admit_create("r7", gated).unwrap();
+        registry
+    }
+
+    #[test]
+    fn a_cancel_before_release_is_prevented_and_the_gate_then_refuses() {
+        let mut registry = queued(true);
+        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Prevented));
+        assert!(
+            !registry.release_gate("r7"),
+            "the gate must refuse a prevented create"
+        );
+    }
+
+    #[test]
+    fn a_cancel_between_release_and_spawn_return_is_released() {
+        let mut registry = queued(true);
+        assert!(registry.release_gate("r7"));
+        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Released));
+    }
+
+    #[test]
+    fn a_cancel_after_spawn_returned_but_before_registration_is_never_prevented() {
+        // N1 window 1: the gate opened, `spawn` returned, the session is not yet published.
+        let mut registry = queued(true);
+        assert!(registry.release_gate("r7"));
+        registry.spawn_returned("r7");
+        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Released));
+        assert!(
+            registry.register_create("r7", "s7"),
+            "the late cancel must close the session"
+        );
+    }
+
+    #[test]
+    fn a_cancel_after_registration_names_the_session_and_is_never_prevented() {
+        // N1 window 2: the session was published between the cancel's lookup and its verdict;
+        // with one critical section the verdict itself must see the publication.
+        let mut registry = queued(true);
+        assert!(registry.release_gate("r7"));
+        registry.spawn_returned("r7");
+        assert!(!registry.register_create("r7", "s7"));
+        assert_eq!(
+            registry.cancel_verdict("r7"),
+            Ok(CancelVerdict::Registered("s7".into()))
+        );
+    }
+
+    #[test]
+    fn an_ungated_create_is_released_from_admission_on() {
+        let mut registry = queued(false);
+        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Released));
+    }
+
+    #[test]
+    fn a_cancel_for_a_finished_create_is_unknown_not_prevented() {
+        let mut registry = queued(true);
+        assert!(registry.release_gate("r7"));
+        registry.spawn_returned("r7");
+        registry.register_create("r7", "s7");
+        registry.evict_create("s7");
+        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Unknown));
+        let mut failed = queued(true);
+        failed.create_failed("r7");
+        assert_eq!(failed.cancel_verdict("r7"), Ok(CancelVerdict::Unknown));
+    }
+
+    #[test]
+    fn a_cancel_that_wins_before_admission_refuses_the_create() {
+        let mut registry = Registry {
+            last_request: 7,
+            ..Registry::default()
+        };
+        registry.note_create("r7");
+        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Prevented));
+        assert_eq!(registry.admit_create("r7", true), Err("CREATE_CANCELLED"));
+    }
+
+    #[test]
+    fn a_cancel_for_a_create_not_read_yet_is_refused_at_admission() {
+        let mut registry = Registry {
+            last_request: 6,
+            ..Registry::default()
+        };
+        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Prevented));
+        registry.last_request = 7;
+        registry.note_create("r7");
+        assert_eq!(registry.admit_create("r7", true), Err("CREATE_CANCELLED"));
+    }
 }

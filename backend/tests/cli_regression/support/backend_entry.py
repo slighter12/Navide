@@ -17,6 +17,14 @@ if generation := os.environ.get("NAVIDE_BASELINE_TRACE"):
     from tests.cli_regression.support.baseline_diagnostics import install_trace
     install_trace(Path(os.environ["NAVIDE_REGRESSION_ROOT"]), generation)
 
+if os.environ.get("NAVIDE_RETIREMENT_REFUSAL_GATE") == "1":
+    from tests.cli_regression.support.retirement_refusal_gate import install as install_refusal_gate
+    install_refusal_gate(Path(os.environ["NAVIDE_REGRESSION_ROOT"]))
+
+if os.environ.get("NAVIDE_CREATE_SEND_GATE") == "1":
+    from tests.cli_regression.support.create_send_gate import install as install_create_gate
+    install_create_gate(Path(os.environ["NAVIDE_REGRESSION_ROOT"]))
+
 if os.environ.get("NAVIDE_CONTROL_FENCE_GATE") == "1":
     from tests.cli_regression.support.control_fence_gate import install
     install(Path(os.environ["NAVIDE_REGRESSION_ROOT"]))

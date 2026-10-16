@@ -28,11 +28,12 @@ function body(source: string, name: string): string {
 
 describe('onKill when the terminal kill is refused', () => {
   const fn = body(appSource, 'onKill')
-  const killStep = fn.slice(fn.indexOf('await ref.kill('), fn.indexOf("pane?.origin === 'pipeline'"))
 
-  it('sweeps the pane\'s PTY when no unspawn will follow', () => {
-    expect(killStep).toContain('catch (err)')
-    expect(killStep).toContain("'manual_pane.release_pty'")
-    expect(killStep).toMatch(/if \(!markRemoved\)/)
+  // Review-9: the backend settlement is no longer a fallback of a failed kill — it always follows
+  // the pane's own kill and is the proof (lib/paneRetirement.ts; App.retirementRule.test.ts).
+  it('records the refused kill and still has the backend settle (a release when no unspawn will follow)', () => {
+    expect(fn).toContain("onKillFailed: (err) => recordDiagnostic({")
+    expect(fn).toContain("code: 'pane.killFailed'")
+    expect(fn).toContain("return sendQuiet<{ ok: boolean }>('manual_pane.release_pty', { pane_id: paneId }, PANE_RELEASE_TIMEOUT_MS)")
   })
 })

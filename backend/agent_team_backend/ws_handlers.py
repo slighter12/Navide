@@ -46,10 +46,11 @@ from . import (
     trust_store,
 )
 from .cli_vendors.codex import command_with_resume_id as codex_command_with_resume_id
-from .cli_runtime import RustTerminalService
+from .cli_runtime import CreateCancelled, RustTerminalService
 from .cli_vendors.registry import VENDORS as CLI_VENDORS
 from .cli_vendors.registry import vendor as cli_vendor
 from .ipc import make_error, make_event, make_response
+from .projects import RetirementTargetChanged
 from .log_readers.claude import ClaudeLogReader, first_user_prompts
 from .applog import app_data_dir, in_data_dir
 from .credential_vault import DEFAULT_SLOT_ID, vault_to_thread
@@ -7490,14 +7491,26 @@ async def terminal_create(session: "Session", msg_id: str, msg_type: str, payloa
             "attribution_started": False,
             "cleanup_task": None,
             "codex_home_id": "",
+            # An embedded panel's surface/workspace, so a window close can settle a create of
+            # its panel that is still in flight (terminal.kill_surface).
+            "surface": str((payload.get("metadata") or {}).get("surface") or ""),
+            "workspace_path": str((payload.get("metadata") or {}).get("workspace_path") or ""),
+            # Set once this create's handler has finished (committed or rolled back): the
+            # disposition a native cancel waits for before it may claim anything.
+            "done": asyncio.Event(),
         }
         session._terminal_create_transactions[key] = transaction
+        _INFLIGHT_CREATES[id(transaction)] = (session, transaction)
         try:
             await _terminal_create_impl(
                 session, msg_id, msg_type, payload, transaction, generation
             )
         except asyncio.CancelledError:
             await _rollback_terminal_create(session, transaction)
+            # The term is rolled back: nothing may answer a retry with its cached success.
+            transaction["committed"] = False
+            transaction.pop("response_payload", None)
+            session._terminal_create_transactions.pop(key, None)
             raise
         except _TerminalCreateCancelled:
             await _rollback_terminal_create(session, transaction)
@@ -7540,10 +7553,34 @@ async def terminal_create(session: "Session", msg_id: str, msg_type: str, payloa
             await _rollback_terminal_create(session, transaction)
             session._terminal_create_transactions.pop(key, None)
             raise
+        finally:
+            transaction["done"].set()
+            _INFLIGHT_CREATES.pop(id(transaction), None)
+
+
+#: Every terminal.create transaction still being handled, across connections (a create
+#: whose connection was lost keeps rolling back on its own handler task): what a pane's
+#: release must settle before it may claim the pane has nothing left running.
+_INFLIGHT_CREATES: dict[int, tuple["Session", dict[str, Any]]] = {}
 
 
 class _TerminalCreateCancelled(Exception):
     pass
+
+
+async def _kill_and_confirm_reaped(terminals: Any, terminal_id: str) -> bool:
+    """Kill a PTY a create must replace and report whether it is really gone.
+
+    A runtime that waits for its own cleanup acknowledgement raises TimeoutError
+    when that wait runs out; for a reap that is the same fact as a False
+    confirmation (the CLI outlived its kill), so both end in the explicit
+    CREATE_REAP_TIMEOUT refusal instead of a generic internal error.
+    """
+    try:
+        await terminals.kill(terminal_id, force=True)
+    except TimeoutError:
+        return False
+    return await terminals.wait_until_reaped(terminal_id)
 
 
 class _TerminalCreateReapTimeout(Exception):
@@ -7582,6 +7619,22 @@ async def _finish_pane_attribution(
 async def _rollback_terminal_create(
     session: "Session", transaction: dict[str, Any]
 ) -> None:
+    async def kill_term() -> None:
+        from . import app
+
+        term_id = str(transaction.get("term_id") or "")
+        if not term_id:
+            return
+        transaction["rolled_back_term"] = term_id
+        if app._PTY_OWNERS.get(term_id) is session:
+            app._PTY_OWNERS.pop(term_id, None)
+        kill_verified = getattr(session.terminals, "kill_verified", None)
+        if kill_verified is None:
+            await session.terminals.kill(term_id, force=True)
+            return
+        transaction["term_cleaned"] = False
+        transaction["term_cleaned"] = await kill_verified(term_id)
+
     async def cleanup() -> None:
         from . import app
 
@@ -7601,11 +7654,7 @@ async def _rollback_terminal_create(
                 )
             except Exception as err:  # noqa: BLE001
                 app.log.warning("terminal create attribution rollback failed: %s", err)
-        term_id = str(transaction.get("term_id") or "")
-        if term_id:
-            if app._PTY_OWNERS.get(term_id) is session:
-                app._PTY_OWNERS.pop(term_id, None)
-            await session.terminals.kill(term_id, force=True)
+        await kill_term()
         snapshot = transaction.pop("store_login_snapshot", None)
         if snapshot is not None:
             agent_key, slot_id, scope_kw = snapshot
@@ -7624,6 +7673,13 @@ async def _rollback_terminal_create(
     cleanup_task = transaction.get("cleanup_task")
     if cleanup_task is None:
         cleanup_task = asyncio.create_task(cleanup())
+        transaction["cleanup_task"] = cleanup_task
+    elif cleanup_task.done() and transaction.get("term_id") and (
+        transaction.get("rolled_back_term") != transaction["term_id"]
+    ):
+        # A term published after an earlier (empty) rollback: that cached cleanup never
+        # saw it, so roll the term back now instead of returning the finished task.
+        cleanup_task = asyncio.create_task(kill_term())
         transaction["cleanup_task"] = cleanup_task
     await asyncio.shield(cleanup_task)
 
@@ -8218,12 +8274,11 @@ async def _terminal_create_impl(
                     replaces_tid,
                     create_pane_id,
                 )
-                await session.terminals.kill(replaces_tid, force=True)
                 # A vendor with a graceful ShutdownSpec (claude) is put down
                 # by a background task, so kill() alone no longer means the
                 # old CLI is gone — and the spawn below would overlap it.
                 # Returns immediately for every other vendor.
-                if not await session.terminals.wait_until_reaped(replaces_tid):
+                if not await _kill_and_confirm_reaped(session.terminals, replaces_tid):
                     app.log.error(
                         "terminal.create: replaced PTY %s outlived its kill "
                         "— refusing to spawn over it for pane %s",
@@ -8256,13 +8311,12 @@ async def _terminal_create_impl(
                 agent_key,
                 resume_dedup_id,
             )
-            await session.terminals.kill(stale.id, force=True)
             # Two CLIs appending to one session file is exactly what this loop
             # exists to prevent, so wait out a graceful shutdown before the
             # --resume spawn below rather than only signalling it — and if the
             # wait runs out, do not spawn at all. Proceeding here would hand
             # the user the corruption this loop was written to stop.
-            if not await session.terminals.wait_until_reaped(stale.id):
+            if not await _kill_and_confirm_reaped(session.terminals, stale.id):
                 app.log.error(
                     "terminal.create: stale PTY %s resuming %s/%s outlived "
                     "its kill — refusing to spawn a second one",
@@ -8286,9 +8340,14 @@ async def _terminal_create_impl(
             metadata=metadata,
             output_log_file=payload.get("output_log_file") or "",
             **({"spawn_command": spawn_command} if spawn_command is not None else {}),
+            **({"cancelled": lambda: transaction["cancelled"] or session.dead,
+                "cancel_record": transaction} if native else {}),
         )
         if native:
-            term = await term
+            try:
+                term = await term
+            except CreateCancelled:
+                raise _TerminalCreateCancelled from None
         transaction["term_id"] = term.id
         # Claim immediately. A CLI can die while attribution registration is
         # still running; its terminal.exit must still reach this renderer.
@@ -8711,12 +8770,46 @@ async def _terminal_create_impl(
     }
     if wiring_warnings:
         response_payload["wiring_warnings"] = wiring_warnings
-    await session.send_json(make_response(msg_id, msg_type, response_payload))
+    # The success/cancel decision is made here, once, before the send can yield: this check
+    # and the commit are one synchronous step (no await between them), and so is the cancel
+    # handler's check-and-flag. Whichever runs first decides for both. A cancel that finds the
+    # create committed gets `cancelled: false` (the term is the client's to close normally);
+    # a create that finds it cancelled never sends success.
     if session.dead or transaction["cancelled"]:
         raise _TerminalCreateCancelled
     transaction["response_payload"] = response_payload
     transaction["committed"] = True
+    await session.send_json(make_response(msg_id, msg_type, response_payload))
+    if session.dead:
+        # The connection died before the success could be delivered: nobody holds this term,
+        # so it is rolled back as on any disconnect (no response is sent on a dead session).
+        transaction["committed"] = False
+        transaction.pop("response_payload", None)
+        raise _TerminalCreateCancelled
     _record_dock_spawn(payload, metadata, agent_key, term.id)
+
+
+async def _native_cancel_disposition(transaction: dict[str, Any]) -> bool:
+    """Wait (bounded) for a cancelled native create's own disposition and report whether it
+    proves the target cannot be running: refused by the runtime, its created root cleaned by
+    verified identity (before or after publication), or never dispatched."""
+    try:
+        async with asyncio.timeout(60):
+            await transaction["done"].wait()
+            native = transaction.get("native")
+            if native:
+                await native["settled"].wait()
+    except TimeoutError:
+        return False
+    native = transaction.get("native")
+    if not native:
+        return True
+    outcome = native["outcome"]
+    if outcome in ("refused", "cleaned", "abandon-cleaned", "abandon-refused"):
+        return True
+    if outcome == "published":
+        return transaction.get("term_cleaned") is True
+    return False
 
 
 @handler("terminal.create.cancel")
@@ -8731,7 +8824,24 @@ async def terminal_create_cancel(
     if transaction and not transaction.get("committed"):
         transaction["cancelled"] = True
         session._terminal_create_tombstones.add(key)
+        # A native create: acknowledge only with proof its target cannot execute, or that
+        # its created root was cleaned by verified identity. Never a bare flag.
+        proven = True
+        cancel_native = getattr(session.terminals, "cancel_dispatched", None)
+        if cancel_native is not None:
+            proven = await cancel_native(transaction) == "proven"
+            if not proven:
+                proven = await _native_cancel_disposition(transaction)
         await _rollback_terminal_create(session, transaction)
+        if not proven:
+            await session.send_json(
+                make_error(
+                    msg_id, msg_type, "CREATE_CANCEL_UNRESOLVED",
+                    "the create could not be proven cancelled before its program ran; "
+                    "it will be cleaned up by verified ownership or fence the runtime",
+                )
+            )
+            return
     elif transaction is None:
         session._terminal_create_tombstones.add(key)
         cancelled = True
@@ -9214,6 +9324,22 @@ async def terminal_kill_surface(session: "Session", msg_id: str, msg_type: str, 
     from . import app
 
     surface = str(payload.get("surface") or "")
+    scope = str(payload.get("workspace_path") or "")
+    # Creates of this window's panels still in flight are settled first (same proof rules as a
+    # pane release): one that cannot be proven cancelled or cleaned fails the close before any
+    # record changes. One that commits meanwhile is published and ended below.
+    if surface and surface != "main":
+        def norm(path: str) -> str:
+            return path.rstrip("/") or path
+
+        def of_this_window(transaction: dict[str, Any]) -> bool:
+            return transaction.get("surface") == surface and (
+                not scope or norm(str(transaction.get("workspace_path") or "")) == norm(scope))
+
+        if (unresolved := await _settle_inflight(of_this_window)) is not None:
+            await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", unresolved,
+                                               {"surface": surface}))
+            return
     ended: dict[str, str] = {}  # pane id -> workspace its panel ran in
     # Panels whose kill raised: still running, so the caller is told which.
     failed: list[dict[str, str]] = []
@@ -10435,6 +10561,59 @@ async def pipeline_slot_session(session: "Session", msg_id: str, msg_type: str, 
     )
 
 
+async def _settle_inflight(matches: "Callable[[dict[str, Any]], bool]") -> str | None:
+    """Settle every create still being handled (any connection) that `matches` selects: cancelled
+    with the same proof rules as terminal.create.cancel. One that commits first is a published
+    session, left to the caller's sweep; one that neither commits nor proves its target cannot run
+    is unresolved. Returns None when settled, otherwise why it is not."""
+    for owner, transaction in list(_INFLIGHT_CREATES.values()):
+        if not matches(transaction) or transaction["done"].is_set():
+            continue
+        if transaction.get("committed"):
+            continue  # published: the caller's sweep takes it
+        # Flag and tombstone in one synchronous step: the handler's own check-and-commit is
+        # synchronous too, so from here this create can no longer commit.
+        transaction["cancelled"] = True
+        owner._terminal_create_tombstones.add((transaction["pane_id"], transaction["generation"]))
+        cancel_native = getattr(owner.terminals, "cancel_dispatched", None)
+        if cancel_native is None:
+            try:  # the non-native rollback kills what it created; wait for it to finish
+                async with asyncio.timeout(60):
+                    await transaction["done"].wait()
+            except TimeoutError:
+                return f"a create for pane {transaction['pane_id']} did not settle"
+            continue
+        if await cancel_native(transaction) == "proven" or await _native_cancel_disposition(transaction):
+            continue
+        return f"a create for pane {transaction['pane_id']} could not be proven cancelled or cleaned"
+    return None
+
+
+async def _settle_pane(session: "Session", pane_id: str, *, force: bool = True) -> str | None:
+    """Settle everything a pane may still have running before a release/unspawn answers.
+
+    1. Creates for the pane that are still being handled (any connection): cancelled with the
+       same proof rules as terminal.create.cancel. A create that commits before the cancel lands
+       is a published session and is taken by step 2; one that neither commits nor proves its
+       target cannot run is unresolved.
+    2. Published sessions for the pane (and its former ids): the existing sweep, whose native kill
+       waits for the sidecar's verified cleanup and raises when it is not verified.
+
+    Returns None when settled, otherwise why it is not (the caller answers with an error rather
+    than reporting the pane released). Never assumes cleanup.
+    """
+    from . import agent_messaging
+
+    pane_ids = {pane_id, *agent_messaging.former_ids(pane_id)} if pane_id else set()
+    if (unresolved := await _settle_inflight(lambda t: t.get("pane_id") in pane_ids)) is not None:
+        return unresolved
+    try:
+        await _sweep_pane_ptys(session, pane_id, force=force)
+    except Exception as err:  # noqa: BLE001 - an unverified kill is an answer, not a crash
+        return f"a terminal of pane {pane_id} could not be verifiably closed: {err}"
+    return None
+
+
 async def _sweep_pane_ptys(session: "Session", pane_id: str, *, force: bool = True) -> None:
     """Take down any PTY still running under a pane whose record is going away.
 
@@ -10482,22 +10661,25 @@ async def pipeline_slot_unspawn(session: "Session", msg_id: str, msg_type: str, 
 
     stage_index = int(payload["stage_index"])
     slot_label = payload["slot_label"]
-    project = app.project_store.record_slot_unspawn(
-        payload["workspace_path"],
-        stage_index=stage_index,
-        slot_label=slot_label,
-    )
-    # A pipeline slot is closed through the same paths as a manual pane, so it
-    # needs the same sweep: the record is now 'removed' and nothing will point
-    # at the process again.
-    pane_id = next(
-        (p.pane_id for p in project.panes
-         if p.origin == "pipeline"
-         and p.stage_index == stage_index
-         and p.slot_label == slot_label),
-        "",
-    )
-    await _sweep_pane_ptys(session, pane_id)
+    # Settle BEFORE the record changes: a slot whose terminal (published, or a create still in
+    # flight) is not proven gone keeps its record, and the close is refused.
+    pane_id = app.project_store.slot_pane_id(
+        payload["workspace_path"], stage_index=stage_index, slot_label=slot_label)
+    if (unresolved := await _settle_pane(session, pane_id)) is not None:
+        await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", unresolved,
+                                           {"pane_id": str(pane_id)}))
+        return
+    try:
+        project = app.project_store.record_slot_unspawn(
+            payload["workspace_path"],
+            stage_index=stage_index,
+            slot_label=slot_label,
+            expected_pane_id=pane_id,
+        )
+    except RetirementTargetChanged as err:
+        await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", str(err),
+                                           {"pane_id": str(pane_id)}))
+        return
     portable_credentials.forget_launch(str(pane_id or ""))
     await session.send_json(
         make_response(msg_id, msg_type, app._project_payload(project))
@@ -10696,13 +10878,34 @@ async def manual_pane_unspawn(session: "Session", msg_id: str, msg_type: str, pa
     # drifted id, and that pane's PTY has to go down too. The requested id is
     # always swept, matching record or not.
     pane_id = payload["pane_id"]
-    project, removed_pane_ids = app.project_store.record_manual_pane_unspawn(
-        payload["workspace_path"],
-        pane_id=pane_id,
-        session_id=payload.get("session_id", "") or "",
-    )
+    session_id = payload.get("session_id", "") or ""
+
+    async def refuse(unresolved: str, pane: str) -> None:
+        await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", unresolved,
+                                           {"pane_id": str(pane)}))
+
+    # Settle BEFORE the record changes (the requested id first: it needs no store, which can be
+    # unavailable), then every drifted record the store would retire with it.
+    settled: list[str] = []
+    for target in [pane_id, *app.project_store.manual_pane_unspawn_targets(
+            payload["workspace_path"], pane_id=pane_id, session_id=session_id)]:
+        if target in settled:
+            continue
+        if (unresolved := await _settle_pane(session, target)) is not None:
+            await refuse(unresolved, target)
+            return
+        settled.append(target)
+    try:
+        project, removed_pane_ids = app.project_store.record_manual_pane_unspawn(
+            payload["workspace_path"],
+            pane_id=pane_id,
+            session_id=session_id,
+            settled_pane_ids=set(settled),
+        )
+    except RetirementTargetChanged as err:
+        await refuse(str(err), pane_id)
+        return
     for swept_id in dict.fromkeys([pane_id, *removed_pane_ids]):
-        await _sweep_pane_ptys(session, swept_id)
         portable_credentials.forget_launch(str(swept_id))
     # A Codex pane's home is named after its pane id, or after the id a
     # restored pane kept using (session_home_id). Its PTY is down by now.
@@ -10736,7 +10939,10 @@ async def pipeline_slot_unspawn_by_pane(session: "Session", msg_id: str, msg_typ
     # PTY of a pane that never realized has nothing else pointing at it — the
     # renderer could not kill what it has no terminal ref for. Losing the
     # record update to that is recoverable; losing the process is not.
-    await _sweep_pane_ptys(session, pane_id)
+    if (unresolved := await _settle_pane(session, pane_id)) is not None:
+        await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", unresolved,
+                                           {"pane_id": str(pane_id)}))
+        return
     project, retired = app.project_store.record_pane_unspawn_by_id(
         payload["workspace_path"], pane_id=pane_id
     )
@@ -10765,7 +10971,10 @@ async def manual_pane_release_pty(session: "Session", msg_id: str, msg_type: str
     keeps the record sends no unspawn, so it says this instead; without it the
     placeholder's process would keep running with nothing pointing at it.
     """
-    await _sweep_pane_ptys(session, payload["pane_id"], force=False)
+    if (unresolved := await _settle_pane(session, payload["pane_id"], force=False)) is not None:
+        await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", unresolved,
+                                           {"pane_id": str(payload["pane_id"])}))
+        return
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 

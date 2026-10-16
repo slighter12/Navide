@@ -52,7 +52,6 @@ fn initial_retention_keeps_detached_real_owned_rows() {
         let mut session = Session {
             id: "caller-unit".into(),
             generation: "caller-unit".into(),
-            create_id: String::new(),
             pane: String::new(),
             workspace: String::new(),
             agent_key: String::new(),

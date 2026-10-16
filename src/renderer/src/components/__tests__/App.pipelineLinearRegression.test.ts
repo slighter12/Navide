@@ -493,7 +493,7 @@ describe('restart from a node', () => {
       log: () => {},
       workspacePath: () => '/ws',
     })
-    const onKill = vi.fn()
+    const onKill = vi.fn(async () => true)  // onKill answers whether the pane was retired
     const onPipelineStart = vi.fn()
     const log: string[] = []
     const deps: Record<string, unknown> = {
