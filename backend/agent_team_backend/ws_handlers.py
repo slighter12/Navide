@@ -164,6 +164,19 @@ def lookup(msg_type: str) -> Handler | None:
 
 
 # ── Editor AI (editor.*) ────────────────────────────────────────────────────
+#: The Navide plugins whose Disabled switch the Host reports (sent only while
+#: one is disabled).
+_DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide"})
+
+
+def _valid_disabled_plugins(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) <= len(_DISABLEABLE_BUILTIN_PLUGINS)
+        and all(isinstance(item, str) and item in _DISABLEABLE_BUILTIN_PLUGINS for item in value)
+    )
+
+
 @handler("host.register")
 async def host_register(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     """Authenticate Electron's private Host WebSocket session."""
@@ -177,13 +190,15 @@ async def host_register(session: "Session", msg_id: str, msg_type: str, payload:
             "features" in payload
             and (
                 not isinstance(payload["features"], dict)
-                or set(payload["features"]) - {"plans_backend_v2"}
+                or set(payload["features"]) - {"plans_backend_v2", "disabled_plugins"}
                 or not isinstance(payload["features"].get("plans_backend_v2", False), bool)
+                or not _valid_disabled_plugins(payload["features"].get("disabled_plugins", []))
             )
         )
     ):
         session.host_authenticated = False
         session.plans_backend_v2 = False
+        session.disabled_plugins = frozenset()
         await session.send_json(
             make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session authentication failed")
         )
@@ -191,6 +206,8 @@ async def host_register(session: "Session", msg_id: str, msg_type: str, payload:
     session.host_authenticated = True
     features = payload.get("features", {})
     session.plans_backend_v2 = isinstance(features, dict) and features.get("plans_backend_v2") is True
+    session.disabled_plugins = frozenset(features.get("disabled_plugins", []) if isinstance(features, dict) else [])
+    app.note_host_disabled_plugins(session.disabled_plugins)
     await session.send_json(make_response(msg_id, msg_type, {"registered": True}))
 
 
@@ -212,6 +229,32 @@ async def window_prove(session: "Session", msg_id: str, msg_type: str, payload: 
     session.window_challenge = ""
     session.navide_window = True
     await session.send_json(make_response(msg_id, msg_type, {"proved": True}))
+
+
+@handler("diagnostics.record")
+async def diagnostics_record(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """A renderer warn/error diagnostic, kept in the on-disk error ledger so a
+    reload does not wipe it (the window's own ring buffer still has it too)."""
+    from . import error_ledger
+
+    if (
+        not isinstance(payload, dict)
+        or payload.get("level") not in error_ledger.LEVELS
+        or not isinstance(payload.get("code"), str) or not payload["code"]
+        or not isinstance(payload.get("message"), str)
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "expected {level: warn|error, code, message}")
+        )
+        return
+    pane_id = payload.get("paneId")
+    workspace = payload.get("workspace")
+    entry = await asyncio.to_thread(
+        error_ledger.record, "renderer", payload["level"], payload["code"], payload["message"],
+        pane_id=pane_id if isinstance(pane_id, str) else "",
+        workspace=workspace if isinstance(workspace, str) else "",
+    )
+    await session.send_json(make_response(msg_id, msg_type, {"recorded": entry is not None}))
 
 
 @handler("agent.capability.result")
@@ -580,6 +623,13 @@ async def plans_ensure_assets(session: "Session", msg_id: str, msg_type: str, pa
             make_error(msg_id, msg_type, "BAD_REQUEST", "Plans asset request is malformed")
         )
         return
+    from . import app
+
+    if app.plans_plugin_disabled():
+        await session.send_json(
+            make_error(msg_id, msg_type, "PLUGIN_TOOL_UNAVAILABLE", "Navide plugin Plans is disabled")
+        )
+        return
     workspace_path = payload["workspace_path"]
     root = await asyncio.to_thread(resolve_plan_root, workspace_path)
     await asyncio.to_thread(ensure_plan_assets, workspace_path)
@@ -598,6 +648,12 @@ async def plans_ensure_assets(session: "Session", msg_id: str, msg_type: str, pa
 @handler("plans.list_docs")
 async def plans_list_docs(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+
+    if app.plans_plugin_disabled():
+        await session.send_json(
+            make_error(msg_id, msg_type, "PLUGIN_TOOL_UNAVAILABLE", "Navide plugin Plans is disabled")
+        )
+        return
 
     # Plans live in the project root (plan_provisioning writes the spec there,
     # and every writer resolves to it), so a workspace opened on a
@@ -632,6 +688,12 @@ async def plans_resolve_root(session: "Session", msg_id: str, msg_type: str, pay
 @handler("plans.cache_put")
 async def plans_cache_put(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+
+    if app.plans_plugin_disabled():
+        await session.send_json(
+            make_error(msg_id, msg_type, "PLUGIN_TOOL_UNAVAILABLE", "Navide plugin Plans is disabled")
+        )
+        return
 
     # Same root as the scan that produced these entries, or the cache keys
     # would never match on the next list.
@@ -4704,8 +4766,8 @@ async def p2p_policy_set(session: "Session", msg_id: str, msg_type: str, payload
     # document and keeps it; the account view's "sign rules now" composes the
     # default for a machine that has no rules at all, and would have dropped it.
     # Absent means keep; only an explicit list clears one.
+    cached = (await server_link.policy_state()).get("policy")
     if isinstance(policy, dict) and "blocked" not in policy:
-        cached = (await server_link.policy_state()).get("policy")
         carried = cached.get("blocked") if isinstance(cached, dict) else None
         if carried:
             log.warning(
@@ -4737,7 +4799,26 @@ async def p2p_policy_set(session: "Session", msg_id: str, msg_type: str, payload
             )
         )
         return
+    # The block list goes to the local copy too, as p2p.trust.block and
+    # unblock send it, so a server that stops serving this document cannot
+    # lift a block made here — nor keep one lifted here.
+    await asyncio.to_thread(_mirror_blocks_locally, cached, policy)
     await session.send_json(make_response(msg_id, msg_type, await _policy_payload()))
+
+
+def _mirror_blocks_locally(before: Any, after: Any) -> None:
+    """Apply the change from *before*'s block list to *after*'s to the local copy."""
+    def keys(policy: Any) -> set[tuple[str, str]]:
+        return {(e["deviceId"], e["memberId"]) for e in device_trust.blocked_entries(policy)}
+
+    old, new = keys(before), keys(after)
+    for device_id, member_id in old - new:
+        trust_store.note_unblocked(device_id, member_id)
+    for device_id, member_id in new:
+        try:
+            trust_store.note_blocked(device_id, member_id)
+        except Exception as err:  # noqa: BLE001 - held in memory by note_blocked
+            log.warning("could not keep a local copy of a block: %s", err)
 
 
 @handler("p2p.access_requests.list")
@@ -7104,11 +7185,15 @@ async def shell_run(session: "Session", msg_id: str, msg_type: str, payload: dic
         return
     if not cmd:
         await session.send_json(make_response(msg_id, msg_type, {"ok": False, "error": "no command"}))
+    elif not isinstance(ws_path, str) or not ws_path.strip():
+        # Required here too: without one this branch skipped the workspace
+        # check below and ran the command in the backend's own cwd (d1).
+        await session.send_json(make_response(msg_id, msg_type, {"ok": False, "error": "workspace path is required"}))
     else:
-        resolved_cwd = app.Path(ws_path).resolve() if ws_path else None
+        resolved_cwd = app.Path(ws_path).resolve()
         # Validate that cwd is a known registered workspace (or its subdirectory)
         known_roots = app.attribution.existing_workspace_roots()
-        cwd_allowed = resolved_cwd is None or any(
+        cwd_allowed = any(
             resolved_cwd == r or resolved_cwd.is_relative_to(r)
             for r in known_roots
         )
@@ -10835,6 +10920,16 @@ async def manual_pane_spawn(session: "Session", msg_id: str, msg_type: str, payl
         previous = next((p for p in before.panes
                          if p.origin != "pipeline" and p.pane_id == previous_pane_id), None)
         previous_session_id = previous.session_id if previous is not None else ""
+    # Closed panes that held exactly the session this spawn resumes: the jobs
+    # one of them owned pass to this pane. Only a closed record counts, so an
+    # owner merely not registered yet (after a restart) keeps its jobs.
+    session_id = str(payload.get("session_id") or "")
+    closed_lineage: set[str] = set()
+    if session_id:
+        known = app.project_store.load_or_create(payload["workspace_path"])
+        closed_lineage = {p.pane_id for p in known.panes
+                          if p.origin != "pipeline" and p.spawn_status == "removed"
+                          and p.session_id == session_id}
     project = app.project_store.record_manual_pane_spawn(
         payload["workspace_path"],
         pane_id=payload["pane_id"],
@@ -10866,6 +10961,14 @@ async def manual_pane_spawn(session: "Session", msg_id: str, msg_type: str, payl
             )
         except Exception:  # noqa: BLE001 — the spawn is recorded either way
             log.exception("manual_pane.spawn: scheduler rebind failed")
+    if closed_lineage:
+        from . import scheduler
+
+        try:
+            await scheduler.get_service().inherit_owner(
+                closed_lineage, str(payload["pane_id"]), session_id)
+        except Exception:  # noqa: BLE001 — the spawn is recorded either way
+            log.exception("manual_pane.spawn: scheduler owner inheritance failed")
 
 
 @handler("manual_pane.unspawn")

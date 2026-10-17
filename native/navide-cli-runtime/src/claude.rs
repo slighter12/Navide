@@ -138,8 +138,22 @@ fn activity(rec: &Value, line: u64, common: &Value, out: &mut Vec<Value>) {
             );
         }
     } else if kind == "user" || kind == "tool_use" {
-        let text = msg["content"].as_str().unwrap_or("").trim();
-        let prompt = if kind == "user" && !text.starts_with('<') {
+        let content = &msg["content"];
+        let pasted_images = content.as_array().is_some_and(|blocks| {
+            blocks.iter().any(|b| b["type"] == "image")
+                && !blocks.iter().any(|b| b["type"] == "tool_result")
+        });
+        let text = if content.is_string() || pasted_images {
+            text_blocks(content)
+        } else {
+            String::new()
+        };
+        let text = text.trim();
+        let prompt = if kind == "user"
+            && !rec["isCompactSummary"].as_bool().unwrap_or(false)
+            && !rec["isMeta"].as_bool().unwrap_or(false)
+            && !text.starts_with('<')
+        {
             text.to_owned()
         } else {
             String::new()

@@ -33,6 +33,7 @@ from . import hook_drain
 from . import guard_hooks
 from .guard import runtime as guard_runtime
 from . import ws_auth
+from . import error_ledger
 from . import loop_watchdog
 from . import mem_probe
 from . import osplat
@@ -452,6 +453,52 @@ def host_supports_plans_backend() -> bool:
     )
 
 
+#: The Navide plugins whose Disabled switch the Host reports.
+DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide"})
+#: Set by main on every backend start: the built-ins disabled at that moment,
+#: comma-separated. Absent when none is.
+DISABLED_BUILTIN_PLUGINS_ENV = "NAVIDE_DISABLED_BUILTIN_PLUGINS"
+#: What the last authenticated Host registration reported, kept across a Host
+#: reconnect. None until a Host has registered in this process.
+_host_reported_disabled: frozenset[str] | None = None
+
+
+def note_host_disabled_plugins(disabled: frozenset[str]) -> None:
+    """Record a Host registration's disabled built-ins (see host.register)."""
+    global _host_reported_disabled
+    _host_reported_disabled = frozenset(disabled)
+
+
+def _disabled_at_spawn() -> frozenset[str]:
+    raw = os.environ.get(DISABLED_BUILTIN_PLUGINS_ENV, "")
+    return frozenset(item for item in raw.split(",") if item in DISABLEABLE_BUILTIN_PLUGINS)
+
+
+def host_disabled_plugins() -> frozenset[str]:
+    """Built-in Navide plugins the user disabled.
+
+    An authenticated Host session is authoritative. Without one (before the
+    Host registers, or while it reconnects) the last registration's answer
+    stands, and before any registration the set main passed at spawn. With
+    nothing disabled every source is empty, which is main's behaviour."""
+    disabled: set[str] = set()
+    hosted = False
+    for session in list(_SESSIONS):
+        if not session.dead and session.host_authenticated:
+            hosted = True
+            disabled |= session.disabled_plugins
+    if hosted:
+        return frozenset(disabled)
+    if _host_reported_disabled is not None:
+        return _host_reported_disabled
+    return _disabled_at_spawn()
+
+
+def plans_plugin_disabled() -> bool:
+    """Whether the user disabled the built-in Plans plugin."""
+    return "navide.plans" in host_disabled_plugins()
+
+
 def navide_window_proof_matches(challenge: str, proof: Any) -> bool:
     """Whether `proof` answers this connection's window challenge: main
     returns HMAC-SHA256(host token, "navide-window/v2\\0" + challenge) to its
@@ -538,6 +585,8 @@ class Session:
         # appears in renderer/backend-info payloads.
         self.host_authenticated = False
         self.plans_backend_v2 = False
+        # Built-in Navide plugins the user disabled, as the Host registered them.
+        self.disabled_plugins: frozenset[str] = frozenset()
         # Set by `ui.invoke.ready`: only a main window runs the UI action bus,
         # while plugin, editor and manager windows share this server and never
         # answer a ui.invoke.request. unicast_any picks among these alone, the
@@ -961,6 +1010,9 @@ async def _active_emit(event: dict[str, Any] | bytes) -> None:
         exit_pane_id = payload.get("pane_id")
         if exit_pane_id:
             _schedule_pane_unregister(exit_pane_id)
+            # The CLI holding the pane's /plan-mcp token is gone; the token
+            # goes too unless the pane is still on screen (see wiring).
+            mcp_server_wiring.release_pane_token(str(exit_pane_id))
             # A CLI that exits with subagents still running never reports their
             # stops, so the count would stay above zero for a pane id that no
             # longer has a CLI behind it.
@@ -1504,14 +1556,16 @@ def _scan_live_session(
     )
     if grew_in_place:
         delta, cursor = reader.usage_since_for_session(
-            path, session_id, state["cursor"]
+            path, session_id, state["cursor"], with_cache_read=True
         )
         totals = {
-            field: state["totals"][field] + delta[field]
-            for field in ("input", "output", "calls")
+            field: state["totals"].get(field, 0) + delta[field]
+            for field in ("input", "output", "calls", "cache_read")
         }
     else:
-        totals, cursor = reader.usage_since_for_session(path, session_id, {})
+        totals, cursor = reader.usage_since_for_session(
+            path, session_id, {}, with_cache_read=True
+        )
     return {
         **state,
         "session_file": str(path),
@@ -1561,9 +1615,10 @@ def _schedule_live_scan(key: tuple[str, str], *, only_if_changed: bool = False) 
             if current is None:
                 return  # the last pane closed while we were reading
             current.update(scanned)
-            if tokens_store.set_live_total(
-                workspace_path, session_key, scanned["totals"]
-            ):
+            published = {
+                field: scanned["totals"][field] for field in ("input", "output", "calls")
+            }
+            if tokens_store.set_live_total(workspace_path, session_key, published):
                 _schedule_tokens_broadcast(workspace_path)
         except Exception as err:  # noqa: BLE001 — cosmetic tally, never fatal
             log.warning("live token scan failed for session=%s: %s", session_key, err)
@@ -2015,8 +2070,9 @@ def _register_workspace_and_backfill(workspace_path: str) -> None:
     attribution.register_workspace(workspace_path)
     # Provision plan-document infrastructure (_spec.md + _template.html) into
     # <workspace>/.agent-team/plans/. Idempotent, never overwrites, never
-    # raises — see plan_provisioning.
-    ensure_plan_assets(workspace_path)
+    # raises — see plan_provisioning. Not while the user has Plans disabled.
+    if not plans_plugin_disabled():
+        ensure_plan_assets(workspace_path)
     # Start watching for disk changes here rather than waiting for the GitPane's
     # first `git.status`: the watcher is the only catch-all writer of the
     # preview record, and until this call it never saw a workspace nobody had
@@ -2267,6 +2323,9 @@ async def _start_log_watcher() -> None:
     # loop thread's stack when the loop stops turning (issue #24), instead of
     # the freeze being reproducible only under sample(1).
     loop_watchdog.start(asyncio.get_running_loop())
+    # Exceptions nobody retrieved (a create_task without a done-callback)
+    # reached only stderr; record them in the error ledger as well.
+    error_ledger.install_loop_handler(asyncio.get_running_loop())
     # Guard events raised in hook worker threads are handed back to this loop.
     guard_runtime.remember_loop(asyncio.get_running_loop())
 
@@ -3813,6 +3872,7 @@ async def handle_message(session: Session, msg: dict[str, Any]) -> None:
         )
     except Exception as err:  # noqa: BLE001
         log.exception("handle_message failed for type=%s", msg_type)
+        error_ledger.record("backend", "error", "ws.internal_error", f"{msg_type}: {type(err).__name__}: {err}")
         if not session.dead:
             await session.send_json(
                 make_error(msg_id, msg_type, "INTERNAL_ERROR", _redact_home(str(err)))

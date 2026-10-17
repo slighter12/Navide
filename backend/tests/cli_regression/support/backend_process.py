@@ -211,6 +211,13 @@ class BackendProcess:
             for source in (self.log_path, scenario_path, self.root / "refusals.jsonl"):
                 if source.exists():
                     archive_text(source, destination / source.name)
+            # The backend's own log file, timestamped where backend.log (its
+            # stdout) is not. At this harness's warning level it holds the
+            # warnings only, the loop watchdog's stall/recover lines among
+            # them. One file by name: the data dir also holds the token.
+            applog = self.root / "data" / "logs" / "backend.log"
+            if applog.exists():
+                archive_text(applog, destination / "backend-applog.log")
         assert exit_error is None, exit_error
         assert not registry_reaped, (
             f"PTY children survived backend shutdown (registry cleanup reaped them): "

@@ -15,7 +15,7 @@ import type {
 } from '../../../shared/executionPolicy'
 import { usePluginInventory } from '../composables/usePluginInventory'
 import { usePluginUpdates } from '../composables/usePluginUpdates'
-import { confirmUninstall, ipcErrorMessage, usePluginInstallFlow } from '../composables/usePluginInstallFlow'
+import { askUninstall, ipcErrorMessage, removeWithAnswer, usePluginInstallFlow } from '../composables/usePluginInstallFlow'
 import { useNotify, vTruncate } from '@navide/plugin-ui/foundation'
 import PluginTrustDialog from './PluginTrustDialog.vue'
 import PackUninstallDialog from './PackUninstallDialog.vue'
@@ -40,6 +40,17 @@ const nonFactoryInstalled = computed(() =>
 )
 const busy = ref(false)
 const error = ref('')
+// A failed inventory read, shown apart from the action error it may follow.
+const inventoryError = ref('')
+
+async function reloadInventory(): Promise<void> {
+  try {
+    await refreshInstalled()
+    inventoryError.value = ''
+  } catch (err) {
+    inventoryError.value = t('settings.extensions.inventoryRefreshFailed', { error: ipcErrorMessage(err) })
+  }
+}
 // Updates for installed Registry packages; the Update button reuses the
 // Marketplace's verified install flow (and its trust dialog).
 const pluginUpdates = usePluginUpdates()
@@ -48,6 +59,11 @@ const updatesById = computed(
 )
 const updateFlow = usePluginInstallFlow()
 const notify = useNotify()
+
+/** The reserved first-party namespace: such a package can be disabled, not removed. */
+function isFirstPartyId(id: string): boolean {
+  return id.startsWith('navide.')
+}
 
 /** `namespace.name` split for the icon tile, which colours itself from the id. */
 function idParts(id: string): { namespace: string; name: string } {
@@ -133,9 +149,18 @@ function pluginErrorMessage(err: unknown): string {
 async function remove(id: string): Promise<void> {
   const api = pluginsApi()
   if (!api) return
-  if (!(await confirmUninstall(t, notify, id))) return
-  await api.remove(id)
-  await refreshInstalled()
+  const answer = await askUninstall(t, notify, id)
+  if (!answer) return
+  busy.value = true
+  error.value = ''
+  try {
+    await removeWithAnswer(api, id, answer)
+    await refreshInstalled()
+  } catch (err) {
+    error.value = pluginErrorMessage(err)
+  } finally {
+    busy.value = false
+  }
 }
 
 // Returning an installed package to what it displaced: the previous version, or
@@ -169,9 +194,7 @@ async function rollback(id: string, kind: 'factory' | 'previous', version?: stri
     error.value = pluginErrorMessage(err)
     // A rollback can fail after the Host already switched packages, so the
     // row is redrawn from the Host rather than left offering a stale action.
-    await refreshInstalled().catch((refreshErr: unknown) => {
-      console.warn('[extensions] inventory refresh after a failed rollback failed:', refreshErr)
-    })
+    await reloadInventory()
   } finally {
     busy.value = false
   }
@@ -247,6 +270,50 @@ async function uninstallPack(members: string[]): Promise<void> {
   }
 }
 
+// The user's "Disabled" switch. A disabled package keeps its files, grant and
+// stored data; the Host only stops loading its views and backend. The row says
+// so with a badge and an Enable button, never silently.
+async function setDisabled(id: string, disabled: boolean): Promise<void> {
+  const api = pluginsApi()
+  if (!api?.setDisabled) return
+  busy.value = true
+  error.value = ''
+  try {
+    await api.setDisabled(id, disabled)
+    await refreshInstalled()
+  } catch (err) {
+    error.value = pluginErrorMessage(err)
+    await reloadInventory()
+  } finally {
+    busy.value = false
+  }
+}
+
+// The Disabled store itself: rebuilt from its backup this session, or
+// unreadable (the built-ins then count as disabled until the user resets it).
+const disabledStoreStatus = ref<'ok' | 'restored' | 'unreadable'>('ok')
+async function refreshDisabledStoreStatus(): Promise<void> {
+  try {
+    disabledStoreStatus.value = (await pluginsApi()?.disabledStoreStatus?.())?.status ?? 'ok'
+  } catch {
+    disabledStoreStatus.value = 'ok'
+  }
+}
+async function resetDisabledStore(): Promise<void> {
+  const api = pluginsApi()
+  if (!api?.resetDisabledStore) return
+  busy.value = true
+  error.value = ''
+  try {
+    disabledStoreStatus.value = (await api.resetDisabledStore()).status
+    await refreshInstalled()
+  } catch (err) {
+    error.value = pluginErrorMessage(err)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function restoreFactoryPackage(id: string): Promise<void> {
   const api = pluginsApi()
   if (!api) return
@@ -263,7 +330,8 @@ async function restoreFactoryPackage(id: string): Promise<void> {
 }
 
 onMounted(() => {
-  void refreshInstalled()
+  void reloadInventory()
+  void refreshDisabledStoreStatus()
   void pluginUpdates.refresh()
   void refreshPacks()
 })
@@ -274,6 +342,7 @@ watch(installed, () => void refreshPacks())
 <template>
   <div class="extensions-pane">
     <p v-if="error" class="ext-error" role="alert">{{ error }}</p>
+    <p v-if="inventoryError" class="ext-error" role="alert">{{ inventoryError }}</p>
     <p v-if="updateFlow.error.value" class="ext-error" role="alert">{{ updateFlow.error.value }}</p>
 
     <section class="ext-section">
@@ -281,6 +350,15 @@ watch(installed, () => void refreshPacks())
         {{ $t('settings.extensions.bundled') }}
         <span class="ext-section-count">{{ factoryRows.length }}</span>
       </h3>
+      <p v-if="disabledStoreStatus === 'restored'" class="ext-store-restored" role="status">
+        {{ $t('settings.extensions.disabledStoreRestored') }}
+      </p>
+      <div v-else-if="disabledStoreStatus === 'unreadable'" class="ext-store-unreadable" role="alert">
+        <p>{{ $t('settings.extensions.disabledStoreUnreadable') }}</p>
+        <button class="ext-store-reset nv-btn nv-btn--primary nv-btn--sm" :disabled="busy" @click="resetDisabledStore()">
+          {{ $t('settings.extensions.disabledStoreReset') }}
+        </button>
+      </div>
       <ul class="ext-list ext-bundled-list">
         <li
           v-for="p in factoryRows"
@@ -296,16 +374,18 @@ watch(installed, () => void refreshPacks())
                 {{ p.installed?.packageVersion ?? p.version }}
               </span>
             </div>
-            <span class="ext-badge ext-state" :class="p.active ? 'ext-active' : 'ext-removed'">
-              {{
-                p.active
-                  ? $t('settings.extensions.state.active')
-                  : p.optedOut
-                    ? $t('settings.extensions.state.removed')
-                    : $t('settings.extensions.state.unavailable')
-              }}
+            <!-- Built-ins are never removed, only disabled; the state says which. -->
+            <span v-if="p.disabled" class="ext-badge ext-disabled-badge" :title="$t('settings.extensions.builtinDisabledNote')">
+              {{ $t('settings.extensions.disabledBadge') }}
+            </span>
+            <span v-else class="ext-badge ext-state" :class="p.active ? 'ext-active' : 'ext-removed'">
+              {{ p.active ? $t('settings.extensions.state.active') : $t('settings.extensions.state.unavailable') }}
             </span>
           </div>
+          <p v-if="p.disabled" class="ext-disabled-note">{{ $t('settings.extensions.builtinDisabledNote') }}</p>
+          <p v-if="p.dataDeletedByEarlierRemoval" class="ext-disabled-note ext-data-deleted-note">
+            {{ $t('settings.extensions.builtinDataDeletedEarlier') }}
+          </p>
           <span v-if="p.installed?.pendingCandidateVersion" class="ext-badge ext-candidate">
             {{ $t('settings.extensions.candidateReady', { version: p.installed.pendingCandidateVersion }) }}
           </span>
@@ -330,19 +410,27 @@ watch(installed, () => void refreshPacks())
               {{ $t('settings.extensionsPolicy.labeledValue', { label: $t('settings.extensionsPolicy.packageVersionGrant'), value: formatPackageGrant(p.installed.packageVersionGrant) }) }}
             </span>
           </details>
-          <div v-if="p.optedOut || p.installed?.pendingCandidateVersion" class="ext-actions">
+          <div v-if="p.disabled !== undefined || p.installed?.pendingCandidateVersion" class="ext-actions">
             <button
-              v-if="p.optedOut"
-              class="ext-restore nv-btn nv-btn--sm"
-              :disabled="busy"
-              @click="restoreFactoryPackage(p.id)"
+              v-if="p.disabled"
+              class="ext-enable nv-btn nv-btn--primary nv-btn--sm"
+              :disabled="busy || updateFlow.busy.value"
+              @click="setDisabled(p.id, false)"
             >
-              {{ $t('settings.extensions.restore') }}
+              {{ $t('settings.extensions.enable') }}
+            </button>
+            <button
+              v-else-if="p.disabled === false"
+              class="ext-disable nv-btn nv-btn--sm"
+              :disabled="busy || updateFlow.busy.value"
+              @click="setDisabled(p.id, true)"
+            >
+              {{ $t('settings.extensions.disable') }}
             </button>
             <!-- A rollback leaves the displaced package staged over the bundled
                  one, and this row is the only place it is still listed. -->
             <button
-              v-else-if="p.installed?.pendingCandidateVersion"
+              v-if="p.installed?.pendingCandidateVersion"
               class="ext-restart nv-btn nv-btn--primary nv-btn--sm"
               :disabled="busy || updateFlow.busy.value"
               @click="restartPlugin(p.id)"
@@ -400,6 +488,9 @@ watch(installed, () => void refreshPacks())
               <span v-else-if="updatesById.get(p.id)" class="ext-badge ext-update-badge">
                 {{ $t('settings.extensions.marketplace.updateAvailableVersion', { version: updatesById.get(p.id)?.latestVersion ?? '' }) }}
               </span>
+              <span v-if="p.disabled" class="ext-badge ext-disabled-badge" :title="$t('settings.extensions.disabledNote')">
+                {{ $t('settings.extensions.disabledBadge') }}
+              </span>
               <!-- Label only: the Host keeps running the package (no silent disable). -->
               <span
                 v-if="p.engineCompatible === false"
@@ -427,6 +518,7 @@ watch(installed, () => void refreshPacks())
                 {{ p.provenance === 'developer-local-unpacked' ? $t('settings.extensions.devUnpacked') : p.warning }}
               </span>
             </div>
+            <p v-if="p.disabled" class="ext-disabled-note">{{ $t('settings.extensions.disabledNote') }}</p>
             <p v-if="p.engineCompatible === false" class="ext-incompatible-reason">
               {{ $t('settings.extensions.incompatibleReason', { version: p.minNavideVersion ?? '' }) }}
             </p>
@@ -487,7 +579,29 @@ watch(installed, () => void refreshPacks())
                   : $t('settings.extensions.rollback.toVersion', { version: p.rollbackToVersion })
               }}
             </button>
-            <button class="ext-remove nv-btn nv-btn--sm ext-btn-danger" :disabled="busy || updateFlow.busy.value" @click="remove(p.id)">
+            <button
+              v-if="p.disabled === false"
+              class="ext-disable nv-btn nv-btn--sm"
+              :disabled="busy || updateFlow.busy.value"
+              @click="setDisabled(p.id, true)"
+            >
+              {{ $t('settings.extensions.disable') }}
+            </button>
+            <button
+              v-else-if="p.disabled"
+              class="ext-enable nv-btn nv-btn--primary nv-btn--sm"
+              :disabled="busy || updateFlow.busy.value"
+              @click="setDisabled(p.id, false)"
+            >
+              {{ $t('settings.extensions.enable') }}
+            </button>
+            <!-- `navide.` packages ship with Navide: they are disabled, never removed. -->
+            <button
+              v-if="!isFirstPartyId(p.id)"
+              class="ext-remove nv-btn nv-btn--sm ext-btn-danger"
+              :disabled="busy || updateFlow.busy.value"
+              @click="remove(p.id)"
+            >
               {{ $t('settings.extensions.marketplace.uninstall') }}
             </button>
           </div>
@@ -823,6 +937,31 @@ watch(installed, () => void refreshPacks())
 .ext-incompatible-reason {
   margin: 0;
   color: var(--danger-bright);
+  font-size: var(--font-xs);
+}
+.ext-badge.ext-disabled-badge {
+  color: var(--risk-fg);
+  background: var(--risk-subtle);
+}
+.ext-store-restored {
+  margin: 0 0 var(--space-2, 8px);
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+.ext-store-unreadable {
+  margin: 0 0 var(--space-2, 8px);
+  padding: 8px 10px;
+  border: 1px solid var(--danger-bright);
+  border-radius: 6px;
+  color: var(--danger-bright);
+  font-size: var(--font-xs);
+}
+.ext-store-unreadable p {
+  margin: 0 0 6px;
+}
+.ext-disabled-note {
+  margin: 0;
+  color: var(--text-secondary);
   font-size: var(--font-xs);
 }
 .ext-pack-includes {

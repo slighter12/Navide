@@ -370,6 +370,9 @@ declare global {
       plugins?: {
         listInstalled: () => Promise<InstalledPluginSummary[]>
         listFactoryPackages: () => Promise<FactoryPluginSummary[]>
+        disabledBuiltins?: () => Promise<string[]>
+        disabledStoreStatus?: () => Promise<{ status: 'ok' | 'restored' | 'unreadable' }>
+        resetDisabledStore?: () => Promise<{ status: 'ok' | 'restored' | 'unreadable' }>
         listContributions: () => Promise<Array<{
           pluginId: string
           packageVersion: string | null
@@ -439,9 +442,11 @@ declare global {
           restoredInstances: number
           skippedDestroyedHostWindows: number
         }>
-        remove: (id: string) => Promise<{ ok: boolean }>
+        remove: (id: string, nativeBackendData?: 'keep' | 'delete') => Promise<{ ok: boolean }>
+        nativeBackendData: (id: string) => Promise<{ exists: boolean; bytes: number; path: string }>
         restoreFactoryPackage: (id: string) => Promise<{ ok: boolean }>
         setPrerelease: (id: string, enabled: boolean) => Promise<{ id: string; enabled: boolean }>
+        setDisabled: (id: string, disabled: boolean) => Promise<{ id: string; disabled: boolean }>
         marketplacePackMembers: (members: string[]) => Promise<PackMemberSummary[]>
         preparePack: (args: { namespace: string; name: string }) => Promise<PreparedPackSummary>
         finishPack: (id: string) => Promise<{ recorded: boolean; pack?: InstalledPackRecord }>
@@ -476,6 +481,8 @@ declare global {
     engineCompatible?: boolean
     /** Per-extension "Get pre-releases" switch (Registry installs only). */
     getsPrereleases?: boolean
+    /** The user's "Disabled" switch; absent on rows it does not apply to. */
+    disabled?: boolean
   }
 
   interface FactoryPluginSummary {
@@ -483,6 +490,10 @@ declare global {
     version: string | null
     active: boolean
     optedOut: boolean
+    /** The user's Disabled switch for this built-in. */
+    disabled?: boolean
+    /** An earlier version removed it and deleted its data; now Disabled. */
+    dataDeletedByEarlierRemoval?: boolean
   }
 
   interface MarketplaceExtension {
@@ -557,6 +568,7 @@ declare global {
     canWriteWorkspace: boolean
     workspaceWrite: string[]
     lastViolation?: 'memory' | 'cpu' | 'processes' | 'disk'
+    shell?: 'allowlist' | 'full'
   }
 
   interface NativeBackendOverview {

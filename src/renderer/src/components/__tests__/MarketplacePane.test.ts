@@ -566,6 +566,102 @@ describe('MarketplacePane', () => {
     expect(api.remove).toHaveBeenCalledWith('acme.demo')
   })
 
+  it('asks whether to keep native backend data, defaulting to delete, only when data exists', async () => {
+    const nativeBackendData = vi
+      .fn()
+      .mockResolvedValue({ exists: true, bytes: 2048, path: '/userData/plugin-native-backends/data/acme.demo' })
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'acme.demo', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+      ]),
+      nativeBackendData,
+    })
+    wrapper = mountMarketplace()
+    await flushPromises()
+    await wrapper.get('[data-id="acme.demo"]').trigger('click')
+    await flushPromises()
+    const view = wrapper.get('[data-detail-id="acme.demo"]')
+
+    // Data exists: the dialog discloses size and location and offers "keep",
+    // unchecked, so confirming deletes the data.
+    await view.get('.ext-uninstall').trigger('click')
+    await flushPromises()
+    expect(nativeBackendData).toHaveBeenCalledWith('acme.demo')
+    const dialog = useNotify().dialog.value
+    expect(dialog?.kind).toBe('confirm')
+    expect(dialog?.message).toContain('2.0 KB')
+    expect(dialog?.detail).toBe('/userData/plugin-native-backends/data/acme.demo')
+    expect(dialog?.checkboxLabel).toBeTruthy()
+    expect(useNotify().dialogCheckbox.value).toBe(false)
+    useNotify().resolveDialog(true)
+    await flushPromises()
+    expect(api.remove).toHaveBeenLastCalledWith('acme.demo', 'delete')
+  })
+
+  it('keeps native backend data when the user ticks keep in the remove dialog', async () => {
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'acme.demo', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+      ]),
+      nativeBackendData: vi.fn().mockResolvedValue({ exists: true, bytes: 10, path: '/d/acme.demo' }),
+    })
+    wrapper = mountMarketplace()
+    await flushPromises()
+    await wrapper.get('[data-id="acme.demo"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-detail-id="acme.demo"] .ext-uninstall').trigger('click')
+    await flushPromises()
+    useNotify().dialogCheckbox.value = true
+    useNotify().resolveDialog(true)
+    await flushPromises()
+    expect(api.remove).toHaveBeenCalledWith('acme.demo', 'keep')
+  })
+
+  it('offers no Uninstall on the detail page of an installed built-in Navide plugin', async () => {
+    const item = {
+      namespace: 'navide', name: 'git', identity: 'navide.git', display_name: 'Git', description: null,
+      categories: [], latest_version: '2.0.0', download_count: 0, rating_average: 0, featured: false,
+    }
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'navide.git', requires: [], sensitive: [], packageVersion: '2.0.0', provenance: 'official-registry' },
+      ]),
+      marketplaceSearch: vi.fn().mockResolvedValue({ items: [item], total: 1, offset: 0, limit: 20 }),
+      marketplaceDetail: vi.fn().mockResolvedValue(
+        demoDetail({ namespace: 'navide', name: 'git', identity: 'navide.git', publisher: 'navide' }),
+      ),
+    })
+    wrapper = mountMarketplace()
+    await flushPromises()
+    await wrapper.get('[data-id="navide.git"]').trigger('click')
+    await flushPromises()
+    const detail = wrapper.get('[data-detail-id="navide.git"]')
+    expect(detail.find('.mkt-installed').exists()).toBe(true)
+    expect(detail.find('.ext-uninstall').exists()).toBe(false)
+    expect(api.remove).not.toHaveBeenCalled()
+  })
+
+  it('removes without a data choice when the plugin has no native backend data', async () => {
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'acme.demo', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+      ]),
+      nativeBackendData: vi.fn().mockResolvedValue({ exists: false, bytes: 0, path: '/x' }),
+    })
+    wrapper = mountMarketplace()
+    await flushPromises()
+    await wrapper.get('[data-id="acme.demo"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-detail-id="acme.demo"] .ext-uninstall').trigger('click')
+    await flushPromises()
+    expect(useNotify().dialog.value?.checkboxLabel).toBeUndefined()
+    expect(useNotify().dialog.value?.detail).toBeUndefined()
+    useNotify().resolveDialog(true)
+    await flushPromises()
+    expect(api.remove).toHaveBeenCalledWith('acme.demo')
+    expect(api.remove.mock.calls[0]).toHaveLength(1)
+  })
+
   it('shows the detail error and a README fallback', async () => {
     mockPlugins({
       marketplaceDetail: vi
@@ -773,6 +869,24 @@ describe('MarketplacePane', () => {
     await flushPromises()
     expect(pluginUpdates.count.value).toBe(2)
     stop()
+  })
+
+  it('badges the merged answer the main process kept when a check fails', async () => {
+    const merged = [
+      { id: 'acme.demo', namespace: 'acme', name: 'demo', installedVersion: '1.0.0', latestVersion: '1.2.0' },
+      { id: 'acme.two', namespace: 'acme', name: 'two', installedVersion: '1.0.0', latestVersion: '2.0.0' },
+    ]
+    const pendingUpdates = vi.fn().mockResolvedValue(merged)
+    mockPlugins({
+      checkUpdates: vi.fn().mockRejectedValue(new Error('update check failed for acme.two (HTTP 503)')),
+      pendingUpdates,
+    })
+    const pluginUpdates = usePluginUpdates()
+    pluginUpdates.updates.value = []
+    await pluginUpdates.refresh()
+    expect(pendingUpdates).toHaveBeenCalled()
+    expect(pluginUpdates.updates.value).toEqual(merged)
+    expect(pluginUpdates.count.value).toBe(2)
   })
 
   it('formats counts with the app locale and shows the rating on list cards', async () => {
@@ -1155,6 +1269,64 @@ describe('MarketplacePane', () => {
     await wrapper.get('.mkt-actions .ext-install').trigger('click')
     await flushPromises()
     expect(api.prepareInstall).toHaveBeenCalledWith({ namespace: 'acme', name: 'demo', version: '2.5.0-beta.1' })
+  })
+
+  it('shows a failed pre-release switch and puts the switch back', async () => {
+    const rows = [
+      { version: '2.5.0-beta.1', channel: 'pre-release' },
+      { version: '2.4.0', channel: 'stable' },
+    ].map((row) => ({
+      published_at: '2026-09-29T00:00:00Z',
+      target: 'universal',
+      yanked: false,
+      trust_tier: 'signed-verified',
+      capabilities: [],
+      sensitive_capabilities: [],
+      download_count: 0,
+      installable: true,
+      ...row,
+    }))
+    mockPlugins({
+      marketplaceDetail: vi
+        .fn()
+        .mockResolvedValue(
+          demoDetail({ latest_version: '2.4.0', latest_installable_version: '2.4.0', gets_prereleases: false, versions: rows })
+        ),
+      setPrerelease: vi
+        .fn()
+        .mockRejectedValue(new Error("Error invoking remote method 'plugins:setPrerelease': Error: store locked")),
+    })
+    wrapper = mountMarketplace()
+    await flushPromises()
+    await wrapper.get('[data-id="acme.demo"]').trigger('click')
+    await flushPromises()
+    const toggle = wrapper.get('.mkt-prerelease-toggle input')
+    await toggle.setValue(true)
+    await flushPromises()
+    expect(wrapper.get('.ext-error[role="alert"]').text()).toBe('Could not change Get pre-releases: store locked')
+    expect((toggle.element as HTMLInputElement).checked).toBe(false)
+    // The detail page stays up rather than turning into the load error.
+    expect(wrapper.find('.mkt-detail-error').exists()).toBe(false)
+  })
+
+  it('shows an inventory that fails to load instead of leaving the rejection unhandled', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      mockPlugins({ listInstalled: vi.fn().mockRejectedValue(new Error('backend gone')) })
+      wrapper = mountMarketplace()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(wrapper.get('.ext-error[role="alert"]').text()).toBe(
+        'Could not reload the installed Navide plugins: backend gone'
+      )
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 
   it('hides the pre-release switch when no pre-release exists', async () => {
