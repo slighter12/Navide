@@ -753,7 +753,17 @@ class TestOrphanParent:
 #: `proc_rusage` stays until it moves under `osplat/` wholesale — it is already
 #: reached only through the Darwin implementation, so its branch is a guard on
 #: an unreachable path rather than a live decision.
+#:
+#: `cli_runtime.py` and `cli_runtime_handoff.py` (ticket E3, evaluation-scoped Agent CLI Runtime) are the two modules
+#: that carry the Rust-runtime path's platform facts. They are NEW files, not a feature module that started branching
+#: again: the whole Rust runtime is selected at run time by the evaluation flag and is macOS-only until ticket E5. The only
+#: live decision is `cli_runtime_handoff.slave_name_of` (macOS `TIOCPTYGNAME` vs Linux `TIOCGPTN`); `cli_runtime.py` only
+#: reports the platform string in a receipt, through the constant `RECEIPT_PLATFORM`. Putting that one ioctl choice behind an
+#: `osplat` seam would change a baseline file, which E2 section 9 forbids for this evaluation (the Python arm must stay
+#: byte-identical); moving the pair behind `osplat` belongs to the adoption decision, not to the evaluation candidate.
 PLATFORM_BRANCH_ALLOWLIST = {
+    "cli_runtime.py",
+    "cli_runtime_handoff.py",
     "cli_vendors/antigravity.py",
     "cli_vendors/claude.py",
     "cli_vendors/cursor.py",

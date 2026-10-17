@@ -1,11 +1,18 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+//! The sidecar: spawn and ownership of PTY-backed roots, the control channel and the lifecycle.
+//!
+//! After the handoff (E1 5.2, 6.1) Rust never reads or writes a PTY: Python owns every byte of
+//! the stream. What stays here is the create (gated, journalled), the handle transfer, the window
+//! size, signals and reaping by recorded identity, and the three independent lifecycle facts
+//! (root exit, stream end, verified cleanup).
+use crate::frame::{self, code, Direction, Frame};
+use crate::session_pty::{SessionPty, SlaveEnd, FD_FORK_LOCK};
+use crate::wire::{Outbound, SocketSender};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, BufRead, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::io::{self, Read, Write};
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -29,26 +36,237 @@ mod initial_retention_test;
 #[path = "opencode.rs"]
 mod opencode;
 
-const CAP: usize = 5 * 1024 * 1024;
-const CHUNK: usize = 16384;
-const MAX_REQUEST: usize = 32 * 1024 * 1024;
-/// Bound for observing the root's exit status (cleanup's root reap; EOF before reap).
-const ROOT_REAP_DEADLINE: Duration = Duration::from_secs(1);
+// ---- named bounds (E1 13.1: every bound has a named source) -------------------------------
+/// Bound for observing the root's exit status after a SIGKILL (cleanup's root reap).
+const ROOT_REAP: Duration = Duration::from_secs(1);
+/// `limits.kill_escalation_ms`: the baseline's `_KILL_ESCALATION_GRACE_S`.
+const KILL_ESCALATION_MS: u64 = 1000;
+/// `limits.eof_reap_ms`: how long an EOF waits for the root's exit before the root-live fence.
+const EOF_REAP_MS: u64 = 1000;
+/// The baseline's `_REAP_CONFIRM_S` and `_REAP_WAIT_SLACK_S` (`terminals._reap_wait_timeout_s`).
+const REAP_CONFIRM_MS: u64 = 1000;
+const REAP_SLACK_MS: u64 = 3000;
+const REQUEST_MS: u64 = 15_000;
+const CREATE_ANSWER_MS: u64 = 20_000;
+const PING_MS: u64 = 5000;
+/// `limits.ownership_snapshot_ms`: a sampling cadence, not a wait on state (E1 13.3 site 12).
+const SNAPSHOT_YOUNG_MS: u64 = 5000;
+const SNAPSHOT_STEADY_MS: u64 = 30_000;
+const SNAPSHOT_YOUNG_WINDOW_MS: u64 = 30_000;
+/// Worst-case encoded sizes used by the pre-spawn `SESSION_OWNED` bound (5.1.3).
+const TTY_NAME_MAX: usize = 32;
+
+/// `limits.cleanup_ms`, derived exactly as the baseline's `_reap_wait_timeout_s()`: the largest
+/// declared graceful grace + kill escalation + reap confirmation + slack.
+fn cleanup_ms() -> u64 {
+    adapters::max_grace_ms() + KILL_ESCALATION_MS + REAP_CONFIRM_MS + REAP_SLACK_MS
+}
 
 type Table = HashMap<i32, (i32, i32, String)>;
+type Sessions = Arc<Mutex<Registry>>;
+/// Creates being coordinated: shutdown waits for them (a condition, not a poll).
+static CREATES_CHANGED: Condvar = Condvar::new();
+
+/// One decoded request frame. It carries its inbound byte reservation, released when the request is
+/// dropped (answered, refused or abandoned), so queued and in-flight requests never exceed the budget.
+struct Request {
+    id: u64,
+    code: u16,
+    meta: Value,
+    blob: Vec<u8>,
+    #[allow(dead_code)] // held for its Drop
+    reservation: Option<Reservation>,
+}
+
+/// `limits.max_inbound_bytes` (E1 1.4): the wire bytes of every request that has been read and not yet
+/// finished. The reader blocks while the next request would exceed it (backpressure, nothing dropped).
+const MAX_INBOUND_BYTES: usize = 16 * 1024 * 1024;
+
+struct InboundBudget {
+    state: Mutex<(usize, usize, bool)>, // used, peak, closed
+    changed: Condvar,
+    cap: usize,
+}
+struct Reservation {
+    budget: Arc<InboundBudget>,
+    size: usize,
+}
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        let mut state = self.budget.state.lock().unwrap();
+        state.0 -= self.size;
+        self.budget.changed.notify_all();
+    }
+}
+impl InboundBudget {
+    fn new(cap: usize) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new((0, 0, false)),
+            changed: Condvar::new(),
+            cap,
+        })
+    }
+    /// Block until `size` more bytes fit (a request larger than the whole budget is admitted alone).
+    /// `None` when the budget was closed (the channel is gone).
+    fn acquire(self: &Arc<Self>, size: usize) -> Option<Reservation> {
+        let mut state = self.state.lock().unwrap();
+        while !state.2 && state.0 != 0 && state.0 + size > self.cap {
+            state = self.changed.wait(state).unwrap();
+        }
+        if state.2 {
+            return None;
+        }
+        state.0 += size;
+        state.1 = state.1.max(state.0);
+        Some(Reservation {
+            budget: self.clone(),
+            size,
+        })
+    }
+    fn close(&self) {
+        self.state.lock().unwrap().2 = true;
+        self.changed.notify_all();
+    }
+    fn snapshot(&self) -> (usize, usize) {
+        let state = self.state.lock().unwrap();
+        (state.0, state.1)
+    }
+}
+
+struct Wire {
+    generation: String,
+    journal: std::path::PathBuf,
+    owner_pid: u32,
+    out: Outbound,
+    /// The observation worker's bounded queue (E1 14): history reads are file I/O and never run on
+    /// the control reader, whose job is admission.
+    observe_tx: Mutex<Option<mpsc::SyncSender<Request>>>,
+    inbound: Arc<InboundBudget>,
+}
+
+/// `limits.max_observation_bytes` / `max_observation_parts` and the part size (a part's meta
+/// and blob together stay under `max_frame_r2p`).
+const MAX_OBSERVATION_BYTES: usize = 8_388_608;
+const MAX_OBSERVATION_PARTS: usize = 128;
+const OBSERVATION_QUEUE: usize = 256;
+/// Settled sessions remembered by id and generation after they leave the registry (E1 v8 5.5): memory-bounded.
+const TOMBSTONES: usize = 4096;
+const OBSERVATION_CHUNK: usize = 64 * 1024 - 256;
+
+// ---- the per-session handle -----------------------------------------------------------------
+
+enum Msg {
+    Kill(bool),
+    TtyEof,
+    Shutdown,
+    Exited,
+}
+
+#[derive(Clone, Copy)]
+struct ExitInfo {
+    code: Option<i32>,
+    signal: Option<i32>,
+}
+struct ExitCell {
+    state: Mutex<Option<ExitInfo>>,
+    changed: Condvar,
+}
+impl ExitCell {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(None),
+            changed: Condvar::new(),
+        }
+    }
+    fn get(&self) -> Option<ExitInfo> {
+        *self.state.lock().unwrap()
+    }
+    fn set(&self, info: ExitInfo) {
+        *self.state.lock().unwrap() = Some(info);
+        self.changed.notify_all();
+    }
+    /// Block until the root has exited or `limit` elapsed (an upper bound on an event wait).
+    fn wait(&self, limit: Duration) -> Option<ExitInfo> {
+        let deadline = Instant::now() + limit;
+        let mut state = self.state.lock().unwrap();
+        while state.is_none() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            state = self.changed.wait_timeout(state, left).unwrap().0;
+        }
+        *state
+    }
+}
+
+struct SessionHandle {
+    id: String,
+    generation: String,
+    pane: String,
+    workspace: String,
+    agent_key: String,
+    spec: Option<adapters::ShutdownSpec>,
+    pty: Arc<SessionPty>,
+    tx: mpsc::Sender<Msg>,
+    exit: Arc<ExitCell>,
+    done: (Mutex<Option<bool>>, Condvar),
+    adopted: AtomicBool,
+    started: Instant,
+    /// Survivors named by this session's `SESSION_CLEANED` (what `SHUTDOWN` reports exactly).
+    survivors: Mutex<Vec<Value>>,
+}
+impl SessionHandle {
+    fn meta(&self) -> Value {
+        json!({"session_id":self.id,"session_generation":self.generation,
+            "pane_id":self.pane,"workspace_path":self.workspace})
+    }
+    fn finished(&self) -> bool {
+        self.done.0.lock().unwrap().is_some()
+    }
+    fn send(&self, message: Msg) {
+        let _ = self.tx.send(message);
+    }
+    /// Block until the session's cleanup is final (`Some(complete)`) or `limit` elapsed.
+    fn wait_finished(&self, limit: Duration) -> Option<bool> {
+        let deadline = Instant::now() + limit;
+        let mut done = self.done.0.lock().unwrap();
+        while done.is_none() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            done = self.done.1.wait_timeout(done, left).unwrap().0;
+        }
+        *done
+    }
+}
+
+/// What only the session's own thread touches.
+struct Owned {
+    pid: i32,
+    root: Value,
+    descendants: Table,
+}
+
 #[derive(Default)]
 struct Registry {
-    sessions: HashMap<String, Arc<Mutex<Session>>>,
+    sessions: HashMap<String, Arc<SessionHandle>>,
     reserved: std::collections::HashSet<String>,
-    workers: HashMap<String, mpsc::SyncSender<Value>>,
     settled: VecDeque<String>,
+    /// Ids (with their generation) of sessions evicted from `sessions` after settling: a late `TTY_EOF` for one of
+    /// them is still answered `accepted` (E1 5.5 race item 6; v8 bounds the memory at `TOMBSTONES`).
+    tombstones: HashMap<String, String>,
+    tombstone_order: VecDeque<String>,
     /// One cancellation state machine per create request still without a final answer or
     /// still published: the only source of a cancel verdict (see `CreatePhase`).
-    creates: HashMap<String, CreatePhase>,
+    creates: HashMap<u64, CreatePhase>,
     last_request: u64,
-    worker_count: Arc<AtomicUsize>,
+    /// Creates being coordinated right now (spawn in progress): shutdown waits for them.
+    creating: usize,
+    /// Every tty this runtime generation has handed out and not yet retired (5.2 uniqueness).
+    ttys: std::collections::HashSet<String>,
 }
-type Sessions = Arc<Mutex<Registry>>;
 
 /// The verdict of a native `cancel` for a create request.
 #[derive(Debug, PartialEq)]
@@ -83,16 +301,14 @@ const EARLY_CANCELS: usize = 256;
 
 impl Registry {
     /// The stdin loop routed a create request to its worker.
-    fn note_create(&mut self, request: &str) {
-        self.creates
-            .entry(request.to_owned())
-            .or_insert(CreatePhase::Queued);
+    fn note_create(&mut self, request: u64) {
+        self.creates.entry(request).or_insert(CreatePhase::Queued);
     }
     /// The create worker admits the request (before any spawn). An ungated create can run
     /// from here on, so it is released at admission.
-    fn admit_create(&mut self, request: &str, gated: bool) -> Result<(), &'static str> {
-        if self.creates.get(request) == Some(&CreatePhase::Cancelled) {
-            self.creates.remove(request);
+    fn admit_create(&mut self, request: u64, gated: bool) -> Result<(), &'static str> {
+        if self.creates.get(&request) == Some(&CreatePhase::Cancelled) {
+            self.creates.remove(&request);
             return Err("CREATE_CANCELLED");
         }
         let phase = if gated {
@@ -100,37 +316,37 @@ impl Registry {
         } else {
             CreatePhase::Released(false)
         };
-        self.creates.insert(request.to_owned(), phase);
+        self.creates.insert(request, phase);
         Ok(())
     }
     /// Under the caller's lock, immediately before the gate byte is written.
-    fn release_gate(&mut self, request: &str) -> bool {
-        if self.creates.get(request) == Some(&CreatePhase::Cancelled) {
-            self.creates.remove(request);
+    fn release_gate(&mut self, request: u64) -> bool {
+        if self.creates.get(&request) == Some(&CreatePhase::Cancelled) {
+            self.creates.remove(&request);
             return false;
         }
-        self.creates
-            .insert(request.to_owned(), CreatePhase::Released(false));
+        self.creates.insert(request, CreatePhase::Released(false));
         true
     }
     /// The gate byte could not be written after `release_gate` allowed it: the target is still
     /// gated and its spawn is about to fail.
-    fn release_failed(&mut self, request: &str) {
-        self.creates.insert(request.to_owned(), CreatePhase::Queued);
+    fn release_failed(&mut self, request: u64) {
+        self.creates.insert(request, CreatePhase::Queued);
     }
     /// `spawn` returned; the phase stays `Released` until the session is published.
-    fn spawn_returned(&mut self, _request: &str) {}
+    fn spawn_returned(&mut self, _request: u64) {}
     /// The create failed or was refused after admission: its answer is an error.
-    fn create_failed(&mut self, request: &str) {
-        self.creates.remove(request);
+    fn create_failed(&mut self, request: u64) {
+        self.creates.remove(&request);
     }
     /// Publish the created session; true when a cancel arrived after the release.
-    fn register_create(&mut self, request: &str, session_id: &str) -> bool {
-        let cancel = matches!(self.creates.get(request), Some(CreatePhase::Released(true)));
-        self.creates.insert(
-            request.to_owned(),
-            CreatePhase::Registered(session_id.to_owned()),
+    fn register_create(&mut self, request: u64, session_id: &str) -> bool {
+        let cancel = matches!(
+            self.creates.get(&request),
+            Some(CreatePhase::Released(true))
         );
+        self.creates
+            .insert(request, CreatePhase::Registered(session_id.to_owned()));
         cancel
     }
     /// A settled session leaves the registry, and with it its create record.
@@ -139,8 +355,8 @@ impl Registry {
             .retain(|_, phase| *phase != CreatePhase::Registered(session_id.to_owned()));
     }
     /// The single cancellation verdict for `target`.
-    fn cancel_verdict(&mut self, target: &str) -> Result<CancelVerdict, &'static str> {
-        Ok(match self.creates.get_mut(target) {
+    fn cancel_verdict(&mut self, target: u64) -> Result<CancelVerdict, &'static str> {
+        Ok(match self.creates.get_mut(&target) {
             Some(phase @ CreatePhase::Queued) => {
                 *phase = CreatePhase::Cancelled;
                 CancelVerdict::Prevented
@@ -154,10 +370,7 @@ impl Registry {
             None => {
                 // A create not read yet can still be refused at admission; one whose answer
                 // was already produced has no record and is never "prevented".
-                let unread = target
-                    .strip_prefix('r')
-                    .and_then(|n| n.parse::<u64>().ok())
-                    .is_some_and(|n| n > self.last_request);
+                let unread = target > self.last_request;
                 if !unread {
                     return Ok(CancelVerdict::Unknown);
                 }
@@ -169,264 +382,50 @@ impl Registry {
                 if early >= EARLY_CANCELS {
                     return Err("cancel admission full");
                 }
-                self.creates
-                    .insert(target.to_owned(), CreatePhase::Cancelled);
+                self.creates.insert(target, CreatePhase::Cancelled);
                 CancelVerdict::Prevented
             }
         })
     }
 }
 
-struct Queue {
-    control: VecDeque<Value>,
-    output: HashMap<String, VecDeque<(Value, usize)>>,
-    bytes: HashMap<String, usize>,
-    order: VecDeque<String>,
-    done: bool,
-}
-struct Wire {
-    generation: String,
-    /// Durable ownership journal (`--ownership-journal`), when the owner asked for one.
-    journal: Option<std::path::PathBuf>,
-    owner_pid: u32,
-    queue: Mutex<Queue>,
-    changed: Condvar,
-}
-impl Wire {
-    fn control(&self, mut value: Value) {
-        value["runtime_generation"] = json!(self.generation);
-        let mut queue = self.queue.lock().unwrap();
-        while queue.control.len() >= 256 && !queue.done {
-            queue = self.changed.wait(queue).unwrap();
-        }
-        queue.control.push_back(value);
-        self.changed.notify_all();
+fn known_owned(owned: &Owned) -> Table {
+    let mut known = owned.descendants.clone();
+    if let Some(start) = owned.root["start_value"].as_str() {
+        known.insert(owned.pid, (0, owned.pid, start.to_owned()));
     }
-    fn output(&self, session: &Session, data: Vec<u8>) {
-        let mut value = session.event("output");
-        value["runtime_generation"] = json!(self.generation);
-        value["seq"] = json!(session.seq);
-        value["offset"] = json!(session.offset - data.len() as u64);
-        value["data_b64"] = json!(STANDARD.encode(&data));
-        value["dropped_before"] = json!(0);
-        let mut queue = self.queue.lock().unwrap();
-        let id = session.id.clone();
-        let mut size = queue.bytes.get(&id).copied().unwrap_or(0);
-        let records = queue.output.entry(id.clone()).or_default();
-        let mut dropped = 0;
-        while size + data.len() > CAP {
-            if let Some((old, bytes)) = records.pop_front() {
-                size -= bytes;
-                dropped += bytes + old["dropped_before"].as_u64().unwrap_or(0) as usize;
-            } else {
-                break;
-            }
-        }
-        if let Some((first, _)) = records.front_mut() {
-            first["dropped_before"] =
-                json!(first["dropped_before"].as_u64().unwrap_or(0) + dropped as u64);
-        } else {
-            value["dropped_before"] = json!(dropped);
-        }
-        records.push_back((value, data.len()));
-        queue.bytes.insert(id.clone(), size + data.len());
-        if !queue.order.contains(&id) {
-            queue.order.push_back(id);
-        }
-        self.changed.notify_all();
-    }
-    fn write_loop(&self) -> io::Result<()> {
-        let mut stdout = io::stdout().lock();
-        loop {
-            let mut queue = self.queue.lock().unwrap();
-            let value = loop {
-                if let Some(value) = queue.control.pop_front() {
-                    break Some(value);
-                }
-                if let Some(id) = queue.order.pop_front() {
-                    if let Some((value, size)) =
-                        queue.output.get_mut(&id).and_then(VecDeque::pop_front)
-                    {
-                        *queue.bytes.get_mut(&id).unwrap() -= size;
-                        if queue
-                            .output
-                            .get(&id)
-                            .is_some_and(|records| !records.is_empty())
-                        {
-                            queue.order.push_back(id);
-                        } else {
-                            queue.output.remove(&id);
-                            queue.bytes.remove(&id);
-                        }
-                        break Some(value);
-                    }
-                }
-                if queue.done {
-                    break None;
-                }
-                queue = self.changed.wait(queue).unwrap();
-            };
-            self.changed.notify_all();
-            drop(queue);
-            let Some(value) = value else {
-                return Ok(());
-            };
-            let bytes = serde_json::to_vec(&value)?;
-            if bytes.len() + 1 > 65536 {
-                return Err(io::Error::other("protocol output exceeds bound"));
-            }
-            stdout.write_all(&bytes)?;
-            stdout.write_all(b"\n")?;
-            stdout.flush()?;
-        }
+    known
+}
+fn retain_owned(owned: &mut Owned, table: &Table) {
+    let pid = owned.pid;
+    #[cfg(target_os = "macos")]
+    owned.descendants.extend(
+        table
+            .iter()
+            .filter(|(child, _)| **child != pid)
+            .map(|(&child, entry)| (child, entry.clone())),
+    );
+    #[cfg(not(target_os = "macos"))]
+    if table.contains_key(&pid) {
+        owned.descendants.extend(descendants(table, pid));
     }
 }
 
-struct Session {
-    id: String,
-    generation: String,
-    pane: String,
-    workspace: String,
-    agent_key: String,
-    fd: Option<OwnedFd>,
-    child: Child,
-    root: Value,
-    started: Instant,
-    active: bool,
-    barrier: Option<String>,
-    paused: Option<Instant>,
-    input: VecDeque<u8>,
-    blocked: Option<Instant>,
-    notified: bool,
-    drained: usize,
-    seq: u64,
-    offset: u64,
-    eof: bool,
-    closing: Option<bool>,
-    finished: bool,
-    cleanup_complete: bool,
-    descendants: Table,
-    last_snapshot: Instant,
-    exit: Option<Value>,
-}
-impl Session {
-    fn event(&self, kind: &str) -> Value {
-        json!({"event":kind,"session_id":self.id,"session_generation":self.generation,
-            "pane_id":self.pane,"workspace_path":self.workspace})
+/// Event-driven wait for owned (possibly non-child) processes to exit; returns those still
+/// running at `deadline`. macOS: kqueue `NOTE_EXIT`. Other platforms: the E5 primitive
+/// (`pidfd_open` / job completion port) is not integrated, so they report everything remaining.
+fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
+    #[cfg(target_os = "macos")]
+    {
+        darwin::wait_exit(pids, deadline)
     }
-    fn fd(&self) -> i32 {
-        self.fd.as_ref().map_or(-1, AsRawFd::as_raw_fd)
-    }
-    fn read(&mut self, wire: &Wire, budget: usize) {
-        let mut left = budget;
-        while left > 0 {
-            // Never truncate a native PTY record with a tiny final-budget buffer.
-            let mut data = vec![0; CHUNK];
-            // SAFETY: owned nonblocking fd, valid uniquely-owned writable buffer.
-            let n = unsafe { libc::read(self.fd(), data.as_mut_ptr().cast(), data.len()) };
-            if n <= 0 {
-                let error = io::Error::last_os_error();
-                if n == 0 || error.raw_os_error() == Some(libc::EIO) {
-                    self.eof = true;
-                } else if error.kind() != io::ErrorKind::WouldBlock
-                    && error.kind() != io::ErrorKind::Interrupted
-                {
-                    self.closing = Some(true);
-                }
-                break;
-            }
-            data.truncate(n as usize);
-            left = left.saturating_sub(n as usize);
-            self.seq += 1;
-            self.offset += n as u64;
-            wire.output(self, data);
-        }
-    }
-    fn flush_input(&mut self, wire: &Wire) -> io::Result<()> {
-        while !self.input.is_empty() {
-            let fd = self.fd();
-            let data = self.input.make_contiguous();
-            // SAFETY: valid byte slice and retained writable PTY descriptor.
-            let n = unsafe { libc::write(fd, data.as_ptr().cast(), data.len()) };
-            if n < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::WouldBlock {
-                    break;
-                }
-                if error.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(error);
-            }
-            if n == 0 {
-                break;
-            }
-            self.input.drain(..n as usize);
-            if self.blocked.is_some() {
-                self.drained += n as usize;
-            }
-        }
-        if self.input.is_empty() {
-            if let Some(since) = self.blocked.take() {
-                if self.notified {
-                    let mut event = self.event("input_unblocked");
-                    event["blocked_ms"] = json!(since.elapsed().as_millis() as u64);
-                    event["drained"] = json!(self.drained);
-                    wire.control(event);
-                }
-            }
-            self.notified = false;
-            self.drained = 0;
-        } else {
-            let since = self.blocked.get_or_insert_with(Instant::now);
-            if !self.notified && since.elapsed() >= Duration::from_millis(500) {
-                self.notified = true;
-                let mut event = self.event("input_blocked");
-                event["pending"] = json!(self.input.len());
-                event["since_ms"] = json!(500);
-                wire.control(event);
-            }
-        }
-        Ok(())
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = deadline;
+        pids.to_vec()
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn bounded_command(mut command: Command) -> io::Result<Vec<u8>> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let stdout = child.stdout.take().unwrap();
-    let reader = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-        if bytes.len() > 4 * 1024 * 1024 {
-            return Err(io::Error::other("snapshot exceeds bound"));
-        }
-        Ok(bytes)
-    });
-    let start = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if start.elapsed() >= Duration::from_secs(5) {
-            child.kill()?;
-            child.wait()?;
-            let _ = reader.join();
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "snapshot timeout"));
-        }
-        thread::sleep(Duration::from_millis(5));
-    };
-    let bytes = reader
-        .join()
-        .map_err(|_| io::Error::other("snapshot reader failed"))??;
-    if !status.success() {
-        return Err(io::Error::other("snapshot command failed"));
-    }
-    Ok(bytes)
-}
 #[cfg(target_os = "macos")]
 fn snapshot(initial_child: Option<i32>, known: &Table) -> io::Result<Table> {
     darwin::snapshot(initial_child, known)
@@ -466,30 +465,102 @@ fn descendants(table: &Table, pid: i32) -> Table {
     }
     result
 }
-fn known_owned(session: &Session) -> Table {
-    let mut known = session.descendants.clone();
-    if let Some(start) = session.root["start_value"].as_str() {
-        let pid = session.child.id() as i32;
-        known.insert(pid, (0, pid, start.to_owned()));
-    }
-    known
+
+/// `limits.snapshot_ms`: the bound on one ownership snapshot (the pre-existing 5 s literal, now named and
+/// advertised; E1 13.3 rows 12-13).
+const SNAPSHOT_MS: u64 = 5000;
+/// Ceiling on a snapshot command's stdout (the pre-existing 4 MiB).
+const SNAPSHOT_OUTPUT_MAX: u64 = 4 * 1024 * 1024;
+
+/// Run a short command and collect its stdout under `SNAPSHOT_MS` (E1 13.3 row 13): a waiter thread blocks in
+/// `waitid(WNOWAIT)` (it observes the exit WITHOUT reaping), sets `exited` under a lock, then reaps with
+/// `child.wait()` and reports on a channel; the caller blocks in `recv_timeout`. On expiry the caller takes the same
+/// lock and signals the pid only if `exited` is still false: until the waiter has set it the child has not been
+/// reaped, so its pid cannot have been reused, and the waiter cannot reap before the caller released the lock
+/// (closes the window review 3 N-5 named). Joins both threads. No polling interval. Compiled on every platform;
+/// the non-macOS snapshot is its caller.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn bounded_command(command: Command) -> io::Result<Vec<u8>> {
+    bounded_command_within(command, Duration::from_millis(SNAPSHOT_MS))
 }
-fn retain_owned(session: &mut Session, table: &Table) {
-    let pid = session.child.id() as i32;
-    #[cfg(target_os = "macos")]
-    session.descendants.extend(
-        table
-            .iter()
-            .filter(|(child, _)| **child != pid)
-            .map(|(&child, entry)| (child, entry.clone())),
-    );
-    #[cfg(not(target_os = "macos"))]
-    if table.contains_key(&pid) {
-        session.descendants.extend(descendants(table, pid));
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn bounded_command_within(mut command: Command, limit: Duration) -> io::Result<Vec<u8>> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let pid = child.id() as i32;
+    let stdout = child.stdout.take().unwrap();
+    let reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout
+            .take(SNAPSHOT_OUTPUT_MAX + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > SNAPSHOT_OUTPUT_MAX {
+            return Err(io::Error::other("snapshot exceeds bound"));
+        }
+        Ok(bytes)
+    });
+    let (status_tx, status_rx) = mpsc::channel();
+    let exited = Arc::new(Mutex::new(false));
+    let waiter_exited = exited.clone();
+    let waiter = thread::spawn(move || {
+        loop {
+            // SAFETY: zeroed siginfo_t is a valid out value; P_PID with our own child's pid; WNOWAIT leaves it unreaped.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let rc = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            };
+            if rc == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                break;
+            }
+        }
+        *waiter_exited.lock().unwrap() = true; // from here the caller must not signal the pid
+        let _ = status_tx.send(child.wait());
+    });
+    let status = match status_rx.recv_timeout(limit) {
+        Ok(status) => status?,
+        Err(_) => {
+            {
+                let already_exited = exited.lock().unwrap();
+                if !*already_exited {
+                    // SAFETY: `pid` is our own direct child and the waiter has not marked it exited, so it is still
+                    // unreaped (it cannot be reaped before the waiter sets the flag, which needs this lock).
+                    unsafe {
+                        libc::kill(pid, libc::SIGKILL);
+                    }
+                }
+            }
+            let _ = waiter.join();
+            let _ = reader.join();
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "snapshot timeout"));
+        }
+    };
+    let _ = waiter.join();
+    let bytes = reader
+        .join()
+        .map_err(|_| io::Error::other("snapshot reader failed"))??;
+    if !status.success() {
+        return Err(io::Error::other("snapshot command failed"));
     }
+    Ok(bytes)
 }
+
 /// Append one identity record and fsync it. The line is a single `write`, so an
 /// abrupt death of this process leaves either the whole line or none of it.
+///
+/// Why one `fsync` per create stays (E1 decision D12): this record is the crash-durable evidence that names a root
+/// before its target may run (ownership invariant I1 of ticket 05). If the sidecar or the backend dies right after
+/// the gate opens, the next startup finds the root through this line and cleans it by identity; without the sync a
+/// crash could leave an executed, unnamed process. It runs under `FD_FORK_LOCK`, which exists for a different reason
+/// (no concurrent fork may inherit the gate's write end), so the sync cost is a correctness price, not a latency
+/// target; the measured cost is in `evidence/e3/e3-handoff.md`.
 fn journal_append(path: &std::path::Path, record: &Value) -> io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut line = serde_json::to_vec(record).map_err(io::Error::other)?;
@@ -502,22 +573,11 @@ fn journal_append(path: &std::path::Path, record: &Value) -> io::Result<()> {
     file.write_all(&line)?;
     file.sync_all()
 }
+
 fn identity(pid: i32, entry: &(i32, i32, String)) -> Value {
     json!({"pid":pid,"pgid":entry.1,"start_kind":"posix-lstart","start_value":entry.2})
 }
-fn resize(fd: i32, rows: u16, cols: u16) -> io::Result<()> {
-    let size = libc::winsize {
-        ws_row: rows,
-        ws_col: cols,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
-    };
-    // SAFETY: valid retained PTY fd, correctly sized winsize pointer.
-    if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &size) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
+
 fn text<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
     value[key]
         .as_str()
@@ -528,9 +588,9 @@ fn dimension(value: &Value, key: &str) -> io::Result<u16> {
     value[key]
         .as_u64()
         .and_then(|n| u16::try_from(n).ok())
+        .filter(|n| *n > 0)
         .ok_or_else(|| io::Error::other(format!("invalid {key}")))
 }
-static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
 fn cloexec_pipe() -> io::Result<(i32, i32)> {
     let mut fds = [0i32; 2];
@@ -556,6 +616,7 @@ fn close_fds(fds: &[i32]) {
         }
     }
 }
+
 /// Owner half of the ownership gate: learn the gated child's pid, take its identity, make it
 /// durable, and only then release the child. Any failure returns before the release.
 struct GateContext<'a> {
@@ -565,7 +626,7 @@ struct GateContext<'a> {
     id: &'a str,
     generation: &'a str,
     sessions: &'a Sessions,
-    request: &'a str,
+    request: u64,
 }
 fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Table, Value)> {
     let GateContext {
@@ -621,19 +682,27 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
     drop(registry);
     Ok((table, root))
 }
-fn spawn(args: &Value, wire: &Wire, request: &str, sessions: &Sessions) -> io::Result<Session> {
-    let id = text(args, "session_id")?.to_owned();
-    let generation = text(args, "session_generation")?.to_owned();
-    let pane = text(args, "pane_id")?.to_owned();
-    let workspace = text(args, "workspace_path")?.to_owned();
-    let cwd = text(args, "cwd")?.to_owned();
-    let agent = args["agent_key"].as_str().unwrap_or("");
-    if !matches!(agent, "" | "terminal") && !adapters::integrated(agent) {
+
+/// Validated `create` arguments.
+struct CreateArgs {
+    id: String,
+    generation: String,
+    pane: String,
+    workspace: String,
+    cwd: String,
+    agent: String,
+    argv: Vec<String>,
+    rows: u16,
+    cols: u16,
+}
+fn create_args(args: &Value) -> io::Result<CreateArgs> {
+    let agent = args["agent_key"].as_str().unwrap_or("").to_owned();
+    if !matches!(agent.as_str(), "" | "terminal") && !adapters::integrated(&agent) {
         return Err(io::Error::other("agent runtime not integrated"));
     }
     let argv: Vec<String> = args["argv"]
         .as_array()
-        .ok_or_else(|| io::Error::other("argv required"))?
+        .ok_or_else(|| io::Error::other("invalid argv"))?
         .iter()
         .map(|v| {
             v.as_str()
@@ -643,40 +712,164 @@ fn spawn(args: &Value, wire: &Wire, request: &str, sessions: &Sessions) -> io::R
         })
         .collect::<io::Result<_>>()?;
     if argv.is_empty() {
-        return Err(io::Error::other("argv required"));
+        return Err(io::Error::other("invalid argv"));
     }
-    let rows = dimension(args, "rows")?;
-    let cols = dimension(args, "cols")?;
-    let mut master = -1;
-    let mut slave = -1;
-    // SAFETY: output descriptors are initialized by openpty; no name/termios pointer.
-    if unsafe {
-        libc::openpty(
-            &mut master,
-            &mut slave,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    } < 0
-    {
-        return Err(io::Error::last_os_error());
+    Ok(CreateArgs {
+        id: text(args, "session_id")?.to_owned(),
+        generation: text(args, "session_generation")?.to_owned(),
+        pane: text(args, "pane_id")?.to_owned(),
+        workspace: text(args, "workspace_path")?.to_owned(),
+        cwd: text(args, "cwd")?.to_owned(),
+        agent,
+        argv,
+        rows: dimension(args, "rows")?,
+        cols: dimension(args, "cols")?,
+    })
+}
+
+/// The `SESSION_OWNED` meta (5.2) for a session whose root is `root`.
+fn owned_meta(create: u64, handle: &SessionHandle, root: &Value) -> Value {
+    json!({"create_id":create,"session_id":handle.id,"session_generation":handle.generation,
+        "pane_id":handle.pane,"workspace_path":handle.workspace,"root":root,
+        "pty":handle.pty.owned_record()})
+}
+
+/// 5.1.3: before any PTY or process exists, the worst-case encoded `SESSION_OWNED` of this
+/// session must fit the `HAS_FD` bound, so an oversized handoff is never found after the gate
+/// opened.
+fn handoff_size_ok(create: u64, args: &CreateArgs) -> bool {
+    let root = json!({"pid":99_999_999,"pgid":99_999_999,"start_kind":"posix-starttime",
+        "start_value":"x".repeat(40)});
+    let meta = json!({"create_id":create,"session_id":args.id,"session_generation":args.generation,
+        "pane_id":args.pane,"workspace_path":args.workspace,"root":root,
+        "pty":{"tty":"x".repeat(TTY_NAME_MAX)}});
+    let bytes = serde_json::to_vec(&meta)
+        .map(|b| b.len())
+        .unwrap_or(usize::MAX);
+    frame::HEADER_LEN.saturating_add(bytes) <= frame::MAX_HAS_FD_FRAME
+}
+
+struct Spawned {
+    handle: Arc<SessionHandle>,
+    mailbox: mpsc::Receiver<Msg>,
+    owned: Owned,
+}
+
+fn watch_exit(pid: i32, cell: Arc<ExitCell>, tx: mpsc::Sender<Msg>) -> io::Result<()> {
+    thread::Builder::new()
+        .name("exit-watch".into())
+        .spawn(move || {
+            let mut status: libc::c_int = 0;
+            let info = loop {
+                // SAFETY: blocking wait for our own child; `status` is a valid out pointer.
+                let reaped = unsafe { libc::waitpid(pid, &mut status, 0) };
+                if reaped == pid {
+                    break if libc::WIFEXITED(status) {
+                        ExitInfo {
+                            code: Some(libc::WEXITSTATUS(status)),
+                            signal: None,
+                        }
+                    } else {
+                        ExitInfo {
+                            code: None,
+                            signal: Some(libc::WTERMSIG(status)),
+                        }
+                    };
+                }
+                if reaped < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                break ExitInfo {
+                    code: None,
+                    signal: None,
+                }; // not our child any more: status unknown
+            };
+            cell.set(info);
+            let _ = tx.send(Msg::Exited);
+        })?;
+    Ok(())
+}
+
+/// A released root whose session could not be set up: signal its group by the identity just recorded and
+/// report whether it was verified reaped (E1 5.1.3). It is our own child, so the wait is a real `waitpid`.
+/// Only the **root** is waited for: the group was just signalled and the only claim made on `effect:none` is that
+/// the root (the one process that ran) is gone; no descendant had time to be recorded (no snapshot ran yet), and
+/// anything that escaped the group is what the generation's journal-based cleanup is for.
+fn kill_and_reap_released(pid: i32) -> bool {
+    // SAFETY: the root is our own child, a session/group leader we just created (pgid == pid); a
+    // negative pid addresses exactly that group.
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
     }
-    // SAFETY: openpty succeeded and transfers each distinct descriptor exactly once.
-    let master = unsafe { OwnedFd::from_raw_fd(master) };
-    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
-    resize(master.as_raw_fd(), rows, cols)?;
-    // SAFETY: retained descriptors; ensure master cannot leak into unrelated child execs.
-    if unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) } < 0
-        || unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0
-    {
-        return Err(io::Error::last_os_error());
+    #[cfg(target_os = "macos")]
+    let _ = wait_exit(&[pid], Instant::now() + ROOT_REAP); // event-driven; the exit is reaped below
+    loop {
+        let mut status: libc::c_int = 0;
+        #[cfg(target_os = "macos")]
+        let flags = libc::WNOHANG;
+        #[cfg(not(target_os = "macos"))]
+        let flags = 0; // a SIGKILLed child exits promptly; E5 replaces this with pidfd
+                       // SAFETY: waitpid on our own child with a valid status pointer.
+        let reaped = unsafe { libc::waitpid(pid, &mut status, flags) };
+        if reaped == pid {
+            return true;
+        }
+        if reaped < 0 {
+            match io::Error::last_os_error().raw_os_error() {
+                Some(libc::EINTR) => continue,
+                Some(libc::ECHILD) => return true, // already reaped elsewhere
+                _ => return false,
+            }
+        }
+        return false; // still running at the bound
     }
+}
+
+/// The error for a failure after the gate released a root: `effect:none` only if it was verified killed and
+/// reaped first (E1 5.1.3), otherwise `CLEANUP_FAILED` (partial) and the generation is lost.
+fn post_effect_failure(verified: bool, what: &str, error: &io::Error) -> io::Error {
+    if verified {
+        io::Error::other(format!("{what}: {error}"))
+    } else {
+        io::Error::other(format!(
+            "CLEANUP_FAILED: {what} ({error}) and the released root could not be verified reaped"
+        ))
+    }
+}
+
+fn spawn(args: &Value, wire: &Wire, request: u64, sessions: &Sessions) -> io::Result<Spawned> {
+    let parsed = create_args(args)?;
+    let (pty, slave) = SessionPty::open(parsed.rows, parsed.cols)?;
+    // Uniqueness of the slave name among this generation's live sessions (5.2, 6.4).
+    if !sessions.lock().unwrap().ttys.insert(pty.tty().to_owned()) {
+        return Err(io::Error::other("duplicate tty"));
+    }
+    let tty = pty.tty().to_owned();
+    let result = spawn_gated(args, &parsed, pty, slave, wire, request, sessions);
+    if result.is_err() {
+        sessions.lock().unwrap().ttys.remove(&tty);
+    }
+    result
+}
+
+fn spawn_gated(
+    args: &Value,
+    parsed: &CreateArgs,
+    pty: SessionPty,
+    slave: SlaveEnd,
+    wire: &Wire,
+    request: u64,
+    sessions: &Sessions,
+) -> io::Result<Spawned> {
+    let argv = &parsed.argv;
     let mut command = Command::new(&argv[0]);
-    command.args(&argv[1..]).current_dir(cwd).env_clear();
+    command
+        .args(&argv[1..])
+        .current_dir(&parsed.cwd)
+        .env_clear();
     for (key, value) in args["env"]
         .as_object()
-        .ok_or_else(|| io::Error::other("env required"))?
+        .ok_or_else(|| io::Error::other("invalid env"))?
     {
         if key.contains(['\0', '=']) {
             return Err(io::Error::other("invalid env key"));
@@ -688,29 +881,25 @@ fn spawn(args: &Value, wire: &Wire, request: &str, sessions: &Sessions) -> io::R
         command.env(key, value);
     }
     command
-        .stdin(Stdio::from(slave.try_clone()?))
-        .stdout(Stdio::from(slave.try_clone()?))
-        .stderr(Stdio::from(slave));
-    // Ownership gate (only when the owner asked for a journal): the root must not execute its
-    // target before its identity is durable. The forked child reports its pid and then BLOCKS on a
-    // gate pipe before exec; the owner records the identity, appends+fsyncs the journal and only
-    // then releases the gate. EOF on the gate (owner dead, or journal refused) makes the child
-    // fail its own spawn, so no target ever runs unnamed. Pipe creation and the spawn are
-    // serialised process-wide so no concurrent fork can inherit the gate's write end (which would
-    // keep the gate open after the owner's death).
-    let gated = wire.journal.is_some();
-    let _spawn_lock = gated.then(|| SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
-    let (mut report_r, mut report_w, mut gate_r, mut gate_w) = (-1, -1, -1, -1);
-    if gated {
-        (report_r, report_w) = cloexec_pipe()?;
-        match cloexec_pipe() {
-            Ok(pair) => (gate_r, gate_w) = pair,
-            Err(error) => {
-                close_fds(&[report_r, report_w]);
-                return Err(error);
-            }
+        .stdin(Stdio::from(slave.0.try_clone()?))
+        .stdout(Stdio::from(slave.0.try_clone()?))
+        .stderr(Stdio::from(slave.0));
+    // Ownership gate (mandatory in wire v1): the root must not execute its target before its
+    // identity is durable. The forked child reports its pid and then BLOCKS on a gate pipe before
+    // exec; the owner records the identity, appends+fsyncs the journal and only then releases the
+    // gate. EOF on the gate (owner dead, or journal refused) makes the child fail its own spawn,
+    // so no target ever runs unnamed. Pipe creation and the spawn are serialised process-wide so
+    // no concurrent fork can inherit the gate's write end (which would keep the gate open after
+    // the owner's death).
+    let _spawn_lock = FD_FORK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (report_r, report_w) = cloexec_pipe()?;
+    let (gate_r, gate_w) = match cloexec_pipe() {
+        Ok(pair) => pair,
+        Err(error) => {
+            close_fds(&[report_r, report_w]);
+            return Err(error);
         }
-    }
+    };
     // SAFETY: only async-signal-safe native calls between fork and exec (setsid, signal, ioctl,
     // close, getpid, write, read on plain integers); no locks, no allocation, no std I/O.
     unsafe {
@@ -722,33 +911,31 @@ fn spawn(args: &Value, wire: &Wire, request: &str, sessions: &Sessions) -> io::R
             libc::signal(libc::SIGXFSZ, libc::SIG_DFL);
             // Preserve baseline's best-effort controlling-terminal claim.
             libc::ioctl(0, libc::TIOCSCTTY as _, 0);
-            if report_w >= 0 {
-                // Only the owner may hold the gate's write end: drop this fork's copies.
-                libc::close(gate_w);
-                libc::close(report_r);
-                let pid = libc::getpid();
-                if libc::write(report_w, (&pid as *const i32).cast(), 4) != 4 {
-                    return Err(io::Error::last_os_error());
+            // Only the owner may hold the gate's write end: drop this fork's copies.
+            libc::close(gate_w);
+            libc::close(report_r);
+            let pid = libc::getpid();
+            if libc::write(report_w, (&pid as *const i32).cast(), 4) != 4 {
+                return Err(io::Error::last_os_error());
+            }
+            let mut byte = 0u8;
+            loop {
+                let n = libc::read(gate_r, (&mut byte as *mut u8).cast(), 1);
+                if n == 1 && byte == b'G' {
+                    break;
                 }
-                let mut byte = 0u8;
-                loop {
-                    let n = libc::read(gate_r, (&mut byte as *mut u8).cast(), 1);
-                    if n == 1 && byte == b'G' {
-                        break;
-                    }
-                    if n < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
-                        continue;
-                    }
-                    // EOF or anything else: the owner is gone or refused. Never exec.
-                    return Err(io::Error::from_raw_os_error(libc::ECANCELED));
+                if n < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                    continue;
                 }
+                // EOF or anything else: the owner is gone or refused. Never exec.
+                return Err(io::Error::from_raw_os_error(libc::ECANCELED));
             }
             Ok(())
         });
     }
-    let (child, table, root) = if gated {
-        let journal = wire.journal.as_deref().unwrap_or(std::path::Path::new(""));
-        let (id_ref, generation_ref, argv0) = (&id, &generation, &argv[0]);
+    let (child, table, root) = {
+        let journal = wire.journal.as_path();
+        let (id_ref, generation_ref, argv0) = (&parsed.id, &parsed.generation, &argv[0]);
         let (spawned, verdict) = thread::scope(|scope| {
             let watcher = scope.spawn(move || {
                 // Owner side of the gate: every path below ends by closing the gate's write end
@@ -792,67 +979,127 @@ fn spawn(args: &Value, wire: &Wire, request: &str, sessions: &Sessions) -> io::R
             (Err(_), Err(error)) => return Err(error),
             (Err(error), Ok(_)) => return Err(error), // exec failed after a durable record: stale row only
         }
+    };
+    // Every sidecar copy of the slave closes now, so the CLI tree closing its own is observable
+    // as EOF on the master.
+    drop(command);
+    let pid = child.id() as i32;
+    drop(child); // reaped only by the exit watcher below
+    let pty = Arc::new(pty);
+    let (tx, mailbox) = mpsc::channel();
+    let exit = Arc::new(ExitCell::new());
+    #[cfg(feature = "fault-hooks")]
+    let watched = if fault::watch_exit_fails(&parsed.pane) {
+        Err(io::Error::other("fault: exit watcher could not start"))
     } else {
-        let mut child = command.spawn()?;
-        let pid = child.id() as i32;
-        let table = snapshot(Some(pid), &Table::new()).unwrap_or_default();
-        let root = if let Some(entry) = table.get(&pid) {
-            identity(pid, entry)
-        } else if let Some(status) = child.try_wait()? {
-            json!({"pid":pid,"pgid":pid,"start_kind":"posix-lstart","start_value":null,"early_status":status.code().or(status.signal().map(|n| -n))})
-        } else {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(io::Error::other("OWNERSHIP_UNVERIFIED"));
-        };
-        (child, table, root)
+        watch_exit(pid, exit.clone(), tx.clone())
     };
-    let mut session = Session {
-        id,
-        generation,
-        pane,
-        workspace,
-        agent_key: args["agent_key"].as_str().unwrap_or("").to_owned(),
-        fd: Some(master),
-        child,
-        root,
+    #[cfg(not(feature = "fault-hooks"))]
+    let watched = watch_exit(pid, exit.clone(), tx.clone());
+    if let Err(error) = watched {
+        // The gate was released: the root has run. `effect:none` is only true if it is dead and reaped.
+        #[cfg(feature = "fault-hooks")]
+        let verified = !fault::reap_is_unverifiable(&parsed.pane) && kill_and_reap_released(pid);
+        #[cfg(not(feature = "fault-hooks"))]
+        let verified = kill_and_reap_released(pid);
+        return Err(post_effect_failure(
+            verified,
+            "the exit watcher could not start",
+            &error,
+        ));
+    }
+    let handle = Arc::new(SessionHandle {
+        id: parsed.id.clone(),
+        generation: parsed.generation.clone(),
+        pane: parsed.pane.clone(),
+        workspace: parsed.workspace.clone(),
+        agent_key: parsed.agent.clone(),
+        spec: adapters::shutdown(&parsed.agent),
+        pty,
+        tx,
+        exit,
+        done: (Mutex::new(None), Condvar::new()),
+        adopted: AtomicBool::new(false),
         started: Instant::now(),
-        active: false,
-        barrier: None,
-        paused: None,
-        input: VecDeque::new(),
-        blocked: None,
-        notified: false,
-        drained: 0,
-        seq: 0,
-        offset: 0,
-        eof: false,
-        closing: None,
-        finished: false,
-        cleanup_complete: false,
+        survivors: Mutex::new(Vec::new()),
+    });
+    let mut owned = Owned {
+        pid,
+        root,
         descendants: Table::new(),
-        last_snapshot: Instant::now(),
-        exit: None,
     };
-    retain_owned(&mut session, &table);
-    let mut event = session.event("owned");
-    event["create_id"] = json!(request);
-    event["root"] = session.root.clone();
-    wire.control(event);
-    Ok(session)
+    retain_owned(&mut owned, &table);
+    Ok(Spawned {
+        handle,
+        mailbox,
+        owned,
+    })
 }
 
-fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Value>> {
-    let pid = session.child.id() as i32;
-    if session.child.try_wait()?.is_some() && session.descendants.is_empty() {
+// ---- lifecycle ---------------------------------------------------------------------------------
+
+struct State {
+    owned: Owned,
+    closing: Option<bool>,
+    exited_sent: bool,
+    eof: bool,
+    eof_deadline: Option<Instant>,
+    next_snapshot: Instant,
+}
+
+fn snapshot_cadence(started: Instant) -> Duration {
+    Duration::from_millis(
+        if started.elapsed() < Duration::from_millis(SNAPSHOT_YOUNG_WINDOW_MS) {
+            SNAPSHOT_YOUNG_MS
+        } else {
+            SNAPSHOT_STEADY_MS
+        },
+    )
+}
+
+/// `SESSION_EXITED`: the root was reaped (5.5). Nothing about the stream or the descendants.
+fn send_exited(handle: &SessionHandle, state: &mut State, wire: &Wire) {
+    if state.exited_sent {
+        return;
+    }
+    let Some(info) = handle.exit.get() else {
+        return;
+    };
+    let mut meta = handle.meta();
+    meta["reason"] = json!(if state.closing.is_some() {
+        "killed"
+    } else {
+        "exit"
+    });
+    meta["exit_code"] = json!(info.code.or(info.signal.map(|n| -n)));
+    meta["signal"] = json!(info.signal.map(|n| format!("SIG{n}")));
+    meta["uptime_ms"] = json!(handle.started.elapsed().as_millis() as u64);
+    wire.out.event(code::SESSION_EXITED, meta);
+    state.exited_sent = true;
+}
+
+/// Signal recorded identities, wait event-driven, escalate, verify (13.1 kill policy). `hangup`
+/// is true for a kill: unless the adapter defers it, the sidecar's master closes right after the
+/// first signal and `SESSION_HANGUP` tells Python (5.5 R-e).
+fn cleanup(
+    handle: &SessionHandle,
+    state: &mut State,
+    wire: &Wire,
+    force: bool,
+    hangup: bool,
+) -> io::Result<Vec<Value>> {
+    let pid = state.owned.pid;
+    if handle.exit.get().is_some() && state.owned.descendants.is_empty() {
         return Ok(Vec::new());
     }
-    let before = snapshot(None, &known_owned(session))?;
-    retain_owned(session, &before);
-    let root_live = before
-        .get(&pid)
-        .is_some_and(|entry| Some(entry.2.as_str()) == session.root["start_value"].as_str());
-    let graceful = session.agent_key == claude_facts::KEY && claude_facts::GRACEFUL;
+    let before = snapshot(None, &known_owned(&state.owned))?;
+    retain_owned(&mut state.owned, &before);
+    let root_start = state.owned.root["start_value"].as_str().map(String::from);
+    let root_live = handle.exit.get().is_none()
+        && before
+            .get(&pid)
+            .is_some_and(|entry| Some(entry.2.as_str()) == root_start.as_deref());
+    let graceful = handle.spec.is_some_and(|spec| spec.graceful);
     let signal = if force && !graceful {
         libc::SIGKILL
     } else {
@@ -863,543 +1110,1033 @@ fn cleanup(session: &mut Session, force: bool, wire: &Wire) -> io::Result<Vec<Va
         unsafe {
             libc::kill(-pid, signal);
         }
-        // Foreground job may have its own group; signal only an observed owned group.
-        let foreground = unsafe { libc::tcgetpgrp(session.fd()) };
-        if foreground > 0
-            && session
-                .descendants
-                .values()
-                .any(|entry| entry.1 == foreground)
-        {
-            unsafe {
-                libc::kill(-foreground, signal);
-            }
-        }
     }
     // Signalled owned descendants, confirmed gone before cleanup reports them absent.
-    #[cfg(target_os = "macos")]
-    let mut signalled = Vec::new();
-    for (&child, old) in &session.descendants {
+    let mut signalled: Vec<(i32, (i32, i32, String))> = Vec::new();
+    for (&child, old) in &state.owned.descendants {
         if before.get(&child).is_some_and(|entry| entry.2 == old.2) {
+            // SAFETY: identity (pid + birth) matched against a fresh table just above.
             unsafe {
                 libc::kill(child, signal);
             }
-            #[cfg(target_os = "macos")]
             signalled.push((child, old.clone()));
         }
     }
-    if graceful {
-        // Keep the master and reads alive across Claude's native cleanup hook.
-        let deadline = Instant::now() + Duration::from_millis(claude_facts::GRACE_MS);
-        if !claude_facts::DEFER_MASTER_CLOSE {
-            session.fd.take();
-        }
-        while session.child.try_wait()?.is_none() && Instant::now() < deadline {
-            session.read(wire, 256 * 1024);
-            thread::sleep(Duration::from_millis(5));
-        }
-    } else if !force {
-        thread::sleep(Duration::from_secs(1));
+    if hangup && !handle.spec.is_some_and(|spec| spec.defer_master_close) {
+        // The kernel hangs the PTY up when the last master closes: the baseline's "signal, then
+        // close the master" effect (SIGHUP) is preserved without Rust ever reading the PTY.
+        handle.pty.close_master();
+        wire.out.event(code::SESSION_HANGUP, handle.meta());
     }
-    let after = snapshot(None, &known_owned(session))?;
-    #[cfg(target_os = "macos")]
-    retain_owned(session, &after);
-    if after
-        .get(&pid)
-        .is_some_and(|entry| Some(entry.2.as_str()) == session.root["start_value"].as_str())
+    if let Some(spec) = handle.spec.filter(|spec| spec.graceful) {
+        // Declared graceful: wait event-driven up to the declared grace for the root.
+        handle.exit.wait(Duration::from_millis(spec.grace_ms));
+        send_exited(handle, state, wire);
+    } else if !force {
+        // Conditional wait (replaces the baseline's unconditional 1 s sleep): returns as soon as
+        // the root and every signalled descendant exited, at the declared escalation bound.
+        let deadline = Instant::now() + Duration::from_millis(KILL_ESCALATION_MS);
+        handle
+            .exit
+            .wait(deadline.saturating_duration_since(Instant::now()));
+        send_exited(handle, state, wire);
+        let pids: Vec<i32> = signalled.iter().map(|(child, _)| *child).collect();
+        wait_exit(&pids, deadline);
+    }
+    let after = snapshot(None, &known_owned(&state.owned))?;
+    retain_owned(&mut state.owned, &after);
+    if handle.exit.get().is_none()
+        && after
+            .get(&pid)
+            .is_some_and(|entry| Some(entry.2.as_str()) == root_start.as_deref())
     {
+        // SAFETY: root identity re-verified against the fresh table.
         unsafe {
             libc::kill(-pid, libc::SIGKILL);
         }
     }
-    for (&child, old) in &session.descendants {
+    for (&child, old) in &state.owned.descendants {
         if after.get(&child).is_some_and(|entry| entry.2 == old.2) {
+            // SAFETY: identity (pid + birth) re-verified against the fresh table.
             unsafe {
                 libc::kill(child, libc::SIGKILL);
             }
-            #[cfg(target_os = "macos")]
             signalled.push((child, old.clone()));
         }
     }
-    let deadline = Instant::now() + ROOT_REAP_DEADLINE;
-    while session.child.try_wait()?.is_none() {
-        // A blocked PTY write can delay even SIGKILL until its master drains.
-        session.read(wire, 256 * 1024);
-        if Instant::now() > deadline {
-            return Err(io::Error::other("root reap timeout"));
-        }
-        thread::sleep(Duration::from_millis(5));
+    let deadline = Instant::now() + ROOT_REAP;
+    // A blocked PTY write can delay even SIGKILL until a master drains: Python keeps reading.
+    if handle.exit.wait(ROOT_REAP).is_none() {
+        return Err(io::Error::other("root reap timeout"));
     }
-    // proc_pidinfo stops answering (ESRCH) while a killed process is still exiting, so
-    // the snapshot alone cannot prove absence; wait within the same deadline.
-    #[cfg(target_os = "macos")]
-    {
-        signalled.sort_by_key(|(child, _)| *child);
-        signalled.dedup_by_key(|(child, _)| *child);
-    }
-    #[cfg(target_os = "macos")]
-    while signalled
-        .iter()
-        .any(|(child, old)| darwin::owned_not_gone(*child, &old.2))
-        && Instant::now() <= deadline
-    {
-        session.read(wire, 256 * 1024);
-        thread::sleep(Duration::from_millis(5));
-    }
-    let final_table = snapshot(None, &known_owned(session))?;
-    #[cfg(target_os = "macos")]
-    retain_owned(session, &final_table);
+    send_exited(handle, state, wire);
+    signalled.sort_by_key(|(child, _)| *child);
+    signalled.dedup_by_key(|(child, _)| *child);
+    let pids: Vec<i32> = signalled.iter().map(|(child, _)| *child).collect();
+    let still_running = wait_exit(&pids, deadline);
+    let final_table = snapshot(None, &known_owned(&state.owned))?;
+    retain_owned(&mut state.owned, &final_table);
+    Ok(survivors_after_cleanup(
+        &state.owned.descendants,
+        &final_table,
+        &signalled,
+        &still_running,
+    ))
+}
+
+/// The recorded descendants that are still there after the kill (13.1 verification). A recorded descendant that
+/// was signalled and whose exit was **observed** (`still_running` is what `wait_exit` could not confirm exited by
+/// the deadline) is gone even if the final snapshot still lists it: a process that has exited stays in the table
+/// as a zombie until its parent (here launchd, after the root died) reaps it, and a zombie is dead, holds nothing
+/// and cannot run. Counting it made `cleanup_complete` depend on how fast the system reaps (measured under load,
+/// `evidence/e3/receipts/r4/survivor-zombie/`).
+fn survivors_after_cleanup(
+    descendants: &Table,
+    final_table: &Table,
+    signalled: &[(i32, (i32, i32, String))],
+    still_running: &[i32],
+) -> Vec<Value> {
+    // Signalled and confirmed exited: dead, whatever the table still shows.
+    let confirmed_exited = |child: &i32| {
+        signalled.iter().any(|(pid, _)| pid == child) && !still_running.contains(child)
+    };
     #[allow(unused_mut)]
-    let mut survivors: Vec<Value> = session
-        .descendants
+    let mut survivors: Vec<Value> = descendants
         .iter()
+        .filter(|(child, _)| !confirmed_exited(child))
         .filter_map(|(&child, old)| {
             final_table
                 .get(&child)
                 .filter(|entry| entry.2 == old.2)
-                .map(|entry| identity(child, entry))
+                .map(|entry| (child, entry))
         })
+        .map(|(child, entry)| identity(child, entry))
         .collect();
     #[cfg(target_os = "macos")]
-    for (child, old) in &signalled {
-        // Not gone by the deadline: a survivor even if the snapshot no longer sees it.
-        if !final_table.contains_key(child) && darwin::owned_not_gone(*child, &old.2) {
+    for (child, old) in signalled {
+        // Not gone by the deadline: a survivor even if the snapshot no longer sees it. A child whose exit the kqueue
+        // wait observed is not one: `owned_not_gone` is true for a zombie (it is still reachable and no longer listed).
+        if !confirmed_exited(child)
+            && !final_table.contains_key(child)
+            && darwin::owned_not_gone(*child, &old.2)
+        {
             survivors.push(identity(*child, old));
         }
     }
-    Ok(survivors)
-}
-fn session_loop(session_arc: Arc<Mutex<Session>>, wire: Arc<Wire>, sessions: Sessions) {
-    let mut eof_before_reap: Option<Instant> = None;
-    loop {
-        let mut session = session_arc.lock().unwrap();
-        if session.finished {
-            return;
-        }
-        if !session.active && session.closing.is_none() {
-            drop(session);
-            thread::sleep(Duration::from_millis(2));
-            continue;
-        }
-        if session
-            .paused
-            .is_some_and(|since| since.elapsed() >= Duration::from_secs(1))
-        {
-            session.paused = None;
-        }
-        if session.barrier.is_none() && session.paused.is_none() {
-            session.read(&wire, 256 * 1024);
-        }
-        if session.flush_input(&wire).is_err() {
-            session.closing = Some(true);
-        }
-        let status = session.child.try_wait().ok().flatten();
-        let closing = session.closing;
-        // A hangup can be read before the root's exit is reapable; cleanup must not signal
-        // descendants while the root is unreaped, so keep draining and reaping first.
-        if session.eof && status.is_none() && closing.is_none() && session.barrier.is_none() {
-            let since = *eof_before_reap.get_or_insert_with(Instant::now);
-            if since.elapsed() < ROOT_REAP_DEADLINE {
-                drop(session);
-                thread::sleep(Duration::from_millis(2));
-                continue;
-            }
-        }
-        if (closing.is_some() || session.eof || status.is_some()) && session.barrier.is_none() {
-            session.read(&wire, 256 * 1024);
-            let survivors = cleanup(&mut session, closing.unwrap_or(false), &wire);
-            let status = session.child.try_wait().ok().flatten().or(status);
-            let mut event = session.event("exit");
-            event["reason"] = json!(if closing.is_some() { "killed" } else { "exit" });
-            event["exit_code"] = json!(status.and_then(|s| s.code().or(s.signal().map(|n| -n))));
-            event["signal"] = json!(status.and_then(|s| s.signal()).map(|n| format!("SIG{n}")));
-            event["uptime_ms"] = json!(session.started.elapsed().as_millis() as u64);
-            event["last_output_seq"] = json!(session.seq);
-            event["dropped_tail_bytes"] = json!(0);
-            event["dropped_tail_first_seq"] = Value::Null;
-            session.exit = Some(event.clone());
-            session.fd.take();
-            session.finished = true;
-            session.cleanup_complete = survivors.as_ref().is_ok_and(Vec::is_empty);
-            wire.control(event);
-            let mut event = session.event("cleaned");
-            event["cleanup_complete"] = json!(session.cleanup_complete);
-            event["root_reaped"] = json!(status.is_some());
-            event["survivors"] =
-                json!(survivors.unwrap_or_else(|error| vec![json!({"error":error.to_string()})]));
-            event["unverifiable"] = json!([]);
-            wire.control(event);
-            let id = session.id.clone();
-            drop(session);
-            let mut registry = sessions.lock().unwrap();
-            registry.workers.remove(&id);
-            registry.settled.push_back(id);
-            while registry.settled.len() > 256 {
-                let id = registry.settled.pop_front().unwrap();
-                registry.sessions.remove(&id);
-                registry.reserved.remove(&id);
-                registry.evict_create(&id);
-            }
-            return;
-        }
-        // Only a loop that will read next can wake on readability; a paused or fenced
-        // session keeps the plain sleep so unread data cannot spin it.
-        let readable_wait =
-            (session.barrier.is_none() && session.paused.is_none()).then(|| session.fd());
-        if session.last_snapshot.elapsed()
-            >= Duration::from_secs(if session.started.elapsed() < Duration::from_secs(30) {
-                5
-            } else {
-                30
-            })
-        {
-            // Probe outside the session lock so input/control remains independent.
-            session.last_snapshot = Instant::now();
-            let known = known_owned(&session);
-            #[cfg(not(target_os = "macos"))]
-            let pid = session.child.id() as i32;
-            drop(session);
-            if let Ok(table) = snapshot(None, &known) {
-                let mut session = session_lock(&session_arc);
-                #[cfg(not(target_os = "macos"))]
-                {
-                    if !table.get(&pid).is_some_and(|entry| {
-                        Some(entry.2.as_str()) == session.root["start_value"].as_str()
-                    }) {
-                        continue; // Keep the last good tree when death races the snapshot.
-                    }
-                    session.descendants = descendants(&table, pid);
-                }
-                #[cfg(target_os = "macos")]
-                retain_owned(&mut session, &table);
-                for (part, values) in session
-                    .descendants
-                    .iter()
-                    .collect::<Vec<_>>()
-                    .chunks(128)
-                    .enumerate()
-                {
-                    let mut event = session.event("ownership");
-                    event["snapshot_seq"] = json!(session.started.elapsed().as_millis() as u64);
-                    event["part"] = json!(part);
-                    event["final"] = json!((part + 1) * 128 >= session.descendants.len());
-                    event["descendants"] = json!(values
-                        .iter()
-                        .map(|(pid, entry)| identity(**pid, entry))
-                        .collect::<Vec<_>>());
-                    wire.control(event);
-                }
-            }
-        } else {
-            drop(session);
-        }
-        match readable_wait {
-            // Same 2 ms maximum, but PTY data wakes the loop immediately.
-            Some(fd) => {
-                let mut ready = libc::pollfd {
-                    fd,
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
-                // SAFETY: one initialized pollfd; a closed (-1) fd is ignored by poll.
-                unsafe {
-                    libc::poll(&mut ready, 1, 2);
-                }
-            }
-            None => thread::sleep(Duration::from_millis(2)),
-        }
-    }
-}
-fn session_lock(session: &Arc<Mutex<Session>>) -> std::sync::MutexGuard<'_, Session> {
-    session.lock().unwrap()
+    survivors
 }
 
-fn execute(request: &Value, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result<Value> {
-    let op = text(request, "op")?;
-    let args = &request["args"];
-    if op == "observe" {
-        if !args["vendor"].as_str().is_some_and(adapters::integrated) {
-            return Err(io::Error::other("observer not integrated"));
-        }
-        let context = if let Some(sid) = request["session_id"].as_str() {
-            let session = sessions
-                .lock()
-                .unwrap()
-                .sessions
-                .get(sid)
-                .cloned()
-                .ok_or_else(|| io::Error::other("UNKNOWN_SESSION"))?;
-            let session = session.lock().unwrap();
-            if request["session_generation"] != session.generation
-                || args["vendor"] != session.agent_key
-            {
-                return Err(io::Error::other("STALE_SESSION"));
+/// `SESSION_CLEANED` and the end of the session thread's work (5.5).
+fn finish(
+    handle: &SessionHandle,
+    wire: &Wire,
+    sessions: &Sessions,
+    survivors: io::Result<Vec<Value>>,
+) {
+    let root_reaped = handle.exit.get().is_some();
+    let complete = survivors.as_ref().is_ok_and(Vec::is_empty) && root_reaped;
+    let mut meta = handle.meta();
+    meta["cleanup_complete"] = json!(complete);
+    meta["root_reaped"] = json!(root_reaped);
+    let survivors = survivors.unwrap_or_else(|error| vec![json!({"error":error.to_string()})]);
+    *handle.survivors.lock().unwrap() = survivors.clone();
+    meta["survivors"] = json!(survivors);
+    meta["unverifiable"] = json!([]);
+    #[cfg(feature = "fault-hooks")]
+    let complete = if fault::survivor(&handle.pane) {
+        let injected =
+            json!([{"pid":1,"pgid":1,"start_kind":"posix-lstart","start_value":"fault-survivor"}]);
+        *handle.survivors.lock().unwrap() = injected.as_array().cloned().unwrap_or_default();
+        meta["survivors"] = injected;
+        meta["cleanup_complete"] = json!(false);
+        false
+    } else {
+        complete
+    };
+    // Rust may close its own master at cleanup, never earlier (5.5 R-a).
+    handle.pty.close_master();
+    #[cfg(feature = "fault-hooks")]
+    let silent = fault::cleaned_silent(&handle.pane);
+    #[cfg(not(feature = "fault-hooks"))]
+    let silent = false;
+    if !silent {
+        wire.out.event(code::SESSION_CLEANED, meta);
+    }
+    *handle.done.0.lock().unwrap() = Some(complete);
+    handle.done.1.notify_all();
+    let mut registry = sessions.lock().unwrap();
+    registry.ttys.remove(handle.pty.tty());
+    registry.settled.push_back(handle.id.clone());
+    while registry.settled.len() > 256 {
+        let id = registry.settled.pop_front().unwrap();
+        if let Some(evicted) = registry.sessions.remove(&id) {
+            registry
+                .tombstones
+                .insert(id.clone(), evicted.generation.clone());
+            registry.tombstone_order.push_back(id.clone());
+            while registry.tombstone_order.len() > TOMBSTONES {
+                let oldest = registry.tombstone_order.pop_front().unwrap();
+                registry.tombstones.remove(&oldest);
             }
-            session.event("observed")
-        } else {
-            json!({"event":"observed","session_id":null,"session_generation":null,"pane_id":null,"workspace_path":null})
-        };
-        let mut result = adapters::observe(args)?;
-        result["ownership"] = context;
-        return Ok(result);
-    }
-    if op == "ping" {
-        let registry = sessions.lock().unwrap();
-        let queue = wire.queue.lock().unwrap();
-        return Ok(
-            json!({"pong":true,"bookkeeping":{"last_request":registry.last_request,
-            "live_sessions":registry.sessions.len()-registry.settled.len(),
-            "settled_sessions":registry.settled.len(),"session_workers":registry.workers.len(),
-            "queued_output_bytes":queue.bytes.values().sum::<usize>(),
-            "max_session_output_bytes":queue.bytes.values().max().copied().unwrap_or(0),
-            "queued_output_sessions":queue.output.len()}}),
-        );
-    }
-    if op == "cancel" {
-        let target = text(args, "target_id")?;
-        // One lock: the verdict and the state it describes cannot diverge.
-        let mut registry = sessions.lock().unwrap();
-        let session = match registry.cancel_verdict(target).map_err(io::Error::other)? {
-            CancelVerdict::Prevented => return Ok(json!({"state":"prevented"})),
-            CancelVerdict::Released => return Ok(json!({"state":"released"})),
-            CancelVerdict::Unknown => return Ok(json!({"state":"unknown"})),
-            CancelVerdict::Registered(sid) => registry.sessions.get(&sid).cloned(),
-        };
-        drop(registry);
-        let Some(session) = session else {
-            return Ok(json!({"state":"unknown"}));
-        };
-        let mut session = session.lock().unwrap();
-        if session.active {
-            return Ok(json!({"state":"settled"}));
         }
-        session.closing = Some(true);
-        session.active = true;
-        return Ok(json!({"state":"cleanup-started"}));
+        registry.reserved.remove(&id);
+        registry.evict_create(&id);
     }
-    if op == "create" {
-        let id = text(args, "session_id")?.to_owned();
-        let request_id = text(request, "id")?;
-        let gated = wire.journal.is_some();
-        let mut all = sessions.lock().unwrap();
-        if !all.reserved.insert(id.clone()) {
-            all.create_failed(request_id);
-            return Err(io::Error::other("duplicate create"));
+}
+
+fn ownership_snapshot(handle: &SessionHandle, state: &mut State, wire: &Wire) {
+    let known = known_owned(&state.owned);
+    #[cfg(not(target_os = "macos"))]
+    let pid = state.owned.pid;
+    let Ok(table) = snapshot(None, &known) else {
+        return;
+    };
+    #[cfg(not(target_os = "macos"))]
+    {
+        if !table
+            .get(&pid)
+            .is_some_and(|entry| Some(entry.2.as_str()) == state.owned.root["start_value"].as_str())
+        {
+            return; // Keep the last good tree when death races the snapshot.
         }
-        if let Err(code) = all.admit_create(request_id, gated) {
-            all.create_failed(request_id);
-            return Err(io::Error::other(code));
+        state.owned.descendants = descendants(&table, pid);
+    }
+    #[cfg(target_os = "macos")]
+    retain_owned(&mut state.owned, &table);
+    let all: Vec<_> = state.owned.descendants.iter().collect();
+    for (part, values) in all.chunks(128).enumerate() {
+        let mut meta = handle.meta();
+        meta["snapshot_seq"] = json!(handle.started.elapsed().as_millis() as u64);
+        meta["part"] = json!(part);
+        meta["final"] = json!((part + 1) * 128 >= all.len());
+        meta["descendants"] = json!(values
+            .iter()
+            .map(|(pid, entry)| identity(**pid, entry))
+            .collect::<Vec<_>>());
+        wire.out.event(code::SESSION_OWNERSHIP, meta);
+    }
+}
+
+fn session_thread(
+    handle: Arc<SessionHandle>,
+    mailbox: mpsc::Receiver<Msg>,
+    owned: Owned,
+    wire: Arc<Wire>,
+    sessions: Sessions,
+) {
+    let mut state = State {
+        owned,
+        closing: None,
+        exited_sent: false,
+        eof: false,
+        eof_deadline: None,
+        next_snapshot: Instant::now() + snapshot_cadence(handle.started),
+    };
+    loop {
+        let mut wake = state.next_snapshot;
+        if let Some(deadline) = state.eof_deadline {
+            wake = wake.min(deadline);
         }
-        drop(all);
-        // Reservation is retained; native spawn/probes never hold the global registry lock.
-        let spawned = spawn(args, wire, request_id, sessions);
-        sessions.lock().unwrap().spawn_returned(request_id);
-        let mut session = match spawned {
-            Ok(session) => session,
-            Err(error) => {
-                sessions.lock().unwrap().create_failed(request_id);
-                return Err(error);
+        match mailbox.recv_timeout(wake.saturating_duration_since(Instant::now())) {
+            Ok(Msg::Exited) => {
+                send_exited(&handle, &mut state, &wire);
+                if state.eof {
+                    // R-d: the stream ended first; now the remaining descendants go, by identity.
+                    let survivors = cleanup(&handle, &mut state, &wire, false, false);
+                    return finish(&handle, &wire, &sessions, survivors);
+                }
             }
-        };
-        let result = json!({"session_id":session.id,"session_generation":session.generation,
-            "state":if session.root["early_status"].is_null() {"owned"} else {"exited"},"root":session.root,"exit":null});
-        // Publication and the cancellation check are one critical section.
-        let mut registry = sessions.lock().unwrap();
-        if registry.register_create(request_id, &id) {
-            session.closing = Some(true);
-            session.active = true;
+            Ok(Msg::Kill(force)) => {
+                state.closing = Some(force);
+                let survivors = cleanup(&handle, &mut state, &wire, force, true);
+                send_exited(&handle, &mut state, &wire);
+                return finish(&handle, &wire, &sessions, survivors);
+            }
+            Ok(Msg::Shutdown) => {
+                state.closing = Some(false);
+                let survivors = cleanup(&handle, &mut state, &wire, false, true);
+                send_exited(&handle, &mut state, &wire);
+                return finish(&handle, &wire, &sessions, survivors);
+            }
+            Ok(Msg::TtyEof) => {
+                state.eof = true;
+                if handle.exit.get().is_some() {
+                    send_exited(&handle, &mut state, &wire);
+                    let survivors = cleanup(&handle, &mut state, &wire, false, false);
+                    return finish(&handle, &wire, &sessions, survivors);
+                }
+                state.eof_deadline = Some(Instant::now() + Duration::from_millis(EOF_REAP_MS));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let now = Instant::now();
+                if state.eof_deadline.is_some_and(|deadline| now >= deadline) {
+                    state.eof_deadline = None;
+                    // The root may have exited just now: its `Exited` message is already queued.
+                    if handle.exit.get().is_none() {
+                        wire.out.event(
+                            code::SESSION_ROOT_LIVE,
+                            json!({"session_id":handle.id,"session_generation":handle.generation}),
+                        );
+                    }
+                }
+                if now >= state.next_snapshot {
+                    ownership_snapshot(&handle, &mut state, &wire);
+                    state.next_snapshot = Instant::now() + snapshot_cadence(handle.started);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
-        let session = Arc::new(Mutex::new(session));
-        registry.sessions.insert(id, session.clone());
-        drop(registry);
-        let wire = wire.clone();
-        let sessions = sessions.clone();
-        thread::spawn(move || session_loop(session, wire, sessions));
-        return Ok(result);
     }
-    let session_arc = sessions
+}
+
+/// Harness build only. A session whose pane id is `fault:<kind>` gets that deliberate fault, so
+/// unrelated panes of the same sidecar can run beside it (E1 15.2 P3, P7, P9).
+#[cfg(feature = "fault-hooks")]
+mod fault {
+    use super::*;
+    use crate::wire::SendFault;
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    pub const SUPPRESSED: &str = "fault: response suppressed";
+
+    /// `fault:delay-response:<path>`: the CREATE answer waits until `<path>` exists (the session is
+    /// already registered and `SESSION_OWNED` already sent, so every later event can overtake it).
+    pub fn delay_response(pane: &str) {
+        if let Some(path) = kind(pane).and_then(|k| k.strip_prefix("delay-response:")) {
+            wait_for_file(path);
+        }
+    }
+    /// Harness build only: hold until a release file exists. A deliberate poll: the file is the test's
+    /// release signal and has no event to wait on; this module is outside the product binary.
+    pub fn wait_for_file(path: &str) {
+        while !std::path::Path::new(path).exists() {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    /// `fault:watch-exit-fail` / `fault:watch-exit-fail-noreap`: the exit watcher cannot start after
+    /// the gate was released. `-noreap` also makes the sidecar's kill/reap verification fail.
+    pub fn watch_exit_fails(pane: &str) -> bool {
+        matches!(
+            kind(pane),
+            Some("watch-exit-fail" | "watch-exit-fail-noreap")
+        )
+    }
+    /// `fault:cleaned-silent`: the session is cleaned (root reaped) but `SESSION_CLEANED` is never sent (P7e).
+    pub fn cleaned_silent(pane: &str) -> bool {
+        kind(pane) == Some("cleaned-silent")
+    }
+    pub fn thread_start_fails(pane: &str) -> bool {
+        kind(pane) == Some("thread-start-fail")
+    }
+    pub fn reap_is_unverifiable(pane: &str) -> bool {
+        kind(pane) == Some("watch-exit-fail-noreap")
+    }
+
+    pub fn fail_second_resize(pane: &str) -> bool {
+        kind(pane) == Some("resize-partial")
+    }
+    /// `fault:resize-hold:<path>`: the RESIZE answer waits until `<path>` exists.
+    pub fn resize_hold(pane: &str) -> Option<String> {
+        kind(pane)?.strip_prefix("resize-hold:").map(str::to_owned)
+    }
+    /// A cleanup that reports a survivor (S6: `KILL` accepted, then an incomplete `SESSION_CLEANED`).
+    pub fn survivor(pane: &str) -> bool {
+        kind(pane) == Some("survivor")
+    }
+
+    /// Harness build only: an observation whose path ends in `.fault-endless` gets a synthetic
+    /// document and then a part stream that never ends.
+    pub fn observation(req: &Request) -> Option<io::Result<(Value, Option<Vec<u8>>)>> {
+        let path = req.meta["path"].as_str()?;
+        if path.ends_with(".fault-endless") {
+            return Some(Ok((
+                json!({"parser":"fault","path":path,"mode":req.meta["mode"]}),
+                None,
+            )));
+        }
+        None
+    }
+
+    /// Endless part stream: the sidecar never stops sending parts for this request.
+    pub fn endless_parts(req: &Request, wire: &Arc<Wire>) -> bool {
+        if !req.meta["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with(".fault-endless"))
+        {
+            return false;
+        }
+        let mut part = 0u64;
+        while !wire.out.is_lost() {
+            wire.out.event_for(
+                code::OBSERVATION_PART,
+                req.id,
+                json!({ "part": part }),
+                vec![b'x'; 60_000],
+            );
+            part += 1;
+        }
+        true
+    }
+
+    fn kind(pane: &str) -> Option<&str> {
+        pane.strip_prefix("fault:")
+    }
+    pub fn suppress_response(pane: &str) -> bool {
+        matches!(
+            kind(pane),
+            Some("suppress-response" | "suppress-owned-and-response")
+        )
+    }
+
+    /// Returns true when the fault replaced the normal `SESSION_OWNED` send.
+    pub fn send_owned(
+        handle: &Arc<SessionHandle>,
+        mut meta: Value,
+        sessions: &Sessions,
+        wire: &Arc<Wire>,
+    ) -> bool {
+        let Some(kind) = kind(&handle.pane) else {
+            return false;
+        };
+        // A fresh, unrelated PTY: its master is a valid master, but not this session's.
+        let decoy = || Arc::new(SessionPty::open(24, 80).expect("decoy pty").0);
+        match kind {
+            "suppress-owned-and-response" => {}
+            "suppress-response" => return false,
+            "corrupt-frame" => {
+                // The normal handoff, then bytes that are not a frame (F3 principal, L8).
+                wire.out
+                    .session_owned(meta, handle.pty.clone())
+                    .expect("owned frame fits");
+                wire.out.raw(vec![0xAB; 32]);
+            }
+            "short-send" => {
+                wire.out
+                    .session_owned_fault(meta, handle.pty.clone(), SendFault::Short)
+            }
+            "zero-send" => wire
+                .out
+                .session_owned_fault(meta, handle.pty.clone(), SendFault::Zero),
+            // 9a: a valid PTY master of ANOTHER pty while the frame names this session's tty.
+            "wrong-master" => wire
+                .out
+                .session_owned_fault(meta, decoy(), SendFault::Short),
+            // 9e: descriptor AND metadata swapped together (the documented undetected class).
+            "consistent-swap" => {
+                let pty = decoy();
+                meta["pty"]["tty"] = json!(pty.tty());
+                wire.out.session_owned_fault(meta, pty, SendFault::Short)
+            }
+            // 9d: the right master, a slave name that is not its own.
+            "wrong-name" => {
+                meta["pty"]["tty"] = json!("/dev/ttys999");
+                wire.out
+                    .session_owned_fault(meta, handle.pty.clone(), SendFault::Short)
+            }
+            // 9b: not a tty at all (a pipe read end).
+            "non-tty" => {
+                let mut ends = [0i32; 2];
+                // SAFETY: two-element output array.
+                assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+                // SAFETY: both descriptors were just created and are owned here.
+                let (read, write) =
+                    unsafe { (OwnedFd::from_raw_fd(ends[0]), OwnedFd::from_raw_fd(ends[1])) };
+                drop(write);
+                let pty = Arc::new(SessionPty::for_fault(read, handle.pty.tty().to_owned()));
+                wire.out.session_owned_fault(meta, pty, SendFault::Short)
+            }
+            // 9c: the tty of a session that is already claimed, with a duplicate of its master.
+            "duplicate-tty" => {
+                let other = sessions
+                    .lock()
+                    .unwrap()
+                    .sessions
+                    .values()
+                    .find(|other| other.id != handle.id)
+                    .cloned();
+                let Some(other) = other else { return false };
+                let duplicate = other
+                    .pty
+                    .lend_master(|fd| unsafe { libc::dup(std::os::fd::AsRawFd::as_raw_fd(&fd)) })
+                    .expect("master open");
+                // SAFETY: a fresh duplicate owned by this value.
+                let pty = Arc::new(SessionPty::for_fault(
+                    unsafe { OwnedFd::from_raw_fd(duplicate) },
+                    other.pty.tty().to_owned(),
+                ));
+                meta["pty"]["tty"] = json!(other.pty.tty());
+                wire.out.session_owned_fault(meta, pty, SendFault::Short)
+            }
+            _ => return false,
+        }
+        true
+    }
+}
+
+// ---- requests ------------------------------------------------------------------------------------
+
+/// Is `meta` naming a settled session that was evicted from the registry (same id **and** generation)?
+fn evicted_session(sessions: &Sessions, meta: &Value) -> bool {
+    let (Ok(id), Ok(generation)) = (text(meta, "session_id"), text(meta, "session_generation"))
+    else {
+        return false;
+    };
+    sessions
+        .lock()
+        .unwrap()
+        .tombstones
+        .get(id)
+        .is_some_and(|known| known == generation)
+}
+
+fn session_of(sessions: &Sessions, meta: &Value) -> io::Result<Arc<SessionHandle>> {
+    let handle = sessions
         .lock()
         .unwrap()
         .sessions
-        .get(text(request, "session_id")?)
+        .get(text(meta, "session_id")?)
         .cloned()
         .ok_or_else(|| io::Error::other("UNKNOWN_SESSION"))?;
-    let mut session = session_arc.lock().unwrap();
-    if text(request, "session_generation")? != session.generation {
+    if text(meta, "session_generation")? != handle.generation {
         return Err(io::Error::other("STALE_SESSION"));
     }
-    match op {
-        "activate" => {
-            session.active = true;
-            Ok(json!({"state":if session.finished {"exited"} else {"running"}}))
+    Ok(handle)
+}
+
+/// Map an internal failure message to the wire error code, stage and effect (10.4). Every
+/// pre-effect refusal is `effect:none`: the gate guarantees the target never ran.
+fn classify(request_code: u16, message: &str) -> (&'static str, &'static str) {
+    let creating = request_code == code::CREATE;
+    let code = match message {
+        "STALE_SESSION" => "STALE_SESSION",
+        "UNKNOWN_SESSION" => "UNKNOWN_SESSION",
+        "OWNERSHIP_UNVERIFIED" => "OWNERSHIP_UNVERIFIED",
+        "CREATE_CANCELLED" => "CREATE_CANCELLED",
+        "observer not integrated" => "observer not integrated", // spelled as the E1 10.4 table does
+        m if m.starts_with("OWNERSHIP_JOURNAL_FAILED") => "OWNERSHIP_JOURNAL_FAILED",
+        m if m.starts_with("CLEANUP_FAILED") => "CLEANUP_FAILED",
+        m if m.starts_with("invalid ") || m.starts_with("duplicate ") => "BAD_REQUEST",
+        _ if creating => "SPAWN_FAILED",
+        _ => "IO_FAILED",
+    };
+    let stage = if message == "invalid handoff_size" {
+        "handoff_size"
+    } else if creating {
+        "spawn"
+    } else {
+        "io"
+    };
+    (code, stage)
+}
+
+fn create(req: &Request, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result<Value> {
+    let parsed = create_args(&req.meta)?;
+    if !handoff_size_ok(req.id, &parsed) {
+        sessions.lock().unwrap().create_failed(req.id);
+        return Err(io::Error::other("invalid handoff_size"));
+    }
+    {
+        let mut all = sessions.lock().unwrap();
+        if !all.reserved.insert(parsed.id.clone()) {
+            all.create_failed(req.id);
+            return Err(io::Error::other("duplicate create"));
         }
-        "write" | "interrupt" => {
-            let data = STANDARD
-                .decode(text(args, "data_b64")?)
-                .map_err(io::Error::other)?;
-            if data.len() > CHUNK {
-                return Err(io::Error::other("input chunk too large"));
-            }
-            if session.finished || session.closing.is_some() {
-                return Ok(json!({"pending":0,"accepted":true}));
-            }
-            let deadline = Instant::now() + Duration::from_secs(15);
-            while session.input.len() + data.len() > CAP {
-                if Instant::now() >= deadline {
-                    return Err(io::Error::other("input admission timeout"));
-                }
-                drop(session);
-                thread::sleep(Duration::from_millis(2));
-                session = session_lock(&session_arc);
-            }
-            if !data.is_empty() {
-                session.input.extend(data);
-                session.flush_input(wire)?;
-            }
-            Ok(json!({"pending":session.input.len(),"accepted":true}))
+        if let Err(refusal) = all.admit_create(req.id, true) {
+            all.create_failed(req.id);
+            all.reserved.remove(&parsed.id);
+            return Err(io::Error::other(refusal));
         }
-        "resize" => {
-            if session.barrier.is_some() {
-                return Err(io::Error::other("CONTROL_FENCE_HELD"));
-            }
-            if session.finished {
-                return Ok(json!({"barrier_id":request["id"],"through_seq":session.seq}));
-            }
-            let cols = dimension(args, "cols")?;
-            let rows = dimension(args, "rows")?;
-            let mut available: i32 = 0;
-            unsafe {
-                libc::ioctl(session.fd(), libc::FIONREAD, &mut available);
-            }
-            session.read(wire, available.max(0) as usize);
-            if args["redraw"].as_bool().unwrap_or(false) {
-                resize(session.fd(), rows.saturating_sub(1).max(1), cols)?;
-            }
-            resize(session.fd(), rows, cols)?;
-            session.barrier = Some(text(request, "id")?.to_owned());
-            Ok(json!({"barrier_id":request["id"],"through_seq":session.seq}))
+    }
+    // Reservation is retained; native spawn/probes never hold the global registry lock.
+    let spawned = spawn(&req.meta, wire, req.id, sessions);
+    let Spawned {
+        handle,
+        mailbox,
+        owned,
+    } = match spawned {
+        Ok(spawned) => spawned,
+        Err(error) => {
+            let mut all = sessions.lock().unwrap();
+            all.create_failed(req.id);
+            all.reserved.remove(&parsed.id);
+            return Err(error);
         }
-        "release" => {
-            if session.barrier.as_deref() == Some(text(args, "barrier_id")?) {
-                session.barrier = None;
+    };
+    let root = owned.root.clone();
+    // Publication, the cancellation check and the registry entry are one critical section, and
+    // the session is findable BEFORE `SESSION_OWNED` can be read: a `KILL` that Python sends the
+    // moment it sees the event must never meet UNKNOWN_SESSION.
+    let cancelled = {
+        let mut registry = sessions.lock().unwrap();
+        registry.spawn_returned(req.id);
+        let cancelled = registry.register_create(req.id, &parsed.id);
+        registry.sessions.insert(parsed.id.clone(), handle.clone());
+        cancelled
+    };
+    let owned_event = owned_meta(req.id, &handle, &root);
+    let (thread_handle, thread_wire, thread_sessions) =
+        (handle.clone(), wire.clone(), sessions.clone());
+    #[cfg(feature = "fault-hooks")]
+    let thread_started = if fault::thread_start_fails(&handle.pane) {
+        Err(io::Error::other("fault: session thread could not start"))
+    } else {
+        thread::Builder::new()
+            .name("session".into())
+            .spawn(move || {
+                session_thread(thread_handle, mailbox, owned, thread_wire, thread_sessions)
+            })
+    };
+    #[cfg(not(feature = "fault-hooks"))]
+    let thread_started = thread::Builder::new()
+        .name("session".into())
+        .spawn(move || session_thread(thread_handle, mailbox, owned, thread_wire, thread_sessions));
+    if let Err(error) = thread_started {
+        // The root has run and is registered but nothing will ever serve it: end it, verified, and take it
+        // out of the registry before answering (E1 5.1.3: the same rule as any post-gate failure).
+        let pid = root["pid"].as_i64().unwrap_or(0) as i32;
+        // SAFETY: the recorded root of a session this sidecar just created (pgid == pid).
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+        let verified = handle.exit.wait(ROOT_REAP).is_some();
+        handle.pty.close_master();
+        let mut all = sessions.lock().unwrap();
+        all.sessions.remove(&parsed.id);
+        all.reserved.remove(&parsed.id);
+        all.ttys.remove(handle.pty.tty());
+        drop(all);
+        return Err(post_effect_failure(
+            verified,
+            "the session thread could not start",
+            &error,
+        ));
+    }
+    #[cfg(feature = "fault-hooks")]
+    let faulted = fault::send_owned(&handle, owned_event.clone(), sessions, wire);
+    #[cfg(not(feature = "fault-hooks"))]
+    let faulted = false;
+    if !faulted {
+        if let Err(error) = wire.out.session_owned(owned_event, handle.pty.clone()) {
+            handle.send(Msg::Kill(true));
+            return Err(error);
+        }
+    }
+    if cancelled {
+        handle.send(Msg::Kill(true));
+    }
+    #[cfg(feature = "fault-hooks")]
+    if fault::suppress_response(&handle.pane) {
+        return Err(io::Error::other(fault::SUPPRESSED));
+    }
+    #[cfg(feature = "fault-hooks")]
+    fault::delay_response(&handle.pane);
+    Ok(
+        json!({"session_id":handle.id,"session_generation":handle.generation,
+        "state":"owned","root":root}),
+    )
+}
+
+fn resize_session(
+    handle: &SessionHandle,
+    meta: &Value,
+) -> Result<Value, (&'static str, String, Value)> {
+    let bad = |message: &str| ("BAD_REQUEST", message.to_owned(), json!({"effect":"none"}));
+    let cols = dimension(meta, "cols").map_err(|_| bad("invalid cols"))?;
+    let rows = dimension(meta, "rows").map_err(|_| bad("invalid rows"))?;
+    if handle.finished() {
+        return Ok(json!({"applied":false,"steps":0}));
+    }
+    let closed = |error: &io::Error| error.raw_os_error() == Some(libc::EBADF);
+    let mut steps = 0;
+    if meta["redraw"].as_bool().unwrap_or(false) {
+        match handle.pty.resize(rows.saturating_sub(1).max(1), cols) {
+            Ok(()) => steps = 1,
+            Err(error) if closed(&error) => return Ok(json!({"applied":false,"steps":0})),
+            Err(error) => {
+                return Err((
+                    "IO_FAILED",
+                    error.to_string(),
+                    json!({"effect":"none","steps":0}),
+                ))
             }
-            Ok(json!({"released":true}))
         }
-        "flow" => {
-            session.paused = args["paused"]
-                .as_bool()
-                .filter(|v| *v)
-                .map(|_| Instant::now());
-            Ok(json!({"paused":session.paused.is_some()}))
-        }
-        "kill" => {
-            session.closing = Some(args["force"].as_bool().unwrap_or(false));
-            session.active = true;
-            Ok(json!({"accepted":true}))
-        }
-        "state" => {
-            let fg = unsafe { libc::tcgetpgrp(session.fd()) };
-            Ok(
-                json!({"state":if session.finished {"exited"} else {"running"},"pending":session.input.len(),
-                "shell_at_prompt":if fg>0 {Some(fg == session.child.id() as i32)} else {None},
-                "root":session.root,"descendants":[],"cleanup_complete":session.cleanup_complete}),
-            )
-        }
-        _ => Err(io::Error::other("UNKNOWN_OP")),
+    }
+    #[cfg(feature = "fault-hooks")]
+    if steps == 1 && fault::fail_second_resize(&handle.pane) {
+        return Err((
+            "IO_FAILED",
+            "fault: second size step refused".into(),
+            json!({"effect":"partial","steps":1}),
+        ));
+    }
+    match handle.pty.resize(rows, cols) {
+        Ok(()) => Ok(json!({"applied":true,"steps":steps + 1})),
+        Err(error) if closed(&error) && steps == 0 => Ok(json!({"applied":false,"steps":0})),
+        Err(error) => Err((
+            "IO_FAILED",
+            error.to_string(),
+            json!({"effect":if steps > 0 {"partial"} else {"none"},"steps":steps}),
+        )),
     }
 }
 
-fn respond(request: Value, sessions: &Sessions, wire: &Arc<Wire>) {
-    let id = request["id"].clone();
-    let response = match execute(&request, sessions, wire) {
-        Ok(result) if request["op"] == "observe" => {
-            let bytes = serde_json::to_vec(&result).expect("JSON value is serializable");
-            for (part, chunk) in bytes.chunks(CHUNK).enumerate() {
-                wire.control(
-                    json!({"event":"observation","observation_id":id,"part":part,
-                    "data_b64":STANDARD.encode(chunk)}),
-                );
+fn dispatch(req: Request, sessions: &Sessions, wire: &Arc<Wire>) {
+    let reply = |meta: Value| wire.out.respond(req.code, req.id, meta);
+    let refuse = |message: &str| {
+        let (error_code, stage) = classify(req.code, message);
+        wire.out
+            .error(req.code, req.id, error_code, stage, message, "none");
+    };
+    match req.code {
+        code::CREATE => unreachable!("creates run on their own thread"),
+        code::ADOPT => match session_of(sessions, &req.meta) {
+            Ok(handle) => {
+                handle.adopted.store(true, Ordering::SeqCst);
+                reply(json!({"adopted":true}));
             }
-            let mut reply = json!({"id":id,"ok":true,"result":{"observation_parts":bytes.len().div_ceil(CHUNK)}});
-            if let Some(error) = result["error"].as_str() {
-                reply["ok"] = json!(false);
-                reply["error"] = json!({"code":"IO_FAILED","message":error,"stage":"io"});
-            }
-            reply
-        }
-        Ok(result) => json!({"id":id,"ok":true,"result":result}),
-        Err(error) => {
-            if request["op"] == "create" {
-                if let Some(sid) = request["args"]["session_id"].as_str() {
-                    let mut registry = sessions.lock().unwrap();
-                    registry.workers.remove(sid);
-                    registry.reserved.remove(sid);
-                }
-            }
-            let message = error.to_string();
-            let code = match message.as_str() {
-                "STALE_SESSION"
-                | "UNKNOWN_SESSION"
-                | "UNKNOWN_OP"
-                | "OWNERSHIP_UNVERIFIED"
-                | "CREATE_CANCELLED" => message.as_str(),
-                _ => {
-                    if message.starts_with("invalid ")
-                        || message.starts_with("duplicate ")
-                        || message == "input chunk too large"
-                    {
-                        "BAD_REQUEST"
-                    } else if request["op"] == "create" {
-                        "SPAWN_FAILED"
-                    } else {
-                        "IO_FAILED"
+            Err(error) => refuse(&error.to_string()),
+        },
+        #[cfg(feature = "fault-hooks")]
+        code::RESIZE
+            if session_of(sessions, &req.meta)
+                .is_ok_and(|h| fault::resize_hold(&h.pane).is_some()) =>
+        {
+            // Harness build only: the answer waits until a release file exists (T6), on its own thread.
+            let handle = session_of(sessions, &req.meta).expect("checked above");
+            let path = fault::resize_hold(&handle.pane).expect("checked above");
+            let wire = wire.clone();
+            thread::spawn(move || {
+                fault::wait_for_file(&path);
+                match resize_session(&handle, &req.meta) {
+                    Ok(meta) => wire.out.respond(req.code, req.id, meta),
+                    Err((error_code, message, extra)) => {
+                        let meta = json!({"code":error_code,"stage":"io","message":message,
+                            "effect":extra["effect"].as_str().unwrap_or("none")});
+                        wire.out.error_with(req.code, req.id, meta);
                     }
                 }
-            };
-            json!({"id":id,"ok":false,"error":{"code":code,"message":message.chars().take(1024).collect::<String>(),
-                "stage":if request["op"]=="create" {"spawn"} else {"io"}}})
+            });
         }
-    };
-    wire.control(response);
+        code::RESIZE => match session_of(sessions, &req.meta) {
+            Ok(handle) => match resize_session(&handle, &req.meta) {
+                Ok(meta) => reply(meta),
+                Err((error_code, message, extra)) => {
+                    let effect = extra["effect"].as_str().unwrap_or("none");
+                    let mut meta = json!({"code":error_code,"stage":"io",
+                        "message":message.chars().take(1024).collect::<String>(),"effect":effect});
+                    if let Some(steps) = extra.get("steps") {
+                        meta["steps"] = steps.clone();
+                    }
+                    wire.out.error_with(req.code, req.id, meta);
+                }
+            },
+            Err(error) => refuse(&error.to_string()),
+        },
+        code::KILL => match session_of(sessions, &req.meta) {
+            Ok(handle) => {
+                // Acknowledged before it acts; the outcome arrives only as EXITED / CLEANED.
+                reply(json!({"accepted":true}));
+                handle.send(Msg::Kill(req.meta["force"].as_bool().unwrap_or(false)));
+            }
+            Err(error) => refuse(&error.to_string()),
+        },
+        code::TTY_EOF => match session_of(sessions, &req.meta) {
+            Ok(handle) => {
+                reply(json!({"accepted":true}));
+                handle.send(Msg::TtyEof);
+            }
+            Err(error)
+                if error.to_string() == "UNKNOWN_SESSION"
+                    && evicted_session(sessions, &req.meta) =>
+            {
+                // The session settled long ago and left the registry: the late EOF report is idempotent (5.5 item 6).
+                reply(json!({"accepted":true}));
+            }
+            Err(error) => refuse(&error.to_string()),
+        },
+        code::CANCEL => {
+            let Some(target) = req.meta["target_id"].as_u64() else {
+                return refuse("invalid target_id");
+            };
+            // One lock: the verdict and the state it describes cannot diverge.
+            let mut registry = sessions.lock().unwrap();
+            let verdict = match registry.cancel_verdict(target) {
+                Ok(verdict) => verdict,
+                Err(refusal) => {
+                    drop(registry);
+                    return refuse(refusal);
+                }
+            };
+            let handle = match verdict {
+                CancelVerdict::Prevented => return reply(json!({"state":"prevented"})),
+                CancelVerdict::Released => return reply(json!({"state":"released"})),
+                CancelVerdict::Unknown => return reply(json!({"state":"unknown"})),
+                CancelVerdict::Registered(sid) => registry.sessions.get(&sid).cloned(),
+            };
+            drop(registry);
+            let Some(handle) = handle else {
+                return reply(json!({"state":"unknown"}));
+            };
+            if handle.adopted.load(Ordering::SeqCst) || handle.finished() {
+                return reply(json!({"state":"settled"}));
+            }
+            handle.send(Msg::Kill(true));
+            reply(json!({"state":"cleanup-started"}));
+        }
+        code::PING => {
+            let registry = sessions.lock().unwrap();
+            reply(
+                json!({"pong":true,"bookkeeping":{"last_request":registry.last_request,
+                "live_sessions":registry.sessions.len().saturating_sub(registry.settled.len()),
+                "settled_sessions":registry.settled.len(),"session_workers":registry.creating,
+                "inbound_bytes":wire.inbound.snapshot().0,"inbound_peak_bytes":wire.inbound.snapshot().1}}),
+            );
+        }
+        code::OBSERVE => {
+            let sender = wire.observe_tx.lock().unwrap().clone();
+            let admitted = sender.is_some_and(|sender| match sender.try_send(req) {
+                Ok(()) => true,
+                Err(mpsc::TrySendError::Full(req) | mpsc::TrySendError::Disconnected(req)) => {
+                    let (error_code, stage) = ("BAD_REQUEST", "admit");
+                    wire.out.error(
+                        req.code,
+                        req.id,
+                        error_code,
+                        stage,
+                        "observation queue not admitting",
+                        "none",
+                    );
+                    true
+                }
+            });
+            if !admitted {
+                wire.out.error(
+                    code::OBSERVE,
+                    0,
+                    "BAD_REQUEST",
+                    "admit",
+                    "observation worker is not running",
+                    "none",
+                );
+            }
+        }
+        _ => refuse("invalid code"),
+    }
 }
 
-pub fn run() -> io::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let option = |name: &str| {
-        args.windows(2)
-            .find(|pair| pair[0] == name)
-            .map(|pair| pair[1].clone())
+/// The ownership context an observation answer carries: the session's identity when the
+/// observation is bound to a live session, nulls for a historical one.
+fn observation_context(req: &Request, sessions: &Sessions) -> io::Result<Value> {
+    let vendor = req.meta["vendor"].as_str().unwrap_or("");
+    let Some(sid) = req.meta["session_id"].as_str() else {
+        return Ok(
+            json!({"event":"observed","session_id":null,"session_generation":null,
+            "pane_id":null,"workspace_path":null}),
+        );
     };
-    let generation =
-        option("--runtime-generation").ok_or_else(|| io::Error::other("generation required"))?;
-    let wire = Arc::new(Wire {
-        generation,
-        journal: option("--ownership-journal").map(std::path::PathBuf::from),
-        owner_pid: option("--owner-pid")
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0),
-        queue: Mutex::new(Queue {
-            control: VecDeque::new(),
-            output: HashMap::new(),
-            bytes: HashMap::new(),
-            order: VecDeque::new(),
-            done: false,
-        }),
-        changed: Condvar::new(),
-    });
-    let writer_wire = wire.clone();
-    let writer = thread::spawn(move || writer_wire.write_loop());
-    if args.iter().any(|arg| arg == "--fail-startup") {
-        wire.control(json!({"event":"fatal","protocol":1,"error":{"code":"STARTUP_FAILED","message":"requested isolated startup fault","stage":"initialize"}}));
-        wire.queue.lock().unwrap().done = true;
-        wire.changed.notify_all();
-        writer.join().unwrap()?;
-        return Err(io::Error::other("STARTUP_FAILED"));
+    let handle = sessions
+        .lock()
+        .unwrap()
+        .sessions
+        .get(sid)
+        .cloned()
+        .ok_or_else(|| io::Error::other("UNKNOWN_SESSION"))?;
+    if req.meta["session_generation"] != handle.generation || vendor != handle.agent_key {
+        return Err(io::Error::other("STALE_SESSION"));
     }
+    let mut context = handle.meta();
+    context["event"] = json!("observed");
+    Ok(context)
+}
+
+/// One observation, computed completely before the first part is sent, so a refusal for size
+/// sends no part at all (E1 14).
+fn observe(req: &Request, sessions: &Sessions, wire: &Arc<Wire>) {
+    let refuse = |message: &str| {
+        let (error_code, stage) = classify(req.code, message);
+        wire.out
+            .error(req.code, req.id, error_code, stage, message, "none");
+    };
+    if !req.meta["vendor"]
+        .as_str()
+        .is_some_and(adapters::integrated)
+    {
+        return refuse("observer not integrated");
+    }
+    let context = match observation_context(req, sessions) {
+        Ok(context) => context,
+        Err(error) => return refuse(&error.to_string()),
+    };
+    #[cfg(feature = "fault-hooks")]
+    let computed =
+        fault::observation(req).unwrap_or_else(|| adapters::observe(&req.meta, &req.blob));
+    #[cfg(not(feature = "fault-hooks"))]
+    let computed = adapters::observe(&req.meta, &req.blob);
+    let (mut document, anchor) = match computed {
+        Ok(computed) => computed,
+        Err(error) => return refuse(&error.to_string()),
+    };
+    document["ownership"] = context;
+    let bytes = serde_json::to_vec(&document).expect("a JSON value is serialisable");
+    let parts = bytes.len().div_ceil(OBSERVATION_CHUNK);
+    if bytes.len() > MAX_OBSERVATION_BYTES || parts > MAX_OBSERVATION_PARTS {
+        return wire.out.error(
+            req.code,
+            req.id,
+            "OBSERVATION_TOO_LARGE",
+            "io",
+            &format!(
+                "result of {} bytes exceeds the observation limits",
+                bytes.len()
+            ),
+            "none",
+        );
+    }
+    #[cfg(feature = "fault-hooks")]
+    if fault::endless_parts(req, wire) {
+        return;
+    }
+    for (part, chunk) in bytes.chunks(OBSERVATION_CHUNK).enumerate() {
+        wire.out.event_for(
+            code::OBSERVATION_PART,
+            req.id,
+            json!({ "part": part }),
+            chunk.to_vec(),
+        );
+    }
+    if let Some(message) = document["error"].as_str() {
+        // The inherited activity "error with progress" shape: the document carries the progress.
+        let meta = json!({"code":"IO_FAILED","stage":"io","effect":"partial",
+            "message":message.chars().take(1024).collect::<String>(),"observation_parts":parts});
+        return wire.out.error_with(req.code, req.id, meta);
+    }
+    wire.out.respond_with_blob(
+        req.code,
+        req.id,
+        json!({"observation_parts":parts,"raw_anchor":anchor.is_some()}),
+        anchor.unwrap_or_default(),
+    );
+}
+
+// ---- startup and the main loop -------------------------------------------------------------------
+
+struct Config {
+    wire: u64,
+    generation: String,
+    owner_pid: u32,
+    journal: std::path::PathBuf,
+    control_fd: i32,
+    #[cfg(feature = "fault-hooks")]
+    fail_startup: bool,
+    #[cfg(feature = "fault-hooks")]
+    ready_wire: Option<u64>,
+    #[cfg(feature = "fault-hooks")]
+    ready_protocol: Option<String>,
+}
+
+fn parse_args(args: &[String]) -> Result<Config, (&'static str, String)> {
+    let startup = |message: String| ("STARTUP_FAILED", message);
+    let mut wire = None;
+    let mut generation = None;
+    let mut owner_pid = None;
+    let mut journal = None;
+    let mut control_fd = None;
+    #[cfg(feature = "fault-hooks")]
+    let (mut fail_startup, mut ready_wire, mut ready_protocol) = (false, None, None);
+    let mut iter = args.iter();
+    while let Some(option) = iter.next() {
+        let mut value = |name: &str| {
+            iter.next()
+                .cloned()
+                .ok_or_else(|| startup(format!("{name} needs a value")))
+        };
+        match option.as_str() {
+            "--wire" => wire = Some(value("--wire")?),
+            "--runtime-generation" => generation = Some(value("--runtime-generation")?),
+            "--owner-pid" => owner_pid = Some(value("--owner-pid")?),
+            "--ownership-journal" => journal = Some(value("--ownership-journal")?),
+            "--control-fd" => control_fd = Some(value("--control-fd")?),
+            #[cfg(feature = "fault-hooks")]
+            "--fail-startup" => fail_startup = true,
+            #[cfg(feature = "fault-hooks")]
+            "--ready-wire" => ready_wire = value("--ready-wire")?.parse().ok(),
+            #[cfg(feature = "fault-hooks")]
+            "--ready-protocol" => ready_protocol = Some(value("--ready-protocol")?),
+            other => return Err(startup(format!("unknown argument {other}"))),
+        }
+    }
+    let number = |text: Option<String>, name: &str| {
+        text.and_then(|text| text.parse::<u64>().ok())
+            .ok_or_else(|| startup(format!("{name} required")))
+    };
+    let wire = number(wire, "--wire")?;
+    if wire != u64::from(frame::WIRE_VERSION) {
+        return Err(("INCOMPATIBLE_WIRE", format!("wire {wire} is not supported")));
+    }
+    let generation = generation.ok_or_else(|| startup("--runtime-generation required".into()))?;
+    if frame::runtime_tag(&generation).is_none() {
+        return Err(startup(
+            "--runtime-generation must be 32 hex characters".into(),
+        ));
+    }
+    Ok(Config {
+        wire,
+        generation,
+        owner_pid: number(owner_pid, "--owner-pid")? as u32,
+        journal: journal
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| startup("--ownership-journal required".into()))?,
+        control_fd: number(control_fd, "--control-fd")? as i32,
+        #[cfg(feature = "fault-hooks")]
+        fail_startup,
+        #[cfg(feature = "fault-hooks")]
+        ready_wire,
+        #[cfg(feature = "fault-hooks")]
+        ready_protocol,
+    })
+}
+
+fn stdout_line(value: &Value) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(&serde_json::to_vec(value)?)?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()
+}
+
+fn fatal_line(error_code: &str, message: &str) {
+    let _ = stdout_line(&json!({"event":"fatal","protocol":"navide-acr","wire":1,
+        "error":{"code":error_code,"message":message,"stage":"initialize"}}));
+}
+
+fn limits() -> Value {
+    json!({"max_meta_p2r":frame::MAX_META_P2R,"max_blob_p2r":frame::MAX_BLOB_P2R,
+        "max_frame_r2p":frame::MAX_FRAME_R2P,"max_observation_bytes":8_388_608,
+        "max_observation_parts":128,"observe_inflight":4,
+        "max_outbound_bytes":crate::wire::MAX_OUTBOUND_BYTES,
+        "max_outbound_frames":crate::wire::MAX_OUTBOUND_FRAMES,"max_inbound_bytes":16_777_216,
+        "request_ms":REQUEST_MS,"create_answer_ms":CREATE_ANSWER_MS,"cleanup_ms":cleanup_ms(),
+        "ping_ms":PING_MS,"kill_escalation_ms":KILL_ESCALATION_MS,"eof_reap_ms":EOF_REAP_MS,
+        "ownership_snapshot_ms":{"young":SNAPSHOT_YOUNG_MS,"steady":SNAPSHOT_STEADY_MS,
+            "young_window_ms":SNAPSHOT_YOUNG_WINDOW_MS},
+        "snapshot_ms":SNAPSHOT_MS})
+}
+
+fn ready_line(config: &Config) -> Value {
     #[allow(unused_mut)]
-    let mut ready = json!({"event":"ready","protocol":option("--ready-protocol").and_then(|s|s.parse::<u32>().ok()).unwrap_or(1),
-        "pid":std::process::id(),"owner_pid":option("--owner-pid").and_then(|s|s.parse::<u32>().ok()).unwrap_or(0),
-        "runtime":"navide-cli-runtime","version":env!("CARGO_PKG_VERSION"),"pty_backend":"posix","ownership_gate":wire.journal.is_some(),"platform":std::env::consts::OS,"arch":std::env::consts::ARCH});
+    let mut ready = json!({"event":"ready","protocol":"navide-acr","wire":config.wire,
+        "version":env!("CARGO_PKG_VERSION"),"runtime":"navide-cli-runtime",
+        "runtime_generation":config.generation,"pid":std::process::id(),"owner_pid":config.owner_pid,
+        "platform":std::env::consts::OS,"arch":std::env::consts::ARCH,"pty_backend":"posix",
+        "handoff":"scm_rights","ownership_gate":true,"limits":limits()});
+    #[cfg(feature = "fault-hooks")]
+    {
+        if let Some(wire) = config.ready_wire {
+            ready["wire"] = json!(wire);
+        }
+        if let Some(protocol) = &config.ready_protocol {
+            ready["protocol"] = serde_json::from_str(protocol).unwrap_or(json!(protocol));
+        }
+    }
     #[cfg(target_os = "macos")]
     match darwin::self_process() {
         Ok(observation) => ready["self_process"] = observation,
@@ -1409,178 +2146,431 @@ pub fn run() -> io::Result<()> {
                 json!({"operation":"darwin-self-process","errno":error.raw_os_error()});
         }
     }
-    wire.control(ready);
-    let sessions: Sessions = Arc::new(Mutex::new(Registry::default()));
-    let mut last_request = 0u64;
-    let mut input_error = None;
-    let mut shutdown = None;
-    let mut observation_sender: Option<mpsc::SyncSender<Value>> = None;
-    let mut stdin = io::stdin().lock();
-    loop {
-        let mut line = Vec::new();
-        let parsed = (|| -> io::Result<Option<Value>> {
-            let length = (&mut stdin)
-                .take((MAX_REQUEST + 1) as u64)
-                .read_until(b'\n', &mut line)?;
-            if length == 0 {
-                return Ok(None);
+    ready
+}
+
+/// Blocking read of exactly `buffer.len()` bytes from the control socket. Returns the number
+/// of bytes read, fewer only at end of file.
+fn read_full(fd: i32, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut got = 0;
+    while got < buffer.len() {
+        // SAFETY: valid descriptor and in-bounds buffer slice.
+        let n = unsafe { libc::read(fd, buffer[got..].as_mut_ptr().cast(), buffer.len() - got) };
+        if n < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
             }
-            if length > MAX_REQUEST || line.last() != Some(&b'\n') {
-                return Err(io::Error::other("invalid bounded request line"));
-            }
-            let request: Value = serde_json::from_slice(&line)?;
-            let id = text(&request, "id")?;
-            let number = id
-                .strip_prefix('r')
-                .and_then(|s| s.parse::<u64>().ok())
-                .filter(|n| *n > last_request)
-                .ok_or_else(|| io::Error::other("invalid/duplicate request counter"))?;
-            last_request = number;
-            sessions.lock().unwrap().last_request = number;
-            Ok(Some(request))
-        })();
-        let request = match parsed {
-            Ok(Some(request)) => request,
-            Ok(None) => break,
-            Err(error) => {
-                input_error = Some(error);
-                break;
-            }
-        };
-        let id = request["id"].clone();
-        if request["runtime_generation"] != wire.generation {
-            wire.control(json!({"id":id,"ok":false,"error":{"code":"STALE_RUNTIME","message":"runtime generation mismatch","stage":"validate"}}));
-            continue;
+            return Err(error);
         }
-        if request["op"] == "shutdown" {
-            shutdown = id.as_str().map(String::from);
+        if n == 0 {
             break;
         }
-        let sid = if request["op"] == "create" {
-            request["args"]["session_id"].as_str()
-        } else {
-            request["session_id"].as_str()
-        };
-        let sender = if let Some(sid) = sid {
-            let mut registry = sessions.lock().unwrap();
-            if request["op"] == "create" {
-                if let Some(request_id) = request["id"].as_str() {
-                    registry.note_create(request_id);
+        got += n as usize;
+    }
+    Ok(got)
+}
+
+enum Ended {
+    /// The backend closed the channel (it died, or this side failed a send).
+    PeerEof,
+    Shutdown(u64),
+    Protocol(String),
+}
+
+pub fn run() -> io::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let config = match parse_args(&args) {
+        Ok(config) => config,
+        Err((error_code, message)) => {
+            fatal_line(error_code, &message);
+            return Err(io::Error::other(error_code));
+        }
+    };
+    #[cfg(feature = "fault-hooks")]
+    if config.fail_startup {
+        fatal_line("STARTUP_FAILED", "requested isolated startup fault");
+        return Err(io::Error::other("STARTUP_FAILED"));
+    }
+    let fd = config.control_fd;
+    // SAFETY: the descriptor was passed by the owner (`pass_fds`); flags only.
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        fatal_line("STARTUP_FAILED", "control descriptor is not open");
+        return Err(io::Error::other("STARTUP_FAILED"));
+    }
+    // A PTY child must never inherit the control channel (it could pass descriptors for the
+    // whole backend); FD_CLOEXEC above, and a closed peer is EPIPE here, never a signal.
+    #[cfg(target_os = "macos")]
+    {
+        let on: libc::c_int = 1;
+        // SAFETY: valid socket and a 4-byte option value.
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_NOSIGPIPE,
+                (&on as *const i32).cast(),
+                4,
+            );
+        }
+    }
+    let tag = frame::runtime_tag(&config.generation).expect("validated while parsing");
+    stdout_line(&ready_line(&config))?;
+    let wire = Arc::new(Wire {
+        generation: config.generation.clone(),
+        journal: config.journal.clone(),
+        owner_pid: config.owner_pid,
+        out: Outbound::new(tag),
+        observe_tx: Mutex::new(None),
+        inbound: InboundBudget::new(MAX_INBOUND_BYTES),
+    });
+    let (observe_tx, observe_rx) = mpsc::sync_channel::<Request>(OBSERVATION_QUEUE);
+    *wire.observe_tx.lock().unwrap() = Some(observe_tx);
+    let writer_wire = wire.clone();
+    let writer = thread::Builder::new()
+        .name("control-writer".into())
+        .spawn(move || {
+            let outcome = writer_wire.out.run_writer(&mut SocketSender(fd));
+            if outcome.is_err() {
+                writer_wire.inbound.close();
+                // Nothing can be said to Python any more: wake the reader as if the peer had closed.
+                // SAFETY: shutdown on the control socket; the reader then sees end of file.
+                unsafe {
+                    libc::shutdown(fd, libc::SHUT_RDWR);
                 }
             }
-            if request["op"] == "create"
-                && !registry.workers.contains_key(sid)
-                && !registry.sessions.contains_key(sid)
-            {
-                let (sender, receiver) = mpsc::sync_channel(256);
-                registry.workers.insert(sid.to_owned(), sender.clone());
-                let request_sessions = sessions.clone();
-                let request_wire = wire.clone();
-                let worker_count = registry.worker_count.clone();
-                worker_count.fetch_add(1, Ordering::SeqCst);
-                thread::spawn(move || {
-                    while let Ok(request) = receiver.recv() {
-                        respond(request, &request_sessions, &request_wire);
-                    }
-                    worker_count.fetch_sub(1, Ordering::SeqCst);
-                });
+            outcome
+        })?;
+    let sessions: Sessions = Arc::new(Mutex::new(Registry::default()));
+    let observer = {
+        let (observe_sessions, observe_wire) = (sessions.clone(), wire.clone());
+        thread::Builder::new()
+            .name("observe".into())
+            .spawn(move || {
+                while let Ok(request) = observe_rx.recv() {
+                    observe(&request, &observe_sessions, &observe_wire);
+                }
+            })?
+    };
+    let ended = loop {
+        let mut header = [0u8; frame::HEADER_LEN];
+        match read_full(fd, &mut header) {
+            Ok(0) | Err(_) => break Ended::PeerEof,
+            Ok(n) if n < header.len() => break Ended::PeerEof,
+            Ok(_) => {}
+        }
+        let header = match frame::parse_header(&header, Direction::PythonToRust, wire.out.tag()) {
+            Ok(header) => header,
+            Err(violation) => {
+                break Ended::Protocol(format!("{}: invalid header", violation.name()))
             }
-            registry.workers.get(sid).cloned()
-        } else {
-            None
         };
-        if let Some(sender) = sender {
-            if let Err(error) = sender.try_send(request) {
-                let request = match error {
-                    mpsc::TrySendError::Full(request)
-                    | mpsc::TrySendError::Disconnected(request) => request,
-                };
-                wire.control(json!({"id":request["id"],"ok":false,"error":{"code":"BAD_REQUEST","message":"session queue not admitting","stage":"admit"}}));
+        let Some(reservation) = wire.inbound.acquire(frame::HEADER_LEN + header.body_len()) else {
+            break Ended::PeerEof;
+        };
+        let mut body = vec![0u8; header.body_len()];
+        match read_full(fd, &mut body) {
+            Ok(n) if n == body.len() => {}
+            _ => break Ended::PeerEof,
+        }
+        let frame: Frame = match frame::decode_body(header, &body) {
+            Ok(frame) => frame,
+            Err(violation) => break Ended::Protocol(format!("{}: invalid body", violation.name())),
+        };
+        let request = Request {
+            id: frame.correlation_id,
+            code: frame.code,
+            meta: frame.meta,
+            blob: frame.blob,
+            reservation: Some(reservation),
+        };
+        {
+            let mut registry = sessions.lock().unwrap();
+            if request.id <= registry.last_request {
+                drop(registry);
+                break Ended::Protocol("correlation: non-increasing request id".into());
             }
-        } else if request["op"] == "observe" {
-            // Historical/settled observation has no live session worker, but
-            // its filesystem I/O must not run on shared stdin admission.
-            let sender = observation_sender.get_or_insert_with(|| {
-                let (sender, receiver) = mpsc::sync_channel(256);
-                let request_sessions = sessions.clone();
-                let request_wire = wire.clone();
-                let worker_count = sessions.lock().unwrap().worker_count.clone();
-                worker_count.fetch_add(1, Ordering::SeqCst);
-                thread::spawn(move || {
-                    while let Ok(request) = receiver.recv() {
-                        respond(request, &request_sessions, &request_wire);
+            registry.last_request = request.id;
+        }
+        if request.code == code::SHUTDOWN {
+            break Ended::Shutdown(request.id);
+        }
+        if request.code == code::CREATE {
+            // The spawn blocks on the ownership gate: its own thread, never the reader.
+            {
+                let mut registry = sessions.lock().unwrap();
+                registry.note_create(request.id);
+                registry.creating += 1;
+            }
+            let (create_sessions, create_wire) = (sessions.clone(), wire.clone());
+            let spawned = thread::Builder::new().name("create".into()).spawn(move || {
+                match create(&request, &create_sessions, &create_wire) {
+                    Ok(meta) => create_wire.out.respond(request.code, request.id, meta),
+                    #[cfg(feature = "fault-hooks")]
+                    Err(error) if error.to_string() == fault::SUPPRESSED => {}
+                    Err(error) => {
+                        let message = error.to_string();
+                        let (error_code, stage) = classify(request.code, &message);
+                        let effect = if error_code == "CLEANUP_FAILED" {
+                            "partial"
+                        } else {
+                            "none"
+                        };
+                        create_wire.out.error(
+                            request.code,
+                            request.id,
+                            error_code,
+                            stage,
+                            &message,
+                            effect,
+                        );
                     }
-                    worker_count.fetch_sub(1, Ordering::SeqCst);
-                });
-                sender
+                }
+                create_sessions.lock().unwrap().creating -= 1;
+                CREATES_CHANGED.notify_all();
             });
-            if let Err(error) = sender.try_send(request) {
-                let request = match error {
-                    mpsc::TrySendError::Full(request)
-                    | mpsc::TrySendError::Disconnected(request) => request,
-                };
-                wire.control(json!({"id":request["id"],"ok":false,"error":{"code":"BAD_REQUEST","message":"observation queue not admitting","stage":"admit"}}));
+            if spawned.is_err() {
+                sessions.lock().unwrap().creating -= 1;
+                break Ended::Protocol("create worker could not start".into());
             }
         } else {
-            // Other runtime operations and settled-state queries have no I/O wait.
-            respond(request, &sessions, &wire);
+            dispatch(request, &sessions, &wire);
         }
+    };
+    if let Ended::Protocol(message) = &ended {
+        wire.out.event(
+            code::FATAL,
+            json!({"code":"PROTOCOL_ERROR","stage":"validate","message":message}),
+        );
     }
-    drop(observation_sender); // Drain admitted work under the existing teardown count/deadline.
-    if let Some(error) = &input_error {
-        wire.control(json!({"event":"fatal","error":{"code":"PROTOCOL_ERROR","message":error.to_string(),"stage":"validate"}}));
-    }
-    let worker_count = {
+    // Teardown: in-flight creates settle, then every session ends by the (non-forced) kill
+    // policy, each wait a condition with the one overall `cleanup_ms` bound.
+    let deadline = Instant::now() + Duration::from_millis(cleanup_ms());
+    {
         let mut registry = sessions.lock().unwrap();
-        registry.workers.clear();
-        registry.worker_count.clone()
-    };
-    let deadline = Instant::now() + Duration::from_secs(12);
-    let clean = loop {
-        let owned: Vec<_> = sessions
-            .lock()
-            .unwrap()
-            .sessions
-            .values()
-            .cloned()
-            .collect();
-        let mut complete = worker_count.load(Ordering::SeqCst) == 0;
-        let mut clean = true;
-        for session in owned {
-            let mut session = session.lock().unwrap();
-            if !session.finished {
-                session.closing = Some(false);
-                session.active = true;
-                session.barrier = None;
-                session.paused = None;
-                complete = false;
-            } else {
-                clean &= session.cleanup_complete;
+        while registry.creating > 0 {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
             }
+            registry = CREATES_CHANGED.wait_timeout(registry, left).unwrap().0;
         }
-        if complete {
-            break clean;
-        }
-        if Instant::now() >= deadline {
-            break false;
-        }
-        thread::sleep(Duration::from_millis(5));
-    };
-    if let Some(id) = shutdown {
-        wire.control(json!({"id":id,"ok":clean,"result":{"cleanup_complete":clean,"survivors":[]},"error":{"code":"CLEANUP_FAILED","message":"incomplete runtime cleanup","stage":"shutdown"}}));
     }
-    wire.queue.lock().unwrap().done = true;
-    wire.changed.notify_all();
-    writer
+    let handles: Vec<Arc<SessionHandle>> = sessions
+        .lock()
+        .unwrap()
+        .sessions
+        .values()
+        .cloned()
+        .collect();
+    for handle in &handles {
+        if !handle.finished() {
+            handle.send(Msg::Shutdown);
+        }
+    }
+    let mut clean = true;
+    for handle in &handles {
+        let left = deadline.saturating_duration_since(Instant::now());
+        clean &= handle.wait_finished(left) == Some(true);
+    }
+    if let Ended::Shutdown(id) = &ended {
+        let survivors: Vec<Value> = handles
+            .iter()
+            .flat_map(|h| h.survivors.lock().unwrap().clone())
+            .collect();
+        if clean {
+            wire.out.respond(
+                code::SHUTDOWN,
+                *id,
+                json!({"cleanup_complete":true,"survivors":[]}),
+            );
+        } else {
+            wire.out.error_with(
+                code::SHUTDOWN,
+                *id,
+                json!({"code":"CLEANUP_FAILED","stage":"shutdown",
+                "message":"incomplete runtime cleanup","effect":"partial","survivors":survivors}),
+            );
+        }
+    }
+    // Admitted observations finish (they are bounded file reads); then the queue closes.
+    wire.observe_tx.lock().unwrap().take();
+    let _ = observer.join();
+    wire.out.finish();
+    let written = writer
         .join()
-        .map_err(|_| io::Error::other("protocol writer panic"))??;
+        .map_err(|_| io::Error::other("control writer panic"))?;
     if !clean {
         return Err(io::Error::other("incomplete cleanup"));
     }
-    if let Some(error) = input_error {
-        return Err(error);
+    if let Ended::Protocol(message) = ended {
+        return Err(io::Error::other(message));
+    }
+    if matches!(ended, Ended::Shutdown(_)) {
+        written?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod bounded_command_tests {
+    use super::*;
+
+    /// E1 13.3 row 13, with real children (also on macOS, where the production snapshot does not use it).
+    #[test]
+    fn a_command_that_finishes_returns_its_output_without_waiting_for_the_bound() {
+        let started = Instant::now();
+        let mut command = Command::new("/bin/echo");
+        command.arg("snapshot-ok");
+        let bytes = bounded_command_within(command, Duration::from_secs(30)).unwrap();
+        assert_eq!(bytes, b"snapshot-ok\n");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "woken by the exit, not by the bound"
+        );
+    }
+
+    #[test]
+    fn a_command_that_overruns_the_bound_is_killed_by_pid_and_reported_as_a_timeout() {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("60");
+        let started = Instant::now();
+        let error = bounded_command_within(command, Duration::from_millis(300)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_failing_command_and_an_oversized_output_are_errors() {
+        let mut failing = Command::new("/usr/bin/false");
+        failing.arg("x");
+        assert!(bounded_command_within(failing, Duration::from_secs(30)).is_err());
+        let mut flood = Command::new("/usr/bin/yes");
+        flood.arg("0123456789");
+        assert!(
+            bounded_command_within(flood, Duration::from_secs(30)).is_err(),
+            "stdout over the 4 MiB bound"
+        );
+    }
+}
+
+#[cfg(test)]
+mod survivor_tests {
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    /// A real zombie: a signalled child that has exited while its parent (this test) has not reaped it yet. Its identity
+    /// is taken while it still runs; afterwards `darwin::row` no longer lists it, but `kill(pid, 0)` still reaches it.
+    fn zombie() -> (std::process::Child, i32, (i32, i32, String)) {
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = child.id() as i32;
+        let entry = darwin::snapshot(Some(pid), &Table::new())
+            .unwrap()
+            .remove(&pid)
+            .unwrap();
+        child.kill().unwrap(); // SIGKILL; not reaped
+        let still = darwin::wait_exit(&[pid], Instant::now() + Duration::from_secs(5));
+        assert!(still.is_empty(), "the child must have exited");
+        // SAFETY: signal 0 only checks existence.
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            0,
+            "an unreaped zombie is still reachable"
+        );
+        (child, pid, entry)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_killed_descendant_that_only_awaits_its_reap_is_not_a_survivor() {
+        let (mut child, pid, entry) = zombie();
+        let mut descendants = Table::new();
+        descendants.insert(pid, entry.clone());
+        // The snapshot no longer lists the zombie; its exit was observed (`still_running` is empty).
+        let survivors = survivors_after_cleanup(&descendants, &Table::new(), &[(pid, entry)], &[]);
+        assert!(
+            survivors.is_empty(),
+            "a zombie was reported as a survivor: {survivors:?}"
+        );
+        child.wait().unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_descendant_whose_exit_was_not_observed_is_a_survivor_and_so_is_an_unsignalled_one() {
+        let mut keep = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = keep.id() as i32;
+        let entry = darwin::snapshot(Some(pid), &Table::new())
+            .unwrap()
+            .remove(&pid)
+            .unwrap();
+        let mut descendants = Table::new();
+        descendants.insert(pid, entry.clone());
+        let final_table: Table = [(pid, entry.clone())].into_iter().collect();
+        let signalled = [(pid, entry)];
+        assert_eq!(
+            survivors_after_cleanup(&descendants, &final_table, &signalled, &[pid]).len(),
+            1
+        );
+        assert_eq!(
+            survivors_after_cleanup(&descendants, &final_table, &[], &[]).len(),
+            1
+        );
+        keep.kill().unwrap();
+        keep.wait().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod inbound_budget_tests {
+    use super::*;
+
+    /// E1 1.4: the sum of live reservations never exceeds the cap, a request that does not fit waits (is
+    /// not dropped), and it proceeds as soon as earlier ones are dropped.
+    #[test]
+    fn reservations_never_exceed_the_cap_and_waiters_proceed_in_order_of_release() {
+        let budget = InboundBudget::new(1000);
+        let first = budget.acquire(600).unwrap();
+        let second = budget.acquire(300).unwrap();
+        let waiting = {
+            let budget = budget.clone();
+            thread::spawn(move || budget.acquire(400).map(|r| r.size))
+        };
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !waiting.is_finished(),
+            "400 more bytes do not fit beside 900"
+        );
+        assert_eq!(budget.snapshot().0, 900);
+        drop(first);
+        assert_eq!(waiting.join().unwrap(), Some(400));
+        drop(second);
+        let (used, peak) = budget.snapshot();
+        assert_eq!(used, 0);
+        assert!(peak <= 1000, "peak {peak}");
+    }
+
+    #[test]
+    fn an_oversized_request_is_admitted_alone_and_closing_wakes_waiters() {
+        let budget = InboundBudget::new(100);
+        let big = budget.acquire(500).unwrap();
+        let blocked = {
+            let budget = budget.clone();
+            thread::spawn(move || budget.acquire(10).is_none())
+        };
+        thread::sleep(Duration::from_millis(50));
+        budget.close();
+        assert!(
+            blocked.join().unwrap(),
+            "a closed budget refuses instead of blocking forever"
+        );
+        drop(big);
+    }
 }
 
 #[cfg(test)]
@@ -1628,17 +2618,17 @@ mod cancel_state_tests {
             last_request: 7,
             ..Registry::default()
         };
-        registry.note_create("r7");
-        registry.admit_create("r7", gated).unwrap();
+        registry.note_create(7);
+        registry.admit_create(7, gated).unwrap();
         registry
     }
 
     #[test]
     fn a_cancel_before_release_is_prevented_and_the_gate_then_refuses() {
         let mut registry = queued(true);
-        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Prevented));
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Prevented));
         assert!(
-            !registry.release_gate("r7"),
+            !registry.release_gate(7),
             "the gate must refuse a prevented create"
         );
     }
@@ -1646,19 +2636,19 @@ mod cancel_state_tests {
     #[test]
     fn a_cancel_between_release_and_spawn_return_is_released() {
         let mut registry = queued(true);
-        assert!(registry.release_gate("r7"));
-        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Released));
+        assert!(registry.release_gate(7));
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Released));
     }
 
     #[test]
     fn a_cancel_after_spawn_returned_but_before_registration_is_never_prevented() {
         // N1 window 1: the gate opened, `spawn` returned, the session is not yet published.
         let mut registry = queued(true);
-        assert!(registry.release_gate("r7"));
-        registry.spawn_returned("r7");
-        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Released));
+        assert!(registry.release_gate(7));
+        registry.spawn_returned(7);
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Released));
         assert!(
-            registry.register_create("r7", "s7"),
+            registry.register_create(7, "s7"),
             "the late cancel must close the session"
         );
     }
@@ -1668,11 +2658,11 @@ mod cancel_state_tests {
         // N1 window 2: the session was published between the cancel's lookup and its verdict;
         // with one critical section the verdict itself must see the publication.
         let mut registry = queued(true);
-        assert!(registry.release_gate("r7"));
-        registry.spawn_returned("r7");
-        assert!(!registry.register_create("r7", "s7"));
+        assert!(registry.release_gate(7));
+        registry.spawn_returned(7);
+        assert!(!registry.register_create(7, "s7"));
         assert_eq!(
-            registry.cancel_verdict("r7"),
+            registry.cancel_verdict(7),
             Ok(CancelVerdict::Registered("s7".into()))
         );
     }
@@ -1680,20 +2670,20 @@ mod cancel_state_tests {
     #[test]
     fn an_ungated_create_is_released_from_admission_on() {
         let mut registry = queued(false);
-        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Released));
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Released));
     }
 
     #[test]
     fn a_cancel_for_a_finished_create_is_unknown_not_prevented() {
         let mut registry = queued(true);
-        assert!(registry.release_gate("r7"));
-        registry.spawn_returned("r7");
-        registry.register_create("r7", "s7");
+        assert!(registry.release_gate(7));
+        registry.spawn_returned(7);
+        registry.register_create(7, "s7");
         registry.evict_create("s7");
-        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Unknown));
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Unknown));
         let mut failed = queued(true);
-        failed.create_failed("r7");
-        assert_eq!(failed.cancel_verdict("r7"), Ok(CancelVerdict::Unknown));
+        failed.create_failed(7);
+        assert_eq!(failed.cancel_verdict(7), Ok(CancelVerdict::Unknown));
     }
 
     #[test]
@@ -1702,9 +2692,9 @@ mod cancel_state_tests {
             last_request: 7,
             ..Registry::default()
         };
-        registry.note_create("r7");
-        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Prevented));
-        assert_eq!(registry.admit_create("r7", true), Err("CREATE_CANCELLED"));
+        registry.note_create(7);
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Prevented));
+        assert_eq!(registry.admit_create(7, true), Err("CREATE_CANCELLED"));
     }
 
     #[test]
@@ -1713,9 +2703,113 @@ mod cancel_state_tests {
             last_request: 6,
             ..Registry::default()
         };
-        assert_eq!(registry.cancel_verdict("r7"), Ok(CancelVerdict::Prevented));
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Prevented));
         registry.last_request = 7;
-        registry.note_create("r7");
-        assert_eq!(registry.admit_create("r7", true), Err("CREATE_CANCELLED"));
+        registry.note_create(7);
+        assert_eq!(registry.admit_create(7, true), Err("CREATE_CANCELLED"));
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_ms_is_derived_exactly_like_the_baseline() {
+        // largest declared graceful grace (Claude, 3000) + escalation (1000) + confirm (1000) + slack (3000)
+        assert_eq!(cleanup_ms(), 8000);
+    }
+
+    #[test]
+    fn the_shutdown_declaration_is_read_through_the_adapter_roster() {
+        assert!(adapters::shutdown("claude")
+            .is_some_and(|spec| spec.graceful && spec.defer_master_close));
+        assert_eq!(adapters::shutdown(""), None);
+        assert_eq!(adapters::shutdown("terminal"), None);
+        assert_eq!(adapters::shutdown("codex"), None);
+    }
+
+    #[test]
+    fn exit_cell_wakes_a_waiter_on_the_event_and_times_out_otherwise() {
+        let cell = Arc::new(ExitCell::new());
+        assert!(cell.wait(Duration::from_millis(20)).is_none());
+        let waiter = {
+            let cell = cell.clone();
+            thread::spawn(move || cell.wait(Duration::from_secs(10)))
+        };
+        thread::sleep(Duration::from_millis(30));
+        let started = Instant::now();
+        cell.set(ExitInfo {
+            code: Some(3),
+            signal: None,
+        });
+        assert_eq!(waiter.join().unwrap().and_then(|info| info.code), Some(3));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "woken by the event, not by the bound"
+        );
+    }
+
+    #[test]
+    fn the_worst_case_owned_frame_is_refused_before_any_process_exists() {
+        let args = |workspace: String| CreateArgs {
+            id: "00000000-0000-0000-0000-000000000000".into(),
+            generation: "0".repeat(32),
+            pane: "pane".into(),
+            workspace,
+            cwd: "/".into(),
+            agent: String::new(),
+            argv: vec!["x".into()],
+            rows: 24,
+            cols: 80,
+        };
+        assert!(handoff_size_ok(1, &args("/tmp/ordinary".into())));
+        assert!(!handoff_size_ok(1, &args("/x".repeat(2100))));
+    }
+
+    #[test]
+    fn unknown_and_missing_arguments_fail_startup_and_a_wrong_wire_is_incompatible() {
+        let ok = |extra: &[&str]| {
+            let mut args: Vec<String> = [
+                "--wire",
+                "1",
+                "--runtime-generation",
+                "00112233445566778899aabbccddeeff",
+                "--owner-pid",
+                "1",
+                "--ownership-journal",
+                "/tmp/j",
+                "--control-fd",
+                "3",
+            ]
+            .map(String::from)
+            .to_vec();
+            args.extend(extra.iter().map(|s| s.to_string()));
+            parse_args(&args)
+        };
+        assert!(ok(&[]).is_ok());
+        assert_eq!(ok(&["--bogus"]).err().map(|e| e.0), Some("STARTUP_FAILED"));
+        let mut wrong = vec!["--wire", "2"];
+        wrong.extend([
+            "--runtime-generation",
+            "00112233445566778899aabbccddeeff",
+            "--owner-pid",
+            "1",
+            "--ownership-journal",
+            "/tmp/j",
+            "--control-fd",
+            "3",
+        ]);
+        let args: Vec<String> = wrong.iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            parse_args(&args).err().map(|e| e.0),
+            Some("INCOMPATIBLE_WIRE")
+        );
+        assert_eq!(
+            parse_args(&["--wire".to_string(), "1".to_string()])
+                .err()
+                .map(|e| e.0),
+            Some("STARTUP_FAILED")
+        );
     }
 }

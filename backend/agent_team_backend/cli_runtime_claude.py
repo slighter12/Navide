@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 from dataclasses import replace
 import hashlib
 import os
@@ -12,6 +11,48 @@ from .log_readers.base import (
     ActivityEvent, IncrementalParseResult, LogReader, TokenUsage, TurnCall,
     TurnUsage, tail_anchor, user_prompt_text,
 )
+
+
+PARSER_ID = "rust-claude-jsonl-v1"
+#: The synchronous scan executors' wait for one observation (a bound on a blocked call, not a poll).
+OBSERVE_RESULT_S = 20
+
+
+def _match_session(path):
+    """The live Claude session whose conversation file this is (Claude's session-stem rule)."""
+    def match(sessions):
+        from .cli_vendors.registry import vendor
+        spec = vendor("claude")
+        return next((s for s in sessions if s.agent_key == "claude"
+                     and (s.metadata.get("explicit_session_id") or spec.resume_id_from_command(s.command)) == path.stem
+                     and not s.closed and not s.hidden), None)
+    return match
+
+
+def _validate(args):
+    """Claude's invariants beyond the shared ones: the session stem and activity high-water progress."""
+    def validate(result, session):
+        path = Path(args["path"])
+        if result.get("native_session_id") != path.stem:
+            raise RuntimeError("PROTOCOL_ERROR: wrong observation session")
+        if result.get("error"):
+            seen = result.get("seen")
+            previous = set(args.get("seen", []))
+            if not isinstance(seen, list) or not all(isinstance(key, str) for key in seen):
+                raise RuntimeError("PROTOCOL_ERROR: invalid activity seen progress")
+            markers = [key for key in seen if key.startswith("act_hw::")]
+            old_water = max((int(key[8:]) for key in previous if key.startswith("act_hw::")), default=0)
+            if (len(markers) != 1 or not markers[0][8:].isascii() or not markers[0][8:].isdecimal()
+                    or int(markers[0][8:]) <= old_water
+                    or set(seen) - set(markers) != {key for key in previous if not key.startswith("act_hw::")}
+                    or result["events"]):
+                raise RuntimeError("PROTOCOL_ERROR: invalid activity high-water progress")
+    return validate
+
+
+def _receipt(result):
+    return {"native_session_id": result["native_session_id"], "checkpoint_offset": result["checkpoint"].get("offset"),
+            "seen": result["seen"], "event_count": len(result["events"])}
 
 
 class NativeClaudeReader(LogReader):
@@ -66,18 +107,19 @@ class NativeClaudeReader(LogReader):
                     stream.seek(start)
                     expected = stream.read(offset - start)
                     invalid = hashlib.blake2b(expected, digest_size=8).hexdigest() != cursor["anchor"]
-        future = asyncio.run_coroutine_threadsafe(service.observe_claude({
-            "path": str(path), "mode": mode, "checkpoint": cursor, "seen": sorted(seen or set()),
-            "expected_anchor_b64": base64.b64encode(expected).decode(), "anchor_invalid": invalid,
-        }), service._loop)
+        request = {"path": str(path), "mode": mode, "checkpoint": cursor, "seen": sorted(seen or set()),
+                   "anchor_invalid": invalid}
+        future = asyncio.run_coroutine_threadsafe(service.observe(
+            "claude", PARSER_ID, request, expected=expected, match=_match_session(Path(path)),
+            validate=_validate(request), receipt=_receipt), service._loop)
         try:
-            result = future.result(timeout=20)
+            result = future.result(timeout=OBSERVE_RESULT_S)
         except TimeoutError:
             future.cancel()
             raise
         if result.get("error"):
             return result  # Activity applies native high-water before propagating this failure.
-        raw_anchor = base64.b64decode(result.pop("anchor_b64"), validate=True)
+        raw_anchor = result.pop("anchor_blob")
         anchor = hashlib.blake2b(raw_anchor, digest_size=8).hexdigest() if raw_anchor else ""
         result["checkpoint"]["anchor"] = anchor
         for event in result["events"]:

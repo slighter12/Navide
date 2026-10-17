@@ -185,7 +185,8 @@ async def test_sidecar_death_invalidates_every_session_and_cleans_only_its_own_t
     lost_sidecar = service._runtime_identity["pid"]
 
     rig.signal_sidecar(service, signal.SIGSTOP)  # hold a real request outstanding
-    pending = asyncio.create_task(service.write_async(sessions[1].id, "pending-input\r"))
+    # Terminal input is a local write on the handed-off PTY (E1 8); the held request is a control message.
+    pending = asyncio.create_task(service._request("resize", {"cols": 110, "rows": 40, "redraw": False}, sessions[1]))
     await rig.until(lambda: any(not f.done() for f in service._pending.values()), "request outstanding")
     rig.signal_sidecar(service, signal.SIGKILL)
 
@@ -246,13 +247,14 @@ async def test_replacement_runtime_failure_after_loss_is_explicit(rig, failure):
         rig.runtime_bin.chmod(0o600)
         expected = "START_FAILED at exec"
     elif failure == "protocol-mismatch":
-        rig.runtime_bin.write_text(f'#!/bin/sh\nexec {BINARY} "$@" --ready-protocol 999\n')
+        harness = BINARY.parents[2] / "target-harness/release/navide-cli-runtime"  # the forced-wire hook is harness-only
+        rig.runtime_bin.write_text(f'#!/bin/sh\nexec {harness} "$@" --ready-wire 999\n')
         rig.runtime_bin.chmod(0o755)
         expected = "PROTOCOL_MISMATCH at handshake"
     else:
         rig.runtime_bin.write_text("#!/bin/sh\nexit 3\n")
         rig.runtime_bin.chmod(0o755)
-        expected = "RUNTIME_LOST"
+        expected = "START_FAILED before ready"
     with pytest.raises(RuntimeError, match=expected):
         await rig.shell(service, "pane-replacement")
     owned = [r["session_id"] for r in rig.receipts() if r["event"] == "owned"]
@@ -275,7 +277,7 @@ async def test_incomplete_cleanup_keeps_fresh_runtime_and_observation_refused(ri
     with pytest.raises(RuntimeError, match="CLEANUP_FAILED"):
         await rig.shell(service, "pane-blocked")
     with pytest.raises(RuntimeError, match="CLEANUP_FAILED"):
-        await service.observe_native("codex", "rust-codex-v1", {"path": str(rig.root / "x"), "mode": "usage"})
+        await service.observe("codex", "rust-codex-jsonl-v1", {"path": str(rig.root / "x"), "mode": "usage"}, match=lambda sessions: None)
     assert len([r for r in rig.receipts() if r["event"] == "ready"]) == 1
     invalidated = [r for r in rig.receipts() if r["event"] == "runtime_invalidated"]
     assert len(invalidated) == 1 and invalidated[0]["unresolved"] == 1
@@ -366,21 +368,24 @@ async def test_observation_across_runtime_loss_is_unchanged_and_not_duplicated(r
             "usage": {"input_tokens": 7, "output_tokens": 5}}},
     ]
     path.write_text("".join(json.dumps(r) + "\n" for r in records))
-    request = {"path": str(path), "mode": "usage", "checkpoint": {}, "seen": [],
-               "expected_anchor_b64": "", "anchor_invalid": False}
+    request = {"path": str(path), "mode": "usage", "checkpoint": {}, "seen": [], "anchor_invalid": False}
+
+    async def observe_claude(service, args):
+        return await service.observe("claude", "rust-claude-jsonl-v1", dict(args), match=lambda sessions: None)
+
     service = rig.service()
-    before = await service.observe_claude(dict(request))
+    before = await observe_claude(service, request)
     assert before["checkpoint"]["offset"] == path.stat().st_size and len(before["events"]) == 1
 
     rig.signal_sidecar(service, signal.SIGSTOP)
-    outstanding = asyncio.create_task(service.observe_claude(dict(request)))
+    outstanding = asyncio.create_task(observe_claude(service, request))
     await rig.until(lambda: any(not f.done() for f in service._pending.values()), "observation outstanding")
     rig.signal_sidecar(service, signal.SIGKILL)
     with pytest.raises(RuntimeError, match="RUNTIME_LOST"):
         await asyncio.wait_for(outstanding, 15)  # the existing reader exception path, no fallback parser
     await rig.recovered(service)
 
-    after = await service.observe_claude(dict(request))  # same persisted cursor input
+    after = await observe_claude(service, request)  # same persisted cursor input
     strip = lambda r: {k: r[k] for k in ("events", "checkpoint", "seen", "parser", "mode")}  # noqa: E731
     assert strip(after) == strip(before)
 
@@ -441,48 +446,24 @@ async def test_f1_unpersisted_owned_spawn_is_cleaned_by_identity_before_a_fresh_
 
 
 async def test_b2_child_spawned_before_owned_was_read_is_cleaned_from_the_sidecar_journal(rig):
-    """The sidecar spawned a SIGHUP/TERM-immune child, but neither its `owned` event nor the
-    create answer was ever delivered to Python (substituted: the read side of the protocol
-    pipe). Its identity can only come from the sidecar's own durable ownership journal.
-    The child is NOT registered with `rig.pids`: no rescue may clean it for this test."""
+    """The sidecar spawned a SIGHUP/TERM-immune child, but neither its `SESSION_OWNED` nor the create
+    answer was ever sent to Python (substituted: the harness build's `suppress-owned-and-response`
+    fault, which replaces the old gated read side of the pipe). Its identity can only come from the
+    sidecar's own durable ownership journal. The child is NOT registered with `rig.pids`."""
+    harness = BINARY.parents[2] / "target-harness/release/navide-cli-runtime"
+    shutil.copyfile(harness, rig.runtime_bin)
+    rig.runtime_bin.chmod(0o755)
     pid_file = rig.root / "spawned.pid"
-    gate = asyncio.Event()
-    gate.set()
-    state = {"drop": False}
-
-    class Gated:
-        def __init__(self, inner):
-            self.inner = inner
-
-        async def readline(self):
-            line = await self.inner.readline()
-            await gate.wait()
-            return b"" if state["drop"] else line
-
-        def __getattr__(self, name):
-            return getattr(self.inner, name)
-
     service = rig.service()
-    original = service._read_protocol
-
-    async def gated_reader():
-        service._runtime.stdout = Gated(service._runtime.stdout)
-        await original()
-
-    service._read_protocol = gated_reader
     await service._ensure_started()
-    gate.clear()
     create = asyncio.create_task(service.create_async(
-        pane_id="pane-undelivered", agent_key="terminal", cwd=str(rig.workspace), env=rig.env,
+        pane_id="fault:suppress-owned-and-response", agent_key="terminal", cwd=str(rig.workspace), env=rig.env,
         command=[base_python_executable(), "-c", SPAWN_AND_HOLD, str(pid_file)]))
     pid = None
     try:
         await rig.until(pid_file.exists, "the sidecar spawned the child")
         pid = int(pid_file.read_text())
         rig.signal_sidecar(service, signal.SIGKILL)
-        await asyncio.sleep(0.3)
-        state["drop"] = True
-        gate.set()
         await rig.recovered(service)
         with pytest.raises(RuntimeError):
             await asyncio.wait_for(create, 15)
@@ -492,7 +473,7 @@ async def test_b2_child_spawned_before_owned_was_read_is_cleaned_from_the_sideca
         invalidated = [r for r in rig.receipts() if r["event"] == "runtime_invalidated"]
         assert len(invalidated) == 1 and invalidated[0]["complete"] is True, invalidated
         assert service._lost is None
-        state["drop"] = False  # the test's pipe fault belongs to the lost generation only
+        shutil.copyfile(BINARY, rig.runtime_bin)  # the fault belongs to the lost generation only
         fresh = await rig.shell(service, "pane-after")  # only after verified, journal-based cleanup
         assert fresh.id
     finally:
@@ -603,7 +584,7 @@ async def test_f4_native_cleanup_failure_invalidates_the_runtime_for_every_sessi
     one = await rig.shell(service, "pane-one")
     two = await rig.shell(service, "pane-two")
     rig.signal_sidecar(service, signal.SIGSTOP)  # a real outstanding request on the other session
-    pending = asyncio.create_task(service.write_async(two.id, "pending-input\r"))
+    pending = asyncio.create_task(service._request("resize", {"cols": 110, "rows": 40, "redraw": False}, two))
     await rig.until(lambda: any(not f.done() for f in service._pending.values()), "request outstanding")
 
     await service._finish_cleanup(one, {"cleanup_complete": False, "root_reaped": True,
@@ -662,7 +643,7 @@ def handler_world(monkeypatch):
 
 
 async def test_l1_timed_out_cleanup_wait_is_the_explicit_reap_timeout_refusal(rig, monkeypatch, handler_world):
-    """A REAL 12 s cleanup wait (no timeout is tuned). Substituted: only the durable-store
+    """A REAL cleanup wait of the advertised `cleanup_ms` (8 s; no timeout is tuned). Substituted: only the durable-store
     acknowledgement is held, so the sidecar's `cleaned` event is read but never settles."""
     app, owners = handler_world
     service = rig.service()
@@ -689,7 +670,8 @@ async def test_l1_timed_out_cleanup_wait_is_the_explicit_reap_timeout_refusal(ri
         waited = time.monotonic() - started
     finally:
         hold.set()
-    assert entered.is_set() and waited >= 11, f"the cleanup wait never actually ran out ({waited:.1f}s)"
+    # The wait is the sidecar's advertised cleanup_ms, derived like the baseline's reap ceiling (8 s).
+    assert entered.is_set() and waited >= service._limits["cleanup_ms"] / 1000 - 1, f"the cleanup wait never actually ran out ({waited:.1f}s)"
     assert second.get("error"), second
     assert second["error"]["code"] == "CREATE_REAP_TIMEOUT", second
     assert second["error"]["details"]["terminal_session_id"] == old_tid

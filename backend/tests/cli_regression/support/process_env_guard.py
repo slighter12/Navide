@@ -11,6 +11,53 @@ from pathlib import Path
 
 _GUARD = None
 
+#: E1 wire v1 launch of the sidecar (ticket E3): `[runtime, --wire 1, --runtime-generation <hex32>, --owner-pid <pid>,
+#: --ownership-journal <data>/runtime-ownership/<gen>.jsonl, --control-fd <n>]`, with `pass_fds == (n,)`.
+WIRE_VERSION = '1'
+
+
+def runtime_launch(runtime: str, generation: str, owner_pid: int, journal: Path, control_fd: int) -> list[str]:
+    """The one launch form of the sidecar (used by the service's own argv builder in tests and by the probes)."""
+    return [runtime, '--wire', WIRE_VERSION, '--runtime-generation', generation, '--owner-pid', str(owner_pid),
+            '--ownership-journal', str(journal), '--control-fd', str(control_fd)]
+
+
+def match_runtime_launch(argv, runtime: str, owner_pid: int, data_root: Path) -> int | None:
+    """The control-fd number if `argv` is exactly the registered sidecar launch for this process, else None.
+    Exact match on every element (no prefix, no optional tail, no blanket allowance)."""
+    if not isinstance(argv, (list, tuple)):
+        return None
+    argv = list(argv)
+    if (len(argv) != 11 or argv[:3] != [runtime, '--wire', WIRE_VERSION] or argv[3] != '--runtime-generation'
+            or len(argv[4]) != 32 or any(c not in '0123456789abcdef' for c in argv[4])
+            or argv[5:7] != ['--owner-pid', str(owner_pid)]
+            or argv[7:9] != ['--ownership-journal', str(data_root / 'runtime-ownership' / f'{argv[4]}.jsonl')]
+            or argv[9] != '--control-fd' or not argv[10].isascii() or not argv[10].isdecimal()
+            or str(int(argv[10])) != argv[10] or int(argv[10]) < 3):
+        return None
+    return int(argv[10])
+
+
+def control_fd_problem(control_fd: int, pass_fds) -> str | None:
+    """Why `control_fd` is not the inherited socketpair end the service must be passing, or None if it is: it must be
+    the only passed descriptor, an open AF_UNIX stream socket in this process."""
+    import socket
+    import stat
+    if tuple(pass_fds or ()) != (control_fd,):
+        return 'pass_fds is not exactly the control descriptor'
+    try:
+        if not stat.S_ISSOCK(os.fstat(control_fd).st_mode):
+            return 'the control descriptor is not a socket'
+        probe = socket.socket(fileno=os.dup(control_fd))
+    except OSError:
+        return 'the control descriptor is not an open descriptor'
+    try:
+        if probe.family != socket.AF_UNIX or probe.type != socket.SOCK_STREAM:
+            return 'the control descriptor is not an AF_UNIX stream socket'
+    finally:
+        probe.close()
+    return None
+
 
 def dependency_inputs(backend: Path) -> dict[str, Path]:
     package = backend / '.venv/lib/python3.12/site-packages/psutil'
@@ -68,6 +115,7 @@ def install(root: Path, document: dict):
             self.native_entries = 0
             self.argv_native_entries = 0
             self.creation_native_entries = 0
+            self.control_fd_violations = []
             self._constructor_code = None
             self.counts = {}
             self._ledger = os.open(root / f'process-env-refusals-{self.pid}.jsonl',
@@ -97,20 +145,19 @@ def install(root: Path, document: dict):
         def revoke(self):
             self.birth = None
 
-        def _creation_role(self, argv):
+        def _creation_role(self, argv, kwargs=None):
             if not isinstance(argv, (list, tuple)):
                 return None
             argv = list(argv)
             runtime = document['files']['runtime']['path']
-            # The two exact launch forms: the bare probe form, and the Python service's form that
-            # additionally names ITS OWN generation's ownership journal inside the fixture data dir.
-            if (len(argv) in (7, 9) and argv[:3] == [runtime, '--protocol', '1']
-                    and argv[3] == '--runtime-generation' and len(argv[4]) == 32
-                    and all(c in '0123456789abcdef' for c in argv[4])
-                    and argv[5:7] == ['--owner-pid', str(os.getpid())]
-                    and (len(argv) == 7 or argv[7:] == [
-                        '--ownership-journal',
-                        str(self.root / 'data' / 'runtime-ownership' / f'{argv[4]}.jsonl')])):
+            # The one exact sidecar launch form (E1 wire v1): see `match_runtime_launch`. When the spawn keyword
+            # arguments are known, the control descriptor is verified too (`control_fd_problem`).
+            control_fd = match_runtime_launch(argv, runtime, os.getpid(), self.root / 'data')
+            if control_fd is not None:
+                if kwargs is not None:
+                    problem = control_fd_problem(control_fd, kwargs.get('pass_fds'))
+                    if problem is not None:
+                        raise PermissionError('registered sidecar launch with a wrong control descriptor: ' + problem)
                 return 'runtime'
             target = document['files']['process_env_target']['path']
             python_entries = {interpreter['path'], str(Path(__file__).resolve().parents[3] / '.venv/bin/python')}
@@ -118,6 +165,16 @@ def install(root: Path, document: dict):
                     and argv[1:] == ['-I', '-S', target, 'SYNTHETIC_R11_CREATION']):
                 return 'synthetic-created'
             return None
+
+        def expect_parent_closed(self, control_fd, identity):
+            """Runs one loop turn after the spawn returned: the service must have closed ITS copy of the child's
+            socketpair end by now (Python must hold only its own end, or it could never see the sidecar die)."""
+            try:
+                now = os.fstat(control_fd)
+            except OSError:
+                return  # closed
+            if (now.st_mode, now.st_dev, now.st_ino) == identity:
+                self.control_fd_violations.append('the parent still holds the child end of the control socketpair')
 
         def bind_loop_routes(self):
             import asyncio
@@ -152,9 +209,17 @@ def install(root: Path, document: dict):
 
             async def bound_spawn(*argv, **kwargs):
                 self.check_running_loop()
-                if self._creation_role(argv) is None:
+                if self._creation_role(argv, kwargs) is None:
                     raise PermissionError('unregistered loop subprocess image or argv')
-                return await original_spawn(*argv, **kwargs)
+                control_fd = match_runtime_launch(list(argv), document['files']['runtime']['path'], os.getpid(), self.root / 'data')
+                identity = None
+                if control_fd is not None:
+                    info = os.fstat(control_fd)
+                    identity = (info.st_mode, info.st_dev, info.st_ino)
+                process = await original_spawn(*argv, **kwargs)
+                if identity is not None:
+                    asyncio.get_running_loop().call_soon(self.expect_parent_closed, control_fd, identity)
+                return process
 
             self._bound_factory, self._bound_spawn = bound_factory, bound_spawn
             uvicorn.Config.get_loop_factory = bound_factory
@@ -169,6 +234,8 @@ def install(root: Path, document: dict):
             import asyncio
             import uvicorn
             self.check(os.getpid(), 'loop-binding')
+            if self.control_fd_violations:
+                raise PermissionError(self.control_fd_violations[0])
             self._check_loop_sources()
             if (uvicorn.Config.get_loop_factory is not self._bound_factory
                     or asyncio.create_subprocess_exec is not self._bound_spawn):

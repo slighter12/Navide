@@ -1,13 +1,19 @@
-"""Supplemental bridge bookkeeping/watermark units, not native execution proof."""
+"""Supplemental bridge bookkeeping units (create marks, request ids, retention, control locks, shutdown
+fence), not native execution proof. The watermark/release/_finish_exit tests of the removed data plane
+are retired: output ordering is the Terminal Stream's (E1 8, 9) and is proven in test_cli_runtime_lifecycle.py."""
 import asyncio
 from collections import deque
 import json
+import os
+import socket
 import threading
 from types import SimpleNamespace
 
 import pytest
 
+from agent_team_backend import cli_runtime_frames as wire
 from agent_team_backend.cli_runtime import RuntimeProcessView, RuntimeSession, RustTerminalService
+from agent_team_backend.cli_runtime_handoff import HandoffSlot
 
 
 @pytest.mark.asyncio
@@ -46,10 +52,14 @@ async def test_native_create_uses_upstream_detached_server_mark(
     async def started():
         pass
 
-    async def request(op, args):
+    async def request(op, args, session=None, **kw):
+        if op == "adopt":
+            return {"adopted": True}
         assert op == "create"
+        master, _slave = os.openpty()  # the descriptor the sidecar would have handed over
+        service._slots[args["session_id"]] = HandoffSlot(args["session_id"], master, f"/dev/fake-{args['session_id']}")
         service._owned[args["session_id"]].set_result({})
-        return {"root": {"pid": 100}, "state": "running"}
+        return {"root": {"pid": 100}, "state": "owned"}
 
     monkeypatch.setattr(service, "_ensure_started", started)
     monkeypatch.setattr(service, "_request", request)
@@ -82,29 +92,50 @@ async def test_concurrent_request_counters_follow_wire_order_and_settle():
     service = RustTerminalService.__new__(RustTerminalService)
     service._loop = asyncio.get_running_loop()
     service._lost = None
-    service._runtime_generation = "unit-generation"
+    service._runtime_generation = "00112233445566778899aabbccddeeff"
     service._request_number = 0
     service._pending = {}
+    service._request_codes = {}
+    from agent_team_backend.cli_runtime_receipts import ControlLedger
+    service._ledger = ControlLedger()
+    service._expired = {}
+    service._inbound_used = 0
+    service._inbound_waiters = []
     service._observations = {}
+    service._observing = {}
     service._admission = asyncio.Semaphore(256)
+    service._observe_slots = asyncio.Semaphore(4)
     service._send_lock = asyncio.Lock()
+    service._limits = {"request_ms": 15_000, "ping_ms": 5_000, "max_inbound_bytes": 16_777_216}
+    parent, child = socket.socketpair()
+    parent.setblocking(False)
+    child.setblocking(False)
+    service._sock = parent
+    tag = wire.runtime_tag(service._runtime_generation)
     ids = []
     maximum = 0
 
-    class Sink:
-        def write(self, data):
-            nonlocal maximum
-            request = json.loads(data)
-            ids.append(request["id"])
-            maximum = max(maximum, len(service._pending))
+    async def peer():
+        nonlocal maximum
+        buffer = b""
+        while len(ids) < 1000:
+            buffer += await service._loop.sock_recv(child, 65536)
+            while len(buffer) >= wire.HEADER_LEN:
+                header = wire.parse_header(buffer[:wire.HEADER_LEN], wire.Direction.PYTHON_TO_RUST, tag)
+                if len(buffer) < wire.HEADER_LEN + header.body_len:
+                    break
+                buffer = buffer[wire.HEADER_LEN + header.body_len:]
+                ids.append(header.correlation_id)
+                maximum = max(maximum, len(service._pending))
+                service._on_answer(
+                    wire.Frame(wire.FrameType.RESPONSE, wire.code.PING, 0, header.correlation_id, tag, {"pong": True}))
 
-        async def drain(self):
-            await asyncio.sleep(0)
-            service._pending[ids[-1]].set_result({"ok": True, "result": {"pong": True}})
-
-    service._runtime = SimpleNamespace(stdin=Sink())
+    reader = asyncio.create_task(peer())
     await asyncio.gather(*(service._request("ping") for _ in range(1000)))
-    assert ids == [f"r{index}" for index in range(1, 1001)]
+    await reader
+    parent.close()
+    child.close()
+    assert ids == list(range(1, 1001)), "request ids are numeric, increasing, in wire order"
     assert maximum <= 256
     assert not service._pending
 
@@ -126,153 +157,53 @@ def test_settled_application_views_keep_only_256_confirmed_receipts():
 
 
 @pytest.mark.asyncio
-async def test_dropped_tail_settles_output_watermark_without_waiting_for_missing_data():
-    service = RustTerminalService.__new__(RustTerminalService)
-    service._loop = asyncio.get_running_loop()
-    service._lost = None
-    service._settled = deque()
-    session = RuntimeSession("unit-tail", "pane", "terminal", [], "unit-cwd",
-                             RuntimeProcessView(100), "unit-generation", {}, {})
-    session.received_seq = 3
-    session.cleanup.set()
-    service._sessions = {session.id: session}
-    service._retained = {session.id: session}
-    for name in ("_out_dropped", "_recent_chunks", "_echo_probe", "_resize_barriers", "_flow_desired", "_write_locks"):
-        setattr(service, name, {})
-    observed = []
-
-    async def drain(sid):
-        observed.append((sid, service._out_dropped[sid]))
-
-    async def emit(event):
-        observed.append(event)
-
-    service.drain_output = drain
-    service._emit = emit
-    await asyncio.wait_for(service._finish_exit(session, {
-        "last_output_seq": 10, "dropped_tail_first_seq": 4, "dropped_tail_bytes": 200,
-        "reason": "exit", "exit_code": 7, "uptime_ms": 30,
-    }), timeout=1)
-    assert session.received_seq == 10 and session.closed
-    assert observed[0] == (session.id, 200)
-    assert observed[1]["type"] == "terminal.exit"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("in_flight", [False, True])
-async def test_final_drain_logs_pending_tail_once_before_public_exit(tmp_path, in_flight):
-    """Real presentation/drain/mirror unit; only private flow transport is substituted."""
-    frames = []
-    emitting = asyncio.Event()
-    allow_emit = asyncio.Event()
-
-    async def emit(frame):
-        if isinstance(frame, bytes):
-            emitting.set()
-            await allow_emit.wait()
-        frames.append(frame)
-
-    service = RustTerminalService(emit)
-    session = RuntimeSession("tail-unit", "pane", "terminal", [], str(tmp_path),
-                             RuntimeProcessView(100), "unit-generation", {}, {})
-    session.received_seq = 3
-    session.cleanup.set()
-    service._sessions[session.id] = service._retained[session.id] = session
-    transcript = tmp_path / "transcript.log"
-    session.output_log_fp = transcript.open("a", encoding="utf-8", buffering=1)
-
-    async def flow_transport(*_args, **_kwargs):
-        return {"paused": False}
-
-    service._request = flow_transport
-    if in_flight:
-        service._out_buffers[session.id] = [b"retained\r\n"]
-        service._out_buf_bytes[session.id] = 10
-        service._flush_output(session)
-        await asyncio.wait_for(emitting.wait(), 1)
-    exiting = asyncio.create_task(service._finish_exit(session, {
-        "last_output_seq": 10, "dropped_tail_first_seq": 4, "dropped_tail_bytes": 200,
-        "reason": "exit", "exit_code": 7, "uptime_ms": 30,
-    }))
-    if in_flight:
-        async with asyncio.timeout(1):
-            while service._out_dropped.get(session.id) != 200:
-                await asyncio.sleep(0)
-    allow_emit.set()
-    await asyncio.wait_for(exiting, 1)
-    if service._event_tasks:
-        await asyncio.wait_for(asyncio.gather(*tuple(service._event_tasks)), 1)
-    logged = transcript.read_text()
-    assert logged.count("[navide: 200 bytes of output dropped]") == 1
-    assert logged.count("retained") == int(in_flight)
-    assert session.closed and session.output_log_fp is None
-    assert session.id not in service._out_dropped
-    expected_data = b"\x01\x01\x00\x00\x00\x09tail-unit\x04pane" + b"retained\r\n"
-    assert [frame for frame in frames if isinstance(frame, bytes)] == ([expected_data] if in_flight else [])
-    assert isinstance(frames[-1], dict) and frames[-1]["type"] == "terminal.exit"
-    assert frames[-1]["payload"] == {
-        "terminal_session_id": session.id, "pane_id": "pane", "reason": "exit", "exit_code": 7,
-        "uptime_ms": 30, "signal": None, "startup_probe": None,
-    }
-    assert set(frames[-1]) == {"id", "type", "payload", "timestamp"}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["cancel-open", "cancel-release", "ack-error"])
-async def test_control_failure_keeps_matching_release_and_unlocks(failure):
-    """Supplemental ownership unit with a controlled private transport, not PTY proof."""
-    frames = []
-
-    async def emit(frame):
-        frames.append(frame)
-
-    service = RustTerminalService(emit)
+@pytest.mark.parametrize("failure", ["request-error", "cancelled-in-request", "ack-error"])
+async def test_control_failure_unlocks_the_control_lock_and_the_barrier(failure):
+    """Supplemental unit with a controlled private transport, not PTY proof (the real order is R5/T6)."""
+    service = RustTerminalService(lambda frame: asyncio.sleep(0))
     session = RuntimeSession("control-unit", "pane", "terminal", [], "unit-cwd",
                              RuntimeProcessView(100), "unit-generation", {}, {})
+    session.handle = SimpleNamespace(read=lambda n: (_ for _ in ()).throw(BlockingIOError()),
+                                     pause_reading=lambda: None, resume_reading=lambda: None)
     service._sessions[session.id] = service._retained[session.id] = session
-    opened = asyncio.Event()
-    allow_open = asyncio.Event()
-    releasing = asyncio.Event()
-    allow_release = asyncio.Event()
-    requests = []
+    entered = asyncio.Event()
 
-    async def transport(op, args, stored):
-        requests.append((op, args))
-        if op == "resize":
-            opened.set()
-            await allow_open.wait()
-            return {"barrier_id": "operation-A", "through_seq": 0}
-        releasing.set()
-        await allow_release.wait()
-        return {"released": True}
+    calls = []
+
+    async def transport(op, args, stored, **kw):
+        calls.append(op)
+        entered.set()
+        if len(calls) > 1:  # only the first control fails; the later one proves the locks were released
+            return {"applied": True, "steps": 1}
+        if failure == "request-error":
+            raise RuntimeError("controlled RESIZE failure")
+        if failure == "cancelled-in-request":
+            await asyncio.Event().wait()
+        return {"applied": True, "steps": 1}
 
     service._request = transport
+    acknowledged = []
 
     async def control():
         async with service.control_async(session.id, 110, 40):
             if failure == "ack-error":
                 raise OSError("controlled ACK failure")
-            await emit({"type": "public-ack"})
+            acknowledged.append(True)
 
     task = asyncio.create_task(control())
-    await asyncio.wait_for(opened.wait(), 1)
-    if failure == "cancel-open":
+    if failure == "cancelled-in-request":
+        await asyncio.wait_for(entered.wait(), 2)
         task.cancel()
-    allow_open.set()
-    await asyncio.wait_for(releasing.wait(), 1)
-    if failure in {"cancel-open", "cancel-release"}:
-        task.cancel()  # Includes second cancellation during matching release.
         with pytest.raises(asyncio.CancelledError):
             await task
-    assert session.control_lock.locked()
-    assert requests[-1] == ("release", {"barrier_id": "operation-A"})
-    allow_release.set()
-    if failure == "ack-error":
-        with pytest.raises(OSError, match="controlled ACK failure"):
-            await task
-    await asyncio.wait_for(asyncio.gather(*tuple(service._event_tasks)), 1)
-    assert not session.control_lock.locked()
-    assert frames == ([] if failure in {"cancel-open", "ack-error"} else [{"type": "public-ack"}])
+    else:
+        with pytest.raises((RuntimeError, OSError)):
+            await asyncio.wait_for(task, 2)
+    assert not session.control_lock.locked(), "the control lock is released on every failure path"
+    assert not service._resize_barriers[session.id].locked(), "so is the barrier"
+    assert acknowledged == []
+    async with service.control_async(session.id, 90, 30):  # a later control still works
+        pass
 
 
 @pytest.mark.asyncio
@@ -313,7 +244,8 @@ async def test_actual_rust_launch_boundary_refuses_unowned_provider_before_nativ
 @pytest.mark.parametrize("cleanup_failed", [False, True])
 async def test_kill_all_fences_retained_exit_cleanup_and_late_error(tmp_path, monkeypatch,
                                                                   ack_already_queued, cleanup_failed):
-    """Supplemental event race: real bridge handlers; controlled ACK and external store pacing."""
+    """Supplemental event race: real handlers; controlled ACK and external store pacing. A retained session
+    whose exit was published (closed) is still reached by kill_all, which waits for its verified cleanup."""
     from agent_team_backend import pty_registry
 
     async def emit(_frame):
@@ -322,12 +254,19 @@ async def test_kill_all_fences_retained_exit_cleanup_and_late_error(tmp_path, mo
     service = RustTerminalService(emit)
     service._data_dir = tmp_path
     service._runtime = SimpleNamespace(returncode=None)
+    service._runtime_generation = "unit-generation"
     session = RuntimeSession("naturally-exited", "pane", "terminal", [], str(tmp_path),
                              RuntimeProcessView(100), "unit-generation", {}, {})
-    service._sessions[session.id] = service._retained[session.id] = session
-    await service._finish_exit(session, {"last_output_seq": 0, "reason": "exit", "exit_code": 0,
-                                        "uptime_ms": 1, "dropped_tail_bytes": 0})
-    assert session.closed and session.id not in service._sessions and not session.cleanup.is_set()
+    session.closed = session.stream_done = session.exit_published = True  # its exit is already out
+    session.joined.set()
+    service._retained[session.id] = session
+    sent = []
+
+    async def transport(op, args, stored, **kw):
+        sent.append(op)
+        return {"accepted": True}
+
+    service._request = transport
     allow_ack = asyncio.Event()
     unregister_started = threading.Event()
     allow_unregister = threading.Event()
@@ -365,11 +304,12 @@ async def test_kill_all_fences_retained_exit_cleanup_and_late_error(tmp_path, mo
             allow_unregister.set()
             await asyncio.wait_for(fence, 2)
             assert session.cleanup.is_set() and unregistered.is_set()
+        assert sent == ["kill"], "kill_all sent KILL for the closed-but-uncleaned session (not the base predicate)"
     finally:
         allow_ack.set()
         allow_unregister.set()
         if cleanup:
-            await asyncio.wait_for(cleanup, 2)
+            await asyncio.gather(cleanup, return_exceptions=True)
         if not fence.done():
             fence.cancel()
         await asyncio.gather(fence, return_exceptions=True)

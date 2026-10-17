@@ -15,8 +15,12 @@ def run(root: Path, selected: str):
     guard = installed()
     factory = uvicorn.Config(app=None, loop=selected).get_loop_factory()
     generation = 'a' * 32
-    command = [document['files']['runtime']['path'], '--protocol', '1',
-               '--runtime-generation', generation, '--owner-pid', str(os.getpid())]
+    import socket
+    from .process_env_guard import runtime_launch
+    (root / 'data' / 'runtime-ownership').mkdir(parents=True, exist_ok=True)
+    channel, child_end = socket.socketpair()  # wire v1: the sidecar's life is this channel, not its stdin
+    command = runtime_launch(document['files']['runtime']['path'], generation, os.getpid(),
+                             root / 'data' / 'runtime-ownership' / f'{generation}.jsonl', child_end.fileno())
     proof = {'selected': selected, 'app_started': False, 'lifespan_started': False,
              'captured': [], 'reaped': []}
 
@@ -24,7 +28,9 @@ def run(root: Path, selected: str):
         actor = await asyncio.create_subprocess_exec(*command, cwd=root,
             env={'HOME': str(root / 'home'), 'TMPDIR': str(root / 'tmp'), 'PATH': '/usr/bin:/bin',
                  'SYNTHETIC_ENV_TRAILER_NEVER_SERIALIZE': 'R12_ONLY_CREATED_SELF'},
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            pass_fds=(child_end.fileno(),))
+        child_end.close()  # the service's own discipline: only the sidecar holds the child end
         metadata = _psosx.Process(actor.pid)
         born, parent, exe = metadata.create_time(), metadata.ppid(), metadata.exe()
         row = {'pid': actor.pid, 'created': born, 'parent': parent,
@@ -161,6 +167,7 @@ def run(root: Path, selected: str):
             proof['negative_labels'] = negatives
         finally:
             actor.stdin.close()
+            channel.close()  # channel EOF: the sidecar ends its sessions (none) and exits 0, silently
             try:
                 await asyncio.wait_for(actor.wait(), 5)
             except BaseException:
@@ -182,53 +189,77 @@ def run(root: Path, selected: str):
 
 
 def protocol_controls(root):
-    """Original startup/fatal/protocol/shutdown behavior; no PTY or application."""
+    """Original startup/fatal/protocol/shutdown behaviour of the sidecar, now over wire v1 (ticket E3): the lifecycle is the
+    inherited control socketpair, requests are binary frames. No PTY, no application, and only the hashed product binary
+    (the fault-hook build is not admitted inside this sandbox and is not needed): `eof` (channel EOF), `shutdown` (a
+    SHUTDOWN frame), `stale` (a frame carrying another generation's runtime tag), `fatal` (a startup failure: an unknown
+    argument) and `protocol` (an incompatible wire version requested)."""
+    import socket
     import subprocess
     from psutil import _psosx
+    from agent_team_backend import cli_runtime_frames as wire
+    from agent_team_backend.cli_runtime_frames import FrameType, code
     from .difference_entry import validate_kernel_setup
+    from .process_env_guard import runtime_launch
     document = validate_kernel_setup(root)
+    product = document['files']['runtime']['path']
     generation = 'c' * 32
-    base = [document['files']['runtime']['path'], '--protocol', '1',
-            '--runtime-generation', generation, '--owner-pid', str(os.getpid())]
+    tag = wire.runtime_tag(generation)
+    (root / 'data' / 'runtime-ownership').mkdir(parents=True, exist_ok=True)
+    journal = root / 'data' / 'runtime-ownership' / f'{generation}.jsonl'
     receipts = []
     for label in ('eof', 'shutdown', 'stale', 'fatal', 'protocol'):
-        flags = ['--fail-startup'] if label == 'fatal' else ['--ready-protocol', '2'] if label == 'protocol' else []
+        channel, child_end = socket.socketpair()
+        base = runtime_launch(product, generation, os.getpid(), journal, child_end.fileno())
+        if label == 'fatal':
+            base = base + ['--unknown-startup-argument', '1']
+        elif label == 'protocol':
+            base[base.index('--wire') + 1] = '2'  # a wire version this sidecar does not speak
+        flags = []
         actor = subprocess.Popen(base + flags, cwd=root,
             env={'HOME': str(root / 'home'), 'PATH': '/usr/bin:/bin', 'TMPDIR': str(root / 'tmp')},
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(child_end.fileno(),))
+        child_end.close()
         meta = _psosx.Process(actor.pid)
         born, parent = meta.create_time(), meta.ppid()
         assert parent == os.getpid()
         receipt = {'label': label, 'pid': actor.pid, 'born': born, 'parent': parent}
         try:
-            requests = []
-            if label == 'stale':
-                requests.append({'id': 'r1', 'op': 'shutdown', 'runtime_generation': 'd' * 32})
-            if label in ('shutdown', 'stale'):
-                requests.append({'id': 'r2' if label == 'stale' else 'r1',
-                    'op': 'shutdown', 'runtime_generation': generation})
-            output, stderr = actor.communicate(b''.join((json.dumps(row) + '\n').encode() for row in requests), timeout=5)
-            assert output.endswith(b'\n')
-            records = [json.loads(line) for line in output.splitlines()]
-            assert all(row['runtime_generation'] == generation for row in records)
-            if label == 'fatal':
-                assert actor.returncode == 1 and records[0]['event'] == 'fatal'
-                assert records[0]['error']['code'] == 'STARTUP_FAILED'
-                assert len(records) == 1 and stderr == b'cli runtime: STARTUP_FAILED\n'
+            first = json.loads(actor.stdout.readline())
+            if label in ('fatal', 'protocol'):
+                code_name = 'STARTUP_FAILED' if label == 'fatal' else 'INCOMPATIBLE_WIRE'
+                assert first['event'] == 'fatal' and first['error']['code'] == code_name and first['error']['stage'] == 'initialize'
+                channel.close()
+                output, stderr = actor.communicate(timeout=5)
+                assert actor.returncode == 1 and output == b'' and stderr == f'cli runtime: {code_name}\n'.encode()
             else:
-                ready = records[0]
-                assert actor.returncode == 0 and stderr == b''
-                assert ready['event'] == 'ready' and ready['pid'] == actor.pid and ready['owner_pid'] == parent
-                assert ready['protocol'] == (2 if label == 'protocol' else 1)
-                assert ready['self_process']['argv'] == base + flags
-                assert ready['self_process']['birth_seconds'] + ready['self_process']['birth_microseconds'] / 1_000_000 == born
+                assert first['event'] == 'ready' and first['pid'] == actor.pid and first['owner_pid'] == parent
+                assert first['runtime_generation'] == generation
+                assert (first['protocol'], first['wire']) == ('navide-acr', 1)
+                assert first['self_process']['argv'] == base
+                assert first['self_process']['birth_seconds'] + first['self_process']['birth_microseconds'] / 1_000_000 == born
                 if label in ('shutdown', 'stale'):
-                    assert records[-1]['ok'] and records[-1]['result'] == {'cleanup_complete': True, 'survivors': []}
+                    request_tag = tag if label == 'shutdown' else wire.runtime_tag('d' * 32)  # stale: another generation's tag
+                    channel.sendall(wire.encode(wire.Frame(FrameType.REQUEST, code.SHUTDOWN, 0, 1, request_tag, {}, b'')))
+                    channel.settimeout(5)
+                    header = wire.parse_header(_read_exact(channel, wire.HEADER_LEN), wire.Direction.RUST_TO_PYTHON, tag)
+                    frame = wire.decode_body(header, _read_exact(channel, header.body_len))
+                    if label == 'shutdown':
+                        assert frame.frame_type is FrameType.RESPONSE and frame.code == code.SHUTDOWN and frame.correlation_id == 1
+                        assert frame.meta == {'cleanup_complete': True, 'survivors': []}
+                    else:  # a frame for another runtime generation is a protocol error: FATAL, then exit 1
+                        assert frame.code == code.FATAL and frame.meta['code'] == 'PROTOCOL_ERROR'
+                else:
+                    channel.close()  # channel EOF: the backend vanished
+                output, stderr = actor.communicate(timeout=5)
+                assert output == b''
                 if label == 'stale':
-                    assert records[1]['error']['code'] == 'STALE_RUNTIME'
-                assert len(records) == {'eof': 1, 'protocol': 1, 'shutdown': 2, 'stale': 3}[label]
+                    assert actor.returncode == 1 and stderr == b'cli runtime: runtime_tag: invalid header\n'
+                else:
+                    assert actor.returncode == 0 and stderr == b''
             receipt.update(reaped=True, exit_code=actor.returncode, passed=True)
         finally:
+            channel.close()
             if actor.returncode is None:
                 assert _psosx.Process(actor.pid).create_time() == born
                 actor.kill()
@@ -237,3 +268,12 @@ def protocol_controls(root):
             receipts.append(receipt)
             (root / 'native-wire-proof.json').write_text(json.dumps(receipts))
     assert all(row.get('passed') and row['reaped'] and not row.get('rescued') for row in receipts)
+
+
+def _read_exact(sock, count):
+    data = b''
+    while len(data) < count:
+        chunk = sock.recv(count - len(data))
+        assert chunk, 'the sidecar closed the channel mid-frame'
+        data += chunk
+    return data

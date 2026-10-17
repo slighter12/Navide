@@ -229,7 +229,7 @@ def install_external_guards(root: Path) -> None:
                 admit_fixture_command(root, list(args), kwargs['env'])
             from .process_env_guard import installed
             payload_guard = installed()
-            observe = payload_guard is not None and payload_guard._creation_role(args) is not None
+            observe = payload_guard is not None and payload_guard._creation_role(args, kwargs) is not None
             if observe:
                 payload_guard._check_constructor_reaper()  # BEFORE creating/exposing any target
             super().__init__(args, *rest, **kwargs)

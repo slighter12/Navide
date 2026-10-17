@@ -1,5 +1,4 @@
 //! Bounded Codex rollout semantics derived from the existing Python reader.
-use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
@@ -40,7 +39,8 @@ fn typed_prompt(payload: &Value) -> Option<String> {
     }
     None
 }
-pub fn observe(args: &Value) -> io::Result<Value> {
+/// See `claude::observe`: `expected` is the raw anchor request blob; the raw anchor is returned.
+pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u8>>)> {
     let path = args["path"]
         .as_str()
         .ok_or_else(|| io::Error::other("path required"))?;
@@ -59,8 +59,7 @@ pub fn observe(args: &Value) -> io::Result<Value> {
         && (replaced
             || stat.len() < offset
             || args["anchor_invalid"] == true
-            || (!text(&args["expected_anchor_b64"]).is_empty()
-                && STANDARD.encode(anchor(&mut file, offset)?) != args["expected_anchor_b64"]));
+            || (!expected.is_empty() && anchor(&mut file, offset)? != expected));
     let start = if mode == "usage" && !rotated {
         offset
     } else {
@@ -310,13 +309,14 @@ pub fn observe(args: &Value) -> io::Result<Value> {
         seen.push(format!("act_hw::{high_water}"));
         seen.push(format!("__lasttext__:{last_text}"));
     }
-    let anchor_b64 = if committed > 0 {
-        STANDARD.encode(anchor(&mut file, committed)?)
+    let raw_anchor = if committed > 0 {
+        anchor(&mut file, committed)?
     } else {
-        String::new()
+        Vec::new()
     };
-    Ok(
+    Ok((
         json!({"parser":"rust-codex-jsonl-v1","path":path,"mode":mode,"identity":identity,"native_session_id":sid,
-        "cwd":cwd,"events":events,"checkpoint":checkpoint,"seen":seen,"anchor_b64":anchor_b64,"error":error}),
-    )
+        "cwd":cwd,"events":events,"checkpoint":checkpoint,"seen":seen,"error":error}),
+        Some(raw_anchor),
+    ))
 }

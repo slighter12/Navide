@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from .fixture_exec import stable_bytes, stable_file
+from .process_env_guard import match_runtime_launch
 
 
 def write_observation(root, name, row):
@@ -119,7 +120,7 @@ def _runtime_self_row(root, ready, metadata):
     self_row = ready.get('self_process')
     if ready.get('self_process_error') or not isinstance(self_row, dict):
         raise PermissionError('missing native SELF evidence')
-    if (ready.get('event') != 'ready' or ready.get('protocol') != 1
+    if (ready.get('event') != 'ready' or ready.get('protocol') != 'navide-acr' or ready.get('wire') != 1
             or ready.get('pid') != metadata['pid'] or ready.get('owner_pid') != metadata['parent']
             or self_row.get('pid') != metadata['pid'] or self_row.get('parent') != metadata['parent']
             or self_row.get('executable') != metadata['exe']
@@ -130,14 +131,12 @@ def _runtime_self_row(root, ready, metadata):
             or not 0 <= micros < 1_000_000 or seconds + micros / 1_000_000 != metadata['created']):
         raise PermissionError('stale native SELF birth')
     generation = ready.get('runtime_generation')
-    expected = [metadata['exe'], '--protocol', '1', '--runtime-generation', generation,
-                '--owner-pid', str(metadata['parent'])]
-    # Exactly two launch forms: bare, or with this generation's own ownership journal in the data dir.
-    journalled = [*expected, '--ownership-journal',
-                  str(root / 'data' / 'runtime-ownership' / f'{generation}.jsonl')]
-    if (not isinstance(generation, str) or len(generation) != 32
-            or any(c not in '0123456789abcdef' for c in generation)
-            or self_row.get('argv') not in (expected, journalled)):
+    argv = self_row.get('argv')
+    # The one wire-v1 launch form (process_env_guard.match_runtime_launch); the control descriptor's number is the only
+    # free element and is only checked for shape here (its socket nature is checked at spawn, before the child exists).
+    if (not isinstance(generation, str) or match_runtime_launch(
+            argv, metadata['exe'], metadata['parent'], root / 'data') is None
+            or argv[4] != generation):
         raise PermissionError('invalid native SELF argv generation')
     for role in ('native-darwin', 'native-posix', 'runtime'):
         identity = document['files'][role]
@@ -221,12 +220,7 @@ def correlate_observation(root, metadata):
             raise PermissionError('invalid native SELF source')
         if row['role'] != 'runtime' or row['image'] != document['files']['runtime']:
             raise PermissionError('unregistered created runtime')
-        argv = row['argv']
-        if (len(argv) not in (7, 9) or argv[:3] != [row['exe'], '--protocol', '1']
-                or argv[3] != '--runtime-generation' or argv[5:7] != ['--owner-pid', str(row['parent'])]
-                or len(argv[4]) != 32 or any(c not in '0123456789abcdef' for c in argv[4])
-                or (len(argv) == 9 and argv[7:] != [
-                    '--ownership-journal', str(root / 'data' / 'runtime-ownership' / f'{argv[4]}.jsonl')])):
+        if match_runtime_launch(row['argv'], row['exe'], row['parent'], root / 'data') is None:
             raise PermissionError('invalid created runtime argv')
     else:
         raise PermissionError('unknown OWN observation phase')

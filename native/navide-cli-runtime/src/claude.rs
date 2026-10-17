@@ -1,5 +1,4 @@
 //! Claude JSONL interpretation; application policy and checkpoint storage stay outside.
-use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs::File;
@@ -275,7 +274,10 @@ fn turns(records: &[(u64, Value)], sid: &str) -> Vec<Value> {
     out
 }
 
-pub fn observe(args: &Value) -> io::Result<Value> {
+/// `expected` is the raw anchor bytes Python read from the file (the request blob). Returns the
+/// result document and the raw anchor to return as the answer's blob (`None` when this parser
+/// returns no anchor).
+pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u8>>)> {
     let path = Path::new(
         args["path"]
             .as_str()
@@ -307,9 +309,6 @@ pub fn observe(args: &Value) -> io::Result<Value> {
         .get("offset")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let expected = STANDARD
-        .decode(args["expected_anchor_b64"].as_str().unwrap_or(""))
-        .map_err(io::Error::other)?;
     let rotated = offset > 0
         && (args["anchor_invalid"] == true
             || args["checkpoint"]["identity"] != identity
@@ -429,10 +428,10 @@ pub fn observe(args: &Value) -> io::Result<Value> {
     }
     let file = reader.into_inner();
     let mut file = file;
-    let anchor_b64 = if committed > 0 {
-        STANDARD.encode(anchor(&mut file, committed)?)
+    let raw_anchor = if committed > 0 {
+        anchor(&mut file, committed)?
     } else {
-        String::new()
+        Vec::new()
     };
     checkpoint.insert("kind".into(), json!("jsonl"));
     checkpoint.insert("identity".into(), json!(identity));
@@ -451,9 +450,10 @@ pub fn observe(args: &Value) -> io::Result<Value> {
     } else if mode == "session_usage" {
         next_seen = seen.into_iter().map(Value::String).collect();
     }
-    Ok(
+    Ok((
         json!({"parser":"rust-claude-jsonl-v1","path":path,"native_session_id":sid,"cwd":cwd,"identity":identity,
-        "mode":mode,"events":events,"checkpoint":checkpoint,"anchor_b64":anchor_b64,"seen":next_seen,"error":activity_error,
+        "mode":mode,"events":events,"checkpoint":checkpoint,"seen":next_seen,"error":activity_error,
         "turns":if mode == "turns" { turns(&records, sid) } else { Vec::new() }}),
-    )
+        Some(raw_anchor),
+    ))
 }

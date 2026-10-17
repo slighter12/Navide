@@ -37,7 +37,7 @@ async function withBackend(fault: string, run: (root: string, endpoint: any) => 
     await until(() => code !== undefined, 'driver cleanup', 25_000)
     const reports = resolve('test-results/ci/shell-runtime', `${fault || 'native'}-${basename(root)}`)
     mkdirSync(reports, { recursive: true })
-    for (const name of ['backend.log', 'scenario.json', 'runtime-receipts.jsonl', 'process-identities.jsonl', 'control-order.json']) {
+    for (const name of ['backend.log', 'scenario.json', 'runtime-receipts.jsonl', 'process-identities.jsonl', 'control-order.json', 'trial-proof.json']) {
       if (existsSync(join(root, name))) copyFileSync(join(root, name), join(reports, name))
     }
     expect(code, log).toBe(0)
@@ -126,6 +126,13 @@ it.runIf(process.platform === 'darwin')('uses one actual native runtime for conc
         await input(peer.tid, 'same-process-世界\r')
         await until(() => (output.get(peer.tid) ?? '').includes(`"pid": ${peer.pid}, "text": "same-process-世界"`), 'same child identity')
       }
+      // The identity monitor samples the process tree at its own (coarse) pace, so a short run can end before it
+      // saw a peer (measured: a failing run had 4 snapshots in total). Wait for the observation instead of
+      // assuming it: this is the receipt the assertion below reads.
+      await until(() => {
+        const text = readFileSync(join(root, 'process-identities.jsonl'), 'utf8')
+        return peers.every((peer) => text.includes(`"pid": ${peer.pid},`))
+      }, 'every peer observed by the identity monitor')
       await input(peers[0].tid, 'exit\r')
       await until(() => exits.has(peers[0].tid), 'natural exit')
       expect(exits.get(peers[0].tid).exit_code).toBe(7)
@@ -161,7 +168,10 @@ for (const [first, second] of [['terminal.resize', 'terminal.redraw'], ['termina
       client.on('terminal.output', (payload) => {
         const frame = payload as TerminalOutputFrame
         const text = new TextDecoder().decode(frame.data)
-        frames.push({ kind: 'output', text })
+        // Recorded in a later macrotask: an ACK and the output that follows it can arrive in one
+        // socket read, and the ACK's promise reaction (a microtask) would otherwise run after
+        // this synchronous handler, inverting what the backend sent in order.
+        setImmediate(() => { frames.push({ kind: 'output', text }) })
         if (text.includes('NATIVE_READY ')) ready = true
       })
       const control = (type: string, tid: string, cols: number) => client.send(type, {
@@ -213,7 +223,7 @@ for (const [first, second] of [['terminal.resize', 'terminal.redraw'], ['termina
   }, 60_000)
 }
 
-for (const [fault, expected] of [['missing', 'missing'], ['exec', 'START_FAILED at exec'], ['startup', 'START_FAILED before ready'], ['protocol', 'PROTOCOL_MISMATCH at handshake']]) {
+for (const [fault, expected] of [['missing', 'missing'], ['exec', 'START_FAILED at exec'], ['startup', 'START_FAILED: STARTUP_FAILED'], ['protocol', 'PROTOCOL_MISMATCH at handshake']]) {
   it.runIf(process.platform === 'darwin')(`refuses ${fault} without a Python PTY fallback`, async () => {
     await withBackend(fault, async (root, endpoint) => {
       const client = createWsClient()
@@ -239,3 +249,48 @@ for (const [fault, expected] of [['missing', 'missing'], ['exec', 'START_FAILED 
     })
   }, 45_000)
 }
+
+// E1 P8, through the principal seam: a non-deferred kill hangs the CLI up (it ignores SIGTERM and records the SIGHUP it
+// receives when every master closes) and the last words it wrote before the hangup reach the renderer before terminal.exit.
+it.runIf(process.platform === 'darwin')('delivers the last words written before a hangup ahead of terminal.exit (P8)', async () => {
+  await withBackend('', async (root, endpoint) => {
+    let connections = 0
+    const client = createWsClient({ onStatus: (status) => { if (status === 'connected') connections++ } })
+    let text = ''
+    const decoder = new TextDecoder()
+    let exit: { exit_code: number | null; reason?: string } | undefined
+    let atExit = ''
+    client.on('terminal.output', (payload) => { text += decoder.decode((payload as TerminalOutputFrame).data, { stream: true }) })
+    client.on('terminal.exit', (payload) => { exit = payload as typeof exit; atExit = text })
+    try {
+      client.connect(endpoint.url)
+      await until(() => connections === 1, 'authenticated WS')
+      const workspace = join(root, 'workspace hup')
+      mkdirSync(workspace)
+      const created = await client.send<{ terminal_session_id: string }>('terminal.create', {
+        pane_id: 'native-shell-hup', agent_key: 'terminal', command: endpoint.command, cwd: workspace,
+        cols: 100, rows: 30, create_generation: 'native-create-hup',
+      }, 15_000)
+      expect(created.ok, JSON.stringify(created)).toBe(true)
+      const tid = created.payload!.terminal_session_id
+      await until(() => text.includes('NATIVE_READY '), 'native child READY')
+      expect((await client.send('terminal.input', { terminal_session_id: tid, data: 'hup-last-words\r' })).ok).toBe(true)
+      // Gate the kill on the CLI having FINISHED writing (its own completion file, written after every write returned), not on
+      // what the renderer has seen: the property under test is that words already written reach the renderer before the exit,
+      // so the hangup must come while some of them may still be in flight, and never before the CLI wrote them.
+      await until(() => existsSync(join(workspace, 'last-words-written.json')), 'the CLI finished writing its last words', 30_000)
+      expect((await client.send('terminal.kill', { terminal_session_id: tid, force: false })).ok).toBe(true)
+      await until(() => exit !== undefined, 'terminal.exit', 30_000)
+      for (let index = 0; index < 64; index++) expect(atExit, `line ${index} was not delivered before terminal.exit`).toContain(`LAST ${String(index).padStart(3, '0')} ${'w'.repeat(2048)}`)
+      expect(atExit).toContain('LAST_WORDS_END')
+      // the CLI observed the hangup itself (SIGTERM was ignored, so only the closed masters could have ended it)
+      await until(() => existsSync(join(workspace, 'hup-observed.json')), 'the CLI recorded the SIGHUP')
+      expect(JSON.parse(readFileSync(join(workspace, 'hup-observed.json'), 'utf8')).signal).toBe('SIGHUP')
+      const receipts = readFileSync(join(root, 'runtime-receipts.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+      expect(receipts.filter((entry) => entry.event === 'hangup')).toHaveLength(1)
+      expect(receipts.filter((entry) => entry.event === 'cleaned' && entry.cleanup_complete && entry.root_reaped)).toHaveLength(1)
+    } finally {
+      client.dispose('P8 complete')
+    }
+  })
+}, 90_000)

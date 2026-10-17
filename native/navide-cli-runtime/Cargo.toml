@@ -6,10 +6,13 @@ publish = false
 
 [dependencies]
 serde_json = "=1.0.150"
-base64 = "=0.22.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.186"
+
+[features]
+# Test-only fault injection for the isolated harness build; never part of the product binary.
+fault-hooks = []
 
 [profile.release]
 lto = "thin"
