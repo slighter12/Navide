@@ -104,7 +104,9 @@ it.runIf(process.platform === 'darwin')('sidecar death with sessions and a pendi
 
       // A real outstanding request, then the sidecar dies under a live backend.
       await driver.ctl('sidecar-stop')
-      const pending = main.input(tids[1], 'pending-input\r', 30_000)
+      // Terminal input is a local write to the handed-off PTY and does not wait for the sidecar (E1 8);
+      // the outstanding sidecar request is a control message, here a resize.
+      const pending = main.client.send('terminal.resize', { terminal_session_id: tids[1], cols: 110, rows: 40 }, 30_000)
       await delay(300)
       await driver.ctl('sidecar-kill')
       const failed = await pending
@@ -164,7 +166,7 @@ it.runIf(process.platform === 'darwin')('sidecar death with sessions and a pendi
   })
 }, 180_000)
 
-for (const [kind, expected] of [['not-executable', 'START_FAILED at exec'], ['protocol-mismatch', 'PROTOCOL_MISMATCH at handshake'], ['exits-before-ready', 'RUNTIME_LOST']]) {
+for (const [kind, expected] of [['not-executable', 'START_FAILED at exec'], ['protocol-mismatch', 'PROTOCOL_MISMATCH at handshake'], ['exits-before-ready', 'START_FAILED before ready']]) {
   it.runIf(process.platform === 'darwin')(`replacement runtime failure after loss (${kind}) is explicit and never falls back`, async () => {
     await withDriver('runtime', async (driver) => {
       const client = new Client(driver.wire.url)
@@ -271,7 +273,7 @@ it.runIf(process.platform === 'darwin')('a create abandoned by a lost WebSocket 
       }
       const outcomes = receipts.filter((r) => r.event === 'abandoned_create')
       expect(outcomes).toHaveLength(1)
-      expect(['cleaned', 'refused']).toContain(outcomes[0].outcome)
+      expect(['cleaned', 'refused', 'prevented']).toContain(outcomes[0].outcome) // E1 10.1 adds `prevented`: a CANCEL that won the gate
       for (const client of [holder, replacement]) {
         for (const [tid, exits] of client.exits) expect(exits.length === 0 || tid === warm.tid).toBe(true)
       }

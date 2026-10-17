@@ -1,6 +1,12 @@
-//! Backend-owned JSONL controller. stdout is exclusively protocol records.
+//! The Navide CLI runtime sidecar. stdout carries the one `ready` (or `fatal`) line; everything after
+//! the handshake is binary frames on the control socket (E1 wire v1).
+mod frame;
 #[cfg(unix)]
 mod posix;
+#[cfg(unix)]
+mod session_pty;
+#[cfg(unix)]
+mod wire;
 
 fn main() {
     #[cfg(unix)]

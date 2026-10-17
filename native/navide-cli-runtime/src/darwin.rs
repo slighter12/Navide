@@ -332,8 +332,105 @@ pub(super) fn owned_not_gone(pid: i32, start: &str) -> bool {
     }
 }
 
+/// Macro `SZOMB` of `<sys/proc.h>`: the process has exited and only awaits its parent's reap.
+const SZOMB: u32 = 5;
+
+/// Has this process already stopped running (gone, or a zombie that only awaits a reap)?
+fn exited(pid: i32) -> bool {
+    // SAFETY: signal 0 performs only the existence/permission check.
+    if unsafe { libc::kill(pid, 0) } != 0
+        && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+    {
+        return true;
+    }
+    // SAFETY: complete initialized pinned libc struct and exact buffer size.
+    let mut info: libc::proc_bsdinfo = unsafe { zeroed() };
+    let received = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size_of::<libc::proc_bsdinfo>() as i32,
+        )
+    };
+    received as usize == size_of::<libc::proc_bsdinfo>() && info.pbi_status == SZOMB
+}
+
+/// Event-driven wait (E1 13.2): block until every pid in `pids` has exited or `deadline`
+/// passes, woken by kqueue `EVFILT_PROC`/`NOTE_EXIT` (no polling interval). Returns the pids that
+/// had not exited at the deadline. Works for non-children of the same user (S0 spike).
+pub(super) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
+    let mut remaining: Vec<i32> = pids.iter().copied().filter(|pid| !exited(*pid)).collect();
+    if remaining.is_empty() {
+        return remaining;
+    }
+    // SAFETY: plain kqueue(2); the descriptor is closed below on every path.
+    let queue = unsafe { libc::kqueue() };
+    if queue < 0 {
+        return remaining;
+    }
+    let zero = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let mut watched = Vec::new();
+    for &pid in &remaining {
+        // SAFETY: zeroed kevent is a valid value; fields are set before the call.
+        let mut change: libc::kevent = unsafe { zeroed() };
+        change.ident = pid as usize;
+        change.filter = libc::EVFILT_PROC;
+        change.flags = libc::EV_ADD | libc::EV_ONESHOT;
+        change.fflags = libc::NOTE_EXIT;
+        let mut event: libc::kevent = unsafe { zeroed() };
+        // SAFETY: one change and one event slot, valid queue.
+        let count = unsafe { libc::kevent(queue, &change, 1, &mut event, 1, &zero) };
+        if count > 0 && event.flags & libc::EV_ERROR != 0 && event.data as i32 == libc::ESRCH {
+            continue; // already gone: not remaining
+        }
+        if count > 0 && event.filter == libc::EVFILT_PROC && event.fflags & libc::NOTE_EXIT != 0 {
+            continue; // exited between the pre-check and the registration
+        }
+        watched.push(pid);
+    }
+    remaining = watched.clone();
+    while !remaining.is_empty() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let timeout = libc::timespec {
+            tv_sec: left.as_secs() as _,
+            tv_nsec: left.subsec_nanos() as _,
+        };
+        // SAFETY: zeroed event buffer of a fixed size; valid queue.
+        let mut events: [libc::kevent; 16] = unsafe { zeroed() };
+        let count = unsafe {
+            libc::kevent(
+                queue,
+                std::ptr::null(),
+                0,
+                events.as_mut_ptr(),
+                events.len() as i32,
+                &timeout,
+            )
+        };
+        if count <= 0 {
+            break;
+        }
+        for event in &events[..count as usize] {
+            if event.filter == libc::EVFILT_PROC && event.fflags & libc::NOTE_EXIT != 0 {
+                remaining.retain(|pid| *pid as usize != event.ident);
+            }
+        }
+    }
+    // SAFETY: the queue descriptor was created above and is not used again.
+    unsafe { libc::close(queue) };
+    remaining
+}
+
 pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<Table> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
     let mut known = seeds.clone();
     if let Some(pid) = initial_child {
         if !known.is_empty() || pid <= 0 {

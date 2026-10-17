@@ -21,7 +21,14 @@ async def main(root: Path, mode: str, fault: str = ""):
     if fault == "fences":
         backend.env["NAVIDE_CONTROL_FENCE_GATE"] = "1"
     if fault in {"startup", "protocol"}:
+        # Fault hooks exist only in the isolated harness build (cargo feature `fault-hooks`),
+        # never in the product binary: this scenario runs the harness build explicitly.
         backend.env["NAVIDE_ACR_FAULT"] = fault
+        harness = Path(__file__).resolve().parents[4] / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime"
+        target = root / "harness-runtime"
+        shutil.copyfile(harness, target)
+        target.chmod(0o755)
+        backend.env["NAVIDE_CLI_RUNTIME_BIN"] = str(target)
     elif fault == "missing":
         backend.env["NAVIDE_CLI_RUNTIME_BIN"] = str(root / "missing-runtime")
     elif fault == "exec":
@@ -69,6 +76,16 @@ async def main(root: Path, mode: str, fault: str = ""):
         finally:
             stopped.set()
             await watcher
+    if not fault:
+        # The per-trial proof (E2 section 3 items 1-3) on THIS principal trial's own receipts, after the backend and the
+        # sidecar are gone so every receipt is flushed. The driver's exit code carries the verdict: the TypeScript test
+        # asserts `code === 0`, so a principal trial whose receipts do not prove the real sidecar and the handoff fails.
+        # (Item 5, the control-plane ledger, is recorded by the E4 matrix harness; there is no ledger receipt here.)
+        from .trial_proof import load, prove
+        proof = prove(load(root))
+        (root / "trial-proof.json").write_text(json.dumps(proof, indent=1))
+        if not proof["ok"] or not proof["items"]["2"]["ck"]:
+            raise SystemExit("trial proof failed: " + "; ".join(proof["failures"] or ["no CK receipt: the handoff was not proven"]))
 
 
 if __name__ == "__main__":

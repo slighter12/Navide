@@ -92,6 +92,15 @@ export async function withDriver(scenario: string, run: (driver: Driver) => Prom
         writeFileSync(join(reports, name), redactDiagnostic(readFileSync(join(root, name), 'utf8')))
       }
     }
+    // The second backend of the two-runtime scenarios keeps its artifacts in `other/`: without them a failure on that backend
+    // (a survivor that could not be killed) could not be diagnosed from receipts, only retried.
+    if (existsSync(join(root, 'other'))) {
+      for (const name of readdirSync(join(root, 'other'))) {
+        if (/^(.*backend\.log|runtime-receipts\.jsonl|.*process-identities\.jsonl)$/.test(name)) {
+          writeFileSync(join(reports, `other-${name}`), redactDiagnostic(readFileSync(join(root, 'other', name), 'utf8')))
+        }
+      }
+    }
     if (!bodyFailed) expect(stdinFault, 'driver stdin fault').toBeUndefined()
     if (!bodyFailed) expect(code, redactDiagnostic(log)).toBe(0)
     if (!bodyFailed && existsSync(join(root, 'orphan-rescue.json'))) {

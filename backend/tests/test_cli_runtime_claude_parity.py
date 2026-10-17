@@ -1,5 +1,4 @@
 """Supplemental native-protocol parity; principal proofs use production WS."""
-import base64
 from contextlib import closing
 from dataclasses import asdict
 import hashlib
@@ -10,21 +9,16 @@ import pytest
 
 from agent_team_backend.cli_vendors.claude import ClaudeLogReader
 from agent_team_backend.log_readers.base import ActivityEvent, TokenUsage, TurnCall, TurnUsage, user_prompt_text
-from tests.test_cli_runtime_native import NativePeer
+from tests.cli_regression.support.frame_peer import FramePeer as NativePeer
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="native macOS reference evidence")
 
 
 def observe(peer, path, mode, **args):
-    request = peer.send("observe", {"vendor": "claude", "path": str(path), "mode": mode, **args})
-    reply = peer.result(request)
-    parts = [e for e in peer.events if e.get("event") == "observation" and e["observation_id"] == request]
-    assert len(parts) == reply["observation_parts"]
-    assert [e["part"] for e in parts] == list(range(len(parts)))
-    assert all(len(json.dumps(e).encode()) < 65536 for e in parts)
-    result = json.loads(b"".join(base64.b64decode(e["data_b64"], validate=True) for e in parts))
+    result, anchor, final = peer.observe("claude", path, mode, **args)
     assert result["parser"] == "rust-claude-jsonl-v1" and result["path"] == str(path)
-    anchor = base64.b64decode(result["anchor_b64"])
+    assert anchor is not None, "the parser returns a raw anchor"
+    result["anchor_blob"] = anchor
     spelling = hashlib.blake2b(anchor, digest_size=8).hexdigest() if anchor else ""
     result["checkpoint"]["anchor"] = spelling
     for event in result["events"]:
@@ -77,7 +71,7 @@ def test_native_usage_activity_and_turns_match_existing_reader(tmp_path):
         assert parsed["events"] == [asdict(e) for e in expected.events]
         assert parsed["checkpoint"] == expected.checkpoint
         assert observe(peer, path, "usage", checkpoint=expected.checkpoint,
-                       expected_anchor_b64=parsed["anchor_b64"])["events"] == []
+                       expected=parsed["anchor_blob"])["events"] == []
         seen = set()
         activity = observe(peer, path, "activity", seen=[])
         expected_activity = baseline.parse_activity(path, seen)
@@ -130,11 +124,11 @@ def test_native_partial_anchor_rewrite_rotation_and_activity_highwater(tmp_path)
         continued = observe(peer, path, "activity", seen=sorted(seen))
         assert continued["events"] == [asdict(e) for e in baseline.parse_activity(path, seen)]
         assert observe(peer, path, "usage", checkpoint=first_expected.checkpoint,
-                       expected_anchor_b64=first_result["anchor_b64"])["events"] == []
+                       expected=first_result["anchor_blob"])["events"] == []
         with path.open("ab") as stream:
             stream.write(b"\n")
         complete = observe(peer, path, "usage", checkpoint=first_expected.checkpoint,
-                           expected_anchor_b64=first_result["anchor_b64"])
+                           expected=first_result["anchor_blob"])
         expected = baseline.parse_incremental(path, first_expected.checkpoint)
         assert complete["events"] == [asdict(e) for e in expected.events]
         assert complete["checkpoint"] == expected.checkpoint
@@ -142,7 +136,7 @@ def test_native_partial_anchor_rewrite_rotation_and_activity_highwater(tmp_path)
         # independently persisted activity high-water deliberately stays put.
         path.write_bytes(path.read_bytes().replace(b"message-1", b"message-X"))
         rewritten = observe(peer, path, "usage", checkpoint=expected.checkpoint,
-                            expected_anchor_b64=complete["anchor_b64"])
+                            expected=complete["anchor_blob"])
         rewritten_expected = baseline.parse_incremental(path, expected.checkpoint)
         assert rewritten["events"] == [asdict(e) for e in rewritten_expected.events]
         assert rewritten["checkpoint"] == rewritten_expected.checkpoint
@@ -150,7 +144,7 @@ def test_native_partial_anchor_rewrite_rotation_and_activity_highwater(tmp_path)
         path.rename(path.with_suffix(".old"))
         path.write_bytes(first)
         rotated = observe(peer, path, "usage", checkpoint=rewritten_expected.checkpoint,
-                          expected_anchor_b64=rewritten["anchor_b64"])
+                          expected=rewritten["anchor_blob"])
         rotated_expected = baseline.parse_incremental(path, rewritten_expected.checkpoint)
         assert rotated["events"] == [asdict(e) for e in rotated_expected.events]
         assert rotated["checkpoint"] == rotated_expected.checkpoint
@@ -162,8 +156,11 @@ def test_native_large_observation_preserves_wire_bound(tmp_path):
     text = "café 世界" * 20000
     path.write_text(json.dumps(assistant(1, [{"type": "text", "text": text}], "end_turn")) + "\n")
     with closing(NativePeer(tmp_path)) as peer:
+        request = peer.number + 1
         result = observe(peer, path, "activity", seen=[])
         assert [e["text"] for e in result["events"] if e["event_type"] == "turn_complete"] == [text]
+        assert peer.last_part_count > 1, "a result this large must be split into parts"
+        assert max(peer.last_part_frame_sizes) <= 65536 + 32, "every part honours max_frame_r2p"
 
 
 def test_native_exceptional_activity_returns_progress_without_swallowing_error(tmp_path):
@@ -178,18 +175,14 @@ def test_native_exceptional_activity_returns_progress_without_swallowing_error(t
         baseline.parse_activity(path, seen)
     assert seen == {"unrelated-key", "act_hw::2"}
     with closing(NativePeer(tmp_path)) as peer:
-        request = peer.send("observe", {"vendor": "claude", "path": str(path), "mode": "activity", "seen": ["unrelated-key"]})
-        while request not in peer.responses:
-            peer.receive()
-        failed = peer.responses.pop(request)
-        assert not failed["ok"] and "not an object" in failed["error"]["message"]
-        assert "observation_parts" in failed.get("result", {}), "exception lost its activity progress"
-        parts = [row for row in peer.events if row.get("event") == "observation" and row["observation_id"] == request]
-        progress = json.loads(b"".join(base64.b64decode(row["data_b64"]) for row in parts))
+        progress, anchor, failed = peer.observe("claude", path, "activity", seen=["unrelated-key"], allow_error=True)
+        assert progress is not None and failed.frame_type.name == "ERROR"
+        assert failed.meta["code"] == "IO_FAILED" and failed.meta["effect"] == "partial"
+        assert "not an object" in failed.meta["message"]
+        assert failed.meta["observation_parts"] >= 1, "exception lost its activity progress"
         assert set(progress["seen"]) == seen and progress["events"] == []
         assert progress["parser"] == "rust-claude-jsonl-v1" and progress["path"] == str(path)
         assert progress["ownership"]["session_id"] is None
-        assert all(row["runtime_generation"] == peer.generation for row in parts)
         result = observe(peer, path, "activity", seen=sorted(seen))
         assert result["events"] == [asdict(event) for event in baseline.parse_activity(path, seen)]
         assert [event["text"] for event in result["events"] if event["event_type"] == "turn_complete"] == ["After exceptional record"]

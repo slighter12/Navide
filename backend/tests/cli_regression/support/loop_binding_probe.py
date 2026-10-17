@@ -12,8 +12,14 @@ def run(root: Path):
     from .difference_entry import validate_kernel_setup
     guard = installed()
     doc = validate_kernel_setup(root)
-    command = [doc['files']['runtime']['path'], '--protocol', '1',
-               '--runtime-generation', 'c' * 32, '--owner-pid', str(os.getpid())]
+    from .process_env_guard import runtime_launch
+    # The REGISTERED launch form (journal under the fixture's data dir, a real socketpair end): every refusal below must
+    # come from the unbound ROUTE, not from an unregistered argv. The descriptor is passed only where the guard admits.
+    (root / 'data' / 'runtime-ownership').mkdir(parents=True, exist_ok=True)
+    parent_end, child_end = __import__('socket').socketpair()
+    command = runtime_launch(doc['files']['runtime']['path'], 'c' * 32, os.getpid(),
+                             root / 'data' / 'runtime-ownership' / ('c' * 32 + '.jsonl'), child_end.fileno())
+    spawn_kwargs = {'pass_fds': (child_end.fileno(),)}
     called, denied = [], []
     base = guard.creation_native_entries
     original_popen = subprocess.Popen
@@ -25,7 +31,7 @@ def run(root: Path):
 
     async def check(label):
         try:
-            await asyncio.create_subprocess_exec(*command)
+            await asyncio.create_subprocess_exec(*command, **spawn_kwargs)
         except PermissionError:
             denied.append(label)
         else:
@@ -46,6 +52,16 @@ def run(root: Path):
         finally:
             loop.subprocess_exec = original
 
+    async def wrong_control_descriptor():
+        # The registered argv, but the descriptor handed to the child is not exactly the control socketpair end.
+        for label, kwargs in (('no-pass-fds', {}), ('extra-pass-fd', {'pass_fds': (child_end.fileno(), parent_end.fileno())})):
+            try:
+                await asyncio.create_subprocess_exec(*command, **kwargs)
+            except PermissionError:
+                denied.append('control-fd-' + label)
+            else:
+                raise AssertionError('registered launch with a wrong control descriptor admitted')
+
     async def wrong_image():
         try:
             await asyncio.create_subprocess_exec(str(root / 'unregistered-SYNTHETIC-image'))
@@ -56,7 +72,7 @@ def run(root: Path):
 
     async def uv_constructor():
         try:
-            original_popen(command, stdout=subprocess.PIPE)
+            original_popen(command, stdout=subprocess.PIPE, **spawn_kwargs)
         except PermissionError:
             denied.append('uvloop-constructor')
         else:
@@ -76,9 +92,12 @@ def run(root: Path):
         asyncio.run(wrong_method(), loop_factory=uvicorn.Config(app=None, loop='auto').get_loop_factory())
         asyncio.run(uv_constructor(), loop_factory=uvicorn.Config(app=None, loop='auto').get_loop_factory())
         asyncio.run(wrong_image(), loop_factory=uvicorn.Config(app=None, loop='auto').get_loop_factory())
+        asyncio.run(wrong_control_descriptor(), loop_factory=uvicorn.Config(app=None, loop='auto').get_loop_factory())
     finally:
         subprocess.Popen = original_popen
     assert called == [] and guard.creation_native_entries == base
+    parent_end.close()
+    child_end.close()
     (root / 'loop-binding-proof.json').write_text(json.dumps({'passed': True,
         'denied': denied, 'actual_spawn_entries': len(called), 'payload_entries': 0,
         'actual_uvloop_preserved': True, 'created_actors': 0}))

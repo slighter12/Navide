@@ -89,6 +89,27 @@ def main():
             if resizes:
                 emit("WINCH " + json.dumps(resizes[-1]))
             emit("SIZE " + json.dumps(dimensions()))
+        elif line == "hup-last-words":
+            # E1 P8: ignores SIGTERM, records the SIGHUP it receives when every master closes, and has just written
+            # a block of "last words" that the backend must deliver before `terminal.exit`.
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+            def hangup(*_):
+                Path("hup-observed.tmp").write_text(json.dumps({"pid": os.getpid(), "signal": "SIGHUP"}))
+                Path("hup-observed.tmp").replace("hup-observed.json")
+                os._exit(0)
+
+            signal.signal(signal.SIGHUP, hangup)
+            emit("LAST_WORDS_BEGIN")
+            for index in range(64):
+                emit(f"LAST {index:03d} " + "w" * 2048)
+            emit("LAST_WORDS_END")
+            # Every byte is now in the kernel's PTY buffer (the writes returned): tell the test, atomically, that the
+            # words are complete. The kill is gated on this file, never on how much the renderer has already seen.
+            Path("last-words-written.tmp").write_text(json.dumps({"pid": os.getpid(), "lines": 64}))
+            Path("last-words-written.tmp").replace("last-words-written.json")
+            while True:  # stay alive: SIGTERM is ignored, so the SIGHUP handler above is the only way this ends
+                time.sleep(1)
         elif line == "split":
             with lock:
                 for byte in "SPLIT café 世界\n".encode():

@@ -71,4 +71,5 @@ def test_unsupported_actual_factory_loop_method_and_uv_constructor_before_spawn(
     assert result.returncode == 0, result.stderr
     proof = json.loads(stable_bytes(root / 'loop-binding-proof.json'))
     assert proof['passed'] and proof['created_actors'] == proof['actual_spawn_entries'] == proof['payload_entries'] == 0
-    assert proof['denied'] == ['factory', 'factory', 'loop', 'method', 'method', 'uvloop-constructor', 'image']
+    assert proof['denied'] == ['factory', 'factory', 'loop', 'method', 'method', 'uvloop-constructor', 'image',
+                               'control-fd-no-pass-fds', 'control-fd-extra-pass-fd']

@@ -1,5 +1,6 @@
 //! Caller-unit control: a genuinely inspected, now-reparented owned row.
 use super::*;
+use std::io::{BufRead, Write};
 use std::os::unix::process::CommandExt;
 
 #[test]
@@ -49,37 +50,16 @@ fn initial_retention_keeps_detached_real_owned_rows() {
         assert!(!table.contains_key(&pid));
         assert_eq!(table[&detached_pid].0, 1);
         assert!(descendants(&table, pid).is_empty()); // The old narrowing loses it.
-        let mut session = Session {
-            id: "caller-unit".into(),
-            generation: "caller-unit".into(),
-            pane: String::new(),
-            workspace: String::new(),
-            agent_key: String::new(),
-            fd: None,
-            child: root.take().unwrap(),
+        let mut owned = Owned {
+            pid,
             root: identity(pid, &known[&pid]),
-            started: Instant::now(),
-            active: false,
-            barrier: None,
-            paused: None,
-            input: VecDeque::new(),
-            blocked: None,
-            notified: false,
-            drained: 0,
-            seq: 0,
-            offset: 0,
-            eof: false,
-            closing: None,
-            finished: false,
-            cleanup_complete: false,
             descendants: Table::new(),
-            last_snapshot: Instant::now(),
-            exit: None,
         };
+        root.take();
         // Identical helper used by the real spawn initializer before owned ACK.
-        retain_owned(&mut session, &table);
-        assert_eq!(session.descendants[&detached_pid], table[&detached_pid]);
-        assert!(!session.descendants.contains_key(&pid));
+        retain_owned(&mut owned, &table);
+        assert_eq!(owned.descendants[&detached_pid], table[&detached_pid]);
+        assert!(!owned.descendants.contains_key(&pid));
     }));
     if let Some(mut root) = root.take() {
         let _ = root.kill();

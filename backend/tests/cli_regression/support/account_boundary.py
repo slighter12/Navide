@@ -146,9 +146,24 @@ def install_account_home_guard(root: Path) -> None:
 
     os.open = guarded_open
 
+    def is_pty_master(fd, mode):
+        """A pseudo-terminal MASTER descriptor (ticket E3: Python owns the data plane over the descriptor the sidecar
+        hands over). Admitted exactly: a character device whose own path is `/dev/ptmx` and that names its slave
+        (`TIOCPTYGNAME`) as a `/dev/ttys*` device. It names no account file, so it is not an origin bypass; a
+        regular file, directory, other device or slave descriptor is still refused."""
+        if not stat.S_ISCHR(mode):
+            return False
+        try:
+            if fcntl.fcntl(fd, 50, bytes(1024)).split(b'\0', 1)[0] != b'/dev/ptmx':
+                return False
+            slave = fcntl.ioctl(fd, 0x40807453, bytes(128)).split(b'\0', 1)[0]  # TIOCPTYGNAME (macOS)
+        except OSError:
+            return False
+        return slave.startswith(b'/dev/ttys') and slave[len(b'/dev/ttys'):].isdigit()
+
     def check_descriptor(fd, write):
         mode = os.fstat(fd).st_mode
-        if stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode) or (fd in {0, 1, 2} and stat.S_ISCHR(mode)):
+        if stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode) or (fd in {0, 1, 2} and stat.S_ISCHR(mode)) or is_pty_master(fd, mode):
             return
         path = fcntl.fcntl(fd, 50, bytes(1024)).split(b'\0', 1)[0]
         check(path, 'descriptor-write' if write else 'descriptor-read', write)

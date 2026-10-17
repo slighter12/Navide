@@ -173,7 +173,9 @@ def _install_common(root: Path, backend: BackendProcess) -> dict:
             shutil.copyfile(BINARY, target)
             target.chmod(0o600)
         elif kind == "protocol-mismatch":
-            target.write_text(f'#!/bin/sh\nexec {BINARY} "$@" --ready-protocol 999\n')
+            # The forced-wire hook exists only in the isolated harness build (cargo feature `fault-hooks`).
+            harness = BINARY.parents[2] / "target-harness/release/navide-cli-runtime"
+            target.write_text(f'#!/bin/sh\nexec {harness} "$@" --ready-wire 999\n')
             target.chmod(0o755)
         elif kind == "exits-before-ready":
             target.write_text("#!/bin/sh\nexit 3\n")
