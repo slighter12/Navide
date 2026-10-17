@@ -109,7 +109,8 @@ server = FastMCP(
         "the stage is \"approved\" or later, and use plan_update_stage to move "
         "it through draft, in-review, approved, in-progress, done, abandoned. "
         "Mark each step with plan_update_todo (pending, in-progress, done, "
-        "skipped) as you go, and record findings or decisions with "
+        "skipped) as you go, add a step the plan is missing with "
+        "plan_add_todo, and record findings or decisions with "
         "plan_add_note. Always edit through these tools — writing the HTML "
         "yourself corrupts the plan-meta island Navide reads.\n"
         "\n"
@@ -191,6 +192,31 @@ server = FastMCP(
         "all."
     ),
 )
+
+#: Tools owned by a built-in Navide plugin, hidden from tools/list while the
+#: user has that plugin disabled. Filled by the plugin's installer.
+_PLUGIN_OWNED_TOOLS: dict[str, frozenset[str]] = {}
+
+
+def hide_tools_while_plugin_disabled(plugin_id: str, names: list[str]) -> None:
+    """Hide ``names`` from tools/list while ``plugin_id`` is disabled. The
+    tools stay registered: a CLI that cached the list still reaches them, and
+    each refuses with PLUGIN_TOOL_UNAVAILABLE on its own."""
+    _PLUGIN_OWNED_TOOLS[plugin_id] = _PLUGIN_OWNED_TOOLS.get(plugin_id, frozenset()) | frozenset(names)
+
+
+async def list_visible_tools() -> list[Any]:
+    """tools/list: FastMCP's own list, minus the tools of disabled built-in
+    plugins. With none disabled it is FastMCP's list unchanged."""
+    from agent_team_backend import app
+
+    tools = await server.list_tools()
+    disabled = app.host_disabled_plugins()
+    hidden = frozenset().union(*(_PLUGIN_OWNED_TOOLS.get(plugin_id, frozenset()) for plugin_id in disabled))
+    return [tool for tool in tools if tool.name not in hidden] if hidden else tools
+
+
+server._mcp_server.list_tools()(list_visible_tools)
 
 
 # ── workspace resolution ────────────────────────────────────────────────────
@@ -291,6 +317,10 @@ def _workspace_mismatch_warning(workspace_path: str) -> str | None:
     target = _norm_workspace(workspace_path)
     if any(_norm_workspace(pane) == target for pane in panes):
         return None
+    # A pane in a repository subfolder has the git root as its plan root (the
+    # root its plan window resolves to), so a plan written there is visible.
+    if any(_norm_workspace(resolve_plan_root(pane)) == target for pane in set(panes)):
+        return None
     known = ", ".join(sorted(set(panes)))
     return (
         f"no live Navide pane uses workspace_path '{workspace_path}', so this plan "
@@ -386,14 +416,25 @@ class _Caller:
     pane_id: str = ""
 
 
+def _bearer(request: Any) -> str:
+    """The token of an ``Authorization: Bearer`` header, or ""."""
+    headers = getattr(request, "headers", None)
+    value = str(headers.get("authorization") or "") if headers is not None else ""
+    scheme, _, token = value.partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
 def _resolve_caller(ctx: Context) -> _Caller:
     """Validate the request's credential (pane / host / external).
 
-    Every pane is spawned pointing at `/plan-mcp?pane=<id>&t=<token>`; backend-
+    Every pane is spawned pointing at `/plan-mcp?pane=<id>&t=<token>`, with a
+    token minted for that pane id alone (mcp_wiring.caller_token); backend-
     written CLI config without a known pane id instead carries
     `?client=host&t=<internal token>` (see mcp_wiring.plan_mcp_url); an
     external client carries `?client=external&t=<external token>`, accepted
-    only while auth.external_enabled() is True. Raises CallerUnknown
+    only while auth.external_enabled() is True. The token may instead arrive
+    as an `Authorization: Bearer` header (codex reads it from its spawn env,
+    so it stays out of the command line). Raises CallerUnknown
     with a caller-facing message when none of these validate.
 
     For the pane kind specifically: the id is fixed at spawn time while a
@@ -420,7 +461,7 @@ def _resolve_caller(ctx: Context) -> _Caller:
     params = getattr(request, "query_params", None)
     if params is None:
         raise CallerUnknown(_UNWIRED)
-    token = str(params.get("t") or "")
+    token = str(params.get("t") or "") or _bearer(request)
     client = str(params.get("client") or "")
     if client == "host":
         if not secrets.compare_digest(token, auth.internal_token()):
@@ -435,7 +476,15 @@ def _resolve_caller(ctx: Context) -> _Caller:
     pane_id = str(params.get("pane") or "")
     if not pane_id:
         raise CallerUnknown(_UNWIRED)
-    if not secrets.compare_digest(token, mcp_wiring.caller_token()):
+    # The token must be the one minted for the very id presented — the id the
+    # CLI was spawned with, which is also what any alias below is keyed by. An
+    # id this run never wired has no token, so nothing can stand in for it.
+    expected = mcp_wiring.bound_pane_token(pane_id)
+    if not expected and agent_messaging.was_forgotten(pane_id):
+        # A closed pane's token is revoked with it (wiring.release_pane_token);
+        # its CLI still hears what it always did, rather than a token error.
+        raise CallerUnknown(_STALE)
+    if not expected or not secrets.compare_digest(token, expected):
         raise CallerUnknown("caller token rejected; reopen the pane to re-wire it")
     entry = agent_messaging.current(pane_id)
     if entry is None:
@@ -1920,8 +1969,9 @@ async def _dispatch_delivery(
                 # a message that entered here never passed through that, so the
                 # receiving window has to apply it instead. Without this, two
                 # agents replying to each other through cli_send have no loop
-                # guard at all.
-                "rate_limit": True,
+                # guard at all. A chat channel is a person typing, capped by the
+                # channel layer instead (channels/manager.py CHAT_RATE_MAX).
+                "rate_limit": origin != "channel",
                 # Only present for a reply — see the docstring.
                 **({"reply_to": reply_to} if reply_to else {}),
                 # Only present for an ack — see the docstring.
@@ -5007,14 +5057,13 @@ _UI_INVOKE_SLOW_TIMEOUT_S = 60.0
 #: caller's own pane; the only legitimate emitter, cli_read_incoming, always
 #: names its own.
 #:
-#: This is NOT a boundary around the inbox, and reading it as one would be a
-#: mistake. A pane caller's identity is the `pane=<id>` query param it was
-#: wired with, checked against a token shared by every pane on the machine
-#: (wiring.caller_token — a freshness check, readable via `ps` by anything
-#: running as the same user). So a local caller can present itself AS the
-#: victim pane and satisfy the check below. What this list buys is that a
-#: caller acting under its own identity cannot reach across to someone else's
-#: inbox; closing the impersonation case needs a per-pane token.
+#: A pane caller's identity is the `pane=<id>` query param it was wired with,
+#: checked against the token minted for that one pane (wiring.caller_token),
+#: so presenting another pane's id takes that pane's own token. What this list
+#: adds is that a caller acting under its own identity cannot reach across to
+#: someone else's inbox. It is not a boundary against a process that can read
+#: the victim pane's own environment or 0600 config file (same user), which
+#: holds that pane's token.
 #:
 #: Deliberately a short explicit list, not "every action with a paneId": focus,
 #: close, getStatus and interrupt are cross-pane by design.
@@ -5446,18 +5495,66 @@ async def ui_diagnostics(
     re-reading old entries. `pane_id` filters to one pane; `limit` caps how
     many entries come back. Errors if no window owns workspace_path within 15s.
 
+    The answer also carries `persisted`: the newest entries (up to `limit`,
+    `pane_id` applied) of the on-disk error ledger, which outlives a window
+    reload and also holds backend faults — exceptions no task retrieved and
+    request handlers that failed. A pane sees only entries recorded for its
+    own workspace, and none when it asks about another workspace; a refused
+    request carries none. It is there even when no window answered.
+
     Called from a CLI pane, this reads that pane's own window when
     workspace_path names that pane's own workspace (or is empty) — see
     ui_invoke.
     """
+    from agent_team_backend import error_ledger
+
     caller = _resolve_caller(ctx)
-    return await _ui_request(
+    answer = await _ui_request(
         workspace_path,
         "invoke",
         caller=caller,
         action="ui.diagnostics.read",
         args={"sinceSeq": since_seq, "paneId": pane_id, "limit": limit},
     )
+    if not answer.get("ok") and answer.get("error_code") not in _DIAGNOSTICS_UNANSWERED:
+        return answer  # refused: nothing from the ledger either
+    scope = _persisted_scope(caller, workspace_path)
+    if scope is None:
+        return answer
+    try:
+        persisted = await asyncio.to_thread(
+            error_ledger.get().read, limit=max(0, min(int(limit), 500)), pane_id=pane_id, workspace=scope
+        )
+    except Exception as err:  # noqa: BLE001 — the window's answer still goes back
+        persisted = [{"source": "backend", "level": "warn", "code": "ledger.unreadable", "message": str(err)}]
+    return {**answer, "persisted": persisted}
+
+
+#: ui_diagnostics answers that mean "no window answered", not "refused": the
+#: ledger is still worth handing back for those.
+_DIAGNOSTICS_UNANSWERED = frozenset({"ui_action_timeout", "ui_no_window_known", "ui_no_window"})
+
+
+def _persisted_scope(caller: "_Caller | None", workspace_path: str) -> str | None:
+    """Which ledger entries a caller may read: "" for all (host and external
+    callers, which already reach every window), a pane's own workspace for a
+    pane, or None for none. A pane asking about another workspace gets none,
+    and entries no workspace was recorded for are left out for it."""
+    if caller is None:
+        return None
+    if caller.kind in ("host", "external"):
+        return ""
+    if caller.kind != "pane":
+        return None
+    from agent_team_backend import agent_messaging
+
+    pane = agent_messaging.get(caller.pane_id)
+    if pane is None or not pane.workspace_path:
+        return None
+    own = _norm_workspace(pane.workspace_path)
+    if workspace_path and _norm_workspace(workspace_path) != own:
+        return None
+    return own
 
 
 # ── Preview record (preview_record / preview_list / preview_show) ───────────
@@ -8608,6 +8705,9 @@ async def _share_run(call: Callable[[Any], Awaitable[dict]]) -> dict:
     try:
         return {"ok": True, **await call(share_links.ServerLinksClient())}
     except share_links.ShareRefused as err:
+        if err.code == share_links.PLANS_DISABLED_CODE:
+            # The agent-tools contract's refusal for a disabled plugin.
+            return {"ok": False, "error": str(err), "code": "PLUGIN_TOOL_UNAVAILABLE", "reason": err.code}
         return {"ok": False, "error": str(err), "reason": err.code}
     except share_links.ShareRemoteError as err:
         if err.code in share_links.UNAVAILABLE_CODES:

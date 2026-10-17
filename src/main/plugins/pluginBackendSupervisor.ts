@@ -670,10 +670,13 @@ function isApprovedBridgePortList(value: unknown): value is readonly PlansBridge
  * until a later contract assigns one explicitly. */
 function executionPolicyNamespaceForBridgePort(
   port: PlansBridgePort,
-): PluginSystemNamespace | undefined {
+): PluginSystemNamespace | 'shell' | undefined {
   switch (port) {
     case 'filesystem':
       return 'fs'
+    case 'shell':
+      // The agent shell policy is judged on the command itself, like shell.run.
+      return 'shell'
     case 'workspace-storage':
     case 'terminal':
     case 'agent-messaging':
@@ -684,6 +687,11 @@ function executionPolicyNamespaceForBridgePort(
   }
   const exhaustive: never = port
   return exhaustive
+}
+
+/** The command of a shell Bridge request, or '' (which no shell policy allows). */
+function bridgeShellCommand(value: JsonValue): string {
+  return isRecord(value) && typeof value.command === 'string' ? value.command : ''
 }
 
 function serverInfo(value: unknown): BackendServerInfo | undefined {
@@ -1682,7 +1690,13 @@ export class PluginBackendSupervisor {
     if (!this.onStderr) return
     const targetGen = generation ?? this.currentGeneration
     if (targetGen?.diagnosticTruncated) return
-    let message = cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)
+    let message = String(cause)
+    if (cause instanceof Error) {
+      // A stack can hold only a bare `Error` header on some runtimes; keep the
+      // message. V8 stacks already carry it, so their output is unchanged.
+      const stack = cause.stack
+      message = stack === undefined ? cause.message : stack.includes(cause.message) ? stack : `${cause.message}\n${stack}`
+    }
     message = message
       .replace(/\x1B(?:\].*?(?:\x07|\x1B\\\\)|\[[0-?]*[ -/]*[@-~]|[@-Z\\-_]|.?)/gu, '')
       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/gu, '')
@@ -1968,6 +1982,7 @@ export class PluginBackendSupervisor {
         originBinding.runtime.initiator,
         this.currentExecutionPolicy(originBinding.runtime, originBinding.workspacePath),
         policyNamespace,
+        policyNamespace === 'shell' ? bridgeShellCommand(request.arguments) : undefined,
       ))
     ) {
       this.sendBridgeError(generation, request.id, 'CAPABILITY_DENIED')

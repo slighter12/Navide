@@ -90,6 +90,28 @@ def test_native_usage_activity_and_turns_match_existing_reader(tmp_path):
         assert observe(peer, path, "session_usage", seen=sorted(prior))["events"] == []
 
 
+def test_native_image_prompt_activity_matches_upstream_reader(tmp_path):
+    image = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}}
+    note = "[Image: original 780x3746, displayed at 416x2000.]"
+    pasted_text = "[Image #5] Why is the image missing?"
+    records = [
+        {"type": "user", "isMeta": True, "message": {"content": note}},
+        {"type": "user", "message": {"content": [{"type": "text", "text": pasted_text}, image]}},
+        {"type": "user", "isMeta": True, "message": {"content": [{"type": "text", "text": note}, image]}},
+        {"type": "user", "message": {"content": [{"type": "text", "text": "Injected note"}]}},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "content": [image]}, image]}},
+        {"type": "user", "isCompactSummary": True, "message": {"content": "Compaction summary"}},
+    ]
+    path = tmp_path / "home/.claude/projects/-tmp-parity/images.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in records))
+    expected = ClaudeLogReader().parse_activity(path, set())
+    assert [event.text for event in expected] == ["", pasted_text, "", "", "", ""]
+    with closing(NativePeer(tmp_path)) as peer:
+        activity = observe(peer, path, "activity", seen=[])
+        assert activity["events"] == [asdict(event) for event in expected]
+
+
 def test_native_partial_anchor_rewrite_rotation_and_activity_highwater(tmp_path):
     path = tmp_path / "home/.claude/projects/-tmp-parity/session.jsonl"
     path.parent.mkdir(parents=True)
