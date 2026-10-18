@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { vTruncate } from '@navide/plugin-ui/foundation'
 import type { useGitAccounts, GitAccountPublic } from '../composables/useGitAccounts'
 
 const props = defineProps<{
@@ -115,7 +116,7 @@ async function remove(id: string): Promise<void> {
         <div v-for="acc in accounts" :key="acc.id" class="ga-row">
           <div class="ga-row-main">
             <span class="ga-row-label">{{ acc.label }}</span>
-            <span class="ga-row-meta">{{ acc.host }} · {{ acc.username }} · ••••{{ acc.tokenLast4 }}</span>
+            <span class="ga-row-meta" v-truncate>{{ acc.host }} · {{ acc.username }} · ••••{{ acc.tokenLast4 }}</span>
           </div>
           <div class="ga-row-actions">
             <template v-if="confirmRemoveId === acc.id">
@@ -193,7 +194,7 @@ async function remove(id: string): Promise<void> {
   overflow-y: auto;
   padding: 18px 22px;
 }
-.ga-section { margin-bottom: 26px; }
+.ga-section { margin-bottom: 0; }
 .ga-head {
   display: flex;
   align-items: flex-start;
@@ -202,7 +203,7 @@ async function remove(id: string): Promise<void> {
   margin-bottom: 14px;
 }
 .ga-title { margin: 0 0 4px; font-size: var(--font-sm); font-weight: 600; color: var(--text-bright); }
-.ga-hint { margin: 0; font-size: 11.5px; color: var(--text-secondary); max-width: 46ch; line-height: 1.4; }
+.ga-hint { margin: 0; font-size: 11.5px; color: var(--text-secondary); max-width: 60ch; line-height: 1.4; text-wrap: pretty; word-break: auto-phrase; }
 
 .ga-banner {
   border-radius: 6px;

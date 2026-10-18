@@ -19,9 +19,10 @@ import re
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from .base import Location
+from .quick_menu import strip_mention
 
 ID_ALPHABET = "abcdefghijkmnopqrstuvwxyz"
 ID_LENGTH = 5
@@ -70,6 +71,12 @@ class RelayRequest:
     created: float = field(default_factory=time.monotonic)
     # The prompt text the request was made for; an answer applies only to it.
     prompt: str = ""
+    # The chat message carrying the request (its last chunk, where the buttons
+    # are) and that message's text, so a request that lapses can settle it.
+    message_id: str = ""
+    message_text: str = ""
+    # The 「正在等確認」 warnings that carried this request's buttons too: (message id, text).
+    held: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -133,9 +140,30 @@ def is_deny(request: RelayRequest, answer: dict[str, Any]) -> bool:
     return 1 <= n <= len(request.options) and bool(_DENY_OPTION_RE.match(request.options[n - 1]))
 
 
+def screen_approval(pane_id: str, prompt: str, workspace: str) -> Any:
+    """Navide Guard on an approval made away from the computer (chat, or an
+    agent through MCP): the guard Decision, whose action is "allow" only when
+    the prompt may be approved remotely. High/critical, unscreenable or empty
+    prompts need someone at the computer. Deterministic, never an LLM."""
+    from .. import guard
+
+    if not prompt.strip():
+        # Nothing to screen: a remote approval fails closed.
+        return guard.Decision("deny", "normal", (), "no prompt on screen to screen", False)
+    return guard.evaluate(
+        pane_id=pane_id, vendor="", tool="prompt", tool_input={"text": prompt},
+        cwd=workspace, workspace=workspace, source="relay",
+    )
+
+
 def same_prompt(a: str, b: str) -> bool:
     """Equal up to whitespace (the probe re-renders the same screen)."""
     return " ".join((a or "").split()) == " ".join((b or "").split())
+
+
+def same_options(a: list[str], b: list[str]) -> bool:
+    """The same menu, row for row, up to whitespace (as the window's expected check)."""
+    return len(a) == len(b) and all(same_prompt(x, y) for x, y in zip(a, b))
 
 
 def _offered(request: RelayRequest) -> list[tuple[int, str]]:
@@ -193,6 +221,34 @@ def answer_hint(request: RelayRequest) -> str:
     return f"回覆 no {request.id}（允許請在電腦前操作）"
 
 
+def is_pending_command(body: str, identity: str = "") -> bool:
+    """``/pending``, optionally ``@bot``-addressed or after a mention; one addressed to
+    another bot is not ours."""
+    rest = strip_mention(body, identity)
+    if not rest.startswith("/") or " " in rest:
+        return False
+    head, _, bot = rest.partition("@")
+    if bot and identity and bot.lower() != identity.lstrip("@").lower():
+        return False
+    return head.lower() == "/pending"
+
+
+HELD_PROMPT_MAX = 300
+
+
+def held_text(request: RelayRequest) -> str:
+    """The prompt, its options and how to answer, for a warning that may be read
+    long after the prompt message itself scrolled away."""
+    prompt = request.prompt.strip()
+    if len(prompt) > HELD_PROMPT_MAX:
+        prompt = prompt[:HELD_PROMPT_MAX] + "…"
+    lines = [prompt] if prompt else []
+    if request.kind == "question":
+        lines += [f"{i}. {opt}" for i, opt in _offered(request)]
+    lines.append(answer_hint(request))
+    return "\n".join(lines)
+
+
 def buttons_for(request: RelayRequest) -> list[tuple[str, str]]:
     if request.kind == "permission":
         deny = ("拒絕", f"{CALLBACK_PREFIX}{request.id}:n")
@@ -201,9 +257,12 @@ def buttons_for(request: RelayRequest) -> list[tuple[str, str]]:
 
 
 class RelayTable:
-    def __init__(self, *, clock=time.monotonic) -> None:
+    def __init__(self, *, clock=time.monotonic,
+                 on_expired: Callable[[RelayRequest], None] | None = None) -> None:
         self._clock = clock
         self._by_id: dict[str, RelayRequest] = {}
+        # Told of each request the TTL removed, so its chat prompt can be settled.
+        self._on_expired = on_expired
 
     def create(
         self, pane_id: str, kind: str, options: list[str], loc: Location, prompt: str = ""
@@ -227,16 +286,22 @@ class RelayTable:
         self.prune()
         return self._by_id.get(request_id)
 
-    def expire_pane(self, pane_id: str) -> None:
-        for rid, req in list(self._by_id.items()):
-            if req.pane_id == pane_id:
-                del self._by_id[rid]
+    def expire_pane(self, pane_id: str) -> list[RelayRequest]:
+        """Drop the pane's requests; returns them so their chat messages can be settled."""
+        gone = [req for req in self._by_id.values() if req.pane_id == pane_id]
+        for req in gone:
+            del self._by_id[req.id]
+        return gone
 
-    def prune(self) -> None:
+    def prune(self) -> list[RelayRequest]:
+        """Drop the requests older than REQUEST_TTL_S; returns them."""
         cutoff = self._clock() - REQUEST_TTL_S
-        for rid, req in list(self._by_id.items()):
-            if req.created < cutoff:
-                del self._by_id[rid]
+        gone = [req for req in self._by_id.values() if req.created < cutoff]
+        for req in gone:
+            del self._by_id[req.id]
+            if self._on_expired is not None:
+                self._on_expired(req)
+        return gone
 
     def for_location(self, location_key: str) -> list[RelayRequest]:
         self.prune()

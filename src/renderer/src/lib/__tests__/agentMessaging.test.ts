@@ -3,6 +3,7 @@ import {
   MSG_START,
   MSG_END,
   MSG_ENVELOPE_PREFIX,
+  ATTACH_MARKER,
   SPAWN_START,
   SPAWN_END,
   isQualifiedTarget,
@@ -18,6 +19,8 @@ import {
   sanitizeMessageContent,
   renderEnvelope,
   isExternalDelivery,
+  hasReplyRoute,
+  LAST_OUTPUT_REPLY_HINT,
   EXTERNAL_CONTENT_START,
   EXTERNAL_CONTENT_END,
   renderFailureNotice,
@@ -380,6 +383,25 @@ describe('renderEnvelope', () => {
     expect(lines[lines.length - 2]).toBe(EXTERNAL_CONTENT_END)
   })
 
+  it('tells a chat sender\'s pane how to send a file, on the one hint line', () => {
+    const env = renderEnvelope('telegram:alice', 'send me the chart', { external: true })
+    const hint = env.split('\n').pop() ?? ''
+    expect(hint).toContain(`單獨一行寫 ${ATTACH_MARKER} <絕對路徑>`)
+    expect(hint.startsWith(ATTACH_MARKER)).toBe(false)
+    expect(env.split('\n').filter((l) => l.includes(ATTACH_MARKER))).toHaveLength(1)
+  })
+
+  it('states the attachment rule the backend enforces: any file but keys and credentials', () => {
+    const hint = renderEnvelope('telegram:alice', 'send me the report', { external: true }).split('\n').pop() ?? ''
+    expect(hint).toContain(`${ATTACH_MARKER} <絕對路徑>（同樣頂格；不傳金鑰類檔案）`)
+    expect(hint).not.toContain('隱藏檔')
+    expect(hint).not.toContain('workspace 內')
+  })
+
+  it('does not offer attachments to a pane-to-pane message', () => {
+    expect(renderEnvelope('coordinator', 'run the tests')).not.toContain(ATTACH_MARKER)
+  })
+
   it('round-trips: a reply written to the hint parses back to the same id', () => {
     const env = renderEnvelope('claude-1', 'hello', { correlationId: 'abc123:7' })
     const hint = env.split('\n').pop() ?? ''
@@ -388,6 +410,43 @@ describe('renderEnvelope', () => {
     expect(parseMessages(reply)).toEqual([
       { target: 'claude-1', content: 'ack', replyTo: 'abc123:7' },
     ])
+  })
+})
+
+describe('hasReplyRoute', () => {
+  it('is true for every sender a MSG block can reach', () => {
+    expect(hasReplyRoute({ from_pane_id: 'p1', from_display: 'Agent-Team/coordinator' })).toBe(true)
+    expect(hasReplyRoute({ from_pane_id: '', from_display: 'telegram:alice' })).toBe(true)
+    expect(hasReplyRoute({ from_pane_id: '', from_display: 'x', origin: 'channel' })).toBe(true)
+    expect(hasReplyRoute({ from_pane_id: '', from_display: 'dev-2/api/pane', origin: 'remote' })).toBe(true)
+  })
+
+  it('is false for an MCP caller with no pane behind it', () => {
+    expect(hasReplyRoute({ from_pane_id: '', from_display: 'a host client' })).toBe(false)
+    expect(hasReplyRoute({ from_pane_id: '', from_display: 'an external client' })).toBe(false)
+    expect(hasReplyRoute({ from_display: 'a host client' })).toBe(false)
+  })
+})
+
+describe('renderEnvelope for a sender with no reply route', () => {
+  it('asks for the answer in the final output instead of a MSG block nobody can receive', () => {
+    const env = renderEnvelope('a host client', 'status?', { correlationId: 'host:mcp:3e79', noReplyRoute: true })
+    expect(env).toBe(`${MSG_ENVELOPE_PREFIX} a host client\nstatus?\n${LAST_OUTPUT_REPLY_HINT}`)
+    expect(env).not.toContain(MSG_START)
+    expect(env).not.toContain('to: a host client')
+  })
+
+  it('leaves every other envelope byte-identical', () => {
+    for (const sender of ['claude-1', 'Agent-Team/coordinator', 'telegram:alice']) {
+      for (const opts of [{}, { correlationId: 'k-1' }, { correlationId: 'k-1', external: true }]) {
+        expect(renderEnvelope(sender, 'hi', { ...opts, noReplyRoute: false })).toBe(renderEnvelope(sender, 'hi', opts))
+      }
+    }
+  })
+
+  it('still honours includeReplyHint: false', () => {
+    expect(renderEnvelope('a host client', 'hi', { includeReplyHint: false, noReplyRoute: true }))
+      .toBe(`${MSG_ENVELOPE_PREFIX} a host client\nhi`)
   })
 })
 

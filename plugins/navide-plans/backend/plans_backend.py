@@ -1,9 +1,10 @@
 """Production ``navide.plans`` Backend Wire v1 child.
 
 The executable is intentionally self-contained.  It owns plan-domain parsing
-and mutation, while every workspace effect is a Host-private
-``navide/host/call`` through the authenticated filesystem bridge.  stdout is
-reserved for compact protocol frames; diagnostics belong on stderr.
+and mutation and reads plan files itself, under the plan root the Host
+authorizes through the authenticated filesystem bridge (``resolve_root``); the
+remaining workspace effects are Host-private ``navide/host/call`` requests.
+stdout is reserved for compact protocol frames; diagnostics belong on stderr.
 """
 
 from __future__ import annotations
@@ -15,30 +16,40 @@ import math
 import os
 import queue
 import re
+import stat
 import sys
 import threading
 import uuid
 from datetime import date, datetime, timezone
 from html import escape as html_escape
+from pathlib import Path
 from typing import Any
 
 import yaml
+from agent_team_backend.fs_write import (
+    _WRITE_PART_MAX_BYTES,
+    _resolve_mutation_safe,
+    write_abort,
+    write_commit,
+    write_file,
+    write_part,
+)
+from agent_team_backend.path_guard import FsError, _resolve_safe
 
 PROTOCOL_REVISION = "2026-07-28"
 SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
 SUBSCRIPTION_ID_KEY = "io.modelcontextprotocol/subscriptionId"
 EVENT_FILTER_KEY = "dev.navide/pluginEvents"
 MAX_FRAME_BYTES = 1_048_576
-# One Host Bridge read_range call. The Host caps a Bridge result at 192 KiB
-# and the payload travels base64-encoded, so 96 KiB of file bytes is the
-# largest range that always fits. A file of any size is read by paging.
+# One part of a renderer's chunked document write (it travels base64-encoded
+# inside one request frame), and one step of a plan-meta head scan.
 RANGE_CHUNK_BYTES = 96 * 1024
 # File bytes returned by one plans.read / plans.read_document call. The caller
 # pages with next_offset; this only bounds one response, never the document.
 TEXT_CHUNK_BYTES = 256 * 1024
 # JSON-encoded size a single chunk's text may take inside one response frame.
 FRAME_TEXT_BUDGET_BYTES = 900_000
-# Content up to this many UTF-8 bytes is written in one Host Bridge call (the
+# Content up to this many UTF-8 bytes is written in one write_file call (the
 # common case: a plan is a few dozen KB); a larger one is staged part by part
 # and swapped in atomically, so a document of any size can be updated.
 SINGLE_WRITE_MAX_BYTES = 256 * 1024
@@ -100,13 +111,20 @@ _subscriptions: dict[str, dict[str, Any]] = {}
 _bridge_pending: dict[str, queue.Queue[tuple[str, Any]]] = {}
 _bridge_origin_ids: dict[str, set[str]] = {}
 _bridge_watch_origins: set[str] = set()
-# In-flight plans.list scan: {"done": threading.Event, "generation": int,
-# "result": list | None, "error": BaseException | None}. Callers that arrive
-# while it runs wait for it, then share the one scan started after them.
+# In-flight plans.list scan per view instance (each has its own plan root):
+# {"done": threading.Event, "generation": int, "result": list | None,
+# "error": BaseException | None}. Callers that arrive while it runs wait for
+# it, then share the one scan started after them.
 # The generation counts scans, not time: a clock coarse enough to read the
 # same value twice a millisecond apart (Windows ticks every ~15.6 ms) cannot
 # order a caller against a scan that started beside it.
-_list_flight: dict[str, Any] | None = None
+_list_flights: dict[Any, dict[str, Any]] = {}
+# The last flight each instance finished cleanly, held only while callers of
+# that instance are still in _list_plans_single_flight: one that arrived before
+# it started may wake after it ended and must still share it. The count is of
+# those callers; the last one out drops both entries, so no result outlives them.
+_list_finished: dict[Any, dict[str, Any]] = {}
+_list_callers: dict[Any, int] = {}
 _list_generation = 0
 
 SERVER_INFO = {"name": "navide.plans", "version": "0.1.0"}
@@ -513,6 +531,7 @@ def _acknowledge(subscription: dict[str, Any]) -> None:
 
 
 def _start_watch(subscription: dict[str, Any]) -> None:
+    # Deliberately left on the Host bridge: the watcher is a Host primitive.
     origin = {"kind": "subscription", "requestId": subscription["id"]}
     origin_key = _origin_key(origin)
     with _state_lock:
@@ -537,48 +556,38 @@ def _start_watch(subscription: dict[str, Any]) -> None:
     threading.Thread(target=watch, daemon=True).start()
 
 
-_range_unsupported = False
-
-
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _bridge_read_range(
-    origin: dict[str, Any], rel_path: str, offset: int, length: int
-) -> tuple[bytes, int, float | None, bool]:
-    """One ranged Host read: (bytes, file size, mtime, reached end of file).
+def _plan_root(origin: dict[str, Any]) -> str:
+    """The plan root the Host authorizes for this request.
 
-    Raises BridgeFailure("METHOD_NOT_FOUND") against a Host that predates
-    read_range; callers then fall back to whole-file reads.
+    Asked of the Host through ``resolve_root`` once per request and never
+    reused across requests: answering it is where the Host applies the Plans
+    Grant and an agent's Execution Policy to the file access this child then
+    does itself. The Host answers from its own binding of the request's
+    origin, never from a payload.
     """
-    global _range_unsupported
-    if _range_unsupported:
-        raise BridgeFailure("METHOD_NOT_FOUND")
+    root = origin.get("root")
+    if root is None:
+        result = _bridge_call(origin, "filesystem", "resolve_root", {})
+        if not _is_record(result) or not isinstance(result.get("root"), str) or not os.path.isabs(result["root"]):
+            raise BridgeFailure("PROTOCOL_ERROR")
+        root = origin["root"] = result["root"]
+    return root
+
+
+def _guarded_path(origin: dict[str, Any], rel_path: str, **options: bool) -> Path:
+    """``rel_path`` under the authorized root, through the core path guard.
+
+    A refused path fails the way the Host's filesystem service failed it.
+    """
     try:
-        result = _bridge_call(
-            origin, "filesystem", "read_range",
-            {"rel_path": rel_path, "offset": offset, "length": length},
-        )
-    except BridgeFailure as error:
-        if error.code == "METHOD_NOT_FOUND":
-            _range_unsupported = True
-        raise
-    if (
-        not _is_record(result)
-        or not isinstance(result.get("data_base64"), str)
-        or not _is_int(result.get("size"))
-        or not isinstance(result.get("eof"), bool)
-    ):
-        raise BridgeFailure("PROTOCOL_ERROR")
-    mtime = result.get("mtime")
-    if mtime is not None and (isinstance(mtime, bool) or not isinstance(mtime, (int, float))):
-        raise BridgeFailure("PROTOCOL_ERROR")
-    try:
-        data = base64.b64decode(result["data_base64"], validate=True)
-    except ValueError:
-        raise BridgeFailure("PROTOCOL_ERROR") from None
-    return data, result["size"], float(mtime) if mtime is not None else None, result["eof"]
+        return _resolve_safe(_plan_root(origin), rel_path, **options)
+    except FsError as exc:
+        _log(f"path {rel_path} refused: {exc}")
+        raise BridgeFailure("WORKSPACE_SCOPE_VIOLATION") from None
 
 
 def _read_bytes(
@@ -586,39 +595,68 @@ def _read_bytes(
 ) -> tuple[bytes, int, float | None, bool]:
     """Read up to ``want`` bytes (all the rest when None) from ``start``.
 
-    Returns (bytes, file size, mtime, reached end of file). The file changing
-    between two ranges of one read raises CONFLICT rather than splicing two
-    versions together.
+    Returns (bytes, file size, mtime, reached end of file), all from one open
+    descriptor, so a read never splices two versions of a file together.
     """
-    chunks: list[bytes] = []
-    position = start
-    size = 0
-    mtime: float | None = None
-    first = True
-    reached_end = False
-    while want is None or position - start < want:
-        length = RANGE_CHUNK_BYTES if want is None else min(RANGE_CHUNK_BYTES, want - (position - start))
-        data, size, chunk_mtime, eof = _bridge_read_range(origin, rel_path, position, length)
-        if first:
-            mtime = chunk_mtime
-            first = False
-        elif chunk_mtime != mtime:
-            raise BridgeFailure("CONFLICT")
-        chunks.append(data)
-        position += len(data)
-        if eof or not data:
-            reached_end = True
-            break
-    return b"".join(chunks), size, mtime, reached_end or position >= size
+    target = _guarded_path(origin, rel_path, allow_mockups=True)
+    try:
+        if not target.is_file():
+            raise BridgeFailure("BACKEND_UNAVAILABLE")
+        with target.open("rb") as handle:
+            st = os.fstat(handle.fileno())
+            handle.seek(start)
+            data = handle.read() if want is None else handle.read(want)
+    except OSError as exc:
+        _log(f"read {rel_path}: {exc}")
+        raise BridgeFailure("BACKEND_UNAVAILABLE") from None
+    return data, st.st_size, st.st_mtime, start + len(data) >= st.st_size
 
 
-def _bridge_read_all(origin: dict[str, Any], rel_path: str) -> tuple[str, float | None]:
-    """Whole document, whatever its size, by paging ranged reads."""
+def _read_text(origin: dict[str, Any], rel_path: str) -> tuple[str, float | None]:
+    """Whole document and its mtime, whatever its size."""
     data, _size, mtime, _eof = _read_bytes(origin, rel_path, 0, None)
     try:
         return data.decode("utf-8"), mtime
-    except UnicodeDecodeError:
+    except UnicodeDecodeError as exc:
+        _log(f"read {rel_path}: {exc}")
         raise BridgeFailure("BACKEND_UNAVAILABLE") from None
+
+
+def _stat(origin: dict[str, Any], rel_path: str) -> tuple[bool, bool]:
+    """(exists, is a directory); a path the guard refuses does not exist."""
+    try:
+        target = _resolve_safe(_plan_root(origin), rel_path, allow_internal_root=True, allow_mockups=True)
+        return target.exists(), target.is_dir()
+    except (FsError, OSError):
+        return False, False
+
+
+def _list_names(origin: dict[str, Any], rel_path: str, *, discovery: bool = False) -> list[str]:
+    """Entry names of one directory level, as the Host's ``list_dir`` gave them.
+
+    Hidden entries are left out. ``discovery`` lists only directories that
+    are not noise, sorted by UTF-8 bytes; otherwise directories come first,
+    then files, each case-insensitively. At most _MAX_DIRECTORY_ENTRIES.
+    """
+    target = _guarded_path(origin, rel_path, allow_internal_root=True, allow_mockups=True)
+    try:
+        if not target.is_dir():
+            raise BridgeFailure("BACKEND_UNAVAILABLE")
+        with os.scandir(target) as it:
+            if discovery:
+                entries = sorted(
+                    (e for e in it if e.is_dir() and not e.name.startswith(".") and e.name not in _NOISE_SEGMENTS),
+                    key=lambda e: e.name.encode("utf-8"),
+                )
+            else:
+                entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
+    except OSError as exc:
+        _log(f"list {rel_path}: {exc}")
+        raise BridgeFailure("BACKEND_UNAVAILABLE") from None
+    names = [e.name for e in entries if not e.name.startswith(".")]
+    if len(names) > _MAX_DIRECTORY_ENTRIES:
+        _log(f"list {rel_path}: {len(names)} entries, only the first {_MAX_DIRECTORY_ENTRIES} are used")
+    return names[:_MAX_DIRECTORY_ENTRIES]
 
 
 def _decode_chunk(data: bytes, final: bool) -> tuple[str, int]:
@@ -653,90 +691,64 @@ def _read_text_chunk(origin: dict[str, Any], rel_path: str, offset: int) -> dict
     }
 
 
-def _bridge_read(origin: dict[str, Any], rel_path: str, include_mtime: bool = False) -> tuple[str, float | None]:
-    arguments: dict[str, Any] = {"rel_path": rel_path}
-    if include_mtime:
-        arguments["include_mtime"] = True
+def _write_failure(result: Any, *, rel_path: str | None = None) -> BridgeFailure:
+    """The failure the Host's filesystem service reported for a write.
+
+    Classified from the write itself, never from the wording of its message.
+    """
+    if _is_record(result) and result.get("conflict") is True:
+        return BridgeFailure("CONFLICT")
+    reason = result.get("error") if _is_record(result) else None
+    _log(f"write {rel_path}: {reason if isinstance(reason, str) else 'malformed write result'}")
+    return BridgeFailure("BACKEND_UNAVAILABLE")
+
+
+def _write(origin: dict[str, Any], rel_path: str, content: str, expected_mtime: float | None = None) -> float | None:
+    """Write a document under the authorized root through the core write path.
+
+    The same calls the Host's filesystem service made: the mutation guard, an
+    atomic replace, and the ``expected_mtime`` conflict check. A document past
+    SINGLE_WRITE_MAX_BYTES is staged in parts and swapped in, as before.
+    """
+    # Plans writes deliberately have no size cap (user decision 2026-09-29:
+    # plans are never skipped or capped), which is why a large document goes
+    # through the staged path, and why no failure here is a size limit.
+    root = _plan_root(origin)
     try:
-        result = _bridge_call(origin, "filesystem", "read_file", arguments)
-    except BridgeFailure as error:
-        if error.code != "RESULT_TOO_LARGE":
-            raise
-        # Past the single-result limit: page the file instead of failing. A
-        # Host that cannot page has nothing better to offer than the original
-        # answer, which says what is wrong.
-        try:
-            return _bridge_read_all(origin, rel_path)
-        except BridgeFailure as fallback:
-            if fallback.code == "METHOD_NOT_FOUND":
-                raise error from None
-            raise
-    if not _is_record(result) or not isinstance(result.get("content"), str):
-        raise BridgeFailure("PROTOCOL_ERROR")
-    mtime = result.get("mtime")
-    if mtime is not None and (isinstance(mtime, bool) or not isinstance(mtime, (int, float))):
-        raise BridgeFailure("PROTOCOL_ERROR")
-    return result["content"], float(mtime) if mtime is not None else None
-
-
-def _bridge_write(origin: dict[str, Any], rel_path: str, content: str, expected_mtime: float | None = None) -> float | None:
+        _resolve_mutation_safe(root, rel_path)
+    except FsError as exc:
+        _log(f"write {rel_path} refused: {exc}")
+        raise BridgeFailure("WORKSPACE_SCOPE_VIOLATION") from None
     data = content.encode("utf-8")
     if len(data) > SINGLE_WRITE_MAX_BYTES:
-        result = _bridge_write_chunked(origin, rel_path, data, expected_mtime)
+        result = _write_staged(root, rel_path, data, expected_mtime)
     else:
-        arguments: dict[str, Any] = {"rel_path": rel_path, "content": content}
-        if expected_mtime is not None:
-            arguments["expected_mtime"] = expected_mtime
-        result = _bridge_call(origin, "filesystem", "write_file", arguments)
+        result = write_file(root, rel_path, content, expected_mtime=expected_mtime)
     if not _is_record(result) or result.get("ok") is not True:
-        if _is_record(result) and result.get("conflict") is True:
-            raise BridgeFailure("CONFLICT")
-        raise BridgeFailure("BACKEND_UNAVAILABLE")
+        raise _write_failure(result, rel_path=rel_path)
     mtime = result.get("mtime")
     return float(mtime) if isinstance(mtime, (int, float)) and not isinstance(mtime, bool) else None
 
 
-def _bridge_write_chunked(
-    origin: dict[str, Any], rel_path: str, data: bytes, expected_mtime: float | None
-) -> Any:
-    """Stage ``data`` on the Host part by part, then swap it in atomically.
+def _write_staged(root: str, rel_path: str, data: bytes, expected_mtime: float | None) -> Any:
+    """Stage ``data`` part by part, then swap it in atomically.
 
-    Same contract as one write_file call: the commit carries ``expected_mtime``
-    and is refused with a conflict if the file changed since it was read, and
-    the replace is a single rename so a reader never sees a partial document.
-    A failure part-way discards the staged bytes.
+    Same contract as one write_file call: the commit is refused with a
+    conflict if the file changed since it was read, and the replace is a
+    single rename. A failure part-way discards the staged bytes.
     """
     upload_id = uuid.uuid4().hex
-    try:
-        offset = 0
-        while True:
-            part = data[offset : offset + RANGE_CHUNK_BYTES]
-            _bridge_call(
-                origin, "filesystem", "write_part",
-                {
-                    "rel_path": rel_path,
-                    "upload_id": upload_id,
-                    "offset": offset,
-                    "data_base64": base64.b64encode(part).decode("ascii"),
-                },
-            )
-            offset += len(part)
-            if offset >= len(data):
-                break
-        commit: dict[str, Any] = {"rel_path": rel_path, "upload_id": upload_id, "total_size": len(data)}
-        if expected_mtime is not None:
-            commit["expected_mtime"] = expected_mtime
-        return _bridge_call(origin, "filesystem", "write_commit", commit)
-    except BaseException as error:
-        try:
-            _bridge_call(origin, "filesystem", "write_abort", {"rel_path": rel_path, "upload_id": upload_id})
-        except BridgeFailure:
-            pass
-        if isinstance(error, BridgeFailure) and error.code == "METHOD_NOT_FOUND":
-            # A Host that predates chunked writes cannot take a document this
-            # large in one frame; say so rather than fail obscurely.
-            raise BridgeFailure("RESOURCE_LIMIT") from None
-        raise
+    offset = 0
+    while True:
+        part = data[offset : offset + _WRITE_PART_MAX_BYTES]
+        result = write_part(root, rel_path, upload_id, offset, base64.b64encode(part).decode("ascii"))
+        if not _is_record(result) or result.get("ok") is not True:
+            write_abort(root, rel_path, upload_id)
+            return result
+        offset += len(part)
+        if offset >= len(data):
+            break
+    return write_commit(root, rel_path, upload_id, len(data), expected_mtime)
 
 
 def _plan_path(value: Any) -> str:
@@ -841,45 +853,38 @@ def _head_info(origin: dict[str, Any], rel_path: str) -> dict[str, Any]:
 
     Reads ranges from the start only until the plan-meta island (or front
     matter) is complete, so listing hundreds of plans never pulls a multi-MB
-    report across the Bridge (the island sits at the top: one range). A file
-    whose island is further down is scanned on, chunk by chunk, until it closes
-    or the file ends, so no plan is mistaken for a plain document. Falls back
-    to a whole-file read on a Host that predates ranged reads.
+    report into memory (the island sits at the top: one range). A file whose
+    island is further down is scanned on, chunk by chunk, until it closes or
+    the file ends, so no plan is mistaken for a plain document.
     """
-    try:
-        data = bytearray()
-        size: int | None = None
-        mtime: float | None = None
-        scanned = 0  # bytes already searched; each chunk is scanned once
-        island_from: int | None = None  # where to look for </script> once the tag opened
-        front_matter = False
-        while True:
-            chunk, size, chunk_mtime, eof = _bridge_read_range(origin, rel_path, len(data), RANGE_CHUNK_BYTES)
-            if mtime is None:
-                mtime = chunk_mtime
-            data += chunk
-            if len(data) == len(chunk):
-                front_matter = data.startswith(b"---")
-            done = eof or not chunk
-            if island_from is None:
-                opened = _PLAN_META_OPEN_BYTES_RE.search(data, max(0, scanned - _SCAN_OVERLAP))
-                if opened:
-                    island_from = opened.end()
-            if island_from is not None:
-                closed = _SCRIPT_CLOSE_BYTES_RE.search(data, max(island_from, scanned - _SCAN_OVERLAP))
-                if closed:
-                    done = True
-            elif front_matter and data.find(b"\n---", max(3, scanned - _SCAN_OVERLAP)) >= 0:
+    data = bytearray()
+    size: int | None = None
+    mtime: float | None = None
+    scanned = 0  # bytes already searched; each chunk is scanned once
+    island_from: int | None = None  # where to look for </script> once the tag opened
+    front_matter = False
+    while True:
+        chunk, size, chunk_mtime, eof = _read_bytes(origin, rel_path, len(data), RANGE_CHUNK_BYTES)
+        if mtime is None:
+            mtime = chunk_mtime
+        data += chunk
+        if len(data) == len(chunk):
+            front_matter = data.startswith(b"---")
+        done = eof or not chunk
+        if island_from is None:
+            opened = _PLAN_META_OPEN_BYTES_RE.search(data, max(0, scanned - _SCAN_OVERLAP))
+            if opened:
+                island_from = opened.end()
+        if island_from is not None:
+            closed = _SCRIPT_CLOSE_BYTES_RE.search(data, max(island_from, scanned - _SCAN_OVERLAP))
+            if closed:
                 done = True
-            scanned = len(data)
-            if done:
-                break
-        text = bytes(data).decode("utf-8", "replace")
-    except BridgeFailure as error:
-        if error.code != "METHOD_NOT_FOUND":
-            raise
-        text, mtime = _bridge_read(origin, rel_path, include_mtime=True)
-        size = len(text.encode("utf-8"))
+        elif front_matter and data.find(b"\n---", max(3, scanned - _SCAN_OVERLAP)) >= 0:
+            done = True
+        scanned = len(data)
+        if done:
+            break
+    text = bytes(data).decode("utf-8", "replace")
     return {"meta": _parse_plan_meta(text), "reason": _meta_problem(text), "size": size, "mtime": mtime}
 
 
@@ -965,7 +970,16 @@ def _write_plan_meta(content: str, meta: dict[str, Any]) -> str:
     match = PLAN_META_RE.search(content)
     block = json.dumps(meta, ensure_ascii=False, indent=2).replace("<", "\\u003c")
     if match is None:
-        return f'<script type="application/json" id="plan-meta">\n{block}\n</script>\n{content}'
+        # Same placement as usePlanHtml.injectPlanMeta: prepending would push
+        # a <!DOCTYPE> behind the island and the file would render in quirks mode.
+        island = f'<script type="application/json" id="plan-meta">\n{block}\n</script>\n'
+        head_close = re.search(r"</head>", content, re.IGNORECASE)
+        if head_close is not None:
+            return f"{content[:head_close.start()]}{island}{content[head_close.start():]}"
+        html_open = re.search(r"<html\b[^>]*>", content, re.IGNORECASE)
+        if html_open is not None:
+            return f"{content[:html_open.end()]}\n{island}{content[html_open.end():]}"
+        return f"{island}{content}"
     return f"{content[:match.start(1)]}\n{block}\n{content[match.end(1):]}"
 
 
@@ -1003,15 +1017,20 @@ def _write_meta_for_path(
 
 
 def _todo_summary(meta: dict[str, Any]) -> dict[str, Any]:
+    # Same shape as the MCP fallback's summary (plan_tools._todo_summary):
+    # awaiting_user counts unfinished todos only the user can do.
     counts: dict[str, int] = {}
     total = 0
+    awaiting_user = 0
     for todo in meta.get("todos", []):
         if not _is_record(todo):
             continue
         total += 1
         status = todo.get("status") if isinstance(todo.get("status"), str) else "unknown"
         counts[status or "unknown"] = counts.get(status or "unknown", 0) + 1
-    return {"total": total, "by_status": counts}
+        if todo.get("owner") == "user" and status not in ("done", "skipped"):
+            awaiting_user += 1
+    return {"total": total, "by_status": counts, "awaiting_user": awaiting_user}
 
 
 def _slug(value: str) -> str:
@@ -1097,11 +1116,8 @@ def _find_nested_plan_roots(origin: dict[str, Any]) -> list[str]:
         if depth >= _MAX_ROOT_DEPTH:
             continue
         try:
-            listing = _bridge_call(origin, "filesystem", "list_dir", {"rel_path": current_rel, "mode": "discovery"})
+            entries = _list_names(origin, current_rel, discovery=True)
         except BridgeFailure:
-            continue
-        entries = listing.get("entries") if _is_record(listing) else None
-        if not isinstance(entries, list):
             continue
         # If truncated is True, the listing was capped by Host at _MAX_DIRECTORY_ENTRIES (2000).
         # We also enforce candidates[:_MAX_DIRECTORY_ENTRIES] defensively.
@@ -1120,17 +1136,12 @@ def _find_nested_plan_roots(origin: dict[str, Any]) -> list[str]:
                 break
             visited += 1
             child_rel = f"{current_rel}/{name}" if current_rel else name
-            try:
-                stat = _bridge_call(origin, "filesystem", "stat_path", {"rel_path": child_rel})
-                if not _is_record(stat) or stat.get("exists") is not True or stat.get("isDirectory") is not True:
-                    continue
-                git_stat = _bridge_call(origin, "filesystem", "stat_path", {"rel_path": f"{child_rel}/.git"})
-                if _is_record(git_stat) and git_stat.get("exists") is True and git_stat.get("isDirectory") is True:
-                    found.append(child_rel)
-                else:
-                    frontier.append((child_rel, depth + 1))
-            except BridgeFailure:
+            if _stat(origin, child_rel) != (True, True):
                 continue
+            if _stat(origin, f"{child_rel}/.git") == (True, True):
+                found.append(child_rel)
+            else:
+                frontier.append((child_rel, depth + 1))
     return found
 
 
@@ -1144,19 +1155,49 @@ def _list_plans(origin: dict[str, Any]) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
 
+    def _unreadable_dir(rel_dir: str, code: str, detail: Any) -> None:
+        # Listed in the shape of an unreadable document, so a plan directory
+        # the user cannot see into is not silently missing from the list.
+        _log(f"plan directory {rel_dir} could not be read: {detail}")
+        entries.append(
+            {
+                "rel_path": rel_dir,
+                "name": rel_dir.rsplit("/", 1)[-1],
+                "stage": None,
+                "overview": "",
+                "todos": {"total": 0, "by_status": {}, "awaiting_user": 0},
+                "mtime": None,
+                "kind": "unreadable",
+                "meta": None,
+                "reason": f"plan directory could not be read ({code})",
+            }
+        )
+
     def _scan_dir(rel_dir: str) -> None:
+        # Only a directory that does not exist is skipped quietly.
         try:
-            stat = _bridge_call(origin, "filesystem", "stat_path", {"rel_path": rel_dir})
-            if not _is_record(stat) or stat.get("exists") is not True:
-                return
-            listing = _bridge_call(origin, "filesystem", "list_dir", {"rel_path": rel_dir})
-            names = listing.get("entries") if _is_record(listing) else None
-            if not isinstance(names, list):
-                return
+            target = _guarded_path(origin, rel_dir, allow_internal_root=True, allow_mockups=True)
         except BridgeFailure as error:
-            if error.code == "BACKEND_UNAVAILABLE":
+            # A path the guard refuses does not exist for us; the guard logged it.
+            if error.code == "WORKSPACE_SCOPE_VIOLATION":
                 return
             raise
+        try:
+            mode = target.stat().st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            return
+        except OSError as exc:
+            _unreadable_dir(rel_dir, "BACKEND_UNAVAILABLE", exc)
+            return
+        if not stat.S_ISDIR(mode):
+            return
+        try:
+            names = _list_names(origin, rel_dir)
+        except BridgeFailure as error:
+            if error.code == "USER_CANCELLED" or _closing:
+                raise
+            _unreadable_dir(rel_dir, error.code, error.code)
+            return
         for name in sorted((n for n in names if isinstance(n, str)), key=lambda s: s.lower()):
             if not is_plan_doc_name(name):
                 continue
@@ -1178,7 +1219,7 @@ def _list_plans(origin: dict[str, Any]) -> list[dict[str, Any]]:
                         "name": name,
                         "stage": None,
                         "overview": "",
-                        "todos": {"total": 0, "by_status": {}},
+                        "todos": {"total": 0, "by_status": {}, "awaiting_user": 0},
                         "mtime": None,
                         "kind": "unreadable",
                         "meta": None,
@@ -1192,7 +1233,7 @@ def _list_plans(origin: dict[str, Any]) -> list[dict[str, Any]]:
                 "name": meta.get("name") if meta is not None else name,
                 "stage": meta.get("stage") if meta is not None else None,
                 "overview": meta.get("overview", "") if meta is not None else "",
-                "todos": _todo_summary(meta) if meta is not None else {"total": 0, "by_status": {}},
+                "todos": _todo_summary(meta) if meta is not None else {"total": 0, "by_status": {}, "awaiting_user": 0},
                 "mtime": info["mtime"],
                 "kind": "plan" if meta is not None else "document",
                 "meta": meta,
@@ -1222,48 +1263,88 @@ def _list_plans_single_flight(origin: dict[str, Any]) -> list[dict[str, Any]]:
     a scan started after it arrived: a scan already past some directory when
     the caller's write landed would hand it a pre-write snapshot.
     """
-    global _list_flight, _list_generation
+    global _list_generation
+    # Every caller is authorized by the Host before it may share a scan, and
+    # a refusal fails the call rather than reading as "no such directory".
+    _plan_root(origin)
+    key = origin["instance"]
     with _state_lock:
         arrived_after = _list_generation
-    while True:
-        with _state_lock:
-            flight = _list_flight
-            leader = flight is None
-            if leader:
-                _list_generation += 1
-                flight = _list_flight = {
-                    "done": threading.Event(),
-                    "generation": _list_generation,
-                    "result": None,
-                    "error": None,
-                }
-        assert flight is not None
-        if not leader:
-            flight["done"].wait()
-            if flight["generation"] <= arrived_after:
-                continue
-            error = flight["error"]
-            # A leader cancelled by its own caller says nothing about ours:
-            # take the next flight instead of reporting its cancellation.
-            if isinstance(error, BridgeFailure) and error.code == "USER_CANCELLED":
-                continue
-            if error is not None:
-                raise error
-            return flight["result"]
-        try:
-            flight["result"] = _list_plans(origin)
-        except BaseException as error:
-            flight["error"] = error
-            raise
-        finally:
+        _list_callers[key] = _list_callers.get(key, 0) + 1
+    try:
+        while True:
             with _state_lock:
-                _list_flight = None
-            flight["done"].set()
-        return flight["result"]
+                flight = _list_flights.get(key)
+                finished = _list_finished.get(key)
+                # A scan that started after this caller arrived and has already
+                # ended is as fresh as one it could still join.
+                if flight is None and finished is not None and finished["generation"] > arrived_after:
+                    return finished["result"]
+                leader = flight is None
+                if leader:
+                    _list_generation += 1
+                    flight = _list_flights[key] = {
+                        "done": threading.Event(),
+                        "generation": _list_generation,
+                        "result": None,
+                        "error": None,
+                    }
+            assert flight is not None
+            if not leader:
+                flight["done"].wait()
+                if flight["generation"] <= arrived_after:
+                    continue
+                error = flight["error"]
+                # A leader cancelled by its own caller says nothing about ours:
+                # take the next flight instead of reporting its cancellation.
+                if isinstance(error, BridgeFailure) and error.code == "USER_CANCELLED":
+                    continue
+                if error is not None:
+                    raise error
+                return flight["result"]
+            try:
+                flight["result"] = _list_plans(origin)
+            except BaseException as error:
+                flight["error"] = error
+                raise
+            finally:
+                with _state_lock:
+                    _list_flights.pop(key, None)
+                    if flight["error"] is None:
+                        _list_finished[key] = flight
+                flight["done"].set()
+            return flight["result"]
+    finally:
+        with _state_lock:
+            _list_callers[key] -= 1
+            if not _list_callers[key]:
+                del _list_callers[key]
+                _list_finished.pop(key, None)
 
 
 def _encoded_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+_PAGED_META_KEYS = ("name", "stage", "overview", "archivedAt")
+_PAGED_TODO_KEYS = ("id", "content", "status", "owner")
+
+
+def _paged_meta(meta: Any) -> Any:
+    """The part of a plan's meta the Plans view reads from a list entry.
+
+    reviewNotes stays an empty list: the view appends to and filters the
+    listed meta's notes, while it shows the notes of the document it reads.
+    """
+    if not _is_record(meta):
+        return meta
+    slim: dict[str, Any] = {key: meta[key] for key in _PAGED_META_KEYS if key in meta}
+    slim["todos"] = [
+        {key: todo[key] for key in _PAGED_TODO_KEYS if key in todo} if _is_record(todo) else todo
+        for todo in meta.get("todos", [])
+    ]
+    slim["reviewNotes"] = []
+    return slim
 
 
 def _list_result(entries: list[dict[str, Any]], arguments: dict[str, Any]) -> Any:
@@ -1273,7 +1354,9 @@ def _list_result(entries: list[dict[str, Any]], arguments: dict[str, Any]) -> An
     it would not fit a frame each entry's full meta is dropped rather than the
     entry. ``{"offset": n}`` pages instead: entries from n on that fit one
     frame, plus ``next_offset`` (null after the last one), so no plan is ever
-    left out however many there are.
+    left out however many there are. Paging is the Plans view's form, so a
+    paged entry carries only the meta the view reads (see _paged_meta); the
+    plain array agents receive keeps the full meta.
     """
     if not arguments:
         if _encoded_size(entries) <= LIST_INLINE_BUDGET_BYTES:
@@ -1287,12 +1370,16 @@ def _list_result(entries: list[dict[str, Any]], arguments: dict[str, Any]) -> An
     used = 0
     index = offset
     while index < len(entries):
-        entry = entries[index]
+        entry = {**entries[index], "meta": _paged_meta(entries[index]["meta"])}
         cost = _encoded_size(entry) + 1
         if page and used + cost > LIST_PAGE_BUDGET_BYTES:
             break
         if not page and cost > LIST_PAGE_BUDGET_BYTES:
+            # The view still needs to know an archived plan is archived.
+            archived_at = entry["meta"].get("archivedAt") if _is_record(entry["meta"]) else None
             entry = {**entry, "meta": None}
+            if archived_at is not None:
+                entry["archivedAt"] = archived_at
             cost = _encoded_size(entry) + 1
         page.append(entry)
         used += cost
@@ -1315,13 +1402,7 @@ def _read_plan(origin: dict[str, Any], rel_path: Any, offset: int = 0) -> dict[s
     there and concatenates ``html``. ``meta`` is only sent with the first page.
     """
     normalized = _plan_path(rel_path)
-    try:
-        chunk = _read_text_chunk(origin, normalized, offset)
-    except BridgeFailure as error:
-        if error.code != "METHOD_NOT_FOUND":
-            raise
-        content, mtime = _bridge_read(origin, normalized, include_mtime=True)
-        return {"rel_path": normalized, "meta": _parse_plan_meta(content), "html": content, "mtime": mtime}
+    chunk = _read_text_chunk(origin, normalized, offset)
     result: dict[str, Any] = {"rel_path": normalized, "html": chunk["text"], "mtime": chunk["mtime"]}
     if offset == 0:
         head = chunk["text"]
@@ -1340,7 +1421,7 @@ def _read_plan(origin: dict[str, Any], rel_path: Any, offset: int = 0) -> dict[s
 
 def _load_for_write(origin: dict[str, Any], rel_path: Any) -> tuple[str, str, dict[str, Any], float]:
     normalized = _plan_path(rel_path)
-    content, mtime = _bridge_read(origin, normalized, include_mtime=True)
+    content, mtime = _read_text(origin, normalized)
     meta = _parse_plan_meta(content)
     if meta is None or mtime is None:
         raise BridgeFailure("INVALID_ARGUMENT")
@@ -1366,14 +1447,14 @@ def _create_plan(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str,
         filename = f"{slug}_{uuid.uuid4().hex[:6]}.html"
         rel_path = f"{PLAN_REL_DIR}/{filename}"
         try:
-            _bridge_read(origin, rel_path)
+            _read_text(origin, rel_path)
         except BridgeFailure as error:
             if error.code == "BACKEND_UNAVAILABLE":
                 break
             raise
     else:
         raise BridgeFailure("RESOURCE_LIMIT")
-    template, _ = _bridge_read(origin, f"{PLAN_REL_DIR}/_template.html")
+    template, _ = _read_text(origin, f"{PLAN_REL_DIR}/_template.html")
     content = template
     replacements = {
         "{{PLAN_NAME}}": html_escape(name.strip()),
@@ -1418,7 +1499,7 @@ def _create_plan(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str,
         "todos": todos,
         "reviewNotes": [],
     }
-    _bridge_write(origin, rel_path, _write_meta_for_path(rel_path, content, meta, stage=stage))
+    _write(origin, rel_path, _write_meta_for_path(rel_path, content, meta, stage=stage))
     return {"rel_path": rel_path, "name": name.strip(), "stage": stage}
 
 
@@ -1430,7 +1511,7 @@ def _update_stage(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str
     meta["stage"] = stage
     if stage == "approved":
         meta["approvedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    _bridge_write(origin, rel_path, _write_meta_for_path(rel_path, content, meta, stage=stage), mtime)
+    _write(origin, rel_path, _write_meta_for_path(rel_path, content, meta, stage=stage), mtime)
     return {"stage": stage, "approvedAt": meta.get("approvedAt")}
 
 
@@ -1461,7 +1542,7 @@ def _update_todo(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str,
         todo_id=todo_id,
         todo_status=status,
     )
-    _bridge_write(origin, rel_path, updated, mtime)
+    _write(origin, rel_path, updated, mtime)
     return dict(target)
 
 
@@ -1480,8 +1561,91 @@ def _add_note(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str, An
                 max_num = max(max_num, int(match.group(1)))
     note = {"id": f"n{max_num + 1}", "author": author, "text": text.strip(), "resolved": False, "reply": ""}
     notes.append(note)
-    _bridge_write(origin, rel_path, _write_meta_for_path(rel_path, content, meta), mtime)
+    _write(origin, rel_path, _write_meta_for_path(rel_path, content, meta), mtime)
     return note
+
+
+_AUTO_TODO_ID_RE = re.compile(r"t(\d+)$")
+_TODO_ROW_RE = re.compile(r"<li\b[^>]*\bdata-todo-id=[\"']([^\"']*)[\"'][^>]*>[\s\S]*?</li>", re.IGNORECASE)
+_EMPTY_TODO_LIST_RE = re.compile(
+    r"(<ul\b[^>]*\bclass=[\"'][^\"']*\btodos\b[^\"']*[\"'][^>]*>)((?:\s|<!--[\s\S]*?-->)*)(</ul>)",
+    re.IGNORECASE,
+)
+_TODO_MARKUP_WARNING = (
+    "the todo was added to plan-meta, but its visible row was not inserted: "
+    "no todo list (or no row for `after`) was found in the document"
+)
+
+
+def _insert_todo_row(content: str, todo: dict[str, str], after: str) -> str | None:
+    """Insert the todo's visible row after ``after``'s row or the last row.
+
+    An empty todo list gets it as its first row; None when there is nowhere
+    to put it. Rows use the same shape plans.create writes.
+    """
+    row = (
+        f'<li data-status="{todo["status"]}" data-todo-id="{html_escape(todo["id"])}">'
+        f'<span class="st">{todo["status"]}</span> <span>{html_escape(todo["content"])}</span></li>'
+    )
+    rows = list(_TODO_ROW_RE.finditer(content))
+    anchor = next((m for m in rows if m.group(1) == after), None) if after else (rows[-1] if rows else None)
+    if anchor is not None:
+        line_start = content.rfind("\n", 0, anchor.start()) + 1
+        indent = content[line_start:anchor.start()]
+        indent = indent if not indent.strip() else ""
+        return f"{content[:anchor.end()]}\n{indent}{row}{content[anchor.end():]}"
+    if after or rows:
+        return None
+    empty = _EMPTY_TODO_LIST_RE.search(content)
+    if empty is None:
+        return None
+    return f"{content[:empty.end(2)]}{row}\n{content[empty.start(3):]}"
+
+
+def _add_todo(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+    text = arguments.get("content")
+    todo_id = arguments.get("id", "")
+    owner = arguments.get("owner", "")
+    status = arguments.get("status", "pending")
+    after = arguments.get("after", "")
+    if (
+        not isinstance(text, str)
+        or not text.strip()
+        or not isinstance(todo_id, str)
+        or not isinstance(after, str)
+        or status not in TODO_STATUSES
+        or owner not in {"", *TODO_OWNERS}
+    ):
+        raise BridgeFailure("INVALID_ARGUMENT")
+    todo_id, after = todo_id.strip(), after.strip()
+    rel_path, content, meta, mtime = _load_for_write(origin, arguments.get("rel_path"))
+    todos = meta["todos"]
+    ids = [todo.get("id") for todo in todos if _is_record(todo)]
+    # A visible row's id is taken too, so the new todo never gets a second row.
+    taken = ids + (_TODO_ROW_RE.findall(content) if rel_path.endswith(".html") else [])
+    if todo_id and (TODO_ID_RE.fullmatch(todo_id) is None or todo_id in taken):
+        raise BridgeFailure("INVALID_ARGUMENT")
+    if after and after not in ids:
+        raise BridgeFailure("INVALID_ARGUMENT")
+    if not todo_id:
+        numbers = [int(m.group(1)) for m in map(_AUTO_TODO_ID_RE.fullmatch, map(str, taken)) if m]
+        todo_id = f"t{max(numbers, default=0) + 1}"
+    todo = {"id": todo_id, "content": text.strip(), "status": status}
+    if owner == "user":
+        todo["owner"] = owner
+    index = len(todos)
+    if after:
+        index = next(i + 1 for i, item in enumerate(todos) if _is_record(item) and item.get("id") == after)
+    todos.insert(index, todo)
+    result: dict[str, Any] = dict(todo)
+    if rel_path.endswith(".html"):
+        inserted = _insert_todo_row(content, todo, after)
+        if inserted is None:
+            result["warning"] = _TODO_MARKUP_WARNING
+        else:
+            content = inserted
+    _write(origin, rel_path, _write_meta_for_path(rel_path, content, meta), mtime)
+    return result
 
 
 def _manual_review_note(origin: dict[str, Any], arguments: dict[str, Any], action: str) -> dict[str, Any]:
@@ -1547,7 +1711,7 @@ def _manual_review_note_once(origin: dict[str, Any], arguments: dict[str, Any], 
             re.IGNORECASE,
         )
         updated = row.sub("", updated, count=1)
-    _bridge_write(origin, rel_path, updated, mtime)
+    _write(origin, rel_path, updated, mtime)
     return dict(note)
 
 
@@ -1585,13 +1749,7 @@ def _manual_document(origin: dict[str, Any], arguments: dict[str, Any], action: 
 
     if action == "read":
         offset = _read_offset(arguments)
-        try:
-            chunk = _read_text_chunk(origin, path, offset)
-        except BridgeFailure as error:
-            if error.code != "METHOD_NOT_FOUND" or offset != 0:
-                raise
-            content, mtime = _bridge_read(origin, path, include_mtime=True)
-            return {"ok": True, "content": content, **({"mtime": mtime} if mtime is not None else {})}
+        chunk = _read_text_chunk(origin, path, offset)
         result: dict[str, Any] = {"ok": True, "content": chunk["text"]}
         if chunk["mtime"] is not None:
             result["mtime"] = chunk["mtime"]
@@ -1603,18 +1761,11 @@ def _manual_document(origin: dict[str, Any], arguments: dict[str, Any], action: 
                 result["next_offset"] = chunk["next_offset"]
         return result
     if action == "list":
-        result = _bridge_call(origin, "filesystem", "list_dir", {"rel_path": path})
-        if not _is_record(result) or not isinstance(result.get("entries"), list):
-            raise BridgeFailure("PROTOCOL_ERROR")
         entries = []
-        for name in result["entries"]:
-            if not isinstance(name, str) or not name or name in {".", ".."} or "/" in name or "\\" in name:
-                raise BridgeFailure("PROTOCOL_ERROR")
-            stat = _bridge_call(origin, "filesystem", "stat_path", {"rel_path": f"{path}/{name}"})
-            if not _is_record(stat) or not isinstance(stat.get("exists"), bool):
-                raise BridgeFailure("PROTOCOL_ERROR")
-            if stat["exists"]:
-                entries.append({"name": name, "is_dir": stat.get("isDirectory") is True})
+        for name in _list_names(origin, path):
+            exists, is_dir = _stat(origin, f"{path}/{name}")
+            if exists:
+                entries.append({"name": name, "is_dir": is_dir})
         return {"ok": True, "entries": entries}
     content = arguments["content"]
     mtime = arguments.get("expected_mtime")
@@ -1623,7 +1774,7 @@ def _manual_document(origin: dict[str, Any], arguments: dict[str, Any], action: 
     ):
         raise BridgeFailure("INVALID_ARGUMENT")
     try:
-        _bridge_write(origin, path, content, mtime)
+        _write(origin, path, content, mtime)
     except BridgeFailure as error:
         if error.code == "CONFLICT":
             return {"ok": False, "conflict": True}
@@ -1675,13 +1826,14 @@ def _manual_upload(origin: dict[str, Any], arguments: dict[str, Any], action: st
         offset, data = arguments["offset"], arguments["data_base64"]
         if not _is_int(offset) or offset < 0 or not isinstance(data, str) or len(data) > _MAX_PART_BASE64_CHARS:
             raise BridgeFailure("INVALID_ARGUMENT")
-        result = _bridge_call(
-            origin, "filesystem", "write_part",
-            {"rel_path": path, "upload_id": upload_id, "offset": offset, "data_base64": data},
-        )
-        return {"ok": True, "size": result.get("size") if _is_record(result) else offset}
+        result = write_part(_plan_root(origin), path, upload_id, offset, data)
+        if not _is_record(result) or result.get("ok") is not True:
+            raise _write_failure(result)
+        return {"ok": True, "size": result.get("size", offset)}
     if action == "abort":
-        _bridge_call(origin, "filesystem", "write_abort", {"rel_path": path, "upload_id": upload_id})
+        result = write_abort(_plan_root(origin), path, upload_id)
+        if not _is_record(result) or result.get("ok") is not True:
+            raise _write_failure(result)
         return {"ok": True}
     total = arguments["total_size"]
     expected = arguments.get("expected_mtime")
@@ -1690,14 +1842,11 @@ def _manual_upload(origin: dict[str, Any], arguments: dict[str, Any], action: st
         and (isinstance(expected, bool) or not isinstance(expected, (int, float)) or not math.isfinite(expected))
     ):
         raise BridgeFailure("INVALID_ARGUMENT")
-    commit: dict[str, Any] = {"rel_path": path, "upload_id": upload_id, "total_size": total}
-    if expected is not None:
-        commit["expected_mtime"] = expected
-    result = _bridge_call(origin, "filesystem", "write_commit", commit)
+    result = write_commit(_plan_root(origin), path, upload_id, total, expected)
     if _is_record(result) and result.get("conflict") is True:
         return {"ok": False, "conflict": True}
     if not _is_record(result) or result.get("ok") is not True:
-        raise BridgeFailure("BACKEND_UNAVAILABLE")
+        raise _write_failure(result)
     mtime = result.get("mtime")
     return {"ok": True, **({"mtime": float(mtime)} if isinstance(mtime, (int, float)) and not isinstance(mtime, bool) else {})}
 
@@ -1727,7 +1876,7 @@ def _document_overview(content: str) -> str:
 
 def _promote(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
     normalized = _plan_path(arguments.get("rel_path"))
-    content, mtime = _bridge_read(origin, normalized, include_mtime=True)
+    content, mtime = _read_text(origin, normalized)
     existing = _parse_plan_meta(content)
     if existing is not None:
         return {"ok": True, "promoted": False, "rel_path": normalized, "meta": existing}
@@ -1743,7 +1892,7 @@ def _promote(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any
         "reviewNotes": [],
     }
     updated = _write_plan_meta(content, meta) if normalized.endswith(".html") else _write_markdown_meta(content, meta)
-    _bridge_write(origin, normalized, updated, mtime)
+    _write(origin, normalized, updated, mtime)
     return {"ok": True, "promoted": True, "rel_path": normalized, "meta": meta}
 
 
@@ -1753,19 +1902,22 @@ def _update_archive(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[s
         raise BridgeFailure("INVALID_ARGUMENT")
     rel_path, content, meta, mtime = _load_for_write(origin, arguments.get("rel_path"))
     meta["archivedAt"] = archived_at
-    _bridge_write(origin, rel_path, _write_meta_for_path(rel_path, content, meta), mtime)
+    _write(origin, rel_path, _write_meta_for_path(rel_path, content, meta), mtime)
     return {"archivedAt": archived_at}
 
 
 def _rename(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
     source = _plan_path(arguments.get("from"))
     target = _plan_path(arguments.get("to"))
+    # Deliberately left on the Host bridge for now (a follow-up item).
     _bridge_call(origin, "filesystem", "rename", {"from": source, "to": target})
     return {"ok": True, "from": source, "to": target}
 
 
 def _delete(origin: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
     rel_path = _plan_path(arguments.get("rel_path"))
+    # Deliberately left on the Host bridge: deleting moves the file to the OS
+    # Trash (send2trash, not the standard library). A follow-up item.
     _bridge_call(origin, "filesystem", "delete", {"rel_path": rel_path})
     return {"ok": True, "rel_path": rel_path}
 
@@ -1830,9 +1982,20 @@ def _handle(frame: Any) -> None:
         subscription = {"id": frame["id"], "events": events, "acknowledged": True}
         with _state_lock:
             _subscriptions[_subscription_key(frame["id"])] = subscription
-        _acknowledge(subscription)
-        if "plans.changed" in events:
-            _start_watch(subscription)
+        try:
+            _acknowledge(subscription)
+            if "plans.changed" in events:
+                _start_watch(subscription)
+        except BrokenPipeError:
+            raise
+        except Exception as error:
+            # Same reason as the navide/call catch-all below, and worse here: the
+            # Host's subscribe has no call timeout, so a dead thread with no reply
+            # leaves it waiting until this process exits.
+            _log(f"subscriptions/listen failed: {type(error).__name__}: {error}")
+            with _state_lock:
+                _subscriptions.pop(_subscription_key(frame["id"]), None)
+            _plugin_error(frame["id"], "BACKEND_ERROR")
         return
 
     if not _valid_request(frame, "navide/call", ("_meta", "name", "arguments", "runtime")):
@@ -1844,7 +2007,7 @@ def _handle(frame: Any) -> None:
     if not _is_method_name(name) or not _is_runtime(runtime) or not _is_json_value(arguments) or not _is_record(arguments):
         _protocol_error(frame["id"])
         return
-    origin = {"kind": "call", "requestId": frame["id"]}
+    origin = {"kind": "call", "requestId": frame["id"], "instance": runtime["instanceId"]}
     try:
         if name == "plans.resolve_root":
             if set(arguments) - {"workspace_path"}:
@@ -1853,6 +2016,9 @@ def _handle(frame: Any) -> None:
             if not _is_record(root) or not isinstance(root.get("root"), str):
                 raise BridgeFailure("PROTOCOL_ERROR")
             result = {"ok": True, "root": root["root"]}
+        # "plans.list_docs" is accepted as an alias of plans.list. Nothing in
+        # this repo sends it to the child today (the legacy renderer's
+        # plans.list_docs goes to the core backend); kept, not removed.
         elif name in {"plans.list", "plans.list_docs"}:
             if arguments and set(arguments) != {"offset"}:
                 raise BridgeFailure("INVALID_ARGUMENT")
@@ -1883,6 +2049,8 @@ def _handle(frame: Any) -> None:
             result = _update_todo(origin, arguments)
         elif name == "plans.add_note":
             result = _add_note(origin, arguments)
+        elif name == "plans.add_todo":
+            result = _add_todo(origin, arguments)
         elif name == "plans.review_note_add":
             result = _manual_review_note(origin, arguments, "add")
         elif name == "plans.review_note_edit":

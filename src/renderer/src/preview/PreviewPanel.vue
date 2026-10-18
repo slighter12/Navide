@@ -10,7 +10,7 @@
 // panel is read-only, and pulling Monaco into the main window would cost every
 // workspace window. "Open in editor" is the escape hatch instead.
 import { computed, ref, toRef } from 'vue'
-import { useNotify } from '@navide/plugin-ui/foundation'
+import { i18n, useNotify, vTruncate } from '@navide/plugin-ui/foundation'
 import type { useBackend } from '../composables/useBackend'
 import { createHostGitFileAccessPort } from '../composables/hostSurfacePorts'
 import { createHostGitTransport } from '../composables/hostGitTransport'
@@ -19,6 +19,7 @@ import FilePreviewPane from '../editor/FilePreviewPane.vue'
 import InlineHtmlPreview from './InlineHtmlPreview.vue'
 import MarkdownPreview from './MarkdownPreview.vue'
 import SnippetPreview from './SnippetPreview.vue'
+import { isMiniIdeOnlyOpenBlocked, useDisabledBuiltins } from '../composables/useDisabledBuiltins'
 import { previewSubtitle, previewTitle, type PreviewTarget } from './previewTarget'
 import { usePreview } from './usePreview'
 import { usePreviewLog, type PreviewLogEntry, type PreviewLogSource } from './usePreviewLog'
@@ -61,6 +62,14 @@ const isForeignWorkspace = computed(() => {
   return t.workspacePath !== props.workspacePath
 })
 
+// With the Mini-IDE disabled and it as the default editor, Open has nowhere to
+// go: shown disabled with the reason instead of failing on click.
+const disabledBuiltins = useDisabledBuiltins()
+// Not cached: the default editor is a setting, read again on every render.
+function openBlockedByMiniIde(): boolean {
+  return disabledBuiltins.disabled.value.has('navide.mini-ide') && isMiniIdeOnlyOpenBlocked()
+}
+
 const canOpenInEditor = computed(() => {
   const t = target.value
   if (!t || (t.kind !== 'file' && t.kind !== 'diff')) return false
@@ -79,7 +88,7 @@ async function copyContent(): Promise<void> {
       copied.value = false
     }, 1500)
   } catch {
-    notify.toast('Copy failed', { type: 'error' })
+    notify.toast(i18n.global.t('preview.copy-failed'), { type: 'error' })
   }
 }
 
@@ -199,7 +208,7 @@ function clearTrack(): void {
     <div v-if="target" class="pv-live">
       <header class="pv-hdr">
         <span class="pv-kind">{{ target.kind }}</span>
-        <span class="pv-title" :title="subtitle || title">{{ title }}</span>
+        <span class="pv-title" v-truncate :title="subtitle || title">{{ title }}</span>
         <span class="pv-acts">
           <button
             v-if="inlineContent !== null"
@@ -212,7 +221,10 @@ function clearTrack(): void {
           <button
             v-if="canOpenInEditor"
             class="pv-btn"
-            :title="$t('preview.open-in-editor')"
+            :disabled="openBlockedByMiniIde()"
+            :title="openBlockedByMiniIde()
+              ? $t('settings.extensions.builtinDisabledTooltip', { name: 'Mini-IDE' })
+              : $t('preview.open-in-editor')"
             @click="openInEditor()"
           >
             {{ $t('preview.open') }}
@@ -256,7 +268,7 @@ function clearTrack(): void {
       </div>
 
       <footer class="pv-foot">
-        <span v-if="subtitle" class="pv-sub" :title="subtitle">{{ subtitle }}</span>
+        <span v-if="subtitle" class="pv-sub" v-truncate>{{ subtitle }}</span>
         <span v-if="target.kind === 'html'" class="pv-flag">{{ $t('preview.sandboxed') }}</span>
         <span v-if="isForeignWorkspace" class="pv-flag pv-warn">{{ $t('preview.foreign-workspace') }}</span>
         <span v-if="attribution" class="pv-flag">{{ attribution }}</span>
@@ -302,7 +314,7 @@ function clearTrack(): void {
             {{ changeMark(e.change) }}
           </span>
           <span class="pv-row-path">{{ rowLabel(e) }}</span>
-          <span class="pv-row-who">{{ rowAuthor(e) }}</span>
+          <span class="pv-row-who" v-truncate>{{ rowAuthor(e) }}</span>
         </button>
       </div>
       <div v-else-if="entries.length" class="pv-track-note">{{ $t('preview.track-no-match') }}</div>

@@ -190,7 +190,7 @@ An agent integration is declared per vendor rather than threaded through the app
 
 A capability the spec leaves undeclared is treated as unsupported for that vendor and degrades gracefully; it never falls back to another vendor's behavior. This keeps a partial integration honest — a CLI can ship with spawning and install detection while resume, log reading and credential switching stay visibly unavailable until they are verified against a real installation.
 
-See [Adding a CLI vendor](../adding-a-cli-vendor.md) for the procedure, and the [CLI Extension Guide](cli-extension-guide.md) for per-vendor integration records. Credential-vault behavior is the remaining surface that vendor files cannot fully declare.
+See [Adding a CLI vendor](../adding-a-cli-vendor.md) for the procedure, and the [CLI Integration Records](cli-extension-guide.md) for per-vendor integration records. Credential-vault behavior is the remaining surface that vendor files cannot fully declare.
 
 ## Session synchronization direction
 
@@ -213,6 +213,14 @@ Sessions should publish structured progress back to the Project Intelligence Lay
 - Cross-agent handoffs can propagate sensitive text.
 - Local API-key file permissions are defense in depth, not a secret vault.
 - Git history and run artifacts can preserve data after a working file is deleted.
+- A pane's identity on the Navide MCP endpoint (`/plan-mcp?pane=<id>`) is
+  checked against a token minted for that one pane at spawn and revoked when
+  the pane closes; panes no longer share a token. This is not a boundary
+  between processes of the same user: the token sits in the pane's spawn
+  environment, its 0600 file under `plan-mcp-panes/` in the app data
+  directory, or its per-pane home, and any process running as the user —
+  another pane's agent included — can read those and present itself as that
+  pane. Binding a caller to the pane's own process is a planned follow-up.
 
 See [Privacy and Data Flows](privacy.md) and [SECURITY.md](../../SECURITY.md).
 
@@ -240,7 +248,7 @@ and capability runtime as third-party packages. Until Marketplace acquisition
 is available, the App ships a factory `navide.git` package and activates it on a
 fresh profile. A verified Marketplace version takes precedence. Removing the
 factory package records a durable opt-out; restart does not reinstall it, and
-the Extensions view is the only place that restores it.
+the Navide Plugins view is the only place that restores it.
 
 Electron main tries the selected v2 descriptor first. A load, mount, or ready
 failure retires the whole v2 Git package and selects the retained legacy

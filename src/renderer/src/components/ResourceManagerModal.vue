@@ -13,6 +13,7 @@
 // and the two row actions are relayed through the main process to whichever
 // window owns the pane, because focusing and reclaiming only exist there.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { vTruncate } from '@navide/plugin-ui/foundation'
 import { useI18n } from 'vue-i18n'
 import type { useBackend } from '../composables/useBackend'
 import type { useResourceUsage } from '../composables/useResourceUsage'
@@ -20,6 +21,7 @@ import { useStorageUsage } from '../composables/useStorageUsage'
 import type { ResourceSummaryRow } from './ResourceSummaryPanel.vue'
 import StorageSection from './StorageSection.vue'
 import { formatBytes } from '../lib/formatBytes'
+import { revealInvisibleText } from '../../../shared/pluginAgentTools'
 import { formatCpuPercent, machineCpuShare, machineMemoryShare } from '../lib/resourceSampling'
 import { idleReclaimDisabled } from '../lib/idleReclaim'
 
@@ -93,6 +95,40 @@ onBeforeUnmount(() => {
     clearInterval(rosterTimer)
     rosterTimer = null
   }
+})
+
+// ── The core backend's agent tool result helper (agent-tools contract 4.4, R2) ──
+// Read when the modal opens, then kept current by the state the backend
+// reports on every change.
+type ResultHelperState = { state: 'idle' | 'ready' | 'unavailable'; lastError: string; since: number }
+const resultHelper = ref<ResultHelperState | null>(null)
+
+async function refreshResultHelper(): Promise<void> {
+  try {
+    const usage = await window.agentTeam?.plugins?.backendResourceUsage?.()
+    if (usage?.backend) resultHelper.value = usage.backend.resultHelper
+  } catch {
+    // Keep the last state: a failed read is not a change.
+  }
+}
+
+const stopResultHelperUpdates = window.agentTeam?.plugins?.onResultHelperState?.((state) => {
+  resultHelper.value = state
+})
+onBeforeUnmount(() => stopResultHelperUpdates?.())
+watch(
+  () => props.open,
+  (open) => {
+    if (open) void refreshResultHelper()
+  },
+  { immediate: true }
+)
+
+const resultHelperDetail = computed(() => {
+  const helper = resultHelper.value
+  if (!helper) return ''
+  if (helper.state === 'unavailable') return t('resource.result-helper-detail-unavailable', { error: revealInvisibleText(helper.lastError) })
+  return helper.state === 'ready' ? t('resource.result-helper-detail-ready') : t('resource.result-helper-detail-idle')
 })
 
 // Recent CPU per pane, for the trend line. Kept only while the modal is open:
@@ -365,6 +401,16 @@ const diskState = computed<'unscanned' | 'scanning' | 'failed' | 'scanned'>(() =
                     : t('resource.disk-unscanned') }}
             </span>
           </div>
+          <div
+            v-if="resultHelper"
+            class="rm-metric"
+            data-metric="result-helper"
+            :data-state="resultHelper.state"
+          >
+            <span class="rm-k">{{ t('resource.result-helper') }}</span>
+            <span class="rm-v" data-part="value">{{ t(`resource.result-helper-${resultHelper.state}`) }}</span>
+            <span v-truncate class="rm-sub" data-part="detail" :title="resultHelperDetail">{{ resultHelperDetail }}</span>
+          </div>
           <button
             v-if="!storage.report.value"
             class="rm-ghost rm-disk-scan"
@@ -426,8 +472,8 @@ const diskState = computed<'unscanned' | 'scanning' | 'failed' | 'scanned'>(() =
           >
             <button class="c-name rm-jump" :title="t('resource.jump')" @click="void paneAction(row.paneId, 'focus')">
               <span class="rm-dot" />
-              <span class="rm-name">{{ row.name }}</span>
-              <span v-if="row.workspace || row.vendor" class="rm-meta">
+              <span class="rm-name" v-truncate>{{ row.name }}</span>
+              <span v-if="row.workspace || row.vendor" class="rm-meta" v-truncate>
                 {{ [row.workspace, row.vendor].filter(Boolean).join(' · ') }}
               </span>
             </button>

@@ -84,6 +84,8 @@ export {
   TERMINAL_DOCK_KEY,
 } from './ports/terminalDock'
 export type {
+  DockAgentMessage,
+  DockPaneRegistration,
   TerminalCreateRequest,
   TerminalCreateResult,
   TerminalDockPort,

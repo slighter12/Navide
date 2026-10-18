@@ -39,6 +39,11 @@ WRITE_TOOLS = {
     "replace", "apply_patch", "str_replace_editor", "create",
 }
 READ_TOOLS = {"read", "read_file", "view", "cat", "notebookread"}
+#: Search tools: grep reads the contents under its path (like a read), glob
+#: lists names (like ls). Grep's pattern is the text searched for, not a path.
+#: Qwen Code calls its grep `grep_search`; Copilot CLI offers `grep` or `rg`.
+GREP_TOOLS = {"grep", "grep_search", "rg"}
+GLOB_TOOLS = {"glob"}
 
 WRAPPERS_NO_ARG = {"nohup", "time", "command", "builtin", "exec", "caffeinate", "stdbuf"}
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh"}
@@ -237,6 +242,8 @@ def _credential_kind(path: str, ctx: _Ctx) -> str | None:
             return "credential"
         base = posixpath.basename(path)
         if rel.startswith(".claude/") and base.startswith(".credentials"):
+            return "credential"
+        if rel == ".claude/secrets" or rel.startswith(".claude/secrets/"):
             return "credential"
         if rel.startswith(".codex/") and base.startswith("auth"):
             return "credential"
@@ -478,9 +485,12 @@ def _extract_substitutions(text: str) -> tuple[str, list[tuple[str, str]]]:
             out.append(f"{_PLACEHOLDER}{len(subs) - 1}\x00")
             i = j + 1
             continue
-        elif c == "#" and not in_single and not in_double and (not out or out[-1][-1] in " \t;&|()<>"):
+        elif c == "#" and not in_single and not in_double and (
+            not out or (len(out[-1]) == 1 and out[-1] in " \t;&|()<>")
+        ):
             # A comment runs to the end of its line only; shlex would take the
-            # rest of the flattened text with it once newlines become ';'.
+            # rest of the flattened text with it once newlines become ';'. An
+            # escaped blank (`\ #`) keeps the word going, so no comment starts.
             end = text.find("\n", i)
             i = n if end < 0 else end
             continue
@@ -545,6 +555,99 @@ def _split(text: str) -> list[list[_Cmd]]:
     if pipeline:
         pipelines.append(pipeline)
     return pipelines
+
+
+_PLAIN_REDIRECTS = frozenset({"<", ">", ">>", "<<", "<<-", "<<<", ">|", "<>", "&>", "&>>"})
+_OPERATOR_CHARS = frozenset(";&|()<>")
+
+
+def single_command(text: str) -> bool:
+    """Whether `text` runs one simple command, after any number of plain
+    `cd DIR` steps, with no substitution and no heredoc left unparsed: the
+    only shape a whole-command allow glob may vouch for on a tainted pane
+    (policy.apply_taint_allow). A glob's `*` spans `;` and newlines, so on a
+    longer line it would vouch for commands it never named."""
+    # Only shapes whose split is unambiguous vouch for anything; quoting and
+    # comment edge cases are refused rather than trusted.
+    if "$'" in text or "\r" in text:
+        return False
+    ctx = _Ctx("", "", "")
+    try:
+        body_free = _extract_heredocs(text, ctx)
+        flat, subs = _extract_substitutions(body_free)
+        if len(flat) != len(_extract_substitutions(body_free.replace("#", "\x01"))[0]):
+            return False
+        pipelines = _split(flat)
+    except ValueError:
+        return False
+    if subs or ctx.heredoc_unparsed or not pipelines or any(len(p) != 1 for p in pipelines):
+        return False
+    # Redirection and operator tokens must be plain.
+    if any(
+        op not in _PLAIN_REDIRECTS or set(target) <= _OPERATOR_CHARS
+        for p in pipelines for op, target in p[0].redirects
+    ) or any(set(word) <= _OPERATOR_CHARS for p in pipelines for word in p[0].argv):
+        return False
+    # An unquoted heredoc body runs its substitutions; quotes there are text.
+    if any(not quoted and ("$(" in body or "`" in body) for body, quoted in ctx.heredocs):
+        return False
+    return all(
+        p[0].argv[:1] == ["cd"] and len(p[0].argv) <= 2 and not p[0].redirects for p in pipelines[:-1]
+    )
+
+
+def _in_modelled_subset(text: str, depth: int = 0) -> bool:
+    """Whether `text` stays inside the shell subset the tokenizer models the
+    way bash and zsh do: no control characters other than newline and tab,
+    no ANSI-C quoting, no unquoted backslash before an operator character or
+    blank, no unquoted `(` inside a word, and no quoted word made only of
+    operator characters (shlex drops the quotes, so it reads as an operator).
+    Anything outside it is graded unanalysable rather than trusted to split
+    as shlex splits it."""
+    if depth == 0 and any((ord(c) < 0x20 and c not in "\n\t") or c == "\x7f" for c in text):
+        return False
+    if depth > 6:
+        return True  # _classify_script already reports nesting-too-deep
+    flat, subs = _extract_substitutions(_extract_heredocs(text, _Ctx("", "", "")))
+    in_single = in_double = quoted = False
+    word: list[str] = []
+    blanks = _OPERATOR_CHARS | {" ", "\t"}
+    flat += " "
+    i = 0
+    while i < len(flat):
+        c = flat[i]
+        if in_single:
+            if c == "'":
+                in_single = False
+            else:
+                word.append(c)
+        elif c == "\\":
+            if not in_double and flat[i + 1] in blanks:
+                return False
+            word.append(flat[i + 1])
+            i += 1
+        elif c == "$" and flat[i + 1] == "'":
+            return False
+        elif c == "'" and not in_double:
+            in_single = quoted = True
+        elif c == '"':
+            in_double, quoted = not in_double, True
+        elif in_double or c not in blanks:
+            word.append(c)
+        else:
+            # End of a word: a `(` glued to it, or a quoted word shlex would read as an operator.
+            if c == "(" and (word or quoted):
+                return False
+            if quoted and word and set(word) <= _OPERATOR_CHARS:
+                return False
+            word, quoted = [], False
+        i += 1
+    # Substitution bodies are shell too; an arithmetic body only through its own substitutions.
+    return all(
+        _in_modelled_subset(inner, depth + 1) if kind != "arith"
+        else all(_in_modelled_subset(nested, depth + 1) for _, nested in _extract_substitutions(inner)[1])
+        for kind, inner in subs
+    )
 
 
 def _unwrap(argv: list[str], acc: _Acc) -> tuple[list[str], bool]:
@@ -1137,6 +1240,9 @@ def classify(
             acc.hit("high", "too-long", f"command is longer than {MAX_COMMAND_CHARS} characters")
             acc.opaque("too-long", "command is too long to analyse")
         elif command:
+            if name != "powershell" and not _in_modelled_subset(command):
+                # The rules below still run, so a level they find is never lowered.
+                acc.opaque("untokenizable-shape", "command uses shell syntax the analyser cannot model")
             _classify_script(command, ctx, acc)
     elif name in WRITE_TOOLS or name in READ_TOOLS:
         for raw in _tool_paths(tool_input):
@@ -1145,7 +1251,31 @@ def classify(
                 acc.opaque("dynamic-path", f"path is not static: {raw}")
                 continue
             _check_path(acc, path, ctx, write=name in WRITE_TOOLS)
+    elif name in GREP_TOOLS or name in GLOB_TOOLS:
+        _check_search(acc, name, tool_input, ctx)
     return acc.verdict()
+
+
+def _check_search(acc: _Acc, name: str, tool_input: dict, ctx: _Ctx) -> None:
+    """Grep / Glob: the locations they reach, against the same credential
+    rules as Read (grep) and ls (glob). These tools expand nothing, so a path
+    that does not resolve statically is skipped rather than made opaque."""
+    # Copilot CLI names the root `paths`: one directory, or a list of them.
+    # Both keys are read: a call carrying both reaches every root it names.
+    roots = []
+    for root in (tool_input.get("path"), tool_input.get("paths")):
+        roots += [r for r in (root if isinstance(root, list) else [root]) if isinstance(r, str) and r]
+    # Glob's pattern and Grep's glob filter are paths under root (or absolute).
+    sub = tool_input.get("pattern" if name in GLOB_TOOLS else "glob")
+    sub = sub if isinstance(sub, str) and sub else None
+    raws = list(roots)
+    if sub:
+        absolute = sub.startswith(("/", "~")) or _isabs(sub) or any(sub.startswith(t) for t in _HOME_TOKENS)
+        raws += [sub] if absolute or not roots else [posixpath.join(r, sub) for r in roots]
+    for raw in raws:
+        path = _resolve(raw, ctx)
+        if path is not None:
+            _check_path(acc, path, ctx, write=False, list_only=name in GLOB_TOOLS)
 
 
 _TOOL_CALL_RE = re.compile(r"\b[A-Z][A-Za-z]*\((.+)\)\s*$")

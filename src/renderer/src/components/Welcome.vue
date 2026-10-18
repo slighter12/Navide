@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { vTruncate } from '@navide/plugin-ui/foundation'
 import { NEW_WORKSPACE_ERROR_KEYS } from '../../../shared/workspaceCreate'
 import type { useBackend } from '../composables/useBackend'
 import { useEditorTargets } from '../composables/useEditorTargets'
 import { useRecentWorkspaces, type RecentWorkspace } from '../composables/useRecentWorkspaces'
+import { relativeTime } from '../lib/relativeTime'
+import navideMark from '../assets/navide-mark.png'
+import { isMiniIdeOnlyOpenBlocked, useDisabledBuiltins } from '../composables/useDisabledBuiltins'
 
 const props = defineProps<{
   backend: ReturnType<typeof useBackend>
@@ -30,7 +34,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => document.removeEventListener('keydown', onDismissKey))
 
-const { recent, loaded, error, touch, pin, unpin, remove } = useRecentWorkspaces(props.backend)
+const { recent, loaded, error, trimmed, touch, pin, unpin, remove } = useRecentWorkspaces(props.backend)
 
 const { t } = useI18n()
 
@@ -67,12 +71,41 @@ function isOpenElsewhere(path: string): boolean {
   return openWorkspaces.value.some((ws) => norm(ws) === target)
 }
 
-// Pinned first, then most-recent-first (backend already orders by recency).
-const ordered = computed<RecentWorkspace[]>(() => {
-  const pinned = recent.value.filter((r) => r.pinned)
-  const rest = recent.value.filter((r) => !r.pinned)
-  return [...pinned, ...rest]
+// Recent keeps every workspace ever opened, so the list is long: pinned and
+// open workspaces sit in their own group on top, the rest page in PAGE_SIZE at
+// a time. The search runs over the whole list, loaded page or not.
+const PAGE_SIZE = 10
+const query = ref('')
+const shown = ref(PAGE_SIZE)
+watch(query, () => { shown.value = PAGE_SIZE })
+
+const matches = computed<RecentWorkspace[]>(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return recent.value
+  return recent.value.filter((r) => r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q))
 })
+// Pinned first, then open; each most-recent-first (the backend's order).
+const headItems = computed<RecentWorkspace[]>(() => [
+  ...matches.value.filter((r) => r.pinned),
+  ...matches.value.filter((r) => !r.pinned && isOpenElsewhere(r.path)),
+])
+const restItems = computed<RecentWorkspace[]>(() =>
+  matches.value.filter((r) => !r.pinned && !isOpenElsewhere(r.path))
+)
+const remaining = computed(() => Math.max(0, restItems.value.length - shown.value))
+const groups = computed(() => [
+  { key: 'open', label: t('recentWorkspaces.group-open'), items: headItems.value },
+  {
+    key: 'recent',
+    // Only worth a heading when there is a group above it to tell apart from.
+    label: headItems.value.length ? t('recentWorkspaces.group-recent') : '',
+    items: restItems.value.slice(0, shown.value),
+  },
+].filter((g) => g.items.length))
+
+function showMore(): void {
+  shown.value += PAGE_SIZE
+}
 
 // How the workspace's last pipeline run ended, mirrored onto the recent entry
 // by the backend's pipeline handlers. Folders that never ran one ('' from older
@@ -81,11 +114,11 @@ const ordered = computed<RecentWorkspace[]>(() => {
 function stateBadge(state: string): { icon: string; label: string; cls: string } | null {
   switch (state) {
     case 'completed':
-      return { icon: '✓', label: 'completed', cls: 'completed' }
+      return { icon: '✓', label: t('recentWorkspaces.state-completed'), cls: 'completed' }
     case 'running':
-      return { icon: '▶', label: 'running', cls: 'running' }
+      return { icon: '▶', label: t('recentWorkspaces.state-running'), cls: 'running' }
     case 'aborted':
-      return { icon: '⏸', label: 'aborted', cls: 'aborted' }
+      return { icon: '⏸', label: t('recentWorkspaces.state-aborted'), cls: 'aborted' }
     default:
       return null
   }
@@ -95,25 +128,15 @@ function timeAgo(iso: string): string {
   if (!iso) return ''
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return ''
-  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000))
-  if (secs < 60) return 'just now'
-  const mins = Math.floor(secs / 60)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  if (days === 1) return 'yesterday'
-  if (days < 30) return `${days} days ago`
-  const months = Math.floor(days / 30)
-  if (months < 12) return `${months}mo ago`
-  return `${Math.floor(months / 12)}y ago`
+  const { unit, count } = relativeTime(then, Date.now())
+  return t(`time.ago-${unit}`, { count })
 }
 
 async function openWorkspace(path: string): Promise<void> {
   // Already open in another window → focus that window instead of opening a
   // duplicate (two windows on one folder means conflicting PTY/git operations).
   if (await window.agentTeam?.focusWorkspaceWindow?.(path)) return
-  await touch(path)
+  await touch(path, '', '', openWorkspaces.value)
   emit('select', path)
 }
 
@@ -172,6 +195,8 @@ async function removeItem(item: RecentWorkspace, ev: Event): Promise<void> {
 // ── Context menu ─────────────────────────────────────────────────────────────
 // Backdrop + fixed menu, following the PlansPane convention.
 const { editorTargets, loadEditorTargets } = useEditorTargets()
+// Read for its subscription: keeps the disabled-Mini-IDE state current.
+useDisabledBuiltins()
 const ctxMenu = ref<{ show: boolean; x: number; y: number; path: string }>({
   show: false,
   x: 0,
@@ -236,13 +261,13 @@ function ctxCopyPath(): void {
     <div class="welcome-card">
       <header class="w-head">
         <button v-if="dismissible" class="w-close" :aria-label="$t('action.close')" @click="dismiss">✕</button>
-        <h1>Navide</h1>
+        <h1 class="w-brand"><img class="w-mark" :src="navideMark" alt="" />Navide</h1>
         <p class="tagline">{{ $t('label.tagline') }}</p>
       </header>
 
       <section class="w-open">
         <h2>{{ $t('label.open-workspace') }}</h2>
-        <div class="w-open-btns">
+        <div class="w-open-btns" data-tour="welcome-open-buttons">
           <button class="primary" :disabled="picking" @click="browse">
             {{ picking ? '…' : $t('action.browse') }}
           </button>
@@ -260,63 +285,89 @@ function ctxCopyPath(): void {
         <h2>{{ $t('label.recent') }}</h2>
 
         <p v-if="error" class="w-error">{{ error }}</p>
+        <p v-if="trimmed > 0" class="r-trimmed">{{ $t('recentWorkspaces.trimmed', { count: trimmed }) }}</p>
 
-        <ul v-if="ordered.length" class="recent-list">
-          <li
-            v-for="item in ordered"
-            :key="item.path"
-            class="recent-item"
-            :class="{ stale: !item.exists }"
-            @click="openWorkspace(item.path)"
-            @contextmenu="openCtxMenu($event, item)"
-          >
-            <button
-              class="pin"
-              :class="{ on: item.pinned }"
-              :title="item.pinned ? $t('label.unpin') : $t('label.pin')"
-              @click="togglePin(item, $event)"
+        <input
+          v-if="recent.length"
+          v-model="query"
+          class="r-search"
+          type="search"
+          :placeholder="$t('recentWorkspaces.search-placeholder')"
+          :aria-label="$t('recentWorkspaces.search-placeholder')"
+        />
+
+        <div v-for="group in groups" :key="group.key" class="recent-group" :class="`recent-group--${group.key}`">
+          <h3 v-if="group.label" class="r-group-label">{{ group.label }}</h3>
+          <ul class="recent-list">
+            <li
+              v-for="item in group.items"
+              :key="item.path"
+              class="recent-item"
+              :class="{ stale: !item.exists }"
+              tabindex="0"
+              @click="openWorkspace(item.path)"
+              @keydown.enter.self="openWorkspace(item.path)"
+              @contextmenu="openCtxMenu($event, item)"
             >
-              {{ item.pinned ? '★' : '☆' }}
-            </button>
-            <div class="r-body">
-              <div class="r-top">
-                <span class="r-name">{{ item.name }}</span>
-                <span v-if="isOpenElsewhere(item.path)" class="r-open" :title="$t('label.already-open')">{{ $t('label.already-open') }}</span>
-                <span
-                  v-if="stateBadge(item.last_known_state)"
-                  class="r-badge"
-                  :class="stateBadge(item.last_known_state)?.cls"
-                >
-                  {{ stateBadge(item.last_known_state)?.icon }}
-                  {{ stateBadge(item.last_known_state)?.label }}
-                </span>
-                <span v-if="!item.exists" class="r-missing" title="Folder not found">{{ $t('label.missing') }}</span>
-                <span class="r-time">{{ timeAgo(item.last_opened_at) }}</span>
+              <button
+                class="pin"
+                :class="{ on: item.pinned }"
+                :title="item.pinned ? $t('label.unpin') : $t('label.pin')"
+                @click="togglePin(item, $event)"
+              >
+                {{ item.pinned ? '★' : '☆' }}
+              </button>
+              <div class="r-body">
+                <div class="r-top">
+                  <span class="r-name">{{ item.name }}</span>
+                  <span v-if="isOpenElsewhere(item.path)" class="r-open" :title="$t('label.already-open')">{{ $t('label.already-open') }}</span>
+                  <span
+                    v-if="stateBadge(item.last_known_state)"
+                    class="r-badge"
+                    :class="stateBadge(item.last_known_state)?.cls"
+                  >
+                    {{ stateBadge(item.last_known_state)?.icon }}
+                    {{ stateBadge(item.last_known_state)?.label }}
+                  </span>
+                  <span v-if="!item.exists" class="r-missing" :title="$t('recentWorkspaces.folder-not-found')">{{ $t('label.missing') }}</span>
+                  <span class="r-time">{{ timeAgo(item.last_opened_at) }}</span>
+                </div>
+                <div class="r-path" v-truncate>{{ item.path }}</div>
+                <div v-if="item.last_known_task" class="r-task">"{{ item.last_known_task }}"</div>
               </div>
-              <div class="r-path">{{ item.path }}</div>
-              <div v-if="item.last_known_task" class="r-task">"{{ item.last_known_task }}"</div>
-            </div>
-            <button
-              v-if="!isOpenElsewhere(item.path)"
-              class="r-delete"
-              :title="$t('action.remove-from-history')"
-              @click="removeItem(item, $event)"
-            >✕</button>
-          </li>
-        </ul>
+              <button
+                class="r-delete"
+                :title="$t('action.remove-from-history')"
+                :aria-label="$t('action.remove-from-history')"
+                @click="removeItem(item, $event)"
+              >✕</button>
+            </li>
+          </ul>
+        </div>
 
-        <p v-else-if="loaded" class="w-empty" v-html="$t('label.no-recent-workspaces')"></p>
+        <button v-if="remaining > 0" class="r-more" @click="showMore">
+          {{ $t('recentWorkspaces.show-more', { count: remaining }) }}
+        </button>
+        <p v-if="query && recent.length && !matches.length" class="r-nomatch">
+          {{ $t('recentWorkspaces.no-match', { query: query.trim() }) }}
+        </p>
+        <p v-else-if="loaded && !recent.length" class="w-empty" v-html="$t('label.no-recent-workspaces')"></p>
       </section>
 
       <footer class="w-foot">
-        <button class="link" @click="emit('open-settings')">⚙ {{ $t('action.settings') }}</button>
+        <button class="link" @click="emit('open-settings')">{{ $t('action.settings') }}</button>
       </footer>
     </div>
 
     <template v-if="ctxMenu.show">
       <div class="ctx-backdrop" @click="closeCtxMenu" @contextmenu.prevent="closeCtxMenu" />
       <div ref="ctxMenuEl" class="ctx-menu" :style="{ top: ctxMenu.y + 'px', left: ctxMenu.x + 'px' }" @click.stop>
-        <button class="menu-item" @click="ctxOpenInEditor()">{{ $t('action.open-in-default-editor') }}</button>
+        <button
+          class="menu-item"
+          :disabled="isMiniIdeOnlyOpenBlocked()"
+          :title="isMiniIdeOnlyOpenBlocked() ? $t('settings.extensions.builtinDisabledTooltip', { name: 'Mini-IDE' }) : undefined"
+          @click="ctxOpenInEditor()"
+        >{{ $t('action.open-in-default-editor') }}</button>
         <div class="menu-item has-sub">
           <span>{{ $t('action.open-with') }}</span><span class="sub-caret">▸</span>
           <div class="ctx-submenu">
@@ -324,6 +375,8 @@ function ctxCopyPath(): void {
               v-for="target in editorTargets"
               :key="target.id"
               class="menu-item"
+              :disabled="isMiniIdeOnlyOpenBlocked(target.id)"
+              :title="isMiniIdeOnlyOpenBlocked(target.id) ? $t('settings.extensions.builtinDisabledTooltip', { name: 'Mini-IDE' }) : undefined"
               @click="ctxOpenInEditor(target.id)"
             >{{ $t(target.labelKey) }}</button>
           </div>
@@ -403,6 +456,16 @@ button.link:focus-visible,
   letter-spacing: 0.5px;
   line-height: 1.2;
 }
+.w-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.w-mark {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
 .tagline {
   margin: 4px 0 0;
   color: var(--text-secondary);
@@ -428,8 +491,8 @@ button.link:focus-visible,
   margin: 10px 0 0;
 }
 button.primary {
-  background: var(--success-emphasis);
-  border: 1px solid var(--success-strong);
+  background: var(--accent-emphasis);
+  border: 1px solid var(--accent-emphasis);
   color: var(--text-on-emphasis);
   padding: 8px 16px;
   border-radius: var(--radius-control);
@@ -437,7 +500,8 @@ button.primary {
   font-size: var(--font-sm);
 }
 button.primary:hover:not(:disabled) {
-  background: var(--success-strong);
+  background: var(--accent-focus);
+  border-color: var(--accent-focus);
 }
 button.ghost {
   background: transparent;
@@ -454,6 +518,54 @@ button.ghost:hover:not(:disabled) {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+/* The card scrolls once the list grows; macOS hides overlay scrollbars until
+   you scroll, which made the rows below the fold look like they did not exist. */
+.welcome-card::-webkit-scrollbar { width: 8px; }
+.welcome-card::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+.r-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+}
+.recent-group + .recent-group { margin-top: 12px; }
+.r-group-label {
+  margin: 0 0 6px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.r-more {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-sm);
+}
+.r-more:hover { background: var(--bg-subtle); }
+.r-more:focus-visible {
+  outline: 2px solid var(--accent-emphasis);
+  outline-offset: 2px;
+}
+.r-trimmed,
+.r-nomatch {
+  margin: 0 0 10px;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
 }
 .recent-list {
   list-style: none;

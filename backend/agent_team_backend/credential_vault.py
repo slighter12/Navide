@@ -40,6 +40,7 @@ import getpass
 import hashlib
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -50,6 +51,7 @@ from pathlib import Path
 from typing import Callable
 
 from .applog import app_data_dir, default_app_data_dir
+from .cloud_secrets import SECURITY_LINE_MAX_BYTES
 from .osplat import secret_files
 from .cli_vendors.registry import vendor as _cli_vendor_spec
 from .profiles_store import (
@@ -149,6 +151,53 @@ LOGIN_HOME_DIRNAME = "login-home"
 # ``login_pending`` is the one predicate covering both kinds of login.
 _PRE_LOGIN_SNAPSHOT_FILE = ".pre-login-live.json"
 
+# A claude account's own CLAUDE_CONFIG_DIR, inside the profile's slot dir.
+# The account signs in there once and Claude Code keeps, refreshes and locks
+# that login itself; Navide only points panes at the directory and never
+# reads, copies or writes the token. A different name from the legacy profile
+# home (``PROFILE_HOME_DIRNAME``) on purpose: the legacy promotion and the
+# login harvest read that home and may delete its Keychain item.
+ACCOUNT_DIR_DIRNAME = "config-dir"
+
+# Entries of ~/.claude an account dir shares with the real home by symlink, so
+# sessions, settings (Navide's hooks) and the user's skills follow the user,
+# not the account. ``(name, is_dir)``. Runtime state (daemon, locks, ide,
+# session-env, shell snapshots) is deliberately not shared: it belongs to the
+# process tree of one config dir. Linked only when the real entry exists,
+# except ``_CLAUDE_ALWAYS_SHARED``, which a pane may create first.
+CLAUDE_SHARED_ENTRIES: tuple[tuple[str, bool], ...] = (
+    ("projects", True),
+    ("file-history", True),
+    ("todos", True),
+    ("tasks", True),
+    ("history.jsonl", False),
+    ("settings.json", False),
+    ("settings.local.json", False),
+    ("CLAUDE.md", False),
+    ("skills", True),
+    ("plugins", True),
+    ("agents", True),
+    ("commands", True),
+    ("output-styles", True),
+    ("keybindings.json", False),
+)
+_CLAUDE_ALWAYS_SHARED = frozenset({"projects", "settings.json"})
+
+# Top-level ``~/.claude.json`` keys copied into a new account dir's own
+# ``.claude.json`` so its first pane skips onboarding and keeps folder trust
+# and user MCP servers. Never ``oauthAccount`` or any API-key field: the
+# account's identity comes from its own sign-in. ``mcpServers`` is re-synced
+# on every prepare so MCP edits keep reaching every account.
+_CLAUDE_SEED_KEYS = (
+    "hasCompletedOnboarding",
+    "lastOnboardingVersion",
+    "theme",
+    "editorMode",
+    "projects",
+    "mcpServers",
+    "bypassPermissionsModeAccepted",
+)
+
 # Where each CLI writes its secret inside an isolated login home, relative to
 # the login-home dir. Env vars and layouts mirror the pre-refactor config-home
 # isolation (verified in commit 0bcfcf8^): claude uses CLAUDE_CONFIG_DIR (macOS
@@ -222,6 +271,25 @@ def _claude_home_secret_is_fresher(home_secret: str | None, slot_secret: str) ->
     home_exp = _claude_oauth_expires_at(home_secret)
     slot_exp = _claude_oauth_expires_at(slot_secret)
     return home_exp is not None and slot_exp is not None and home_exp >= slot_exp
+
+
+def _is_older_login_of_same_account(live: "LiveCredentials", stored: "LiveCredentials") -> bool:
+    """True when ``live`` is the same claude account as ``stored`` (both
+    emails known and equal) with a strictly older token expiry. A non-finite
+    expiry (Infinity/NaN) proves nothing."""
+    live_exp = _claude_oauth_expires_at(live.secret)
+    stored_exp = _claude_oauth_expires_at(stored.secret)
+    if (
+        live_exp is None or stored_exp is None
+        or not (math.isfinite(live_exp) and math.isfinite(stored_exp))
+        or live_exp >= stored_exp
+    ):
+        return False
+    emails = [
+        creds.account.get("emailAddress") if isinstance(creds.account, dict) else None
+        for creds in (live, stored)
+    ]
+    return all(isinstance(e, str) and e for e in emails) and emails[0].casefold() == emails[1].casefold()
 
 
 def _claude_credential_is_wiped(secret: str | None) -> bool:
@@ -323,6 +391,17 @@ def _write_live_file(path: Path, text: str) -> None:
     secret_files.write_private_plain(path, text.encode("utf-8"))
 
 
+def _link_target(raw: str) -> str:
+    """A symlink's target as it was written: Windows' ``os.readlink`` returns
+    it as an extended-length path (``\\\\?\\`` / ``\\\\?\\UNC\\``), which never
+    equals the plain path the link was created from."""
+    if raw.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + raw[len("\\\\?\\UNC\\"):]
+    if raw.startswith("\\\\?\\"):
+        return raw[len("\\\\?\\"):]
+    return raw
+
+
 def legacy_claude_keychain_service(config_dir: Path | str) -> str:
     """Keychain service Claude Code used under CLAUDE_CONFIG_DIR isolation:
     the fixed service name suffixed with sha256(config-dir string)[:8]."""
@@ -358,6 +437,9 @@ class CredentialVault:
         self._platform = platform or sys.platform
         self._switch_locks: dict[str, asyncio.Lock] = {}
         self.stores = stores
+        # Account dirs whose login a pane reported expired, keyed to the
+        # login's change stamp at that moment (see mark_account_dir_expired).
+        self._expired_dir_logins: dict[str, str] = {}
 
     def switch_lock(self, agent_key: str) -> asyncio.Lock:
         """Per-agent lock serializing credential swaps and opportunistic
@@ -477,23 +559,56 @@ class CredentialVault:
         # Interactive mode (-i) takes the command on stdin so the secret
         # never appears in the argv, which any local process can read via
         # the process table.
+        account = account or getpass.getuser()
         command = " ".join(
             [
                 "add-generic-password",
                 "-U",
-                "-a", _kc_quote(account or getpass.getuser()),
+                "-a", _kc_quote(account),
                 "-s", _kc_quote(service),
                 "-w", _kc_quote(secret),
             ]
         )
-        rc, out = self._security(["-i"], command + "\n")
+        if len(command.encode("utf-8")) <= SECURITY_LINE_MAX_BYTES:
+            rc, out = self._security(["-i"], command + "\n")
+        else:
+            # `security -i` reads 4096-byte lines: a longer command runs its
+            # first 4095 bytes as a whole one, storing a TRUNCATED secret, and
+            # only then fails. Claude Code's own credentials outgrow that once
+            # a few MCP logins sit in them (4.3 KB observed), so every switch
+            # away from such an account failed and left a broken slot behind.
+            # Claude Code itself takes the same way out for the same item: the
+            # value goes on the argv, hex-encoded, only when stdin cannot
+            # carry it.
+            log.warning(
+                "keychain write %s: %d-byte command exceeds the security -i "
+                "line limit; using argv",
+                service, len(command.encode("utf-8")),
+            )
+            try:
+                rc, out = self._security(
+                    [
+                        "add-generic-password", "-U", "-a", account, "-s", service,
+                        "-X", secret.encode("utf-8").hex(),
+                    ],
+                    None,
+                )
+            except Exception as err:  # noqa: BLE001
+                # Never let it propagate as is: a TimeoutExpired (locked
+                # keychain, an open access prompt) carries the full argv,
+                # hex secret included, and the swap error quotes err.args[0].
+                # `from None` keeps it out of any logged traceback too.
+                raise CredentialVaultError(
+                    f"keychain write failed for {service!r} "
+                    f"({type(err).__name__})"
+                ) from None
         if rc != 0:
-            # Last line only, truncated: enough for the security error message
-            # while guaranteeing the secret (a long JSON blob) is never logged.
+            # Only `security`'s own error line ("security: ..."): on a failed
+            # command it also echoes the command, and with it the secret.
             lines = out.strip().splitlines()
-            detail = lines[-1][:200] if lines else ""
+            detail = lines[-1][:200] if lines and lines[-1].startswith("security:") else ""
             raise CredentialVaultError(
-                f"keychain write failed for {service!r}"
+                f"keychain write failed for {service!r} (security exited {rc})"
                 + (f": {detail}" if detail else "")
             )
 
@@ -759,13 +874,15 @@ class CredentialVault:
         else:
             _write_private(self.app_secret_path(name), secret)
 
-    def _read_live_oauth_account(self) -> dict | None:
+    def _read_live_oauth_account(self, *, strict: bool = False) -> dict | None:
         raw = _read_text(self._claude_config_json())
         if raw is None:
             return None
         try:
             data = json.loads(raw)
         except ValueError:
+            if strict:
+                raise
             return None
         account = data.get("oauthAccount") if isinstance(data, dict) else None
         return account if isinstance(account, dict) else None
@@ -915,16 +1032,23 @@ class CredentialVault:
         """The slot's display-only account info (claude's ``oauthAccount``)."""
         return self.read_slot(agent_key, slot_id).account
 
-    def live_account(self, agent_key: str) -> dict | None:
+    def live_account(self, agent_key: str, *, strict: bool = False) -> dict | None:
         """The live display-only account info — claude's ``oauthAccount`` in
         ``~/.claude.json``, read WITHOUT touching the Keychain. The credential
         watcher re-reads this on every write to that file (Claude Code rewrites
         it constantly), and telling one account from another needs no secret.
-        None for the other agents, which have no such block."""
-        return self._read_live_oauth_account() if agent_key == "claude" else None
+        None for the other agents, which have no such block. ``strict=True``
+        raises on unparsable JSON (a file caught mid-write) instead of reading
+        it as signed out."""
+        return self._read_live_oauth_account(strict=strict) if agent_key == "claude" else None
 
     def identity(
-        self, agent_key: str, slot_id: str | None = None, *, scope: str | None = None
+        self,
+        agent_key: str,
+        slot_id: str | None = None,
+        *,
+        scope: str | None = None,
+        strict: bool = False,
     ) -> dict:
         """Display-only identity for one account slot (``slot_id=None`` = the
         live state, i.e. the currently active account). ``signedIn`` reflects
@@ -934,13 +1058,15 @@ class CredentialVault:
         display-only (a long-lived-token login carries no oauthAccount but is
         still signed in). Reads files — plus, for
         claude on macOS, the Keychain — so call off the event loop.
-        Returns ``{"email": str | None, "signedIn": bool}``; never raises."""
+        Returns ``{"email": str | None, "signedIn": bool}``; never raises unless
+        ``strict=True``, which surfaces a failed read (a transient Keychain
+        failure included) instead of reporting it as signed out."""
         try:
             if agent_key == "claude":
                 # The active row reads the live state (~/.claude.json account
                 # + live secret), a parked row its slot snapshot.
                 base = (
-                    self.read_live("claude") if slot_id is None
+                    self.read_live("claude", strict=strict) if slot_id is None
                     else self.read_slot("claude", slot_id)
                 )
                 email = (
@@ -963,12 +1089,12 @@ class CredentialVault:
                 return {
                     "email": None,
                     "signedIn": any(
-                        self.identity(agent_key, slot_id, scope=candidate)["signedIn"]
+                        self.identity(agent_key, slot_id, scope=candidate, strict=strict)["signedIn"]
                         for candidate in switch.scopes
                     ),
                 }
             if slot_id is None:
-                secret = self.read_live(agent_key, scope=scope).secret
+                secret = self.read_live(agent_key, strict=strict, scope=scope).secret
             else:
                 secret = self.read_slot(agent_key, slot_id, scope=scope).secret
             if spec is not None and spec.identity_from_secret is not None:
@@ -978,6 +1104,8 @@ class CredentialVault:
             data = _parse_json_dict(secret)
             return {"email": None, "signedIn": bool(data and data.get("access_token"))}
         except Exception:  # noqa: BLE001 — identity is display-only, never fatal
+            if strict:
+                raise
             return {"email": None, "signedIn": False}
 
     # ---- account switching ----
@@ -995,7 +1123,21 @@ class CredentialVault:
         state so callers can roll it back."""
         self.require_store_mutation(agent_key)
         creds = self.read_live(agent_key, strict=True, scope=scope)
+        pending = self._sign_in_pending_live_marker(agent_key, slot_id)
+        if (
+            agent_key == "claude"
+            and pending.exists()
+            and _is_older_login_of_same_account(
+                creds, self.read_slot(agent_key, slot_id, scope=scope)
+            )
+        ):
+            # The slot holds a sign-in through Navide that never reached live
+            # (e.g. its restore failed), and live still runs on this account's
+            # older token: keep the newer one. Only in that window — outside
+            # it live is the account's current token, whatever its expiry.
+            return creds
         self.write_slot(agent_key, slot_id, creds, scope=scope)
+        pending.unlink(missing_ok=True)
         return creds
 
     def restore(self, agent_key: str, slot_id: str, *, scope: str | None = None) -> None:
@@ -1003,6 +1145,24 @@ class CredentialVault:
         live credentials, and an empty slot clears them (the CLI then prompts
         a fresh login)."""
         self.write_live(agent_key, self.read_slot(agent_key, slot_id, scope=scope), scope=scope)
+        self._sign_in_pending_live_marker(agent_key, slot_id).unlink(missing_ok=True)
+
+    def _sign_in_pending_live_marker(self, agent_key: str, slot_id: str) -> Path:
+        """Set while a claude sign-in harvested into the slot has not been
+        restored to live; ``capture`` keeps it over an older live token of the
+        same account until then."""
+        return self.slot_dir(agent_key, slot_id) / ".sign-in-pending-live"
+
+    def move_sign_in_pending_live(self, agent_key: str, from_slot_id: str, to_slot_id: str) -> None:
+        """Carry a pending-live sign-in marker along with the sign-in when it
+        is folded into another slot; the source keeps none."""
+        source = self._sign_in_pending_live_marker(agent_key, from_slot_id)
+        if not source.exists():
+            return
+        target = self._sign_in_pending_live_marker(agent_key, to_slot_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch()
+        source.unlink(missing_ok=True)
 
     def switch(
         self,
@@ -1073,6 +1233,13 @@ class CredentialVault:
         if agent_key == "claude":
             if self._is_macos:
                 self._keychain_delete(self._slot_service(agent_key, slot_id))
+                if slot_id != DEFAULT_SLOT_ID:
+                    # The account's own config-dir login is a Keychain item
+                    # named after the dir; once the slot dir is archived by
+                    # rename nothing can reach it, so it goes with the account.
+                    self._keychain_delete(
+                        legacy_claude_keychain_service(self.account_dir_path(slot_id))
+                    )
             (self.slot_dir(agent_key, slot_id) / _OAUTH_ACCOUNT_SLOT_FILE).unlink(
                 missing_ok=True
             )
@@ -1366,6 +1533,7 @@ class CredentialVault:
             # the home's own .claude.json for the display-only oauthAccount.
             if not self.harvest_legacy_claude_home(slot_id, home):
                 return False
+            self._sign_in_pending_live_marker("claude", slot_id).touch()
             # The user just re-logged this account, so the login must win. The
             # legacy profile-home promotion (promote_profile_home_secrets)
             # keeps a home copy whose expiry is not older than the slot's — an
@@ -1404,6 +1572,141 @@ class CredentialVault:
         shutil.rmtree(home, ignore_errors=True)
         return True
 
+    # ---- per-account config dirs (claude) ----
+
+    def account_dir_path(self, slot_id: str) -> Path:
+        """The claude account's own ``CLAUDE_CONFIG_DIR``. Byte-for-byte
+        stable: Claude Code names the Keychain item after a hash of this exact
+        string. The built-in Default account is the real ``~/.claude`` and has
+        none."""
+        if not slot_id or slot_id == DEFAULT_SLOT_ID:
+            raise ValueError("the Default account uses the real ~/.claude")
+        return Path(canonical_path_str(self.slot_dir("claude", slot_id) / ACCOUNT_DIR_DIRNAME))
+
+    def _keychain_item_exists(self, service: str) -> bool:
+        """Whether a generic-password item exists, asking for its attributes
+        only — the secret is never read (no ``-g``/``-w``)."""
+        return self._keychain_item_stamp(service)[0]
+
+    def _keychain_item_stamp(self, service: str) -> tuple[bool, str | None]:
+        """``(exists, modification stamp)`` of a generic-password item, from
+        its attributes only — the secret is never read (no ``-g``/``-w``).
+        The stamp is the raw ``mdat`` value, or None when it is not printed."""
+        try:
+            rc, out = self._security(["find-generic-password", "-s", service], None)
+        except Exception as err:  # noqa: BLE001
+            log.warning("keychain lookup %s failed: %s", service, err)
+            return False, None
+        if rc != 0:
+            return False, None
+        for line in out.splitlines():
+            marker = '"mdat"<timedate>='
+            if marker in line:
+                return True, line.split(marker, 1)[1].strip() or None
+        return True, None
+
+    def _account_dir_login_stamp(self, slot_id: str) -> tuple[bool, str | None]:
+        """``(present, change stamp)`` of the login inside the account dir:
+        the Keychain item's modification date on macOS, the credentials
+        file's mtime elsewhere. Never the credential itself."""
+        directory = self.account_dir_path(slot_id)
+        if not directory.is_dir():
+            return False, None
+        if self._is_macos:
+            return self._keychain_item_stamp(legacy_claude_keychain_service(directory))
+        try:
+            return True, str((directory / ".credentials.json").stat().st_mtime_ns)
+        except OSError:
+            return False, None
+
+    def account_dir_signed_in(self, slot_id: str) -> bool:
+        """Whether the account has signed in inside its own config dir. A
+        presence check only: Claude Code owns the credential and refreshes it,
+        so Navide never reads it. A login a pane reported expired does not
+        count until it changes — a new sign-in rewrites it. Blocking (a
+        ``security`` call on macOS)."""
+        present, stamp = self._account_dir_login_stamp(slot_id)
+        if not present:
+            return False
+        expired_at = self._expired_dir_logins.get(slot_id)
+        if expired_at is None:
+            return True
+        if stamp is not None and stamp != expired_at:
+            self._expired_dir_logins.pop(slot_id, None)
+            return True
+        return False
+
+    def mark_account_dir_expired(self, slot_id: str) -> bool:
+        """A pane on this account dir reported its login expired. Claude Code
+        empties the tokens in place after ``invalid_grant`` and the item stays,
+        so presence alone would keep sending panes to a dead login. Until the
+        login changes the dir no longer counts as signed in, and panes fall
+        back to the live credential. Returns False when no change stamp can be
+        read — nothing could ever clear the mark, so none is set. In memory:
+        a restart re-learns it from the next pane that hits it."""
+        present, stamp = self._account_dir_login_stamp(slot_id)
+        if not present or stamp is None:
+            return False
+        self._expired_dir_logins[slot_id] = stamp
+        return True
+
+    def account_dir_identity(self, slot_id: str) -> dict | None:
+        """The ``oauthAccount`` Claude Code recorded in the account dir's own
+        ``.claude.json`` (display only, not a secret), or None."""
+        try:
+            directory = self.account_dir_path(slot_id)
+        except ValueError:
+            return None
+        parsed = _parse_json_dict(_read_text(directory / ".claude.json"))
+        account = parsed.get("oauthAccount") if parsed else None
+        return account if isinstance(account, dict) else None
+
+    def prepare_account_dir(self, slot_id: str) -> Path:
+        """Create or refresh the account dir and return it: owner-only, the
+        shared ``~/.claude`` entries linked in, and its ``.claude.json`` seeded
+        once from the real one (user MCP servers re-synced every time).
+        Credentials are never touched. Blocking — call off the event loop."""
+        directory = self.account_dir_path(slot_id)
+        secret_files.make_private_dir(directory)
+        real = self._real_home / ".claude"
+        for name, is_dir in CLAUDE_SHARED_ENTRIES:
+            target = real / name
+            if name in _CLAUDE_ALWAYS_SHARED or target.exists() or target.is_symlink():
+                self._link_shared(directory / name, target, is_dir=is_dir)
+        self._seed_account_dir_config(directory)
+        return directory
+
+    def _seed_account_dir_config(self, directory: Path) -> None:
+        real = _parse_json_dict(_read_text(self._claude_config_json())) or {}
+        path = directory / ".claude.json"
+        raw = _read_text(path)
+        if raw is None:
+            seed = {key: real[key] for key in _CLAUDE_SEED_KEYS if key in real}
+            try:
+                _write_live_file(path, json.dumps(seed, indent=2))
+            except OSError as err:
+                log.warning("cannot seed %s: %s", path, err)
+            return
+        current = _parse_json_dict(raw)
+        if current is None or "mcpServers" not in real:
+            return
+        if current.get("mcpServers") == real["mcpServers"]:
+            return
+        current["mcpServers"] = real["mcpServers"]
+        try:
+            _write_live_file(path, json.dumps(current, indent=2))
+        except OSError as err:
+            log.warning("cannot sync MCP servers into %s: %s", path, err)
+
+    def account_dir_spawn_env(self, slot_id: str) -> tuple[dict[str, str], list[str]]:
+        """``(env_set, env_remove)`` that runs claude on the account's own
+        config dir. The API-key overrides are removed for the same reason a
+        login pane removes them: they would outrank the account's login."""
+        return (
+            {"CLAUDE_CONFIG_DIR": os.fspath(self.account_dir_path(slot_id))},
+            list(CLAUDE_ENV_OVERRIDES),
+        )
+
     # ---- legacy persistent isolated homes ----
 
     def profile_home_path(self, agent_key: str, slot_id: str) -> Path:
@@ -1428,10 +1731,40 @@ class CredentialVault:
         """Make sure a shared symlink can be written through: the target dir
         itself for a directory link, or the target's parent for a file link
         (the file is created by the CLI on first write, through the symlink)."""
+        base = target if is_dir else target.parent
+        created = self._new_in_claude_home(base)
         try:
-            (target if is_dir else target.parent).mkdir(parents=True, exist_ok=True)
+            base.mkdir(parents=True, exist_ok=True)
         except OSError as err:
             log.warning("cannot ensure shared target base %s: %s", target, err)
+            return
+        if created:
+            self._announce_claude_home("note", base, "created for signed-in accounts")
+
+    def _new_in_claude_home(self, path: Path) -> bool:
+        """Whether ``path`` is under the real ``~/.claude`` and not there yet.
+        The path test comes first, so a link elsewhere (grok's, made while
+        its ``switch_lock`` is held) costs no I/O. Never raises."""
+        try:
+            return path.is_relative_to(self._real_home / ".claude") and not path.is_dir()
+        except Exception:  # noqa: BLE001 — a disclosure check never fails a link
+            return False
+
+    def _announce_claude_home(self, kind: str, target: Path, detail: str) -> None:
+        """Disclose a change in the real ``~/.claude`` (the required
+        convenience feature claude.account-homes): only a log row and a
+        notice. Never raises into the vault operation that made the change."""
+        try:
+            if not target.is_relative_to(self._real_home / ".claude"):
+                return
+            from . import convenience_wiring
+
+            if kind == "note":
+                convenience_wiring.note("claude.account-homes", target, detail=detail)
+            else:
+                convenience_wiring.changed("claude.account-homes", target, detail=detail)
+        except Exception as err:  # noqa: BLE001
+            log.warning("announcing %s failed: %s", target, err)
 
     def _migrate_file(self, src: Path, target: Path) -> bool:
         """Move a real file that shadows a shared link into the real home.
@@ -1451,6 +1784,7 @@ class CredentialVault:
                 return True
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(os.fspath(src), os.fspath(target))
+            self._announce_claude_home("changed", target, f"moved from {src}")
             return True
         except OSError as err:
             log.warning("migrating %s -> %s failed: %s", src, target, err)
@@ -1492,6 +1826,7 @@ class CredentialVault:
                 log.warning("kept %s unshared: could not fully merge into %s", src, target)
                 return False
             shutil.rmtree(src, ignore_errors=True)
+            self._announce_claude_home("changed", target, f"merged from {src}")
             return True
         except OSError as err:
             log.warning("migrating dir %s -> %s failed: %s", src, target, err)
@@ -1509,7 +1844,7 @@ class CredentialVault:
         isolated home, never raising."""
         try:
             if dst.is_symlink():
-                if os.readlink(dst) == os.fspath(target):
+                if _link_target(os.readlink(dst)) == os.fspath(target):
                     self._ensure_target_base(target, is_dir=is_dir)
                     return
                 dst.unlink()  # stale/wrong link -> repoint
@@ -1575,6 +1910,11 @@ class CredentialVault:
     def _homes_promoted_marker(self, agent_key: str) -> Path:
         return self._root / agent_key / ".homes-promoted"
 
+    def _logout_announced_marker(self, agent_key: str) -> Path:
+        """Set while the user's sign-out outside Navide has been told; a
+        startup that finds a login again clears it."""
+        return self._root / agent_key / ".logout-announced"
+
     def _unify_claude_live(self, active_id: str | None) -> None:
         """One-shot (marker-guarded) alignment of claude's live location with
         the active account. Under the pre-unification model a managed claude
@@ -1632,7 +1972,10 @@ class CredentialVault:
         # The marker is written only after every profile promoted cleanly —
         # a failed profile leaves it unwritten so the next startup retries.
         promoted_marker = self._homes_promoted_marker(agent_key)
-        if not promoted_marker.exists():
+        # Set on an earlier startup: the live login was published then, so an
+        # empty one now is the user signing out outside Navide.
+        promoted_before = promoted_marker.exists()
+        if not promoted_before:
             all_promoted = True
             for profile_id in profile_ids:
                 try:
@@ -1663,11 +2006,31 @@ class CredentialVault:
         # publish the freshly promoted slot so panes are signed in.
         try:
             active_scope = scopes.get(active_id)
+            # Strict: a transient Keychain failure is no empty live login.
+            live_empty = self.read_live(agent_key, strict=True, scope=active_scope).secret is None
+            announced = self._logout_announced_marker(agent_key)
+            if not live_empty:
+                announced.unlink(missing_ok=True)
             if (
-                self.read_live(agent_key, scope=active_scope).secret is None
+                live_empty
                 and self.read_slot(agent_key, active_id, scope=active_scope).secret is not None
             ):
-                self.restore(agent_key, active_id, scope=active_scope)
+                # The convenience feature credentials.auto-repair: announced,
+                # skipped when off. A sign-out made outside Navide is never
+                # undone; the user is told instead.
+                from .convenience_wiring import prompt_live_logout, repair_live_login
+
+                if promoted_before:
+                    # One sign-out, one prompt: not again on every startup.
+                    if not announced.exists() and prompt_live_logout(agent_key):
+                        announced.parent.mkdir(parents=True, exist_ok=True)
+                        announced.touch()
+                    return
+                repair_live_login(
+                    agent_key, active_id,
+                    lambda: self.restore(agent_key, active_id, scope=active_scope),
+                    reason="the live login was empty",
+                )
         except Exception as err:  # noqa: BLE001
             log.warning(
                 "restoring active %s account after promotion failed: %s",

@@ -58,6 +58,33 @@ def default_seams() -> Seams:
             return {"status": "queued", "unknown": True}
         return {"status": entry["status"], "reason": entry.get("reason"), "hold": entry.get("hold")}
 
+    async def cancel(msg_key: str) -> str:
+        # The same withdrawal cli_cancel_message asks of the window owning the queue.
+        from .. import app
+
+        entry = mcp._mcp_message_status.get(msg_key)
+        if entry is None:
+            return "unknown"
+        if entry["status"] != "queued":
+            return str(entry["status"])
+        await app.broadcast(make_event("agent_msg.cancel", {"msg_key": msg_key}))
+        await mcp._await_delivery(msg_key, mcp._CANCEL_VERDICT_TIMEOUT_S)
+        settled = mcp._mcp_message_status.get(msg_key)
+        return str(settled["status"]) if settled else "unknown"
+
+    async def resume(pane_id: str) -> dict[str, Any]:
+        # What project.set_pane_stopped does when the user types into a stopped pane.
+        from .. import app
+
+        pane = agent_messaging.current(pane_id)
+        if pane is None:
+            return {"ok": False, "error": "pane is gone"}
+        app.project_store.set_pane_stopped(pane.workspace_path, pane_id=pane.pane_id, stopped=False)
+        await app.broadcast(make_event("pane.stopped", {
+            "workspace_path": pane.workspace_path, "pane_id": pane.pane_id, "stopped": False,
+        }))
+        return {"ok": True}
+
     async def interrupt(pane_id: str) -> dict[str, Any]:
         pane = agent_messaging.current(pane_id)
         if pane is None:
@@ -99,19 +126,38 @@ def default_seams() -> Seams:
             "answerable": not pane.agent_key or pane.agent_key in relay.ANSWERABLE_AGENTS,
         }
 
-    async def answer(pane_id: str, answer_payload: dict[str, Any]) -> dict[str, Any]:
+    async def limit_info(pane_id: str) -> dict[str, Any]:
+        # The renderer's own reading (usageLimitUntil) and screen tail, as cli_get_status
+        # reports them; nothing here asks a vendor for quota.
+        pane = agent_messaging.current(pane_id)
+        if pane is None:
+            return {}
+        reply = await mcp._ui_request(
+            pane.workspace_path, "invoke", caller=mcp._pane_caller(pane.pane_id),
+            action="ui.pane.getStatus", args={"paneId": pane.pane_id},
+        )
+        result = reply.get("result") or {}
+        return {"until": result.get("usageLimitUntil"), "buffer": str(result.get("buffer") or "")}
+
+    async def answer(pane_id: str, answer_payload: dict[str, Any],
+                     expected: dict[str, Any] | None = None) -> dict[str, Any]:
         pane = agent_messaging.current(pane_id)
         if pane is None:
             return {"ok": False, "error": "pane is gone"}
+        args: dict[str, Any] = {"paneId": pane.pane_id, "answer": answer_payload}
+        if expected is not None:
+            # The window presses only while this same prompt is on screen, as for cli_answer_prompt.
+            args["expected"] = expected
         reply = await mcp._ui_request(
             pane.workspace_path, "invoke", caller=mcp._pane_caller(pane.pane_id),
-            action="ui.pane.sendKeys", args={"paneId": pane.pane_id, "answer": answer_payload},
+            action="ui.pane.sendKeys", args=args,
         )
         if not reply.get("ok"):
             return {"ok": False, "error": str(reply.get("error") or "the window did not answer")}
         result = reply.get("result") or {}
         if not result.get("ok", True) or not result.get("sent"):
-            return {"ok": False, "error": str(result.get("error") or "not sent")}
+            return {"ok": False, "error": str(result.get("error") or "not sent"),
+                    "error_code": str(result.get("errorCode") or "")}
         return {"ok": True}
 
     def resolve_pane(pane_id: str) -> str:
@@ -135,6 +181,42 @@ def default_seams() -> Seams:
         if taint.is_tainted(parent_id) and not taint.is_tainted(child_id):
             taint.safe_mark_tainted(child_id, "agent", f"spawned by tainted pane {parent_id}")
 
+    def ui_settings() -> dict[str, Any]:
+        from .. import app
+
+        return app.ui_settings_store.get()
+
+    def pane_agent(pane_id: str) -> str:
+        pane = agent_messaging.current(pane_id)
+        return pane.agent_key if pane is not None else ""
+
+    def agent_skills(agent_key: str) -> list[str]:
+        from .. import app
+        from .quick_menu import agent_skills as listed
+
+        return listed(app.skills_store, agent_key)
+
+    # /mcp: read-only and allowlisted (mcp_menu). A CLI's own servers come from its config
+    # file and are never started; Navide's are the ones it already runs.
+    def agent_mcp(agent_key: str) -> list[dict[str, Any]]:
+        from .. import native_mcp
+        from .mcp_menu import native_rows
+
+        return native_rows(native_mcp.scan(), agent_key)
+
+    async def navide_mcp() -> list[dict[str, Any]]:
+        from .. import app
+        from .mcp_menu import navide_rows
+
+        servers = await asyncio.to_thread(app.mcp_settings_store.list_servers)
+        return await navide_rows(servers, app.mcp_manager.get)
+
+    async def navide_mcp_tools(name: str) -> list[str] | None:
+        from .. import app
+        from .mcp_menu import navide_tools
+
+        return await navide_tools(app.mcp_manager.get, name)
+
     async def broadcast(event_type: str, payload: dict[str, Any]) -> None:
         from .. import app
 
@@ -153,9 +235,11 @@ def default_seams() -> Seams:
 
     return Seams(
         deliver=deliver, await_verdict=await_verdict, interrupt=interrupt, pane_state=pane_state,
-        awaiting_info=awaiting_info, answer=answer, resolve_pane=resolve_pane, broadcast=broadcast,
+        awaiting_info=awaiting_info, answer=answer, limit_info=limit_info, resolve_pane=resolve_pane, broadcast=broadcast,
         read_secret=read_secret, write_secret=write_secret, pane_workspace=pane_workspace,
         pane_directory=pane_directory, inherit_taint=inherit_taint,
+        ui_settings=ui_settings, pane_agent=pane_agent, agent_skills=agent_skills, cancel=cancel, resume=resume,
+        agent_mcp=agent_mcp, navide_mcp=navide_mcp, navide_mcp_tools=navide_mcp_tools,
     )
 
 

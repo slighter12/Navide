@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 
 import pytest
@@ -57,6 +58,7 @@ async def test_poll_delivers_messages_and_persists_offset(api: FakeBotApi) -> No
     try:
         await _until(lambda: got)
         assert ad.status.lifecycle == "ready" and ad.status.identity == "@navide_bot"
+        assert ad.status.display_name == "Navide"  # getMe's first_name, for the app's channel labels
         m = got[0]
         assert (m.chat_id, m.sender_id, m.text, m.is_direct, m.thread_id) == ("42", "7", "hello", True, "")
         assert api.calls_of("deleteWebhook") == [{"drop_pending_updates": False}]
@@ -122,7 +124,7 @@ async def test_backoff_restarts_after_a_successful_poll(api: FakeBotApi) -> None
         pass
 
     api.fail("getUpdates", 500, "Internal Server Error", times=3)
-    ad = TelegramAdapter(TOKEN, base_url=api.base_url, backoff=backoff, poll_timeout_s=1)
+    ad = TelegramAdapter(TOKEN, base_url=api.base_url, backoff=backoff, poll_timeout_s=1, stable_s=0.0)
     await ad.start(emit)
     try:
         await _until(lambda: len(attempts) == 3 and ad.status.lifecycle == "ready"
@@ -130,6 +132,33 @@ async def test_backoff_restarts_after_a_successful_poll(api: FakeBotApi) -> None
         api.fail("getUpdates", 500, "Internal Server Error")
         await _until(lambda: len(attempts) == 4)
         assert attempts == [1, 2, 3, 1]
+    finally:
+        await ad.stop()
+
+
+async def test_a_session_that_answers_then_drops_at_once_keeps_backing_off(api: FakeBotApi) -> None:
+    # Same rule as ReceiveLoop: only a session that stayed up READY_STABLE_S
+    # restarts the series, or a server that answers once and fails would be
+    # retried at the first-step delay forever.
+    attempts: list[int] = []
+
+    def backoff(attempt: int, _r: float) -> float:
+        attempts.append(attempt)
+        return 0.01
+
+    async def emit(_msg: InboundMessage) -> None:
+        pass
+
+    api.fail("getUpdates", 500, "Internal Server Error", times=3)
+    ad = TelegramAdapter(TOKEN, base_url=api.base_url, backoff=backoff, poll_timeout_s=1, stable_s=10.0)
+    await ad.start(emit)
+    try:
+        await _until(lambda: len(attempts) == 3 and ad.status.lifecycle == "ready"
+                     and len(api.calls_of("getUpdates")) >= 5)
+        assert ad.status.reconnect_attempts == 0  # the status still shows a live session
+        api.fail("getUpdates", 500, "Internal Server Error")
+        await _until(lambda: len(attempts) == 4)
+        assert attempts == [1, 2, 3, 4]
     finally:
         await ad.stop()
 
@@ -246,6 +275,21 @@ async def test_inbound_topic_vs_general_thread_ids(api: FakeBotApi) -> None:
     ]
 
 
+async def test_buttons_are_laid_out_in_rows_that_fit_a_phone(api: FakeBotApi) -> None:
+    ad = _adapter(api)
+    loc = Location("telegram", "default", "42")
+    options = [(f"{n}. Option {n}", f"nv1:abcde:{n}") for n in range(1, 10)]
+    await ad.send_text(loc, "pick one", buttons=options)
+    rows = api.calls_of("sendMessage")[0]["reply_markup"]["inline_keyboard"]
+    assert [b["callback_data"] for row in rows for b in row] == [d for _, d in options]  # order kept
+    assert len(rows) > 1
+    assert all(len(row) <= 3 and sum(len(b["text"]) for b in row) <= 24 for row in rows)
+    long = [("1. Yes, and don't ask again for this command", "nv1:abcde:1"), ("2. No", "nv1:abcde:2")]
+    await ad.send_text(loc, "approve?", buttons=long)
+    rows = api.calls_of("sendMessage")[1]["reply_markup"]["inline_keyboard"]
+    assert [[b["text"] for b in row] for row in rows] == [[long[0][0]], [long[1][0]]]  # a long label gets its own row
+
+
 async def test_edit_buttons_and_callback(api: FakeBotApi) -> None:
     got: list[InboundMessage] = []
 
@@ -259,6 +303,8 @@ async def test_edit_buttons_and_callback(api: FakeBotApi) -> None:
     assert markup["inline_keyboard"][0][1] == {"text": "No", "callback_data": "nv1:abcde:n"}
     await ad.edit_text(loc, "9", "working…")
     assert api.calls_of("editMessageText")[0]["message_id"] == 9
+    # No reply_markup: Telegram drops the inline keyboard, as a settled prompt needs.
+    assert "reply_markup" not in api.calls_of("editMessageText")[0]
 
     api.push_callback(chat_id=42, data="nv1:abcde:y")
     await ad.start(emit)
@@ -338,3 +384,317 @@ async def test_stop_ends_polling_even_if_a_cancel_is_swallowed(api: FakeBotApi, 
     assert done, "stop() did not return"
     assert time.monotonic() - started < 2
     assert swallowed and ad.status.lifecycle == "stopped"
+
+
+# --- Managed Bots (Bot API 9.6) ------------------------------------------------
+
+
+def _collect() -> tuple[list[InboundMessage], object]:
+    got: list[InboundMessage] = []
+
+    async def emit(msg: InboundMessage) -> None:
+        got.append(msg)
+
+    return got, emit
+
+
+async def test_messages_and_button_presses_are_delivered_as_before(api: FakeBotApi) -> None:
+    """Locks the message and callback_query paths: exactly these inbound values, in order."""
+    got, emit = _collect()
+    api.push_message(chat_id=42, text="hello", sender_id=7, username="alice")
+    api.push_callback(chat_id=42, data="nv1:abcde:y", sender_id=7)
+    api.push_message(chat_id=42, text="", sender_id=7)  # no text: skipped
+    ad = _adapter(api)
+    await ad.start(emit)
+    try:
+        await _until(lambda: len(got) >= 2)
+        await _until(lambda: api.calls_of("answerCallbackQuery"))
+    finally:
+        await ad.stop()
+    msg, cb = got
+    assert (msg.platform, msg.account, msg.chat_id, msg.thread_id, msg.sender_id, msg.sender_name,
+            msg.text, msg.message_id, msg.is_direct, msg.callback_data, msg.reply_to_id) == (
+        "telegram", "default", "42", "", "7", "alice", "hello", "42:1", True, "", "")
+    assert (cb.chat_id, cb.sender_id, cb.text, cb.callback_data, cb.message_id.startswith("cb:q")) == (
+        "42", "7", "", "nv1:abcde:y", True)
+    assert len(got) == 2
+
+
+async def test_polling_asks_for_managed_bot_updates_too(api: FakeBotApi) -> None:
+    got, emit = _collect()
+    ad = _adapter(api)
+    await ad.start(emit)
+    try:
+        await _until(lambda: api.calls_of("getUpdates"))
+    finally:
+        await ad.stop()
+    assert api.calls_of("getUpdates")[0]["allowed_updates"] == ["message", "callback_query", "managed_bot"]
+
+
+@pytest.mark.parametrize("flag, expected", [(True, True), (False, False), (None, False)])
+async def test_get_me_says_whether_the_bot_can_manage_bots(flag, expected) -> None:
+    with FakeBotApi(TOKEN, can_manage_bots=flag) as fake:
+        got, emit = _collect()
+        ad = _adapter(fake)
+        await ad.start(emit)
+        try:
+            await _until(lambda: ad.status.lifecycle == "ready")
+        finally:
+            await ad.stop()
+    assert ad.status.can_manage_bots is expected
+    assert dataclasses.asdict(ad.status)["can_manage_bots"] is expected
+
+
+async def test_a_managed_bot_update_goes_to_the_handler_and_not_to_chats(api: FakeBotApi) -> None:
+    got, emit = _collect()
+    handled: list[dict] = []
+
+    async def on_managed_bot(update: dict) -> None:
+        handled.append(update)
+
+    ad = _adapter(api)
+    ad.on_managed_bot = on_managed_bot
+    api.push_managed_bot(creator_id=7, bot_id=999, bot_username="made_bot")
+    api.push_message(chat_id=42, text="after")
+    await ad.start(emit)
+    try:
+        await _until(lambda: handled and got)
+    finally:
+        await ad.stop()
+    assert handled == [{
+        "user": {"id": 7, "is_bot": False, "first_name": "neil"},
+        "bot": {"id": 999, "is_bot": True, "first_name": "Navide bot", "username": "made_bot"},
+    }]
+    assert [m.text for m in got] == ["after"]
+
+
+async def test_a_managed_bot_update_without_a_handler_is_skipped(api: FakeBotApi) -> None:
+    got, emit = _collect()
+    offsets = MemOffsets()
+    ad = _adapter(api, offsets)
+    uid = api.push_managed_bot(creator_id=7, bot_id=999)
+    api.push_message(chat_id=42, text="after")
+    await ad.start(emit)
+    try:
+        await _until(lambda: got)
+    finally:
+        await ad.stop()
+    assert [m.text for m in got] == ["after"]
+    assert offsets.rows[("telegram", "default")][1] > uid
+
+
+async def test_managed_bot_token_asks_for_the_new_bots_user_id(api: FakeBotApi) -> None:
+    api.handlers["getManagedBotToken"] = lambda params: f"{params['user_id']}:NEWSECRET"
+    ad = _adapter(api)
+    assert await ad.managed_bot_token(999) == "999:NEWSECRET"
+    assert api.calls_of("getManagedBotToken") == [{"user_id": 999}]
+    api.fail("getManagedBotToken", 400, "Bad Request: bot not found")
+    with pytest.raises(Exception, match="bot not found"):
+        await ad.managed_bot_token(1000)
+
+
+async def test_menu_sends_and_edits_several_button_rows(api: FakeBotApi) -> None:
+    ad = _adapter(api)
+    loc = Location("telegram", "default", "42", "50")
+    rows = [[("💬 A", "nv2:p:aaaaaaaa"), ("💬 B", "nv2:p:bbbbbbbb")], [("Next ▶", "nv2:g:cccccccc")]]
+    message_id = await ad.send_menu(loc, "menu", rows)
+    sent = api.calls_of("sendMessage")[0]
+    assert sent["message_thread_id"] == 50 and message_id.isdigit()
+    assert sent["reply_markup"]["inline_keyboard"] == [
+        [{"text": "💬 A", "callback_data": "nv2:p:aaaaaaaa"}, {"text": "💬 B", "callback_data": "nv2:p:bbbbbbbb"}],
+        [{"text": "Next ▶", "callback_data": "nv2:g:cccccccc"}],
+    ]
+    await ad.edit_menu(loc, "9", "page 2", rows[1:])
+    edit = api.calls_of("editMessageText")[0]
+    assert edit["message_id"] == 9
+    assert edit["reply_markup"]["inline_keyboard"] == [[{"text": "Next ▶", "callback_data": "nv2:g:cccccccc"}]]
+
+
+async def _one_session(api: FakeBotApi) -> None:
+    ad = _adapter(api)
+
+    async def emit(msg: InboundMessage) -> None:
+        pass
+
+    await ad.start(emit)
+    try:
+        await _until(lambda: api.calls_of("getUpdates"))
+    finally:
+        await ad.stop()
+
+
+async def test_the_command_menu_is_added_to_an_empty_list(api: FakeBotApi) -> None:
+    api.handlers["getMyCommands"] = lambda params: []
+    await _one_session(api)
+    calls = api.calls_of("setMyCommands")
+    assert len(calls) == 1
+    assert [c["command"] for c in calls[0]["commands"]] == ["pending", "prompts", "skills", "mcp", "status", "stop", "cancel", "resume"]
+
+
+async def test_existing_commands_are_preserved(api: FakeBotApi) -> None:
+    mine = [{"command": "deploy", "description": "my own"}, {"command": "status", "description": "my status"}]
+    api.handlers["getMyCommands"] = lambda params: [dict(c) for c in mine]
+    await _one_session(api)
+    commands = api.calls_of("setMyCommands")[0]["commands"]
+    # The user's commands first, unchanged and in order; "status" was theirs already.
+    assert commands[:2] == mine
+    assert [c["command"] for c in commands[2:]] == ["pending", "prompts", "skills", "mcp", "stop", "cancel", "resume"]
+
+
+async def test_a_complete_command_list_is_not_written(api: FakeBotApi) -> None:
+    from agent_team_backend.channels.telegram import BOT_COMMANDS
+
+    api.handlers["getMyCommands"] = lambda params: [dict(c) for c in BOT_COMMANDS]
+    await _one_session(api)
+    assert api.calls_of("setMyCommands") == []
+
+
+async def test_an_unreadable_command_list_is_not_written(api: FakeBotApi) -> None:
+    api.fail("getMyCommands", 400, "Bad Request: something")
+    await _one_session(api)
+    assert api.calls_of("setMyCommands") == []
+
+
+async def test_our_command_with_an_old_description_is_updated_in_place(api: FakeBotApi) -> None:
+    from agent_team_backend.channels.telegram import BOT_COMMANDS
+
+    # A bot registered in another language: /pending still says it in English.
+    old = [{"command": "deploy", "description": "my own"},
+           *[dict(c, description="List panes waiting for confirmation") if c["command"] == "pending" else dict(c)
+             for c in BOT_COMMANDS]]
+    api.handlers["getMyCommands"] = lambda params: [dict(c) for c in old]
+    await _one_session(api)
+    commands = api.calls_of("setMyCommands")[0]["commands"]
+    assert [c["command"] for c in commands] == [c["command"] for c in old]
+    assert commands[0] == {"command": "deploy", "description": "my own"}
+    assert next(c for c in commands if c["command"] == "pending")["description"] == "列出等待確認的 pane"
+
+
+@pytest.mark.parametrize("description", ["快速選單", "Prompt 與技能選單", "Prompts and skills menu", "プロンプトとスキルのメニュー"])
+async def test_our_retired_menu_command_is_removed(api: FakeBotApi, description: str) -> None:
+    from agent_team_backend.channels.telegram import BOT_COMMANDS
+
+    # A bot registered by an earlier build still lists /menu, worded by Navide.
+    mine = [{"command": "deploy", "description": "my own"}, {"command": "menu", "description": description}]
+    api.handlers["getMyCommands"] = lambda params: [dict(c) for c in mine]
+    await _one_session(api)
+    commands = api.calls_of("setMyCommands")[0]["commands"]
+    assert commands == [mine[0], *BOT_COMMANDS]
+
+
+async def test_a_list_missing_nothing_but_holding_our_menu_is_rewritten_without_it(api: FakeBotApi) -> None:
+    from agent_team_backend.channels.telegram import BOT_COMMANDS
+
+    old = [*[dict(c) for c in BOT_COMMANDS[:1]], {"command": "menu", "description": "Prompt 與技能選單"},
+           *[dict(c) for c in BOT_COMMANDS[1:]]]
+    api.handlers["getMyCommands"] = lambda params: [dict(c) for c in old]
+    await _one_session(api)
+    assert api.calls_of("setMyCommands")[0]["commands"] == BOT_COMMANDS
+
+
+async def test_a_users_own_command_sharing_our_name_is_left_alone(api: FakeBotApi) -> None:
+    mine = [{"command": "menu", "description": "today's lunch"}]
+    api.handlers["getMyCommands"] = lambda params: [dict(c) for c in mine]
+    await _one_session(api)
+    commands = api.calls_of("setMyCommands")[0]["commands"]
+    assert commands[0] == mine[0]
+    assert [c["command"] for c in commands].count("menu") == 1
+
+
+async def test_commands_are_described_in_the_navide_language(api: FakeBotApi) -> None:
+    api.handlers["getMyCommands"] = lambda params: []
+    ad = _adapter(api)
+    ad.command_language = lambda: "en-US"
+
+    async def emit(msg: InboundMessage) -> None:
+        pass
+
+    await ad.start(emit)
+    try:
+        await _until(lambda: api.calls_of("getUpdates"))
+    finally:
+        await ad.stop()
+    commands = api.calls_of("setMyCommands")[0]["commands"]
+    assert next(c for c in commands if c["command"] == "prompts")["description"] == "Prompt list"
+
+
+async def test_a_language_change_rewrites_our_descriptions_only(api: FakeBotApi) -> None:
+    from agent_team_backend.channels.telegram import bot_commands
+
+    current = [{"command": "deploy", "description": "my own"}, *bot_commands("zh-TW")]
+    api.handlers["getMyCommands"] = lambda params: [dict(c) for c in current]
+    ad = _adapter(api)
+    ad.command_language = lambda: "ja-JP"
+
+    async def emit(msg: InboundMessage) -> None:
+        pass
+
+    await ad.start(emit)
+    try:
+        await _until(lambda: api.calls_of("getUpdates"))
+    finally:
+        await ad.stop()
+    commands = api.calls_of("setMyCommands")[0]["commands"]
+    assert commands == [{"command": "deploy", "description": "my own"}, *bot_commands("ja-JP")]
+
+
+async def test_an_unreadable_language_still_writes_the_default_wording(api: FakeBotApi) -> None:
+    from agent_team_backend.channels.telegram import BOT_COMMANDS
+
+    def broken() -> str:
+        raise OSError("settings unreadable")
+
+    api.handlers["getMyCommands"] = lambda params: []
+    ad = _adapter(api)
+    ad.command_language = broken
+
+    async def emit(msg: InboundMessage) -> None:
+        pass
+
+    await ad.start(emit)
+    try:
+        await _until(lambda: api.calls_of("getUpdates"))
+    finally:
+        await ad.stop()
+    assert api.calls_of("setMyCommands")[0]["commands"] == BOT_COMMANDS
+
+
+async def test_every_language_describes_every_command() -> None:
+    from agent_team_backend.channels.telegram import BOT_COMMANDS, bot_commands
+
+    names = [c["command"] for c in BOT_COMMANDS]
+    for lang in ("zh-TW", "en-US", "ja-JP"):
+        commands = bot_commands(lang)
+        assert [c["command"] for c in commands] == names
+        assert all(0 < len(c["description"]) <= 256 for c in commands)
+    assert bot_commands("xx") == bot_commands("zh-TW")
+
+
+async def test_a_failed_command_menu_does_not_stop_the_bot(api: FakeBotApi) -> None:
+    api.handlers["getMyCommands"] = lambda params: []
+    api.fail("setMyCommands", 400, "Bad Request: something")
+    got: list[InboundMessage] = []
+
+    async def emit(msg: InboundMessage) -> None:
+        got.append(msg)
+
+    api.push_message(chat_id=42, text="hello")
+    ad = _adapter(api)
+    await ad.start(emit)
+    try:
+        await _until(lambda: got)
+    finally:
+        await ad.stop()
+    assert got[0].text == "hello"
+
+
+async def test_send_text_replies_to_a_message_on_its_first_chunk(api: FakeBotApi) -> None:
+    ad = _adapter(api)
+    await ad.send_text(Location("telegram", "default", "42"), ("word " * 2000).strip(), reply_to="9")
+    sends = api.calls_of("sendMessage")
+    assert len(sends) > 1
+    assert sends[0]["reply_parameters"] == {"message_id": 9, "allow_sending_without_reply": True}
+    assert all("reply_parameters" not in s for s in sends[1:])
+    await ad.send_text(Location("telegram", "default", "42"), "plain")
+    assert "reply_parameters" not in api.calls_of("sendMessage")[-1]
+    assert ad.capabilities.reply_to

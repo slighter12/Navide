@@ -24,7 +24,12 @@ import type {
 } from '../ports/gitSurface'
 import type { KeybindingsPort } from '@navide/plugin-ui/shared'
 import { useGitAccounts } from './useGitAccounts'
+import { encodeReason } from './useAgentMessaging'
+import { hasReplyRoute, isExternalDelivery, renderEnvelope } from '../lib/agentMessaging'
+import { pinFreshSessionAtLaunch } from '../lib/sessionHeal'
+import { dockRestoreFromResponse } from '../lib/dockWindow'
 import type {
+  DockAgentMessage,
   TerminalCreateRequest,
   TerminalDockPort,
   TerminalExitEvent,
@@ -279,6 +284,7 @@ export function createHostTerminalDockPort(backend: HostBackend): TerminalDockPo
       output_log_file: request.outputLogFile,
       login_profile_id: request.loginProfileId,
       is_login: request.isLogin,
+      ...(request.accountDirLogin ? { account_dir_login: true } : {}),
       replaces_terminal_id: request.replacesTerminalId,
       ...(request.quotaTransactionId ? { quota_transaction_id: request.quotaTransactionId } : {}),
       ...(request.quotaOriginalPaneId ? { quota_original_pane_id: request.quotaOriginalPaneId } : {}),
@@ -298,7 +304,11 @@ export function createHostTerminalDockPort(backend: HostBackend): TerminalDockPo
       rows,
     }),
     interrupt: (sessionId) => send('terminal.interrupt', { terminal_session_id: sessionId }),
-    kill: (sessionId, force) => send('terminal.kill', { terminal_session_id: sessionId, force }),
+    kill: (sessionId, force, options) => send('terminal.kill', {
+      terminal_session_id: sessionId,
+      force,
+      ...(options?.retireRestore ? { retire_restore: true } : {}),
+    }),
     redraw: (sessionId, cols, rows) => send('terminal.redraw', {
       terminal_session_id: sessionId,
       cols,
@@ -314,6 +324,56 @@ export function createHostTerminalDockPort(backend: HostBackend): TerminalDockPo
       max_results: maxResults,
     }),
     listAgentPanes: () => send('agent_msg.list', {}),
+    registerAgentPane: (pane) => send('agent_msg.register_dock', { ...pane }),
+    unregisterAgentPane: (paneId) => send('agent_msg.unregister_dock', { pane_id: paneId }),
+    // An embedded panel takes messages the way a main-window pane does: the
+    // same broadcast (App.vue's agent_msg.deliver handler), the same envelope
+    // (useAgentMessaging.acceptRemoteMessage) and the same report. Only over a
+    // backend that hears that broadcast: the Mini-IDE plugin's capability shim
+    // says it does not, and its panel then registers as not deliverable.
+    ...((backend as { forwardsAgentMessages?: boolean }).forwardsAgentMessages === false ? {} : {
+      onAgentMessage: (callback: (message: DockAgentMessage) => void) => backend.on('agent_msg.deliver' as never, (raw) => {
+        const ev = raw as {
+          msg_key?: string
+          target_pane_id?: string
+          from_pane_id?: string
+          from_display?: string
+          content?: string
+          kind?: string
+          origin?: string
+        }
+        if (!ev?.msg_key || !ev.target_pane_id || !ev.content) return
+        const fromDisplay = ev.from_display || 'unknown'
+        callback({
+          msgKey: ev.msg_key,
+          targetPaneId: ev.target_pane_id,
+          fromDisplay,
+          text: renderEnvelope(fromDisplay, ev.content, {
+            correlationId: ev.msg_key,
+            external: isExternalDelivery(ev),
+            noReplyRoute: !hasReplyRoute(ev),
+          }),
+          ...(ev.kind === 'ack' ? { kind: 'ack' as const } : {}),
+        })
+      }),
+      reportAgentDelivery: (msgKey: string, ok: boolean, reason?: string) => send('agent_msg.delivered', {
+        msg_key: msgKey,
+        ok,
+        reason: reason ? encodeReason({ key: reason }) : '',
+      }),
+    }),
+    pinFreshSessionAtLaunch,
+    async readDockRestore(workspacePath, paneId) {
+      return dockRestoreFromResponse(await send<{ record?: { agent?: string; session_id?: string } | null }>(
+        'terminal.dock_record', { workspace_path: workspacePath, pane_id: paneId },
+      ))
+    },
+    async dockSurfaceRetired(workspacePath, paneId, surface) {
+      const provided = await window.agentTeam?.dockSurfaceProvided?.(surface)
+      if (provided !== false) return false
+      await send('terminal.dock_retire', { workspace_path: workspacePath, pane_id: paneId, surface })
+      return true
+    },
     statPath: (path, timeoutMs) => send('fs.stat_path', { path }, timeoutMs),
     async getHomeDirectory(): Promise<string> {
       return (await window.agentTeam?.getHomeDir?.()) || ''

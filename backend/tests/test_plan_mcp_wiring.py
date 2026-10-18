@@ -12,7 +12,7 @@ import pytest
 from agent_team_backend import app, osplat
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
 from agent_team_backend.plugins import wiring as plugin_wiring
-from agent_team_backend.mcp_server import auth as plan_mcp_auth, wiring as plan_mcp_wiring
+from agent_team_backend.mcp_server import auth as plan_mcp_auth, pane_home, wiring as plan_mcp_wiring
 
 
 # ---- write_claude_config ----
@@ -91,7 +91,7 @@ def test_backend_port_absent_or_garbage(tmp_path: Path) -> None:
 def test_plan_mcp_url_with_pane_id_carries_the_pane_credential() -> None:
     url = plan_mcp_wiring.plan_mcp_url(4567, "pane-1")
     assert url == (
-        f"http://127.0.0.1:4567/plan-mcp?pane=pane-1&t={plan_mcp_wiring.caller_token()}"
+        f"http://127.0.0.1:4567/plan-mcp?pane=pane-1&t={plan_mcp_wiring.caller_token('pane-1')}"
     )
 
 
@@ -184,11 +184,18 @@ def test_wire_codex_second_run_is_noop() -> None:
 # ---- wire_command: copilot ----
 
 
-def test_wire_copilot_appends_inline_config() -> None:
+def _config_file(wired: str) -> dict[str, Any]:
+    """The config document a wired command names by path (``@path`` or bare)."""
+    value = osplat.terminal_backend.parse_command(wired)[-1].removeprefix("@")
+    return json.loads(Path(value).read_text(encoding="utf-8"))
+
+
+def test_wire_copilot_appends_config_file() -> None:
     wired = plan_mcp_wiring.wire_command("copilot", "copilot --allow-all-tools", 4567)
-    inline = plan_mcp_wiring.config_json("copilot", 4567)
-    assert wired == f"copilot --allow-all-tools --additional-mcp-config {osplat.paths.quote_arg(inline)}"
-    assert "client=host" in wired
+    path = plan_mcp_wiring.write_spawn_config("copilot", 4567)
+    assert wired == f"copilot --allow-all-tools --additional-mcp-config {osplat.paths.quote_arg(f'@{path}')}"
+    assert _config_file(wired) == json.loads(plan_mcp_wiring.config_json("copilot", 4567))
+    assert "client=host" in json.dumps(_config_file(wired))
 
 
 def test_wire_copilot_shell_wrapper_and_pane_credential() -> None:
@@ -196,7 +203,8 @@ def test_wire_copilot_shell_wrapper_and_pane_credential() -> None:
     wired = plan_mcp_wiring.wire_command("copilot", command, 4567, pane_id="p1")
     assert wired[:2] == ["/bin/zsh", "-ilc"]
     assert wired[2].startswith("copilot --additional-mcp-config ")
-    assert "pane=p1" in wired[2] and "client=host" not in wired[2]
+    url = _config_file(wired[2])["mcpServers"]["navide"]["url"]
+    assert "pane=p1" in url and "client=host" not in url
     assert command[2] == "copilot"  # input untouched
 
 
@@ -221,17 +229,17 @@ def test_wire_copilot_keeps_user_additional_config() -> None:
     command = "copilot --additional-mcp-config @/home/user/servers.json"
     wired = plan_mcp_wiring.wire_command("copilot", command, 4567)
     assert wired.startswith(command + " --additional-mcp-config ")
-    assert plan_mcp_wiring.SERVER_NAME in wired
+    assert plan_mcp_wiring.SERVER_NAME in _config_file(wired)["mcpServers"]
 
 
 # ---- wire_command: qwen ----
 
 
-def test_wire_qwen_appends_inline_config_with_http_url() -> None:
+def test_wire_qwen_appends_config_file_with_http_url() -> None:
     wired = plan_mcp_wiring.wire_command("qwen", "qwen --yolo", 4567, pane_id="p1")
-    inline = plan_mcp_wiring.config_json("qwen", 4567, "p1")
-    assert wired == f"qwen --yolo --mcp-config {osplat.paths.quote_arg(inline)}"
-    entry = json.loads(inline)["mcpServers"][plan_mcp_wiring.SERVER_NAME]
+    path = plan_mcp_wiring.write_spawn_config("qwen", 4567, "p1")
+    assert wired == f"qwen --yolo --mcp-config {osplat.paths.quote_arg(str(path))}"
+    entry = _config_file(wired)["mcpServers"][plan_mcp_wiring.SERVER_NAME]
     # qwen has no "type" discriminator: httpUrl is streamable HTTP, while a
     # plain "url" would be read as SSE.
     assert entry == {"httpUrl": plan_mcp_wiring.plan_mcp_url(4567, "p1")}
@@ -243,7 +251,7 @@ def test_wire_qwen_shell_wrapper_and_host_credential() -> None:
     wired = plan_mcp_wiring.wire_command("qwen", command, 4567)
     assert wired[:2] == ["/bin/zsh", "-ilc"]
     assert wired[2].startswith("qwen --mcp-config ")
-    assert "client=host" in wired[2]
+    assert "client=host" in _config_file(wired[2])["mcpServers"]["navide"]["httpUrl"]
     assert command[2] == "qwen"  # input untouched
 
 
@@ -403,8 +411,12 @@ def test_wire_cursor_refuses_to_write_the_global_config(
 ) -> None:
     """~/.cursor/mcp.json is cursor's *global* config. Opening the home
     directory as a workspace must not put our server into every project the
-    user has — outside Navide the variable is unset and it cannot connect."""
-    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+    user has — outside Navide the variable is unset and it cannot connect.
+
+    The home is the real one: a backend launched from a shimmed pane inherits
+    that shim's HOME, which ``Path.home()`` would answer with."""
+    monkeypatch.setattr(pane_home, "real_home", lambda: tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "inherited-shim-home"))
     env: dict[str, str] = {}
     plan_mcp_wiring.wire_command("cursor", "cursor-agent", 4567, "p1", env, str(tmp_path))
     assert not plan_mcp_wiring.project_config_path("cursor", tmp_path).exists()
@@ -457,12 +469,75 @@ def test_wire_cursor_keeps_the_permissions_the_users_file_had(tmp_path: Path) ->
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+@pytest.mark.skipif(not osplat.paths.enforces_posix_modes(), reason="POSIX mode bits")
+def test_cursor_config_behind_a_link_is_written_through_it(tmp_path: Path) -> None:
+    """A mcp.json that is a link to a file inside the workspace: wiring and
+    removal write the file it points at, keep the link, and keep the mode."""
+    ws = tmp_path / "ws"
+    real = ws / "dotfiles" / "mcp.json"
+    real.parent.mkdir(parents=True)
+    real.write_text(json.dumps({"mcpServers": {"mine": {"command": "x"}}}), encoding="utf-8")
+    real.chmod(0o600)
+    path = plan_mcp_wiring.project_config_path("cursor", ws)
+    path.parent.mkdir(parents=True)
+    path.symlink_to(real)
+
+    plan_mcp_wiring.wire_command("cursor", "cursor-agent", 4567, "p1", {}, str(ws))
+    assert path.is_symlink()
+    assert plan_mcp_wiring.SERVER_NAME in json.loads(real.read_text(encoding="utf-8"))["mcpServers"]
+
+    assert plan_mcp_wiring.remove_project_config("cursor", path) is True
+    assert path.is_symlink()
+    assert json.loads(real.read_text(encoding="utf-8")) == {"mcpServers": {"mine": {"command": "x"}}}
+    assert stat.S_IMODE(real.stat().st_mode) == 0o600
+    assert sorted(p.name for p in real.parent.iterdir()) == ["mcp.json"]
+
+
+@pytest.mark.parametrize("layout", ["file-link", "dangling", "dir-link"])
+def test_cursor_config_linked_outside_the_workspace_is_never_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    """OF-N1: a cloned repo decides where its .cursor/mcp.json points. A
+    link out of the workspace (to ~/.claude.json, to a path that does not
+    exist yet, or a .cursor folder that is a link) is never written or
+    created through, and removal leaves it alone too."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(pane_home, "real_home", lambda: home)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    if layout == "file-link":
+        outside = home / ".claude.json"
+        outside.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+        (ws / ".cursor").mkdir()
+        (ws / ".cursor" / "mcp.json").symlink_to(outside)
+    elif layout == "dangling":
+        outside = tmp_path / "victim" / "x.json"
+        (ws / ".cursor").mkdir()
+        (ws / ".cursor" / "mcp.json").symlink_to(outside)
+    else:
+        (home / ".cursor").mkdir()
+        outside = home / ".cursor" / "mcp.json"
+        outside.write_text(json.dumps({"mcpServers": {"navide": {"url": "u"}}}), encoding="utf-8")
+        (ws / ".cursor").symlink_to(home / ".cursor")
+    before = outside.read_bytes() if outside.exists() else None
+
+    assert plan_mcp_wiring.ensure_project_config("cursor", ws) is False
+    path = plan_mcp_wiring.project_config_path("cursor", ws)
+    assert plan_mcp_wiring.remove_project_config("cursor", path) is False
+
+    assert (outside.read_bytes() if outside.exists() else None) == before
+    assert not (tmp_path / "victim").exists()
+
+
 def test_wire_cursor_does_not_claim_a_repo_above_the_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A home that is itself a dotfiles repo must not swallow every workspace
-    under it that is not a repo of its own."""
-    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+    under it that is not a repo of its own. The real home, not an inherited
+    shim's HOME."""
+    monkeypatch.setattr(pane_home, "real_home", lambda: tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "inherited-shim-home"))
     (tmp_path / ".git" / "info").mkdir(parents=True)
     ws = tmp_path / "projects" / "not-a-repo"
     ws.mkdir(parents=True)
@@ -587,15 +662,16 @@ async def test_terminal_create_wires_claude_pane(
         plugin_wiring.shutdown(app.plugin_host)
 
     # The endpoint is shared by every pane, so the URL carries the pane id (and
-    # the caller token) — which means claude gets the config inline rather than
-    # as a path, so no per-pane file is left behind.
+    # the caller token) — in a 0600 per-pane file, never in the command line.
     created = session.terminals.created[0]  # type: ignore[attr-defined]
-    inline = plan_mcp_wiring.config_json("claude", 4567, "pane-1")
+    path = plan_mcp_wiring.write_spawn_config("claude", 4567, "pane-1")
     assert created["command"][2] == (
-        f"claude --dangerously-skip-permissions --mcp-config {osplat.paths.quote_arg(inline)}"
+        f"claude --dangerously-skip-permissions --mcp-config {osplat.paths.quote_arg(str(path))}"
     )
-    assert "pane=pane-1" in inline
-    assert plan_mcp_wiring.caller_token() in inline
+    url = _config_file(created["command"][2])["mcpServers"]["navide"]["url"]
+    assert "pane=pane-1" in url
+    assert plan_mcp_wiring.caller_token("pane-1") in url
+    assert plan_mcp_wiring.caller_token("pane-1") not in created["command"][2]
 
 
 @pytest.mark.asyncio

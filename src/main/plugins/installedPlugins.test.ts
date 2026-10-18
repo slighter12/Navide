@@ -22,8 +22,10 @@ import {
   scanInstalledPlugins,
   InstalledPluginError,
   backendEntryOnDisk,
+  isManifestV2,
 } from './installedPlugins'
 import { immutablePluginPackageDir, PluginActivationSelector } from './pluginActivationSelector'
+import { isMethodName } from './pluginBackendSupervisor'
 import { isWindows } from '../../shared/osplat'
 
 const VALID = { id: 'acme.demo', version: '1.2.3', entry: 'dist/main.js', requires: ['fs', 'git'] }
@@ -439,6 +441,29 @@ describe('loadPluginDir', () => {
     })
   })
 
+  it('loads an installed package with camelCase backend names and no agent tools exactly as main does', () => {
+    // Main's rule for backend.methods / events: the package and its views
+    // load; only activation refuses the camelCase name (isMethodName). The
+    // lower-case rule applies to agentTools[].method only.
+    const manifest = JSON.parse(readFixture('valid', 'backend-declared-methods.json'))
+    manifest.backend.methods = ['files.search', 'files.indexNow']
+    manifest.backend.events = ['files.indexProgress']
+    mkdirSync(join(root, 'backend'), { recursive: true })
+    mkdirSync(join(root, 'frontend', 'left'), { recursive: true })
+    writeFileSync(join(root, 'frontend', 'left', 'index.html'), '<!doctype html>')
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest))
+    const backendPath = join(root, backendEntryOnDisk('backend/acme-indexer'))
+    writeFileSync(backendPath, Buffer.from([0x7f, 0x45, 0x4c, 0x46]))
+    chmodSync(backendPath, 0o700)
+
+    const loaded = loadPluginDir(root)
+    expect(loaded.error).toBeUndefined()
+    expect(loaded.activation?.views.map((view) => view.id)).toEqual(['left'])
+    expect(loaded.activation?.backend).toMatchObject({ protocolVersion: 1, activation: 'startup' })
+    expect(loaded.packageSummary).toBeDefined()
+    expect(isMethodName('files.indexNow')).toBe(false)
+  })
+
   // The exec-bit arm is POSIX-only: on Windows executability is the `.exe`
   // extension, which this fixture name carries, so the mode cannot fail it.
   it.skipIf(isWindows())('rejects a non-executable backend during disk loading', () => {
@@ -592,5 +617,118 @@ describe('scanInstalledPlugins', () => {
       dir: pluginDir,
       error: 'plugin lifecycle selector is unreadable',
     }])
+  })
+})
+
+describe('Manifest v2 filesystem scope declarations', () => {
+  function scopedManifest(scopes: unknown): Record<string, any> {
+    const manifest = JSON.parse(readFixture('valid', 'fs-scopes-declared.json')) as Record<string, any>
+    manifest.permissions.scopes = scopes
+    return manifest
+  }
+
+  it('carries the declared scopes into the installed package summary as a copy', () => {
+    const manifest = parseInstalledManifest(
+      JSON.parse(readFixture('valid', 'fs-scopes-declared.json'))
+    )
+    const summary = manifestToInstalledPackageSummary(manifest)
+    const read = ['**/.acme/notes/*', '**/.acme/notes/.history/**', 'docs/*.md']
+    expect(summary.manifestPermissions).toEqual({
+      system: ['fs'],
+      scopes: { fs: { root: 'repository', read, write: ['**/.acme/notes/*'] } },
+    })
+    summary.manifestPermissions!.scopes!.fs!.read!.push('mutated')
+    if (!isManifestV2(manifest)) throw new Error('expected a Manifest v2 package')
+    expect(manifest.permissions.scopes?.fs.read).toEqual(read)
+  })
+
+  it.each([
+    [{ fs: { write: ['../outside'] } }, /manifest permissions\.scopes\.fs\.write\[0\] is not a safe relative path pattern/],
+    [{ fs: { read: ['/etc'] } }, /manifest permissions\.scopes\.fs\.read\[0\] is not a safe relative path pattern/],
+    [{ fs: { read: ['docs/'] } }, /manifest permissions\.scopes\.fs\.read\[0\] is not a safe relative path pattern/],
+    [{ fs: { read: ['docs/a**'] } }, /manifest permissions\.scopes\.fs\.read\[0\] is not a safe relative path pattern/],
+    [{ fs: { read: ['docs', '***'] } }, /manifest permissions\.scopes\.fs\.read\[1\] is not a safe relative path pattern/],
+    [{ fs: { root: 'home', read: ['docs/*'] } }, /manifest permissions\.scopes\.fs\.root must be workspace or repository/],
+    [{ fs: { root: 'repository' } }, /manifest permissions\.scopes\.fs must declare read or write/],
+    [{ fs: { delete: ['docs'] } }, /manifest permissions\.scopes\.fs has unknown field 'delete'/],
+    [{ fs: {} }, /manifest permissions\.scopes\.fs must declare read or write/],
+    [{ fs: { read: [] } }, /manifest permissions\.scopes\.fs\.read must contain 1-16 item\(s\)/],
+    [{ fs: { read: ['docs', 'docs'] } }, /manifest permissions\.scopes\.fs\.read must not contain duplicate items/],
+    [{}, /manifest permissions\.scopes is missing required field 'fs'/],
+    [{ network: { read: ['example.com'] } }, /manifest permissions\.scopes has unknown field 'network'/],
+  ])('rejects malformed scope declaration %j with a field-specific error', (scopes, message) => {
+    expect(() => parseInstalledManifest(scopedManifest(scopes))).toThrow(message)
+  })
+
+  it('rejects a scope declaration on an Extension Pack like any other permission', () => {
+    expect(() =>
+      parseInstalledManifest(JSON.parse(readFixture('invalid', 'extension-pack-with-scopes.json')))
+    ).toThrow(/an extension pack must not request permissions/)
+  })
+
+  // The Plans declaration must match what its backend actually reaches:
+  // - root: src/main/plugins/plansRoot.ts resolvePlansRootPath (nearest
+  //   ancestor containing .git, else the workspace);
+  // - documents: plugins/navide-plans/backend/plans_backend.py PLAN_DOC_DIRS
+  //   and _plan_path (a document directly inside one of those directories,
+  //   which may sit at any depth under the root);
+  // - `.plans/<doc>`: _manual_document and _manual_write_path;
+  // - read-only history: the `/.history/` branch of _manual_document.
+  // When the backend's reach changes, change the manifest and this list.
+  const PLANS_DOC_DIRS = [
+    '.agent-team/plans',
+    '.agent-team/reports',
+    '.claude/loop-reports',
+    '.claude/plans',
+    '.cursor/plans',
+    'docs/plans',
+    'docs/reports',
+  ]
+
+  it('declares exactly the plan document locations the Plans backend reads and writes', () => {
+    const manifest = parseInstalledManifest(
+      JSON.parse(readFileSync(join(process.cwd(), 'plugins/navide-plans/manifest.json'), 'utf8'))
+    )
+    expect(manifestToInstalledPackageSummary(manifest).manifestPermissions).toEqual({
+      system: ['fs', 'ui', 'aiCli'],
+      scopes: {
+        fs: {
+          root: 'repository',
+          read: [
+            ...PLANS_DOC_DIRS.map((dir) => `**/${dir}/*`),
+            ...PLANS_DOC_DIRS.map((dir) => `**/${dir}/.history/**`),
+            '.plans/*',
+          ],
+          write: [...PLANS_DOC_DIRS.map((dir) => `**/${dir}/*`), '.plans/*'],
+        },
+      },
+    })
+  })
+
+  it('keeps the declared Plans document directories in step with the backend', () => {
+    const backend = readFileSync(
+      join(process.cwd(), 'plugins/navide-plans/backend/plans_backend.py'),
+      'utf8'
+    )
+    const tuple = /^PLAN_DOC_DIRS: tuple\[str, \.\.\.\] = \(\n([\s\S]*?)\n\)/m.exec(backend)
+    expect(tuple, 'PLAN_DOC_DIRS not found in plans_backend.py').not.toBeNull()
+    expect([...tuple![1].matchAll(/"([^"]+)"/g)].map((match) => match[1])).toEqual(PLANS_DOC_DIRS)
+  })
+
+  it('leaves the descriptor, activation and capability policy unchanged by a scope declaration', () => {
+    const scoped = parseInstalledManifest(
+      JSON.parse(readFixture('valid', 'fs-scopes-declared.json'))
+    )
+    const unscopedRaw = JSON.parse(readFixture('valid', 'fs-scopes-declared.json')) as Record<string, any>
+    delete unscopedRaw.permissions.scopes
+    const unscoped = parseInstalledManifest(unscopedRaw)
+    if (!isManifestV2(scoped) || !isManifestV2(unscoped)) throw new Error('expected Manifest v2 packages')
+
+    expect(manifestToDescriptor(scoped, '/plugins/acme.notes')).toEqual(
+      manifestToDescriptor(unscoped, '/plugins/acme.notes')
+    )
+    expect(manifestToActivation(scoped, '/plugins/acme.notes')).toEqual(
+      manifestToActivation(unscoped, '/plugins/acme.notes')
+    )
   })
 })

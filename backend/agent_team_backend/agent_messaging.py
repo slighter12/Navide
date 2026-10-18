@@ -95,6 +95,26 @@ class RegisteredPane:
     #: this is a fact about yourself, which is the one lineage question you are
     #: entitled to ask.
     spawned_by: str = ""
+    #: Which window surface hosts this pane, for an embedded AI panel
+    #: (AiCliDock): "pm" for the Pipeline Manager modal, "plans" / "git" /
+    #: "editor" for those windows. Empty for an ordinary window pane — which is
+    #: every pane the main window registers, since it never sends the field.
+    surface: str = ""
+    #: The kind of window that surface lives in ("main" for the Pipeline
+    #: Manager modal, else the surface's own window). Empty alongside `surface`.
+    window_kind: str = ""
+    #: True when the panel's window delivers messages into it itself (it
+    #: listens for agent_msg.deliver and reports agent_msg.delivered). Only a
+    #: panel sets it; a panel without it is refused as a target (see _accept).
+    deliverable: bool = False
+
+    @property
+    def is_dock(self) -> bool:
+        """An embedded AI panel rather than a pane of a window's pane pool.
+
+        It can act through the MCP tools like any pane; it is accepted as a
+        message target only when it registered as deliverable (see _accept)."""
+        return bool(self.surface) and self.surface != "main"
 
     @property
     def offline(self) -> bool:
@@ -113,7 +133,7 @@ class RegisteredPane:
         return f"{self.workspace_label}/{self.name}"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        view: dict[str, Any] = {
             "pane_id": self.pane_id,
             "name": self.name,
             "workspace_path": self.workspace_path,
@@ -125,6 +145,15 @@ class RegisteredPane:
             "realized": self.realized,
             "displayStatus": self.display_status,
         }
+        # Added only when set, so a pane registered without them — every pane
+        # the main window mirrors — reports exactly the keys it always has.
+        if self.surface:
+            view["surface"] = self.surface
+        if self.window_kind:
+            view["window_kind"] = self.window_kind
+        if self.deliverable:
+            view["deliverable"] = True
+        return view
 
 
 @dataclass
@@ -224,6 +253,27 @@ _OWNERS: dict[str, Any] = {}
 # superseded pane_id -> the pane that took its place
 _ALIASES: dict[str, PaneAlias] = {}
 
+#: How many forgotten pane ids are remembered. Only the MCP caller check reads
+#: them, to tell "this id was a pane once" from "this id was never registered";
+#: a few hundred covers every pane a long session closes without growing forever.
+FORGOTTEN_IDS_MAX = 512
+# pane ids removed from the registry, oldest first (insertion order)
+_FORGOTTEN: dict[str, None] = {}
+
+
+def _remember_forgotten(pane_id: str) -> None:
+    _FORGOTTEN.pop(pane_id, None)
+    _FORGOTTEN[pane_id] = None
+    while len(_FORGOTTEN) > FORGOTTEN_IDS_MAX:
+        _FORGOTTEN.pop(next(iter(_FORGOTTEN)))
+
+
+def was_forgotten(pane_id: str) -> bool:
+    """Whether ``pane_id`` named a registered pane that has since been removed
+    (closed, or offline past the grace period) — as opposed to an id this
+    backend never saw registered at all."""
+    return pane_id in _FORGOTTEN
+
 # Observers of the registry (chat-channel mirroring), called synchronously as
 # (event, pane_id) with event "register" | "unregister" | "status", and of the
 # message-log rows windows append. They must be cheap and must not raise.
@@ -261,6 +311,9 @@ def register(
     owner: Any = None,
     realized: bool = True,
     spawned_by: str = "",
+    surface: str = "",
+    window_kind: str = "",
+    deliverable: bool = False,
 ) -> RegisteredPane:
     """Mirror one window's pane handle. Re-registering the same pane replaces
     its entry, which is how renames propagate."""
@@ -283,11 +336,15 @@ def register(
         # such a re-register — carrying the old value over would pin the pane to
         # an id nothing answers to any more.
         spawned_by=spawned_by,
+        surface=surface,
+        window_kind=window_kind,
+        deliverable=deliverable,
         # A reconnecting window re-runs agent_msg.register for every pane it
         # mirrors, which is what clears the offline flag drop_owner set:
         # offline_since starts at None on the fresh entry.
     )
     _PANES[pane_id] = entry
+    _FORGOTTEN.pop(pane_id, None)
     if owner is not None:
         _OWNERS[pane_id] = owner
     _notify_pane("register", pane_id)
@@ -376,6 +433,19 @@ def resolve_alias(pane_id: str) -> str:
     return alias.pane_id if alias is not None else ""
 
 
+def former_ids(pane_id: str) -> list[str]:
+    """Every former id that now resolves to this pane (the inverse of
+    resolve_alias). Chains are flattened as they grow, so one pass finds them
+    all."""
+    return [former for former, alias in _ALIASES.items() if alias.pane_id == pane_id]
+
+
+def owner_of(pane_id: str) -> Any:
+    """The WS connection currently mirroring ``pane_id``, or None when no live
+    window holds it (never registered, or its window disconnected)."""
+    return _OWNERS.get(pane_id)
+
+
 def current(pane_id: str) -> RegisteredPane | None:
     """The pane a possibly-superseded id names right now.
 
@@ -406,10 +476,13 @@ def unregister(pane_id: str, owner: Any = None) -> bool:
     Returns whether the entry was removed."""
     if owner is not None and pane_id in _OWNERS and _OWNERS[pane_id] is not owner:
         return False
-    _PANES.pop(pane_id, None)
+    if _PANES.pop(pane_id, None) is not None:
+        _remember_forgotten(pane_id)
     _OWNERS.pop(pane_id, None)
+    former = former_ids(pane_id)
     _forget_aliases_to(pane_id)
     _notify_pane("unregister", pane_id)
+    _release_caller_tokens([pane_id, *former])
     return True
 
 
@@ -453,10 +526,33 @@ def purge_expired() -> list[str]:
     ]
     for pane_id in expired:
         _PANES.pop(pane_id, None)
+        _remember_forgotten(pane_id)
         _OWNERS.pop(pane_id, None)
+        former = former_ids(pane_id)
         _forget_aliases_to(pane_id)
         _notify_pane("unregister", pane_id)
+        _release_caller_tokens([pane_id, *former])
     return expired
+
+
+def names_pane(pane_id: str) -> bool:
+    """Whether ``pane_id`` is still a registered pane (online or not) or an
+    alias of one. No purge: asked from inside the registry's own removals."""
+    return pane_id in _PANES or pane_id in _ALIASES
+
+
+def _release_caller_tokens(pane_ids: list[str]) -> None:
+    """Let /plan-mcp revoke the caller tokens of ids nothing names any more."""
+    try:
+        from .mcp_server import wiring
+    except Exception:  # noqa: BLE001 — the registry must never break over it
+        log.exception("agent_messaging: could not load MCP wiring")
+        return
+    for pane_id in pane_ids:
+        try:
+            wiring.release_pane_token(pane_id)
+        except Exception:  # noqa: BLE001
+            log.exception("agent_messaging: releasing pane %s token failed", pane_id)
 
 
 def get(pane_id: str) -> RegisteredPane | None:
@@ -646,6 +742,20 @@ def _accept(entry: RegisteredPane, to: str, *, cross_workspace: bool = False) ->
     means the address is right and the answer is to wait or retry.
     """
     if entry.offline_since is None:
+        if entry.is_dock and not entry.deliverable:
+            # The main window's delivery looks the target up in its own pane
+            # pool, which a dock is not part of; only a panel whose own window
+            # delivers into it (registered as deliverable) can take a message.
+            # Accepting any other would park the message forever, so it is
+            # refused while the address is still on screen.
+            return _resolve_error(
+                "target-is-dock",
+                f'target "{to}" is an embedded AI panel ({entry.surface}) — it can '
+                f"use Navide's tools but cannot receive messages yet; send to a "
+                f"window pane instead",
+                to=to,
+                surface=entry.surface,
+            )
         return ResolveResult(pane=entry, cross_workspace=cross_workspace)
     seconds = entry.offline_seconds()
     return _resolve_error(
@@ -676,9 +786,18 @@ def resolve(from_pane_id: str, to: str) -> ResolveResult:
     device, rest = _split_device_segment(target)
     if device:
         if not is_local_device(device):
-            return _unknown_device(device, target)
+            # Local first, here too (M4): a UUID-shaped folder is common on this
+            # platform (`/var/folders/…/T/<uuid>/`, app containers, worktrees),
+            # and `<uuid>/proj/reviewer` naming a pane that exists on this
+            # machine must not leave it.
+            local = _resolve_here(from_pane_id, target)
+            return local if local.pane is not None else _unknown_device(device, target)
         target = rest
+    return _resolve_here(from_pane_id, target)
 
+
+def _resolve_here(from_pane_id: str, target: str) -> ResolveResult:
+    """`resolve` for a target with no device segment left in it."""
     purge_expired()
     sender = _PANES.get(from_pane_id)
 
@@ -853,3 +972,4 @@ def _reset_for_test() -> None:
     _PANES.clear()
     _OWNERS.clear()
     _ALIASES.clear()
+    _FORGOTTEN.clear()

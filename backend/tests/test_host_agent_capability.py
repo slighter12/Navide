@@ -59,6 +59,47 @@ def test_host_token_matching_uses_the_private_copy_not_child_environment(
 
 
 @pytest.mark.asyncio
+async def test_without_a_stdin_host_token_host_register_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R3-M2: a backend nobody handed a token on stdin (tests, run by hand)
+    refuses host.register; the token set from stdin is accepted."""
+    monkeypatch.setattr(app, "_HOST_SESSION_TOKEN", "")
+    session = _session()
+    await app.handle_message(session, {
+        "id": "none", "type": "host.register", "payload": {"token": ""},
+    })
+    assert session.host_authenticated is False
+
+    app.set_host_session_token("from-stdin")
+    await app.handle_message(session, {
+        "id": "stdin", "type": "host.register", "payload": {"token": "from-stdin"},
+    })
+    assert session.host_authenticated is True
+
+
+def test_the_spawn_environment_is_never_a_source_of_the_host_token() -> None:
+    """R3-M2: the variable is only scrubbed. A fresh interpreter importing app
+    with NAVIDE_BACKEND_HOST_TOKEN set must neither adopt it nor keep it."""
+    import os
+    import subprocess
+    import sys
+
+    script = (
+        "import os\n"
+        "from agent_team_backend import app\n"
+        "print(repr(app._HOST_SESSION_TOKEN), 'NAVIDE_BACKEND_HOST_TOKEN' in os.environ)\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**os.environ, "NAVIDE_BACKEND_HOST_TOKEN": "env-visible"},
+        capture_output=True, text=True, timeout=120,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().splitlines()[-1] == "'' False"
+
+
+@pytest.mark.asyncio
 async def test_unicast_host_skips_unauthenticated_sessions() -> None:
     unauthenticated = _session()
     authenticated = _session()
@@ -168,3 +209,59 @@ async def test_agent_capability_result_requires_an_authenticated_host(
     })
     assert resolved == [("mcp:1", {"ok": True})]
     assert session.websocket.sent[-1]["payload"] == {"ok": True, "delivered": True}  # type: ignore[attr-defined]
+
+
+# The Host gives a backend call its own deadline (payload ``timeoutMs``, else
+# 30 s) and reports that timeout itself; the MCP side must still be listening.
+_HOST_DEFAULT_BACKEND_DEADLINE_S = 30.0
+
+
+async def _waited_timeout(monkeypatch: pytest.MonkeyPatch, call) -> float:
+    from agent_team_backend.pending_registry import TIMEOUT
+
+    waits: list[float] = []
+
+    async def host_silent(event: dict[str, Any]) -> bool:
+        return True
+
+    async def fake_wait(request_id: str, future: Any, *, timeout: float) -> Any:
+        waits.append(timeout)
+        return TIMEOUT
+
+    monkeypatch.setattr(app, "unicast_host", host_silent)
+    monkeypatch.setattr(plan_mcp._agent_capability_pending, "wait", fake_wait)
+    result = await call()
+    assert result["error_code"] == "host_timeout"
+    assert len(waits) == 1
+    return waits[0]
+
+
+def _routes(payload: dict[str, Any]):
+    return [
+        lambda: request_host_agent_capability(
+            "view-1", "backend", payload, caller=_Caller(kind="external"),
+        ),
+        lambda: request_host_agent_workspace_backend(
+            "navide.plans", "/workspace", payload, caller=_Caller(kind="external"),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", [0, 1])
+async def test_mcp_outwaits_the_host_default_backend_deadline(
+    monkeypatch: pytest.MonkeyPatch, route: int,
+) -> None:
+    payload = {"reqId": "plans-1", "name": "plans.list", "args": {}}
+    waited = await _waited_timeout(monkeypatch, _routes(payload)[route])
+    assert waited > _HOST_DEFAULT_BACKEND_DEADLINE_S
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", [0, 1])
+async def test_mcp_outwaits_a_caller_supplied_backend_deadline(
+    monkeypatch: pytest.MonkeyPatch, route: int,
+) -> None:
+    payload = {"reqId": "plans-1", "name": "plans.list", "args": {}, "timeoutMs": 90_000}
+    waited = await _waited_timeout(monkeypatch, _routes(payload)[route])
+    assert waited > 90.0

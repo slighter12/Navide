@@ -33,6 +33,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import osplat
+from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -76,6 +77,15 @@ from ..log_readers.base import encode_claude_cwd  # noqa: F401
 def _assistant_text(msg: dict) -> str:
     """Join the text blocks of an assistant message ("" when none)."""
     return join_text_blocks(msg.get("content"), "text")
+
+
+def _has_pasted_images(content: object) -> bool:
+    """A prompt with pasted images: a content list of text and image blocks, as
+    opposed to tool results (which may hold images too) and injected text lists."""
+    if not isinstance(content, list):
+        return False
+    types = {b.get("type") for b in content if isinstance(b, dict)}
+    return "image" in types and "tool_result" not in types
 
 
 # Claude's tool for putting a multiple-choice question to the user. The turn
@@ -190,8 +200,8 @@ def first_user_prompts(path: Path, limit: int = 2) -> list[str]:
                 rec = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            if rec.get("type") != "user":
-                continue
+            if rec.get("type") != "user" or rec.get("isMeta"):
+                continue  # isMeta: Claude Code's own notes (an image Read's size line)
             msg = rec.get("message")
             if not isinstance(msg, dict):
                 continue
@@ -614,11 +624,20 @@ class ClaudeLogReader(LogReader):
                         # carry their text so the frontend can name the pane.
                         # tool_result lists / command wrappers stay text-less.
                         text = ""
-                        if rtype == "user":
+                        # A compaction summary is written as a plain-string user
+                        # record but nobody typed it, and an idle compaction has
+                        # no turn after it: as prompt text it opened a chat run
+                        # that never ended.
+                        # An isMeta record is Claude Code's own note, such as the
+                        # size line after the agent Reads an image; posted as the
+                        # user's prompt it read "你：[Image: original ...]".
+                        if rtype == "user" and not rec.get("isCompactSummary") and not rec.get("isMeta"):
                             msg = rec.get("message")
                             content = msg.get("content") if isinstance(msg, dict) else None
                             if isinstance(content, str):
                                 text = user_prompt_text(content)
+                            elif _has_pasted_images(content):
+                                text = user_prompt_text(join_text_blocks(content, "text"))
                         out.append(ActivityEvent(
                             vendor="claude",
                             event_type="agent_active",
@@ -874,11 +893,15 @@ def parse_usage_panel(text: str, *, now: datetime | None = None) -> list[dict]:
     return [found[k] for k in sorted(found, key=lambda k: (order.get(k, 2), k))]
 
 
-def _panel_probe_env() -> dict[str, str]:
+def _panel_probe_env(config_dir: str | None = None) -> dict[str, str]:
+    """The probe's environment. ``config_dir`` asks an account that signed in
+    inside its own CLAUDE_CONFIG_DIR instead of the live login."""
     env = dict(os.environ)
     for key in _ENV_DROP:
         env.pop(key, None)
     env.update({"TERM": "xterm-256color", "COLUMNS": "100", "LINES": "40"})
+    if config_dir:
+        env["CLAUDE_CONFIG_DIR"] = config_dir
     return env
 
 
@@ -916,7 +939,7 @@ def _first_line(*streams: str) -> str:
     return ""
 
 
-async def read_usage_panel(binary: str) -> str:
+async def read_usage_panel(binary: str, config_dir: str | None = None) -> str:
     """Run ``claude -p /usage`` and return what it printed.
 
     Raises ``RuntimeError`` with a message fit for the badge's ``error`` field:
@@ -928,7 +951,7 @@ async def read_usage_panel(binary: str) -> str:
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=_panel_probe_env(), start_new_session=True,
+        env=_panel_probe_env(config_dir), start_new_session=True,
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=USAGE_TIMEOUT_S)
@@ -970,7 +993,9 @@ async def read_usage_panel(binary: str) -> str:
     return text
 
 
-async def fetch_claude_usage_via_cli(home: Path) -> dict[str, Any] | None:
+async def fetch_claude_usage_via_cli(
+    home: Path, config_dir: str | None = None
+) -> dict[str, Any] | None:
     """Snapshot for the usage badge, or None when there is no CLI to ask.
 
     A read that actually started a Claude Code but came back empty returns an
@@ -988,7 +1013,9 @@ async def fetch_claude_usage_via_cli(home: Path) -> dict[str, Any] | None:
     # Logged out is knowable without a spawn. The CLI would only present its
     # login wizard — at a full boot's cost, on every retry, forever — and the
     # badge would say "unavailable" where it means "log in".
-    if await read_claude_credentials(home) is None:
+    # An account dir is only ever read once its own login exists (the caller
+    # checks), and that credential is Claude Code's to read, not ours.
+    if config_dir is None and await read_claude_credentials(home) is None:
         return _snapshot("claude", "no-credentials")
     try:
         binary = resolve_cli_binary("claude")
@@ -1006,7 +1033,9 @@ async def fetch_claude_usage_via_cli(home: Path) -> dict[str, Any] | None:
         )
         return None
     try:
-        raw = await read_usage_panel(binary)
+        raw = await (
+            read_usage_panel(binary, config_dir) if config_dir else read_usage_panel(binary)
+        )
     except Exception as err:  # noqa: BLE001 — a failed read is just "no data"
         log.warning("claude /usage read failed: %s", err)
         return _costly(str(err) or type(err).__name__)
@@ -1242,6 +1271,15 @@ async def fetch_claude(home: Path) -> dict:
     return await fetch_claude_usage_via_cli(home) or _snapshot("claude", "cli-missing")
 
 
+async def fetch_claude_account_dir(config_dir: Path) -> dict:
+    """Claude quota for an account that signed in inside its own config dir:
+    the same ``/usage`` read, run on that dir. Unlike the live login, such an
+    account can be measured while another one is active."""
+    return await fetch_claude_usage_via_cli(
+        config_dir, os.fspath(config_dir)
+    ) or _snapshot("claude", "cli-missing")
+
+
 
 
 # ---- resume / session ------------------------------------------------------
@@ -1300,13 +1338,13 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
 
 # ---- vendor spec -----------------------------------------------------------
 
-def _install_hooks(port_file: str) -> Any:
+def _install_hooks(port_file: str, *, skip: frozenset[str] = frozenset()) -> Any:
     # Lazy import: claude_hooks lives outside cli_vendors, and a module-level
     # import here would be a cycle. Inside a function it is a plain runtime
     # backreference (see test_vendor_modules_import_only_allowed_modules).
     from ..claude_hooks import install_hooks
 
-    return install_hooks(port_file)
+    return install_hooks(port_file, skip=skip)
 
 
 def classify_secret(secret: str) -> SlotKind:
@@ -1358,7 +1396,17 @@ _PORTABLE_SHADOWING_SETTINGS = tuple(
 )
 
 
+# Where this CLI keeps the extensions it installed for itself (read-only
+# inventory, cli_extensions). Verified 2026-10-10 against the installed
+# binary's --help and the files on disk.
+_EXTENSIONS = ExtensionsSpec(sources=(
+    ExtensionsSource("plugins-json", (".claude", "plugins", "installed_plugins.json"), "Claude plugin",
+        settings=(".claude", "settings.json"), mod_label="Claude mod"),
+    ExtensionsSource("hooks", (".claude", "settings.json"), "Claude hook", section=("hooks",)),
+))
+
 SPEC = VendorSpec(
+    extensions=_EXTENSIONS,
     key="claude",
     # Official standalone CLI network requirements (verified 2026-09-21):
     # https://code.claude.com/docs/en/network-config#network-access-requirements
@@ -1408,6 +1456,7 @@ SPEC = VendorSpec(
         ),
         flag="--mcp-config",
         flag_accepts_path=True,
+        flag_file_prefix="",
     ),
     # An `asyncRewake` hook: it runs in the background, and exiting 2 wakes the
     # agent with its stderr shown as a system reminder — even when the session

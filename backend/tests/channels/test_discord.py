@@ -146,7 +146,9 @@ async def test_send_chunks_buttons_edit_typing_and_create_location(http: FakeHtt
     assert [b["custom_id"] for b in buttons] == ["nv1:abcde:yes", "nv1:abcde:no"]
 
     await adapter.edit_text(loc, ids[0], "edited")
-    assert http.calls_to("PATCH", f"/channels/T77/messages/{ids[0]}")[0].body["content"] == "edited"
+    patch = http.calls_to("PATCH", f"/channels/T77/messages/{ids[0]}")[0].body
+    # An edit replaces the message, buttons included: a settled prompt keeps none.
+    assert patch["content"] == "edited" and patch["components"] == []
     await adapter.send_typing(loc)
     assert http.calls_to("POST", "/channels/T77/typing")
     # A plain channel location posts to the channel itself.
@@ -355,6 +357,17 @@ async def test_known_locations_from_guild_channels_and_dms(http: FakeHttp) -> No
         await adapter.stop()
 
 
+async def test_ready_reports_the_bots_display_name_when_it_has_one() -> None:
+    adapter = DiscordAdapter("tok")
+    await adapter._dispatch("READY", {"user": {"id": "999", "username": "navide", "global_name": "Navide Bot"},
+                                      "session_id": "s", "resume_gateway_url": "wss://x", "application": {"id": "555"}})
+    assert (adapter.status.identity, adapter.status.display_name) == ("@navide", "Navide Bot")
+    other = DiscordAdapter("tok")
+    await other._dispatch("READY", {"user": {"id": "999", "username": "navide"}, "session_id": "s",
+                                    "resume_gateway_url": "wss://x", "application": {"id": "555"}})
+    assert other.status.display_name == ""
+
+
 async def test_link_url_is_the_bot_install_url_from_ready() -> None:
     adapter = DiscordAdapter("tok")
     assert adapter.link_url("ABCD2345", "group") == ""  # before READY
@@ -363,3 +376,19 @@ async def test_link_url_is_the_bot_install_url_from_ready() -> None:
     assert adapter.link_url("ABCD2345", "group") == (
         "https://discord.com/oauth2/authorize?client_id=555&scope=bot&permissions=309237713920")
     assert adapter.link_url("ABCD2345", "direct") == ""
+
+
+async def test_menu_sends_and_edits_one_action_row_per_button_row(http: FakeHttp) -> None:
+    http.route("POST", r"/channels/[^/]+/messages", lambda r: {"id": "msg1"})
+    http.route("PATCH", r"/channels/[^/]+/messages/[^/]+", lambda r: {"id": "msg1"})
+    adapter = DiscordAdapter(TOKEN, base_url=http.base_url)
+    loc = Location("discord", "default", "C1", "T77")
+    rows = [[(f"💬 {i}", f"nv2:p:aaaaaaa{i}") for i in range(5)], [("Next ▶", "nv2:g:bbbbbbbb")]]
+    assert await adapter.send_menu(loc, "menu", rows) == "msg1"
+    body = http.calls_to("POST", "/channels/T77/messages")[0].body
+    assert [r["type"] for r in body["components"]] == [1, 1]
+    assert [b["custom_id"] for b in body["components"][0]["components"]] == [d for _, d in rows[0]]
+    assert body["components"][1]["components"][0]["label"] == "Next ▶"
+    await adapter.edit_menu(loc, "msg1", "page 2", rows[1:])
+    patch = http.calls_to("PATCH", "/channels/T77/messages/msg1")[0].body
+    assert patch["content"] == "page 2" and len(patch["components"]) == 1

@@ -91,17 +91,25 @@ async def _request_again(env: Env) -> str:
     return req.id
 
 
-async def test_answer_is_void_when_the_prompt_changed(env: Env) -> None:
+async def test_answer_is_void_when_the_prompt_changed(env: Env, monkeypatch) -> None:
     rid = await _request(env, NORMAL)
+
+    # The run watch's probe relays the changed prompt on its own; on a loaded
+    # runner that lands before or after the answer. Hold it so the answer meets
+    # the changed screen through the prompt binding alone.
+    async def hold(*_a) -> None:
+        return None
+
+    monkeypatch.setattr(env.m, "_check_awaiting", hold)
     env.fake.prompt = "Bash command\n\n  npm run deploy\n\nDo you want to proceed?"
     await env.inbound(f"yes {rid}")
     assert env.fake.answers == []
-    assert env.tg.texts()[-1] == mgr_mod.MSG_RELAY_EXPIRED
+    assert mgr_mod.MSG_RELAY_PROMPT_CHANGED in env.tg.texts()
     # A deny is bound the same way: it must not land on a different prompt.
     rid = await _request_again(env)
     env.fake.prompt = NORMAL
     await env.inbound(f"no {rid}")
-    assert env.fake.answers == [] and env.tg.texts()[-1] == mgr_mod.MSG_RELAY_EXPIRED
+    assert env.fake.answers == [] and env.tg.texts().count(mgr_mod.MSG_RELAY_PROMPT_CHANGED) == 2
 
 
 async def test_unknown_prompt_cannot_be_approved_remotely(env: Env) -> None:

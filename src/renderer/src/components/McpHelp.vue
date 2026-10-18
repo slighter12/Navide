@@ -25,6 +25,7 @@ const planTools = [
   'plan_update_stage',
   'plan_update_todo',
   'plan_add_note',
+  'plan_add_todo',
 ] as const
 
 const cliTools = [
@@ -43,7 +44,9 @@ const cliTools = [
   'cli_get_status',
   'cli_wait_idle',
   'cli_interrupt',
+  'cli_answer_prompt',
   'cli_close_agent',
+  'cli_reclaim_agent',
   'cli_place_pane',
   'cli_message_log',
   'cli_usage',
@@ -58,6 +61,9 @@ const workspaceTools = [
   'prompt_list',
   'memory_list',
   'mcp_list',
+  'cli_extensions_list',
+  'credentials_list',
+  'credentials_findings',
   'pipeline_list',
   'pipeline_status',
   'pipeline_start',
@@ -67,6 +73,9 @@ const workspaceTools = [
   'pipeline_reset',
   'pipeline_restart',
   'pipeline_define',
+  'pipeline_graph',
+  'pipeline_gate',
+  'pipeline_restart_from',
   'stage_define',
   'role_define',
   'scheduler_list',

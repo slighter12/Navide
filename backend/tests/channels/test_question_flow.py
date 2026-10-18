@@ -77,6 +77,31 @@ async def test_an_answer_to_a_stale_screen_brings_the_current_prompt(env: Env) -
     assert env.fake.answers == [("pane-1", {"kind": "question", "option": 1})]
 
 
+async def test_a_stale_answer_relays_the_current_prompt_exactly_once(env: Env) -> None:
+    # Two paths relay the current prompt after a stale answer: the answer's follow-up
+    # and the run's awaiting probe. Hold the probe so the follow-up gets there first,
+    # then let one probe tick land before the chat answers the prompt it was shown.
+    probe = env.m._check_awaiting
+    held = False
+
+    async def check_awaiting(adapter, pane_id, pending):
+        if not held:
+            await probe(adapter, pane_id, pending)
+
+    env.m._check_awaiting = check_awaiting
+    rid = await _question(env, ["Keep", "Discard"], prompt="Old question")
+    env.fake.prompt = "New question"
+    held = True
+    await env.inbound(f"1 {rid}")
+    await _until(lambda: any("New question" in t for t in _prompts(env))
+                 and env.m._awaiting_shown["pane-1"].prompt == "New question")
+    new_rid = _relay_id(env)
+    await probe(env.tg, "pane-1", env.m._pending["pane-1"])
+    assert sum("New question" in t for t in _prompts(env)) == 1
+    await env.inbound(f"1 {new_rid}")
+    assert env.fake.answers == [("pane-1", {"kind": "question", "option": 1})]
+
+
 def _capture_buttons(env: Env) -> list:
     sent: list = []
     orig = env.tg.send_text
@@ -239,3 +264,17 @@ async def test_a_bare_answer_with_nothing_to_answer_is_not_queued(env: Env) -> N
     await env.inbound("1")
     assert len(env.fake.delivered) == delivered and env.fake.answers == []
     assert "請在電腦上回答" in env.tg.texts()[-1] and "沒有送出" in env.tg.texts()[-1]
+
+
+async def test_a_prompt_left_by_a_status_change_is_settled_in_the_chat(env: Env) -> None:
+    # The status event usually beats the run's probe to it: that path must settle
+    # the chat's prompt (and drop its buttons) too.
+    from agent_team_backend.channels import manager as mgr_mod
+
+    await _awaiting(env)
+    await _until_relay_prompt(env)
+    i = max(n for n, t in enumerate(env.tg.texts()) if t.startswith("⏸"))
+    mid, text = str(i + 1), env.tg.texts()[i]
+    _set_status(env, "running")
+    await _until(lambda: any(m == mid for m, _ in env.tg.edits))
+    assert (mid, f"{text}\n\n{mgr_mod.MSG_RELAY_DONE_LOCALLY}") in env.tg.edits

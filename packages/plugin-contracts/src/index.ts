@@ -51,9 +51,29 @@ export interface ExecutionPolicy {
   shell: string[]
 }
 
+export const V2_FS_SCOPE_ROOTS = ['workspace', 'repository'] as const
+export type PluginFsScopeRoot = (typeof V2_FS_SCOPE_ROOTS)[number]
+
+/** Path patterns a package declares it reads or writes, relative to `root`
+ *  (`workspace` by default; `repository` is the nearest enclosing Git root).
+ *  `*` matches within one segment and `**` matches zero or more segments; a
+ *  pattern covers only the paths it matches. A disclosure for the user: the
+ *  Host grants and enforces nothing from it. */
+export type PluginManifestV2FsScopes = {
+  root?: PluginFsScopeRoot
+  read?: string[]
+  write?: string[]
+}
+
+export type PluginManifestV2Scopes = {
+  fs: PluginManifestV2FsScopes
+}
+
 export type PluginManifestV2Permissions = {
   system?: PluginSystemNamespace[]
   shell?: PluginShellMode
+  /** Optional declared resource scopes; disclosure only, never a grant. */
+  scopes?: PluginManifestV2Scopes
 }
 
 export type PluginManifestV2Receiver = {
@@ -101,6 +121,13 @@ export type PluginManifestV2 = {
     methods?: string[]
     /** Package-local events this backend may publish. */
     events?: string[]
+    /** Tools an agent may call through the core navide MCP server once the
+     *  user consents. This parser applies what the manifest schema expresses;
+     *  the rules it cannot (name prefix derived from the id, reserved names,
+     *  method listed in `methods`, unique names, integers only in
+     *  `inputSchema`, the 1 MiB cap) are applied by the Host and the Registry
+     *  (docs/en-US/plugin-agent-tools-contract.md section 2). */
+    agentTools?: PluginManifestV2AgentTool[]
   }
   /** Extension Pack members (package ids). A pack carries no runtime surface
    *  and no permissions of its own: every member is installed, verified and
@@ -109,6 +136,17 @@ export type PluginManifestV2 = {
   /** Legacy fields are intentionally unavailable on a v2 manifest. */
   requires?: never
   entry?: never
+}
+
+/** One `backend.agentTools` entry (contract section 2.1). */
+export type PluginManifestV2AgentTool = {
+  name: string
+  method: string
+  risk: 'read' | 'write'
+  title: string
+  description: string
+  inputSchema: Record<string, unknown>
+  timeoutMs?: number
 }
 
 export type PluginContractErrorCode =
@@ -400,9 +438,53 @@ export function compareSemver(left: string, right: string): number | null {
   return 0
 }
 
+const MAX_SCOPE_PATHS = 16
+
+function isScopePattern(pattern: string): boolean {
+  // Wildcards aside, a pattern obeys the package safe-path rule; `**` must be
+  // a whole segment.
+  return (
+    canonicalPackagePath(pattern.replace(/\*/g, '_')) !== null &&
+    pattern.split('/').every((segment) => segment === '**' || !segment.includes('**'))
+  )
+}
+
+function scopePaths(value: unknown, label: string): string[] {
+  const paths = uniqueStringArray(value, label, 1, MAX_SCOPE_PATHS)
+  paths.forEach((path, index) => {
+    if (!isScopePattern(path)) {
+      fail(`${label}[${index}] is not a safe relative path pattern`)
+    }
+  })
+  return paths
+}
+
+function parseScopes(value: unknown): PluginManifestV2Scopes {
+  const scopes = assertObject(value, 'manifest permissions.scopes')
+  assertOnlyKeys(scopes, ['fs'], 'manifest permissions.scopes')
+  const fs = assertObject(
+    required(scopes, 'fs', 'manifest permissions.scopes'),
+    'manifest permissions.scopes.fs'
+  )
+  assertOnlyKeys(fs, ['root', 'read', 'write'], 'manifest permissions.scopes.fs')
+  if (fs.root !== undefined && !V2_FS_SCOPE_ROOTS.includes(fs.root as PluginFsScopeRoot)) {
+    fail('manifest permissions.scopes.fs.root must be workspace or repository')
+  }
+  if (fs.read === undefined && fs.write === undefined) {
+    fail('manifest permissions.scopes.fs must declare read or write')
+  }
+  return {
+    fs: {
+      ...(fs.root !== undefined ? { root: fs.root as PluginFsScopeRoot } : {}),
+      ...(fs.read !== undefined ? { read: scopePaths(fs.read, 'manifest permissions.scopes.fs.read') } : {}),
+      ...(fs.write !== undefined ? { write: scopePaths(fs.write, 'manifest permissions.scopes.fs.write') } : {}),
+    },
+  }
+}
+
 function parsePermissions(value: unknown): PluginManifestV2Permissions {
   const permissions = assertObject(value, 'manifest permissions')
-  assertOnlyKeys(permissions, ['system', 'shell'], 'manifest permissions')
+  assertOnlyKeys(permissions, ['system', 'shell', 'scopes'], 'manifest permissions')
   let system: PluginSystemNamespace[] | undefined
   if (Object.prototype.hasOwnProperty.call(permissions, 'system')) {
     const values = uniqueStringArray(permissions.system, 'manifest permissions.system', 1, 3)
@@ -418,7 +500,10 @@ function parsePermissions(value: unknown): PluginManifestV2Permissions {
     }
     shell = permissions.shell as PluginShellMode
   }
-  return { ...(system ? { system } : {}), ...(shell ? { shell } : {}) }
+  const scopes = Object.prototype.hasOwnProperty.call(permissions, 'scopes')
+    ? parseScopes(permissions.scopes)
+    : undefined
+  return { ...(system ? { system } : {}), ...(shell ? { shell } : {}), ...(scopes ? { scopes } : {}) }
 }
 
 function parseMarketplace(value: unknown): PluginManifestV2['marketplace'] {
@@ -524,7 +609,7 @@ function parseViews(value: unknown): { views: PluginManifestV2View[] } {
 
 function parseBackend(value: unknown): PluginManifestV2['backend'] {
   const backend = assertObject(value, 'manifest backend')
-  assertOnlyKeys(backend, ['entry', 'protocolVersion', 'activation', 'methods', 'events'], 'manifest backend')
+  assertOnlyKeys(backend, ['entry', 'protocolVersion', 'activation', 'methods', 'events', 'agentTools'], 'manifest backend')
   const entry = safePath(required(backend, 'entry', 'manifest backend'), 'manifest backend.entry')
   const filename = entry.slice(entry.lastIndexOf('/') + 1).toLowerCase()
   const extension = filename.slice(filename.lastIndexOf('.'))
@@ -539,18 +624,63 @@ function parseBackend(value: unknown): PluginManifestV2['backend'] {
   const events = backend.events === undefined
     ? undefined
     : backendNameList(backend.events, 'manifest backend.events', MAX_BACKEND_EVENTS)
+  const agentTools = backend.agentTools === undefined ? undefined : agentToolList(backend.agentTools)
   return {
     entry,
     protocolVersion: 1,
     activation: 'startup',
     ...(methods ? { methods } : {}),
     ...(events ? { events } : {}),
+    ...(agentTools ? { agentTools } : {}),
   }
+}
+
+const AGENT_TOOL_KEYS = ['name', 'method', 'risk', 'title', 'description', 'inputSchema', 'timeoutMs'] as const
+const AGENT_TOOL_NAME_PATTERN = /^[a-z][a-z0-9]{1,15}_[a-z0-9_]{1,40}$/
+// The Host backend supervisor's method-name rule (isMethodName in
+// src/main/plugins/pluginBackendSupervisor.ts): stricter than the manifest
+// schema's backend name pattern, and what activation enforces.
+const AGENT_TOOL_METHOD_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/
+// eslint-disable-next-line no-control-regex
+const AGENT_TOOL_TEXT_PATTERN = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029<>]+$/
+
+/** The `agentTool` definition of plugin-manifest-v2.schema.json; returns copies. */
+function agentToolList(value: unknown): PluginManifestV2AgentTool[] {
+  if (!Array.isArray(value) || value.length === 0) fail('manifest backend.agentTools must be a non-empty array')
+  return value.map((raw, index) => {
+    const label = `manifest backend.agentTools[${index}]`
+    const tool = assertObject(raw, label)
+    assertOnlyKeys(tool, AGENT_TOOL_KEYS, label)
+    for (const key of AGENT_TOOL_KEYS.slice(0, 6)) required(tool, key, label)
+    if (typeof tool.name !== 'string' || !AGENT_TOOL_NAME_PATTERN.test(tool.name)) fail(`${label}.name is invalid`)
+    if (typeof tool.method !== 'string' || tool.method.length > 128 || !AGENT_TOOL_METHOD_PATTERN.test(tool.method)) {
+      fail(`${label}.method must be a lower-case backend method name (a-z, 0-9, _ and dots), as the Host accepts`)
+    }
+    if (tool.risk !== 'read' && tool.risk !== 'write') fail(`${label}.risk must be 'read' or 'write'`)
+    for (const key of ['title', 'description'] as const) {
+      const text = tool[key]
+      if (typeof text !== 'string' || !AGENT_TOOL_TEXT_PATTERN.test(text)) {
+        fail(`${label}.${key} must be non-empty plain text without control characters or < >`)
+      }
+    }
+    const schema = tool.inputSchema
+    if (!isRecord(schema) || schema.type !== 'object') fail(`${label}.inputSchema must be a JSON Schema of type 'object'`)
+    if (tool.timeoutMs !== undefined) {
+      const timeout = tool.timeoutMs
+      if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 1 || timeout > 120_000) {
+        fail(`${label}.timeoutMs must be an integer from 1 to 120000`)
+      }
+    }
+    return structuredClone(tool) as PluginManifestV2AgentTool
+  })
 }
 
 /** Most package-local methods / events one backend may declare. */
 export const MAX_BACKEND_METHODS = 64
 export const MAX_BACKEND_EVENTS = 32
+// Main's rule, unchanged: an installed package without agent tools loads as
+// before. agentTools[].method has the stricter AGENT_TOOL_METHOD_PATTERN.
+// Pinned by pluginBackendNameRule.test.ts.
 const BACKEND_NAME_PATTERN = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$/
 
 function backendNameList(value: unknown, label: string, maxItems: number): string[] {
@@ -603,7 +733,7 @@ export function parseManifestV2(raw: unknown): PluginManifestV2 {
     if (manifest.contributes !== undefined || manifest.backend !== undefined) {
       fail('an extension pack must not declare contributes or backend')
     }
-    if (permissions.system !== undefined || permissions.shell !== undefined) {
+    if (permissions.system !== undefined || permissions.shell !== undefined || permissions.scopes !== undefined) {
       fail('an extension pack must not request permissions')
     }
   } else if (manifest.contributes === undefined && manifest.backend === undefined) {
@@ -806,6 +936,9 @@ export interface PublicMethodParams extends EditorFilesystemParams, EditorAiPara
   'fs.statPath': { path: string; selectionGrant?: string }
   'ui.openInEditor': { path: string; line?: number; column?: number }
   'ui.openPlansWindow': { path: string }
+  'ui.shareCaps': Record<string, never>
+  'ui.shareCreate': { path: string; ttlSeconds?: number; requireLogin?: boolean; sendToChat?: boolean; chatId?: string }
+  'ui.shareChatTargets': Record<string, never>
   'ui.openExternal': { url: string }
   'aiCli.listProfiles': { terminalView?: boolean }
   'aiCli.startSession': { profileId: string; requestId?: string; cols: number; rows: number; yolo?: boolean; persistView?: boolean }
@@ -851,6 +984,13 @@ export interface PublicMethodResults extends EditorFilesystemResults, EditorAiRe
   'fs.statPath': { exists: boolean }
   'ui.openInEditor': { opened: boolean }
   'ui.openPlansWindow': { opened: boolean }
+  'ui.shareCaps': { ok: true } | { ok: false; code: string; message: string }
+  'ui.shareCreate':
+    | { ok: true; link: { linkId: string; url: string; expiresAt: string; masked: Array<{ line: number; category: string; action: string }> } }
+    | { ok: false; code: string; message: string; reason?: string }
+  'ui.shareChatTargets':
+    | { ok: true; chats: Array<{ chatId: string; platform: string; name: string }> }
+    | { ok: false; code: string; message: string }
   'ui.openExternal': { opened: boolean }
   'aiCli.listProfiles': { profiles: Array<{ id: string; label: string; fullScreenTui?: boolean; bracketedPaste?: boolean; shiftEnterSequence?: string }> }
   'aiCli.startSession': { sessionId: string }
@@ -862,7 +1002,12 @@ export interface PublicMethodResults extends EditorFilesystemResults, EditorAiRe
   'aiCli.redrawSession': Record<string, never>
   'aiCli.interruptSession': Record<string, never>
   'aiCli.stopSession': Record<string, never>
-  'shell.run': { exitCode: number; stdout: string; stderr: string }
+  /** stdout and stderr are cut at 8000 characters each; `truncated` and the
+   *  full UTF-8 sizes say so (`stderrBytes` only when stderr was cut). */
+  'shell.run': {
+    exitCode: number; stdout: string; stderr: string
+    truncated?: boolean; stdoutBytes?: number; stderrBytes?: number
+  }
   'storage.get': StorageGetResult
   'storage.set': null
   'storage.delete': boolean

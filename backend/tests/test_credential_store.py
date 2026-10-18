@@ -200,3 +200,89 @@ async def test_usage_poll_consumes_bound_context_not_backend_environment(store_c
     result = await usage.UsageService(cache_path=tmp_path / "usage.json").poll_once(vault._real_home)
     assert result["providers"][vendor]["status"] == "no-credentials"
     assert len(calls) == 1
+
+
+async def test_usage_poll_waits_quietly_for_an_unverified_store_then_resumes(store_case, monkeypatch, tmp_path, caplog):
+    from agent_team_backend import usage_service as usage
+    from agent_team_backend.cli_vendors import kilo, opencode
+    from agent_team_backend.cli_vendors.registry import VENDORS
+
+    vendor, _, vault, _, _, _, _, _ = store_case
+    monkeypatch.setattr(usage, "_get_profiles_store", lambda: None)
+    monkeypatch.setattr(usage, "_get_credential_vault", lambda: vault)
+    monkeypatch.setattr(usage, "_CLI_VENDORS", {vendor: VENDORS[vendor]})
+    calls = []
+
+    async def empty(_home):
+        return usage._snapshot("claude", "no-credentials")
+
+    async def fetch(home, env=None, **kwargs):
+        calls.append(home)
+        return usage._snapshot(vendor, "no-credentials")
+
+    monkeypatch.setattr(usage, "fetch_claude", empty)
+    monkeypatch.setattr(kilo if vendor == "kilo" else opencode, "fetch_" + vendor, fetch)
+    service = usage.UsageService(cache_path=tmp_path / "usage.json")
+    with caplog.at_level("DEBUG", logger=usage.log.name):
+        for _ in range(2):
+            result = await service.poll_once(vault._real_home)
+            snap = result["providers"][vendor]
+            assert snap["status"] == "unverified"
+            assert "open a standard CLI pane" in snap["error"]
+    assert calls == []
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+    bind(store_case)
+    result = await service.poll_once(vault._real_home)
+    assert result["providers"][vendor]["status"] == "no-credentials"
+    assert len(calls) == 1
+
+
+async def test_usage_poll_isolates_a_store_that_fails_to_read(monkeypatch, tmp_path, caplog):
+    import dataclasses
+    import sqlite3
+
+    from agent_team_backend import usage_service as usage
+    from agent_team_backend.cli_vendors.registry import VENDORS
+
+    class Stores:
+        def enabled(self, _provider):
+            return True
+
+        def context(self, provider):
+            if provider == "kilo":
+                raise sqlite3.OperationalError("database is locked")
+            return provider
+
+    class Vault:
+        stores = Stores()
+
+    read = []
+
+    async def from_context(ctx):
+        read.append(ctx)
+        return usage._snapshot(ctx, "no-credentials")
+
+    async def empty(_home):
+        return usage._snapshot("claude", "no-credentials")
+
+    # The failing store sits between two healthy ones: a task is already
+    # running for the first when the second is asked for its context.
+    vendors = {
+        name: dataclasses.replace(VENDORS[spec], fetch_usage_from_context=from_context)
+        for name, spec in (("opencode", "opencode"), ("kilo", "kilo"), ("pi", "opencode"))
+    }
+    monkeypatch.setattr(usage, "_get_profiles_store", lambda: None)
+    monkeypatch.setattr(usage, "_get_credential_vault", lambda: Vault())
+    monkeypatch.setattr(usage, "_CLI_VENDORS", vendors)
+    monkeypatch.setattr(usage, "fetch_claude", empty)
+
+    with caplog.at_level("WARNING", logger=usage.log.name):
+        result = await usage.UsageService(cache_path=tmp_path / "usage.json").poll_once(tmp_path)
+
+    assert sorted(read) == ["opencode", "pi"]
+    assert result["providers"]["opencode"]["status"] == "no-credentials"
+    assert result["providers"]["pi"]["status"] == "no-credentials"
+    assert result["providers"]["kilo"]["status"] == "error"
+    assert "database is locked" in result["providers"]["kilo"]["error"]
+    assert [r for r in caplog.records if "kilo" in r.getMessage()]

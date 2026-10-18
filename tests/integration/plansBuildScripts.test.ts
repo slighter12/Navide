@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -22,6 +22,10 @@ function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'navide-plans-build-'))
   roots.push(root)
   file(root, 'plugins/navide-plans/backend/plans_backend.py', '# production source\n')
+  file(root, 'backend/agent_team_backend/__init__.py', '# package marker\n')
+  file(root, 'backend/agent_team_backend/path_guard.py', '# shared path guard\n')
+  file(root, 'backend/agent_team_backend/fs_write.py', '# shared write path\n')
+  file(root, 'backend/agent_team_backend/git_security.py', '# shared Git guard\n')
   file(root, 'backend/pyproject.toml', '# build dependencies\n')
   file(root, 'backend/uv.lock', '# pinned toolchain\n')
   file(root, 'dist-plugins/navide-plans/manifest.json', JSON.stringify({ backend: { entry: 'backend/navide-plans' } }))
@@ -31,6 +35,7 @@ function fixture(): string {
 const fs = require('node:fs');
 const path = require('node:path');
 fs.appendFileSync('build-calls', 'build\\n');
+fs.writeFileSync('build-args', process.argv.slice(2).join('\\n'));
 if (process.env.NAVIDE_TEST_FAIL_BUILD) process.exit(1);
 const destination = process.argv[process.argv.indexOf('--distpath') + 1];
 fs.mkdirSync(destination, { recursive: true });
@@ -55,7 +60,10 @@ function buildCount(root: string): number {
 // The stub `uv` is a shebang script found through PATH, which Windows'
 // CreateProcess never resolves (only .com/.exe), so the real uv would run and
 // parse the placeholder lock instead.
-describe.skipIf(isWindows())('Plans backend build cache', () => {
+// Each build() starts the real build script and its stub uv as two Node
+// processes, up to six times per test: the cost is process startup, which
+// stretches with machine load, not a wait on anything that could race.
+describe.skipIf(isWindows())('Plans backend build cache', { timeout: 30_000 }, () => {
   it('skips unchanged development builds and rebuilds changed inputs or missing output', () => {
     const root = fixture()
     build(root)
@@ -70,6 +78,33 @@ describe.skipIf(isWindows())('Plans backend build cache', () => {
     rmSync(join(root, 'dist-plugins/navide-plans/backend'), { recursive: true })
     build(root)
     expect(buildCount(root)).toBe(4)
+  })
+
+  it('rebuilds when a core module the backend bundles changes', () => {
+    const root = fixture()
+    build(root)
+    build(root)
+    expect(buildCount(root)).toBe(1)
+    file(root, 'backend/agent_team_backend/path_guard.py', '# changed shared path guard\n')
+    build(root)
+    expect(buildCount(root)).toBe(2)
+    file(root, 'backend/agent_team_backend/__init__.py', '# changed package marker\n')
+    build(root)
+    expect(buildCount(root)).toBe(3)
+    file(root, 'backend/agent_team_backend/fs_write.py', '# changed shared write path\n')
+    build(root)
+    expect(buildCount(root)).toBe(4)
+    file(root, 'backend/agent_team_backend/git_security.py', '# changed shared Git guard\n')
+    build(root)
+    expect(buildCount(root)).toBe(5)
+  })
+
+  it('lets PyInstaller import the shared path guard from the backend source tree', () => {
+    const root = fixture()
+    build(root)
+    const args = readFileSync(join(root, 'build-args'), 'utf8').trim().split('\n')
+    expect(args).toContain('--paths')
+    expect(args[args.indexOf('--paths') + 1]).toBe(join(realpathSync(root), 'backend'))
   })
 
   it('rebuilds altered output and never caches a failed build; release builds remain unconditional', () => {
@@ -137,7 +172,17 @@ describe.skipIf(isWindows())('production Plans CI fixture exclusion', () => {
 // other platform; the Host runs `<entry>.exe` there (backendEntryOnDisk). The
 // verifier reads process.platform, so a preloaded module makes it see win32.
 describe('production Plans verifier on a Windows build', () => {
-  const asWindows = `data:text/javascript,${encodeURIComponent("Object.defineProperty(process, 'platform', { value: 'win32' })")}`
+  const windowsPlatformSource = "Object.defineProperty(process, 'platform', { value: 'win32' })"
+  const asWindows = `data:text/javascript,${encodeURIComponent(windowsPlatformSource)}`
+
+  // Bun accepts Node's `--import` flag but never applies the preload, so the
+  // Windows simulation is handed to Bun as a real preload module; the payload
+  // and the spawned verifier are unchanged. Node keeps the `--import` route.
+  function windowsPlatformPreload(root: string): string[] {
+    if (!process.versions.bun) return ['--import', asWindows]
+    const preload = file(root, 'scripts/windows-platform.mjs', `${windowsPlatformSource}\n`)
+    return ['--preload', preload]
+  }
 
   function verifyWindowsBuild(entry: string, executable: string): ReturnType<typeof spawnSync> {
     const root = fixture()
@@ -147,7 +192,7 @@ describe('production Plans verifier on a Windows build', () => {
     file(root, 'dist-plugins/navide-plans/manifest.json', JSON.stringify({ backend: { entry } }))
     file(root, `dist-plugins/navide-plans/backend/${executable}`, 'MZproduction-binary')
     copyFileSync('scripts/verify-plans-production.mjs', join(root, 'scripts/verify-plans-production.mjs'))
-    return spawnSync(process.execPath, ['--import', asWindows, join(root, 'scripts/verify-plans-production.mjs')], {
+    return spawnSync(process.execPath, [...windowsPlatformPreload(root), join(root, 'scripts/verify-plans-production.mjs')], {
       cwd: root, encoding: 'utf8',
     })
   }

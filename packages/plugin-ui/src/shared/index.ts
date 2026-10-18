@@ -62,7 +62,7 @@ export type {
   KeyConflict,
 } from './keybindings/customization'
 
-export { defaults } from './keybindings/defaults'
+export { defaults, settingsKeySpec, sidebarTabKeySpec } from './keybindings/defaults'
 
 export {
   acceleratorToSpec,
@@ -72,6 +72,7 @@ export {
   MENU_ROLE_ACCELERATORS,
   menuOwnedSpecs,
   NATIVE_MENU_KEYS,
+  nativeMenuKeys,
   splitKeyTokens,
   TERMINAL_KEYS,
 } from './keybindings/externalKeys'

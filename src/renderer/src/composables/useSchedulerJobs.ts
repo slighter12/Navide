@@ -13,6 +13,9 @@
 // Ownership: this window acts as the user and may change every job; the
 // labels only say which ones an agent created, which of those no agent can
 // change any more (creator gone), and when an agent's periodic job expires.
+// The exception is a system job (owner.kind 'system', e.g. workspace
+// self-evolution): the backend refuses every mutation of it, so its row is
+// read-only and points at the workspace that manages it.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { useBackend } from './useBackend'
@@ -59,6 +62,9 @@ export function useSchedulerJobs(backend: ReturnType<typeof useBackend>) {
   function light(job: SchedulerJob): Light {
     const st = job.state ?? {}
     if (st.running_at || inGrace(job)) return 'running'
+    // A gone target is red even once the backend disabled the job for it:
+    // it needs the user to rebind it, not just to switch it back on.
+    if (targetGone(job)) return 'err'
     if (!job.enabled) return 'off'
     if ((st.consecutive_errors ?? 0) > 0) return 'err'
     if (st.last_status === 'skipped') return 'skip'
@@ -67,7 +73,13 @@ export function useSchedulerJobs(backend: ReturnType<typeof useBackend>) {
   }
 
   function targetGone(job: SchedulerJob): boolean {
+    if (job.state?.disabled_reason === 'target_gone') return true
     return job.state?.last_status === 'skipped' && job.state.last_skip_reason === 'target_gone'
+  }
+
+  /** Rebound onto its rebuilt pane but still stopped: it waits for someone to switch it on. */
+  function rebound(job: SchedulerJob): boolean {
+    return !job.enabled && !!job.state?.rebound_needs_enable && !targetGone(job)
   }
 
   function skipLabel(job: SchedulerJob): string {
@@ -76,6 +88,7 @@ export function useSchedulerJobs(backend: ReturnType<typeof useBackend>) {
   }
 
   function targetLabel(job: SchedulerJob): string {
+    if (isSystem(job)) return t('scheduler.system.managed-by')
     const a = job.action
     const name = a.pane_name || shortId(a.pane_id)
     return a.pane_id
@@ -84,7 +97,17 @@ export function useSchedulerJobs(backend: ReturnType<typeof useBackend>) {
   }
 
   function isAgent(owner: JobOwner | null | undefined): boolean {
-    return !!owner && owner.kind !== 'user'
+    return !!owner && owner.kind !== 'user' && owner.kind !== 'system'
+  }
+
+  /** Owned by the app: no enable/disable, remove, edit, run-now, adopt, keep. */
+  function isSystem(job: SchedulerJob): boolean {
+    return job.owner?.kind === 'system'
+  }
+
+  /** The workspace whose panel manages a system job. */
+  function systemWorkspace(job: SchedulerJob): string {
+    return job.owner?.workspace || job.action.workspace || ''
   }
 
   function whoLabel(owner: JobOwner): string {
@@ -283,8 +306,11 @@ export function useSchedulerJobs(backend: ReturnType<typeof useBackend>) {
     now,
     light,
     targetGone,
+    rebound,
     skipLabel,
     targetLabel,
+    isSystem,
+    systemWorkspace,
     backoffLabel,
     ownerLabel,
     ownerTitle,

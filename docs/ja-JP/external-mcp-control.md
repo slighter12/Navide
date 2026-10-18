@@ -74,6 +74,7 @@ Credential（Navide が claude/codex の Pane を Spawn するときに発行）
 | `plan_update_stage` | `workspace_path`, `rel_path`, `stage` | Stage を設定: `draft`、`in-review`、`approved`、`in-progress`、`done`、`abandoned` |
 | `plan_update_todo` | `workspace_path`, `rel_path`, `todo_id`, `status` | 一つの Todo の Status を設定: `pending`、`in-progress`、`done`、`skipped` |
 | `plan_add_note` | `workspace_path`, `rel_path`, `text`, `author?`（`ai`\|`user`、既定は `ai`） | Review Note を追記 |
+| `plan_add_todo` | `workspace_path`, `rel_path`, `content`, `id?`, `owner?`（`agent`\|`user`）, `status?`（既定は `pending`）, `after?` | 既存の Plan に Todo を追加（末尾、または `after` で指定した Todo の後ろ） |
 
 ここで `workspace_path` が必須なのは、外部 Client が Pane ではないためです。Pane
 の呼び出し元はこれを省略し、Tool はその Pane 自身の Workspace を使います。これは
@@ -98,7 +99,7 @@ Plan ウィンドウが Plan を解決する際の基準と同じものです。
 | Tool | パラメータ | 動作 |
 |---|---|---|
 | `cli_list_targets` | — | アドレス指定可能な CLI Pane を一覧: `name`、`address`、`pane_id`（すべての `ui.pane.*` アクションが取るキーであり、下の Pane 系 Tool では `address` の代わりにもなる）、`workspace_path`、`same_workspace`、`busy`、`realized`（復元用 placeholder は false: 背後で CLI が動いていないため常に busy で、誰かが開くまでメッセージは待機する — `ui.pane.open`、または `cli_send(open_target=true)`）、`hold_reason?` |
-| `cli_whoami` | — | **CLI Pane 専用。** 自分自身の識別情報を、名簿が他 Pane を記述するのと同じ形で返します: `{ok, caller, name, address, pane_id, workspace_path, agent_key, busy, offline, realized, delegation_hint, hold_reason?, spawned_by?, waiting_on_me?}`。`delegation_hint` は委譲ルール（下の `cli_open_agent` を参照）を、server instructions を読んでいない Pane のために再掲します。`pane_id` は全ての `ui.pane.*` が受け付ける唯一のキーであり、Pane が自分自身を操作するための前提です。`spawned_by` は自分を開いた Pane（閉じた後は `{pane_id, gone: true}`）|
+| `cli_whoami` | — | **CLI Pane 専用。** 自分自身の識別情報を、名簿が他 Pane を記述するのと同じ形で返します: `{ok, caller, name, address, pane_id, workspace_path, agent_key, busy, offline, realized, delegation_hint, hold_reason?, surface?, window_kind?, spawned_by?, waiting_on_me?}`。`delegation_hint` は委譲ルール（下の `cli_open_agent` を参照）を、server instructions を読んでいない Pane のために再掲します。`pane_id` は全ての `ui.pane.*` が受け付ける唯一のキーであり、Pane が自分自身を操作するための前提です。`spawned_by` は自分を開いた Pane（閉じた後は `{pane_id, gone: true}`）|
 | `cli_send` | `to`（Pane のアドレス、または Broadcast を表す `"group"`）, `text`, `wait_for_delivery_s=0`（上限 120）, `pane_id?`, `reply_to?` | 別の Pane が Idle になった時点で指示を配信（Busy なら Queue に保留）。`msg_key` を返し、待機を指定した場合はその結末も返す。プレーンな Terminal Pane（`agent_key: "terminal"`）宛てのテキストはそのまま打ち込まれ、**ユーザーの権限でシェルコマンドとして実行される**。`"group"` は Terminal を飛ばし、Terminal はチャットチャネルからの内容を拒否する — [プレーンな Terminal Pane](inter-cli-messaging.md#プレーンな-terminal-pane) を参照 |
 | `cli_check_message` | `msg_key` | 一つの `cli_send` の結末: `{status, target, age_seconds, reason?, settled_after_s?, hold?, held_for_s?, stale?}` |
 | `cli_cancel_message` | `msg_key` | 送信済みでまだ入っていないメッセージを取り消します。判断するのは受信側 Queue を持つウィンドウです。まだ待機中なら破棄して status は `cancelled` に、配信が始まっていれば取り消しは無視され、確定した status が返ります。取り消しは失敗ではなく、通知も書き戻されません。`{ok, msg_key, status, reason?}` を返します |
@@ -108,6 +109,7 @@ Plan ウィンドウが Plan を解決する際の基準と同じものです。
 | `cli_send_and_wait` | `to`, `text`, `timeout_s=60`（上限 120）, `pane_id?` | `cli_send` に加えてその Turn の完了まで待機。`cli_wait_idle` の結果に `{ok, target, msg_key}` を付けて返す  **リモート Pane**: 送信と配信 gate はローカルと同じ（`rejected` は `failed` と区別されたまま）。待機の半分は名簿バッジを使い、弱点は `cli_wait_idle` と同じです。 |
 | `cli_open_agent` | `agent`, `name`, `task`, `workspace_path`（Pane 以外の呼び出し元では必須）, `model`, `effort`, `pane_id?`, `session_id?`, `run_group_id?` | Task 付きで新しい CLI Pane を Spawn。`{ok, name, address, pane_id}` を返し、Spawn が Advisory の閾値を越えた場合は `advisories` も返す。**委譲ルール**（server instructions にも同じ一文があります）: ファイルを編集する、数分以上かかる、あるいはユーザーが途中で見たり中断したり引き継いだりしたくなる作業は、ここで開いた Pane に渡します — Agent 自身の subagent 機構（Claude Code の `Agent`／`Task` ツール）にではなく。Pane は Navide 上で見え、実行中に開け、呼び出し元の Session より長く生きます。subagent は要約を一つ返すだけのブラックボックスです。結果が一段落で済む短い読み取り専用の調査には、引き続き subagent が適しています。`model` と `effort` は任意で、その CLI が受け付けない場合は無視せず「拒否」するため、Pane が別のモデルで静かに起動することはない。多くの CLI は model を受け付けるが、独立した effort を受け付けるものは少なく、残りは effort を model id に埋め込む（`gpt-5.3-codex-high`）。model id は検証しない（リリースごとに変わるため）が、effort はその CLI の語彙と照合する。**`agent: "terminal"`** はプレーンなログインシェルの Pane を開く。`task` は省略可能で、プロンプトが出たあとに一度だけ打ち込まれるコマンドライン（後ろには何も付け足さない。シェルは報告できないため報告の指示もない）。`model`、`effort`、`session_id` は拒否される。再入力はしないので、確認できなかった Kickoff は `unverified` を返す。再送すればコマンドがもう一度実行されるため、再送前に `cli_read_log` を読むこと |
 | `cli_close_agent` | `target`, `pane_id?` | Pane を閉じる — `cli_open_agent` のもう半分です。**これは相手の作業を終わらせます**: Pane と PTY が消え、走っていた Turn もろとも死に、その Pane 宛に Queue されていたものは配信されません。取り消しは効きません — 閉じた Pane の Session は待避ではなく消滅です。先に `cli_get_status` を見て、作業中の Pane は閉じないでください。`cli_interrupt` はより穏当な段（割り込みキーを押すだけで Pane は開いたまま）、`cli_send` はさらに穏当（Turn の完了を待つ）です。`{ok, target, name, closed, advisories?}` を返します。`advisories` は閉じたことの代償のうち他の誰も報告しないもの — Pane が Turn の途中だった、メッセージが Queue に残っていた、子 Pane が孤児になった — で、Kill の後では知りようがないため事前に集めます。このマシン上の Pane のみ: `<device>/<workspace>/<pane>` 形式のアドレスは `close-local-only` で失敗します。これはアドレスの誤りではなく、この Tool の限界です |
+| `cli_reclaim_agent` | `target`, `pane_id?` | 作業を終えた Pane を回収する — `cli_close_agent` の取り消し可能な版です。CLI プロセスは終了し、Pane は会話を保ったままクリックで再開できるカードとして残ります。ステータスバーの「今すぐ回収」（`ui.pane.reclaim`）を、`cli_send` と同じアドレスで指定した 1 つの Pane に対して、その Pane を持つウィンドウで実行します。ステータスバーのガードが適用され、ビジー・フォーカス中・再開不可の Pane、未送信の入力やキュー中のメッセージがある Pane は拒否されます。`{ok, target, name, reclaimed}` を返し、拒否時は `ok: false`、`reclaimed: false`、ガードの `reason`、`error_code` `reclaim-refused` です。このマシン上の Pane のみ（`reclaim-local-only`）、自分自身は不可（`self-reclaim`）。v0.2.16 より古いウィンドウは `reclaim-unsupported` を返します — `cli_close_agent` で代用せず、アプリを更新してください |
 
 **Choosing a tab group when opening a pane.** `cli_open_agent` accepts optional
 `run_group_id` for a fresh pane or a new pane opened with `session_id`:
@@ -151,6 +153,12 @@ group ID below with values returned for the target workspace:
 （Pane への打ち込みが通らなかった）、`pane-closed`（配信前に対象が消えた）、
 `no-report`（試行が結果を報告しなかった）です。
 
+`unconfirmed`（reason は `delivery-unconfirmed`）はそのどちらでもありません。
+テキストと Enter は Resume した直後の CLI に送られましたが、その CLI はまだ受信を
+示していません。送信は済んでおり実行中の可能性もあるため、これだけで再送しないで
+ください。先に `cli_get_status` か `cli_read_log` で Pane を確認してください。
+後から CLI の Transcript にメッセージが現れると、状態は `delivered` になります。
+
 失敗は、要求がなくても送信側の Pane にも Push されます。Navide は対象と理由を
 記した `[Navide MSG] delivery failed` の通知を、その Pane が Idle になった時点で、
 通常のメッセージと同じ Queue と注入経路を通じて書き込みます。これは一度も Poll
@@ -178,7 +186,10 @@ Turn の途中の Pane や入力されている Pane はメッセージをはる
 **メッセージがまだ Queue にある理由。** `hold` は Messages パネルが表示するのと
 同じ理由で、`{key, n?}` の形をとります。`key` は `typing`、`mid-turn`、`behind`、
 `starting`、`settling`、`not-ready`、`gone`、`paused`、`remote-ack` のいずれかで、
-`held_for_s` はその状態が続いている長さです。これは `cli_check_message` と、
+`held_for_s` はその状態が続いている長さです。別のデバイスへ送って 1 分以上応答のない
+メッセージは Server に問い合わせられ、その後は `remote-busy`（対象 Pane が Turn の
+途中）または `remote-unreported`（作業中ではなく、相手からもまだ何の応答もない）に
+なります。これは `cli_check_message` と、
 Timeout した `cli_send` の待機に現れ、メッセージが決着したあとや、どのウィンドウも
 理由を報告していない間は現れません。`cli_list_targets` は同じ事実を Pane ごとに
 `hold_reason` として見せ、それが `busy` を説明可能にしています。ただしここから送った
@@ -386,6 +397,7 @@ Host Wiring — だけです。Navide の CLI Pane から、その Pane 自身�
 | `ui.pane.open` | `{paneId}` | 復元用の placeholder（`cli_list_targets` で `realized: false` の Pane）を開き、完了を待つ。`{realized, reason, paneId}` を返す — `paneId` は開いた後の Pane の id、`reason` は `opened`、`fresh`（新しいセッション。以前の会話は覚えていない）、`already-open`、または開けなかった理由。Resume 動作が `ask` でもモーダルは出ません |
 | `ui.pane.getStatus` | `{paneId}` | その Pane の `{status, buffer, logPath?, awaitingKind?, kickoff?, agentLabel?, model?, effort?, profileId?, loginExpired?, usageLimitUntil?}` を返す — アイデンティティ系のキーは Pane に値がある場合のみ |
 | `ui.pane.interrupt` | `{paneId}` | その Pane の割り込みキーを押す。`{sent, status, advisories?}` を返す — `status` は押す**前**に読まれます。押すこと自体が、報告しようとしているその状態を変えてしまうためです |
+| `ui.pane.reclaim` | `{paneId}`（単一 id または配列） | 作業を終えた Pane のリソースを解放する：CLI プロセスは終了し、Pane はクリックで再開できるカードとして残る（ステータスバーの「今すぐ回収」と同じ）。ビジーまたは回答待ち、フォーカス中、未送信の入力あり、キュー中のメッセージあり、再開不可の Pane は拒否される。`{reclaimed, refused: [{paneId, reason, detail}]}` を返す |
 | `ui.tab.switch` | `{tabId}` | Active な Stage/Run-group タブを切り替え |
 | `ui.preview.show` | `{kind, …}` | 右レールのプレビューパネルにファイル・diff・インラインスニペットを表示 |
 | `ui.window.openPlans` | `{rel_path?}` | Plan ウィンドウを開く。`rel_path`（`.agent-team/plans/<name>.html`、相対パス、`..` 不可）を渡すとその Plan 1 件に絞って開く |
@@ -507,6 +519,40 @@ CLI が既に何を渡されているのか、このプロジェクトが既に�
 | `workspace_switch` | `path` | 呼び出し元 Pane をホストしているウィンドウを、そのウィンドウがすでに保持している別の Workspace に切り替えます（1 ウィンドウ複数プロジェクト）。Pane は影響を受けません。ウィンドウが `path` を保持していない場合は、`workspace_open` を案内するエラーになります。そのウィンドウで Pipeline が実行中の間も拒否されます（先に `pipeline_abort` するか、サイドバーから切り替えてください）。Pane からの呼び出し専用です — host や外部の呼び出し元は自分のウィンドウを持たないため `ok: false` になります（代わりに `ui_invoke` に `workspace_path` と action `ui.workspace.switch` を渡してください）。今画面に表示されている Workspace を `{ok, path}` で返します |
 | `mcp_list` | — | ここで設定されている MCP サーバー — Navide 自身がクライアントとして接続するもの（ライブ状態付き）と、各 CLI が自分の設定（`~/.claude.json`、`~/.codex/config.toml` など）に持つものをファイルの記述どおりに反映したもの。`{servers, native, agents}` を返します。Navide 管理の各サーバーは `{name, enabled, transport, command, args, env}` または `{name, enabled, transport, url, headers}` に `status`（`disabled` / `connected` / `error` / `unknown`）と `tool_count` を加えたもので、ツール一覧そのものは含みません。各 native エントリは `{name, agent, transport, path, command, args, url, env, headers, enabled, valid, error}` です。`agents` は各ベンダーと、Navide がその MCP に対してできること（`wired` / `planned` / `unsupported`）、および自身の設定が反映されているかどうかです。資格情報の形をした値 — env と header の値、`--api-key=` 形式の引数、URL の userinfo と秘密のクエリパラメータ — はすべて `***` にマスク済みで、名前とホストはエントリを識別できるよう残されます。Workspace ごとではなくグローバルな一覧です。読み取り専用 — サーバーの追加・有効化・編集は Settings でのユーザーの判断です |
 | `prompt_list` | `id=""` | ユーザーが Settings → Prompts に保持する Prompt スキル — アプリから CLI Pane に送る保存済みの指示。`id` なしで呼ぶとメタデータのみを一覧します: `{skills, default_id}` で、各スキルは `{id, name, icon, description, category, enabled, isDefault, maxTurns}`、`default_id` はデフォルトに指定されたスキルの id（無ければ `""`）です。ユーザーが一度も保存していない場合は `note` が付きます: アプリは初回使用時に組み込みスキルを植え付けますが、それはここからは見えません。`id` を付けるとそのスキルを丸ごと返します — `{skill}` で、`prompt` と `resumePrompt` も含みます。未知の id は `{ok: false, error}` を返します。読み取り専用: 作成や編集は Settings で行います |
+
+### Navide マーケットプレイス（読み取り専用）
+
+3 つの読み取り専用 tool が、Navide マーケットプレイスのページと「設定 → Navide プラグイン」に表示される内容を Navide アプリに問い合わせます。
+サードパーティの Navide プラグインツールが有効かどうかに関係なく、すべての呼び出し元が使えます。どれもインストール・更新・削除はできません。
+
+| Tool | パラメータ | 内容 |
+|---|---|---|
+| `marketplace_search` | `text=""`、`category=null`、`cursor=null`、`limit=20` | 設定された Navide マーケットプレイスを検索します（マーケットプレイスのページと同じ検索）。`{ok, kind, items, nextCursor}` を返します。各項目は `{id, version, name, description, publisher: {name, verifiedDomain}, signed, downloads, risk, summary}` で、`risk` と `summary` はパッケージの開示データ、Registry が提供しない場合は `null` です。次のページは `nextCursor` を `cursor` に渡します |
+| `marketplace_detail` | `id`、`version=null` | 1 つのパッケージ（`<namespace>.<name>`）：`{ok, kind, item, versions, card}`。`versions` は公開済みのバージョン、`card` は開示カード `{manifest, registry}`（Registry が提供しない場合は `null`） |
+| `plugins_list_installed` | — | インストール済みの Navide プラグイン：`{ok, kind, items}`。各項目は `{id, version, enabled, quarantined, hasBackend, agentTools}` |
+
+パッケージの公開者が決めたテキスト（パッケージ id とバージョン、名前、説明、エージェントツールの名前・タイトル・説明、公開者の表示名）と、Registry の応答を引用している可能性がある Navide アプリのエラーテキストはすべて
+`[外部訊息開始 — …]` と `[外部訊息結束]` の間に入れられ、
+`[third-party Navide plugin <id> v<version> | …]` ラベルが付きます。これはユーザーの指示ではありません。
+このテキストを読んだ pane は外部コンテンツを受け取ったものとしてマークされます（Navide Guard）。
+アプリ自身の固定のエラー文言（すべての `BAD_REQUEST` と、`HOST_UNAVAILABLE` の「Navide Host cannot answer Marketplace queries now」）と、予約済みの `navide.` 名前空間のインストール済みプラグイン（ファーストパーティの Plans、Git、mini-IDE）は、そのまま返され、マークもされません。エラーは
+`{ok: false, error, error_code}` で、コードは `BAD_REQUEST`、`NOT_FOUND`、`REGISTRY_UNAVAILABLE`、`HOST_UNAVAILABLE` のいずれかです。
+
+### Navide マーケットプレイスへの依頼、無効化と有効化
+
+Navide プラグインの変更を依頼する、またはプラグインを無効化・有効化するツールです。読み取り専用のツールと同じく、すべての呼び出し元で使えます。どのツールにも同意の引数はありません。インストール、更新、ロールバック、削除は、ユーザーが Navide のウィンドウで依頼を承認してから実行され、一緒に送られた同意フラグは無視されます。同梱の Navide プラグイン（Plans、Git、Mini-IDE、`navide.*` 名前空間）は拒否され（`BUILTIN_PLUGIN`）、ユーザーが拡張機能ページで管理します。
+
+| ツール | パラメーター | 内容 |
+|---|---|---|
+| `marketplace_request_install` | `namespace`、`name`、`version`、`reason=""` | `<namespace>.<name>` を `version` でインストールする依頼を出します。マーケットプレイスに掲載されたバージョン（ない場合は `NOT_FOUND`）で、まだインストールされていないことが条件です。ユーザーは依頼者、`reason`（エージェントが書いたものとして表示）、開示カードを見て判断します。`{ok, approval_id, status: "pending", expires_at, note}` を返します。依頼は 15 分で期限切れになり、同じパッケージとバージョンの依頼をもう一度出すと保留中の依頼が返ります |
+| `marketplace_request_update` | `namespace`、`name`、`version`、`reason=""` | インストール済みパッケージの新しいバージョンへの依頼（未インストールなら `NOT_INSTALLED`） |
+| `marketplace_request_rollback` | `namespace`、`name`、`version`、`reason=""` | インストール済みパッケージの古いバージョンへの依頼 |
+| `plugins_request_remove` | `namespace`、`name`、`reason=""` | インストール済みパッケージを削除する依頼 |
+| `marketplace_request_status` | `approval_id`、`wait_s=0` | `{ok, approval_id, kind, target: {id, version}, status, error, expires_at}`。`status` は `pending`、`applying`（承認済み、実行中）、`completed`、`failed`、`rejected`、`expired` のいずれかです。`wait_s`（0〜60）でその秒数だけ変化を待ちます。別の Navide ウィンドウが先にこのリクエストを確定し、実行中だったウィンドウが後から実際の結果を報告した場合は、`finished_late: true` と `settled: {status, error}`（それまでの記録）も返り、`status` と `error` は実際の結果になります |
+| `plugins_disable` | `namespace`、`name` | インストール済みのマーケットプレイスのパッケージを、拡張機能ページのスイッチと同じようにすぐ無効にします。ビュー、バックエンド、エージェントツールは止まり、ファイル、許可、データは残ります。ユーザーにはどの呼び出し元が行ったかが通知され、ワンクリックで元に戻せます。変更は記録されます。`{ok, pluginId, pluginVersion, disabled: true, changed}` を返します。すでに無効だった場合は `changed` が false で、何も起きず通知もされません |
+| `plugins_enable` | `namespace`、`name` | エージェントが無効にしたパッケージは、ユーザーがすでに与えた同意のまますぐ有効にし、`{ok, pluginId, pluginVersion, disabled: false, changed}` を返します。ユーザーが無効にしたパッケージは有効にせず、ユーザーの判断を求める依頼を出して `{ok: false, error_code: "APPROVAL_REQUIRED", error, approval_id, status: "pending", expires_at}` を返します |
+
+エラーは `{ok: false, error, error_code}` で、`BAD_REQUEST`、`BUILTIN_PLUGIN`、`NOT_INSTALLED`、`NOT_FOUND`、`ACTION_FAILED`、`REGISTRY_UNAVAILABLE`、`HOST_UNAVAILABLE` のいずれかです。依頼、判断、結果、無効化、有効化はすべて、呼び出し元（pane 名、外部クライアント、Navide Host）とともに navide.db の `plugin_agent_actions` テーブルに記録されます。
 
 ### Pipeline
 

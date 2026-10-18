@@ -59,6 +59,10 @@ CLAUDE_CONFIG_FILENAME = ".claude.json"
 # the change still waits out the debounce before the fingerprint is read.
 POLL_INTERVAL_S = 1.0
 
+# An identity read that failed, or a change that did not read the same twice,
+# is looked at again this many times before waiting for the next file change.
+CHECK_RETRIES = 5
+
 # Sentinel for "no fingerprint recorded yet" — a signed-out agent is a
 # legitimate reading, so no ordinary value can stand in for "never read".
 _UNSEEN = object()
@@ -93,14 +97,16 @@ def live_identity_fingerprint(agent_key: str) -> object:
     the common case costs one file read instead of a Keychain ``security``
     subprocess. The other agents read their live secret's identity — a file
     read too; kimi has no identity field, so all it can report is whether a
-    token exists. Blocking I/O: call through ``vault_to_thread``."""
+    token exists. Raises when the identity cannot be read (a file caught
+    mid-write, a transient Keychain failure) rather than reading that as signed
+    out. Blocking I/O: call through ``vault_to_thread``."""
     from . import app
 
     vault = app.credential_vault
     if agent_key == "claude":
-        account = vault.live_account("claude") or {}
+        account = vault.live_account("claude", strict=True) or {}
         return (account.get("emailAddress"), account.get("accountUuid"))
-    identity = vault.identity(agent_key)
+    identity = vault.identity(agent_key, strict=True)
     return (identity.get("email"), bool(identity.get("signedIn")))
 
 
@@ -108,8 +114,11 @@ def _norm_email(value: object) -> str | None:
     return value.casefold() if isinstance(value, str) and value else None
 
 
-def _match_live_slot(agent_key: str) -> tuple[str | None, str, str | None]:
-    """``(live email, active slot id, matching slot id)`` for one agent.
+def _match_live_slot(
+    agent_key: str, scope: str | None = None
+) -> tuple[str | None, str, str | None]:
+    """``(live email, active slot id, matching slot id)`` for one agent
+    (``scope``: one provider entry of a per-provider store).
 
     The live email is None whenever the account cannot be identified at all —
     signed out, kimi (no identity field), or a claude long-lived-token login
@@ -125,7 +134,8 @@ def _match_live_slot(agent_key: str) -> tuple[str | None, str, str | None]:
     from . import app
 
     vault = app.credential_vault
-    live = vault.identity(agent_key)
+    kw = {"scope": scope} if scope else {}
+    live = vault.identity(agent_key, **kw)
     raw_email = live.get("email") if live.get("signedIn") else None
     email = _norm_email(raw_email)
     doc = app.cli_profiles_store.list()
@@ -140,15 +150,19 @@ def _match_live_slot(agent_key: str) -> tuple[str | None, str, str | None]:
     if DEFAULT_SLOT_ID not in slot_ids:
         slot_ids.append(DEFAULT_SLOT_ID)
     for slot_id in slot_ids:
-        slot_email = _norm_email(vault.identity(agent_key, slot_id).get("email"))
+        slot_email = _norm_email(vault.identity(agent_key, slot_id, **kw).get("email"))
         if slot_email == email or (slot_email is None and slot_id == active):
             return raw_email, active, slot_id
     return raw_email, active, None
 
 
-def _adopt_unregistered_live_account(agent_key: str, email: str) -> str | None:
+def _adopt_unregistered_live_account(
+    agent_key: str, email: str, *, scope: str | None = None
+) -> str | None:
     """Give a live login no slot holds its own profile and make it the active
     one; returns the new profile id, or None when nothing was registered.
+    ``scope`` is the provider entry the login was read from (per-provider
+    stores); the profile is created in it.
 
     Without this the ledger keeps naming some other account, and the next
     switch would capture this login into a slot that belongs to a different
@@ -166,14 +180,14 @@ def _adopt_unregistered_live_account(agent_key: str, email: str) -> str | None:
     store = app.cli_profiles_store
     vault = app.credential_vault
     try:
-        profile = store.create(agent_key=agent_key, name=email)
+        profile = store.create(agent_key=agent_key, name=email, scope=scope)
     except Exception as err:  # noqa: BLE001 — a watcher must never crash
         log.warning("registering the live %s account failed: %s", agent_key, err)
         return None
     profile_id = str(profile["id"])
     registered = False
     try:
-        if vault.harvest(agent_key, profile_id):
+        if vault.harvest(agent_key, profile_id, **({"scope": scope} if scope else {})):
             store.set_default(agent_key, profile_id)
             registered = True
         else:
@@ -194,14 +208,15 @@ def _adopt_unregistered_live_account(agent_key: str, email: str) -> str | None:
         except Exception as err:  # noqa: BLE001
             log.error("undoing profile %s for %s failed: %s", profile_id, agent_key, err)
         return None
+    # The profile is named by the account's email; the log names only the id.
     log.info(
-        "live %s account %s was unregistered; registered it as profile %s",
-        agent_key, email, profile_id,
+        "live %s account was unregistered; registered it as profile %s",
+        agent_key, profile_id,
     )
     return profile_id
 
 
-def align_default_to_live(agent_key: str) -> str | None:
+def align_default_to_live(agent_key: str, *, scope: str | None = None) -> str | None:
     """Point ``defaults[agent_key]`` at the slot whose snapshot matches the
     live credentials, registering a profile for the account when no slot holds
     it (see ``_adopt_unregistered_live_account``); returns the slot id when the
@@ -214,11 +229,13 @@ def align_default_to_live(agent_key: str) -> str | None:
     ``cli_profiles.set_default`` cannot interleave. Blocking."""
     from . import app
 
-    email, active, matched = _match_live_slot(agent_key)
+    email, active, matched = _match_live_slot(agent_key, scope)
     if matched is None:
         # An account nothing holds. Registering it needs an identity to name
         # it by, which is exactly what a None email says we do not have.
-        return None if email is None else _adopt_unregistered_live_account(agent_key, email)
+        return None if email is None else _adopt_unregistered_live_account(
+            agent_key, email, scope=scope
+        )
     if matched == active:
         return None
     app.cli_profiles_store.set_default(
@@ -229,6 +246,35 @@ def align_default_to_live(agent_key: str) -> str | None:
         agent_key, matched,
     )
     return matched
+
+
+def point_at_profile_holding_live(agent_key: str, *, scope: str | None = None) -> str | None:
+    """Make the profile whose slot holds exactly the live secret the active
+    one; returns its id, or None when no other profile holds it. For a login
+    with no email to match by: the same login followed twice lands on the
+    profile it got the first time. Never writes credentials. Call inside
+    ``switch_lock(agent_key)``. Blocking."""
+    from . import app
+    from .quota_failover import profile_scope
+
+    vault = app.credential_vault
+    kw = {"scope": scope} if scope else {}
+    live = vault.read_live(agent_key, strict=True, **kw).secret
+    if live is None:
+        return None
+    doc = app.cli_profiles_store.list()
+    active = doc["defaults"].get(agent_key)
+    for profile in doc["profiles"]:
+        profile_id = profile.get("id")
+        if (
+            profile.get("agentKey") != agent_key or profile_id == active
+            or profile_scope(agent_key, profile) != scope
+        ):
+            continue
+        if vault.read_slot(agent_key, profile_id, **kw).secret == live:
+            app.cli_profiles_store.set_default(agent_key, profile_id)
+            return str(profile_id)
+    return None
 
 
 async def reconcile_live_account(agent_key: str) -> None:
@@ -253,14 +299,20 @@ async def reconcile_live_account(agent_key: str) -> None:
     except Exception as err:  # noqa: BLE001 — a watcher must never crash the loop
         log.warning("reconciling the active %s account failed: %s", agent_key, err)
         return
-    await _broadcast_profiles_changed(
-        "live_credentials", agent_key=agent_key, forced=False
-    )
+    try:
+        await _broadcast_profiles_changed(
+            "live_credentials", agent_key=agent_key, forced=False
+        )
+    except Exception as err:  # noqa: BLE001 — the ledger already moved; say so
+        log.warning("announcing the realigned %s account failed: %s", agent_key, err)
     # The usage badges read the active account's credentials — pull them now so
     # the badge follows the account the user just signed into.
     from .usage_service import service
 
-    service.request_refresh()
+    try:
+        service.request_refresh()
+    except Exception as err:  # noqa: BLE001
+        log.warning("refreshing usage after the %s account change failed: %s", agent_key, err)
 
 
 def _stamp(path: Path) -> tuple[int, int, int] | None:
@@ -299,6 +351,14 @@ class CredentialWatcher:
         self._fingerprints: dict[str, object] = {}
         self._pending: dict[str, asyncio.TimerHandle] = {}
         self._seed_task: asyncio.Task | None = None
+        # agent_key -> serializes that agent's checks, so an older reading
+        # can never be recorded after a newer one
+        self._check_locks: dict[str, asyncio.Lock] = {}
+        # agent_key -> checks still allowed before giving up until the next change
+        self._retries_left: dict[str, int] = {}
+        # Running checks, held so they are not collected mid-flight and so
+        # their failures reach the log.
+        self._check_tasks: set[asyncio.Task] = set()
         self._started = False
         self._resolver = resolver
         # path -> (agent_key, last stamp)
@@ -327,7 +387,10 @@ class CredentialWatcher:
         # Bindings cannot be replaced. An unbound vendor had no previous
         # watch, so changes at the old path can never reconcile its new store.
         if path not in self._watched:
-            self._fingerprints[agent_key] = await vault_to_thread(self._fingerprint, agent_key)
+            try:
+                self._fingerprints[agent_key] = await vault_to_thread(self._fingerprint, agent_key)
+            except Exception as err:  # noqa: BLE001 — the watch matters more than the seed
+                log.warning("seeding the live %s identity failed: %s", agent_key, err)
             self._watch_file(path, agent_key)
 
     def stop(self) -> None:
@@ -368,14 +431,20 @@ class CredentialWatcher:
     async def _poll(self) -> None:
         while True:
             await asyncio.sleep(self._poll_s)
-            paths = list(self._watched)
-            # Off the loop: a home directory on a network mount stats slowly.
-            stamps = await asyncio.to_thread(lambda: [_stamp(p) for p in paths])
-            for path, stamp in zip(paths, stamps):
-                agent_key, last = self._watched[path]
-                if stamp != last:
-                    self._watched[path] = (agent_key, stamp)
-                    self._schedule_fire(agent_key)
+            # One failed round must not end the watch for the rest of the
+            # process (#144); cancellation is not an Exception and still stops it.
+            try:
+                paths = list(self._watched)
+                # Off the loop: a home directory on a network mount stats slowly.
+                stamps = await asyncio.to_thread(lambda: [_stamp(p) for p in paths])
+                for path, stamp in zip(paths, stamps):
+                    agent_key, last = self._watched[path]
+                    if stamp != last:
+                        self._watched[path] = (agent_key, stamp)
+                        self._retries_left[agent_key] = CHECK_RETRIES
+                        self._schedule_fire(agent_key)
+            except Exception as err:  # noqa: BLE001
+                log.warning("polling the credential files failed: %s", err)
 
     def _schedule_fire(self, agent_key: str) -> None:
         loop = self._loop
@@ -390,17 +459,51 @@ class CredentialWatcher:
 
     def _fire(self, agent_key: str) -> None:
         self._pending.pop(agent_key, None)
-        asyncio.ensure_future(self._check(agent_key))
+        task = asyncio.ensure_future(self._check(agent_key))
+        self._check_tasks.add(task)
+        task.add_done_callback(self._check_done)
+
+    def _check_done(self, task: asyncio.Task) -> None:
+        self._check_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            log.warning("checking a live identity failed: %s", task.exception())
 
     async def _check(self, agent_key: str) -> None:
         """The de-noising gate: read who the live credentials belong to and do
-        nothing unless that differs from the last reading."""
-        try:
-            fp = await vault_to_thread(self._fingerprint, agent_key)
-        except Exception as err:  # noqa: BLE001
-            log.warning("reading the live %s identity failed: %s", agent_key, err)
+        nothing unless that differs from the last reading.
+
+        A changed reading must read the same again after the debounce before
+        it counts: a file caught mid-write parses as signed out, and recording
+        that would hide the real change behind a stamp already consumed. A
+        read that fails, or a change that has not settled, is retried
+        (#144)."""
+        lock = self._check_locks.setdefault(agent_key, asyncio.Lock())
+        async with lock:
+            try:
+                fp = await vault_to_thread(self._fingerprint, agent_key)
+                if self._fingerprints.get(agent_key, _UNSEEN) == fp:
+                    return
+                await asyncio.sleep(self._debounce_s)
+                settled = await vault_to_thread(self._fingerprint, agent_key) == fp
+            except Exception as err:  # noqa: BLE001
+                log.warning("reading the live %s identity failed: %s", agent_key, err)
+                settled = None
+            if not settled:
+                self._retry(agent_key)
+                return
+            self._fingerprints[agent_key] = fp
+            try:
+                await self._on_identity_change(agent_key)
+            except Exception as err:  # noqa: BLE001
+                log.warning("handling the %s identity change failed: %s", agent_key, err)
+
+    def _retry(self, agent_key: str) -> None:
+        left = self._retries_left.get(agent_key, CHECK_RETRIES)
+        if left <= 0:
+            log.warning(
+                "the live %s identity did not settle; waiting for the next change",
+                agent_key,
+            )
             return
-        if self._fingerprints.get(agent_key, _UNSEEN) == fp:
-            return
-        self._fingerprints[agent_key] = fp
-        await self._on_identity_change(agent_key)
+        self._retries_left[agent_key] = left - 1
+        self._schedule_fire(agent_key)

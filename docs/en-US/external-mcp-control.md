@@ -72,6 +72,7 @@ Implementation: [`mcp_server/server.py`](../../backend/agent_team_backend/mcp_se
 | `plan_update_stage` | `workspace_path`, `rel_path`, `stage` | Set stage: `draft`, `in-review`, `approved`, `in-progress`, `done`, `abandoned` |
 | `plan_update_todo` | `workspace_path`, `rel_path`, `todo_id`, `status` | Set one todo's status: `pending`, `in-progress`, `done`, `skipped` |
 | `plan_add_note` | `workspace_path`, `rel_path`, `text`, `author?` (`ai`\|`user`, default `ai`) | Append a review note |
+| `plan_add_todo` | `workspace_path`, `rel_path`, `content`, `id?`, `owner?` (`agent`\|`user`), `status?` (default `pending`), `after?` | Add a todo to an existing plan, appended or after the todo `after` names |
 
 `workspace_path` is required here because an external client is not a pane;
 a pane caller omits it and the tools use that pane's own workspace, which is
@@ -96,7 +97,7 @@ documents the addresses, the idle gate and the guard rails they share.
 | Tool | Parameters | What it does |
 |---|---|---|
 | `cli_list_targets` | — | List addressable CLI panes: `name`, `address`, `pane_id` (the key every `ui.pane.*` action takes, and an alternative to `address` on the pane tools below), `workspace_path`, `same_workspace`, `busy`, `realized` (false for a restore placeholder: no CLI is running behind it, so it is busy forever and a message parks until someone opens it — `ui.pane.open`, or `cli_send(open_target=true)`), `hold_reason?` |
-| `cli_whoami` | — | **CLI panes only.** Your own identity, in the same shape the roster describes a peer: `{ok, caller, name, address, pane_id, workspace_path, agent_key, busy, offline, realized, delegation_hint, hold_reason?, spawned_by?, waiting_on_me?}`. `delegation_hint` restates the delegation rule (below, under `cli_open_agent`) for a pane that never read the server instructions. `pane_id` is what every `ui.pane.*` action takes, so this is what lets a pane act on itself; `spawned_by` names the pane that opened you (`{pane_id, gone: true}` once it has closed) |
+| `cli_whoami` | — | **CLI panes only.** Your own identity, in the same shape the roster describes a peer: `{ok, caller, name, address, pane_id, workspace_path, agent_key, busy, offline, realized, delegation_hint, hold_reason?, surface?, window_kind?, spawned_by?, waiting_on_me?}`. `delegation_hint` restates the delegation rule (below, under `cli_open_agent`) for a pane that never read the server instructions. `pane_id` is what every `ui.pane.*` action takes, so this is what lets a pane act on itself; `spawned_by` names the pane that opened you (`{pane_id, gone: true}` once it has closed) |
 | `cli_send` | `to` (a pane address, or `"group"` to broadcast), `text`, `wait_for_delivery_s=0` (capped at 120), `pane_id?`, `reply_to?` | Deliver an instruction to another pane once it's idle (queued if busy); returns `msg_key`, and with a wait, what became of it. To a plain terminal pane (`agent_key: "terminal"`) the text is typed bare and **runs as a shell command with the user's privileges**; terminals are skipped by `"group"` and refuse chat-channel content — see [Plain terminal panes](inter-cli-messaging.md#plain-terminal-panes) |
 | `cli_check_message` | `msg_key` | What became of one `cli_send`: `{status, target, age_seconds, reason?, settled_after_s?, hold?, held_for_s?, stale?}` |
 | `cli_cancel_message` | `msg_key` | Withdraw a message you sent, if it has not gone in yet. Decided by the window owning the recipient's queue: still waiting → dropped and the status becomes `cancelled`; delivery already started → the withdrawal is ignored and you are told what it settled as. A withdrawal is not a failure and writes no notice back to you. Returns `{ok, msg_key, status, reason?}` |
@@ -106,6 +107,7 @@ documents the addresses, the idle gate and the guard rails they share.
 | `cli_send_and_wait` | `to`, `text`, `timeout_s=60` (capped at 120), `pane_id?` | `cli_send` plus the wait for that turn to finish; returns `cli_wait_idle`'s result plus `{ok, target, msg_key}`  **Remote panes**: send and delivery gate work as they do locally (`rejected` stays distinct from `failed`); the wait half uses the roster badge with the same weaknesses as `cli_wait_idle`. |
 | `cli_open_agent` | `agent`, `name`, `task`, `workspace_path` (required for a non-pane caller), `model`, `effort`, `pane_id?`, `session_id?`, `run_group_id?` | Spawn a new CLI pane with a task; returns `{ok, name, address, pane_id}`, plus `advisories` when the spawn crossed an advisory threshold. **Delegation rule** (also in the server instructions): work that edits files, runs longer than a few minutes, or that the user may want to watch, interrupt or take over goes to a pane opened here — not to the agent's own subagent facility (Claude Code's `Agent` / `Task` tools). A pane is visible in Navide, can be opened mid-run and outlives the caller's session; a subagent is a black box that hands back one summary. Subagents stay the right tool for short read-only lookups whose whole result is a paragraph. `model` and `effort` are optional and are refused — not ignored — when that CLI cannot take them, so a pane never quietly starts on a different model than asked for. Most CLIs accept a model; fewer accept a separate effort, the rest encoding it in the model id (`gpt-5.3-codex-high`). Model ids are not validated (they change every release); effort is checked against that CLI's vocabulary. **Two ways to open onto something that already exists**, and they are not interchangeable: `pane_id` reopens a restore placeholder Navide is already holding (see `cli_list_targets`' `realized: false`), keeping its name and resuming only the one conversation its own record remembers; `session_id` opens a **new** pane onto any conversation the vendor still has on disk — including one started outside Navide in a plain terminal — using that CLI's own resume syntax (`claude --resume <id>`, `codex resume <id>`, `opencode --session <id>`, …), so it starts with that conversation's memory and `task` is then typed in as the follow-up. Read the ids from `cli_list_sessions`. The id is checked against the vendor's session store **before** the pane opens: an id with nothing on disk is refused with `unknown-session-id` rather than opening a pane that silently starts fresh, which is indistinguishable from a successful resume until you read the transcript. The two are mutually exclusive (`conflicting-target`), and aider — the one CLI with no session ids — is refused with `no-session-support`. A resumed pane answers with `resumed_session_id` and `restored_lineage`. **By default, a resume restores the conversation's previous parent and tab group**; an explicit `run_group_id` changes only the tab group. A pane's record outlives the pane — closing one marks it removed rather than deleting it — so the parent pane and tab group that conversation last sat in are still on disk, and the pane reopens under that parent, in that group, rather than parented onto the caller. A conversation that was a root pane goes back to the root. `restored_lineage` is `{spawned_by, run_group_id}`, always present on a resume, so the caller can see where it landed; `spawned_by: ""` means the root. When the project document no longer remembers the pane at all, the pane opens unparented (`spawned_by: ""`); `restored_lineage.run_group_id` is empty by default or contains the explicit `run_group_id` when one was supplied. **`agent: "terminal"`** opens a plain login-shell pane: `task` is optional — a command line typed once after the prompt, with nothing appended (no report-back instructions; a shell cannot report) — and `model`, `effort` and `session_id` are refused. It is never retyped, so an unconfirmed kickoff answers `unverified`; read `cli_read_log` before resending, because a resend runs the command again |
 | `cli_close_agent` | `target`, `pane_id?` | Close a pane — the other half of `cli_open_agent`. **This ends the other agent's work**: the pane and its PTY go away, whatever turn was running dies with them, and anything queued for it is never delivered. It cannot be undone — a closed pane's session is gone, not parked, so check `cli_get_status` first; `cli_interrupt` is the softer rung and `cli_send` softer still. Returns `{ok, target, name, closed, advisories?}`, where `advisories` names what closing cost and nobody else would have reported — the pane was mid-turn, messages were queued for it, it had children that are now orphaned — gathered before the kill because none of it is knowable afterwards. Panes on this machine only: a `<device>/<workspace>/<pane>` address fails with `close-local-only`, which is a limit of this tool rather than a wrong address |
+| `cli_reclaim_agent` | `target`, `pane_id?` | Reclaim a finished pane — the reversible counterpart of `cli_close_agent`. Its CLI process ends and the pane stays as a click-to-resume card holding its conversation, the status bar's "reclaim now" (`ui.pane.reclaim`) for one pane addressed like `cli_send`, in whichever window holds it. The status bar's guards apply: a busy, focused or non-resumable pane, or one with unsent input or queued messages, is refused. Returns `{ok, target, name, reclaimed}`; a refusal answers `ok: false`, `reclaimed: false`, the guard's `reason` and `error_code` `reclaim-refused`. Panes on this machine only (`reclaim-local-only`), never your own (`self-reclaim`); a window older than v0.2.16 answers `reclaim-unsupported` — update the app rather than falling back to `cli_close_agent` |
 
 **Choosing a tab group when opening a pane.** `cli_open_agent` accepts optional
 `run_group_id` for a fresh pane or a new pane opened with `session_id`:
@@ -149,6 +151,13 @@ pending-message queue is at its cap), `inject-failed` (typing it into the
 pane did not take), `pane-closed` (the target went away before delivery), or
 `no-report` (the attempt never reported an outcome).
 
+`unconfirmed` (reason `delivery-unconfirmed`) is neither of those: the text
+and its Enter went into a CLI that had just been resumed, and that CLI has
+not shown it received it. It was sent, and it may be running, so do not
+resend on it alone — look at the pane first with `cli_get_status` or
+`cli_read_log`. The status becomes `delivered` if the CLI's transcript shows
+the message later.
+
 A failure is also pushed at the sending pane without being asked for: Navide
 writes a `[Navide MSG] delivery failed` notice naming the target and the
 reason into that pane once it is idle, through the same queue and injection
@@ -177,7 +186,10 @@ Left at its default of `0`, the answer is byte-for-byte what it always was.
 **Why a message is still queued.** `hold` is the same reason the Messages panel
 shows — `{key, n?}`, where `key` is `typing`, `mid-turn`, `behind`, `starting`,
 `settling`, `not-ready`, `gone`, `paused` or `remote-ack` — and `held_for_s` is
-how long it has been that way. It appears on `cli_check_message` and on a
+how long it has been that way. A message to another device that has gone a
+minute unanswered is asked about through the server, and then reads
+`remote-busy` (its target pane is mid-turn) or `remote-unreported` (it is not,
+and the far side has still said nothing). It appears on `cli_check_message` and on a
 timed-out `cli_send` wait, and it is absent once the message settles or while
 no window has reported one. `cli_list_targets` surfaces the same fact per pane
 as `hold_reason`, which is what makes `busy` explainable — but only while a
@@ -395,6 +407,7 @@ documented argument shapes.
 | `ui.pane.open` | `{paneId}` | Open a restore placeholder (a pane whose `cli_list_targets` row says `realized: false`) and wait for it. Returns `{realized, reason, paneId}` — `paneId` is the id the pane is known by afterwards, `reason` is `opened`, `fresh` (a new session, no memory of the old one), `already-open`, or why it stayed closed. Under resume behavior `ask` it does not raise the modal |
 | `ui.pane.getStatus` | `{paneId}` | Returns `{status, buffer, logPath?, awaitingKind?, kickoff?, agentLabel?, model?, effort?, profileId?, loginExpired?, usageLimitUntil?}` for that pane — the identity keys only when the pane has a value for them |
 | `ui.pane.interrupt` | `{paneId}` | Press that pane's interrupt key. Returns `{sent, status, advisories?}` — the status is read *before* the press, because the press changes the very thing being reported |
+| `ui.pane.reclaim` | `{paneId}` (one id or an array) | Free finished panes' resources: each CLI process ends and the pane stays as a click-to-resume card, the status bar's "reclaim now". Busy or awaiting, focused, unsent-input, queued-message and non-resumable panes are refused. Returns `{reclaimed, refused: [{paneId, reason, detail}]}` |
 | `ui.pane.place` | `{paneId, runGroupId?, spawnedBy?}` | Move a pane to a tab group and/or make it a child of another pane. Each key is optional and independent; `""` is a value (ungrouped tab / root), an absent key is left alone. Group first, then parent. Returns `{paneId, applied, runGroupId, spawnedBy}`. The action behind `cli_place_pane` |
 | `ui.tab.switch` | `{tabId}` | Switch the active stage/run-group tab |
 | `ui.preview.show` | `{kind, …}` | Show a file, diff or inline snippet in the right rail's preview panel |
@@ -520,6 +533,59 @@ servers are configured, and which prompts the user has saved.
 | `workspace_switch` | `path` | Switch the window that hosts the calling pane to another workspace it already holds (one window, many projects); panes are not affected. Refused with an error pointing at `workspace_open` when the window does not hold `path`, and refused while a pipeline is running in that window (`pipeline_abort` first, or switch from the sidebar). Pane callers only — a host or external caller has no window of its own and gets `ok: false` (use `ui_invoke` with a `workspace_path` and action `ui.workspace.switch` instead). Returns `{ok, path}` with the workspace now on screen |
 | `mcp_list` | — | The MCP servers configured here — the ones Navide connects to as a client, with their live state, and the ones each CLI keeps in its own config (`~/.claude.json`, `~/.codex/config.toml`, …), reflected as the file states them. Returns `{servers, native, agents}`. Each managed server is `{name, enabled, transport, command, args, env}` or `{name, enabled, transport, url, headers}` plus `status` (`disabled`, `connected`, `error`, `unknown`) and `tool_count`; the tool list itself is left out. Each native entry is `{name, agent, transport, path, command, args, url, env, headers, enabled, valid, error}`. `agents` is every vendor with what Navide can do with its MCP (`wired`, `planned`, `unsupported`) and whether its own config is reflected. Every credential-shaped value — env and header values, `--api-key=` style arguments, URL userinfo and secret query parameters — is already masked as `***`; names and hosts are kept so an entry stays recognisable. Global, not per workspace. Read-only — adding, enabling or editing a server is the user's decision, made in Settings |
 | `prompt_list` | `id=""` | The prompt skills the user keeps in Settings → Prompts — saved instructions fired at a CLI pane from the app. With no `id` this lists metadata only: `{skills, default_id}`, each skill being `{id, name, icon, description, category, enabled, isDefault, maxTurns}`, and `default_id` the id of the skill marked default (`""` when none is). A `note` is added when the user has never saved any: the app then seeds a builtin skill on first use, which is not visible from here. With an `id` it returns that one skill in full — `{skill}`, carrying `prompt` and `resumePrompt` as well; an unknown id answers `{ok: false, error}`. Read-only: creating or editing one is done in Settings |
+
+### Navide Marketplace (read-only)
+
+Three read-only tools ask the Navide app for what the Navide Marketplace page
+and Settings → Navide Plugins show. They work for every caller, whether or
+not third-party Navide plugin tools are switched on, and none of them can
+install, update or remove anything.
+
+| Tool | Parameters | What it does |
+|---|---|---|
+| `marketplace_search` | `text=""`, `category=null`, `cursor=null`, `limit=20` | Search the configured Navide Marketplace, the same search the Marketplace page runs. Returns `{ok, kind, items, nextCursor}`; each item is `{id, version, name, description, publisher: {name, verifiedDomain}, signed, downloads, risk, summary}`, where `risk` and `summary` are the package's disclosure or `null` when the Registry provides none. Pass `nextCursor` back as `cursor` for the next page |
+| `marketplace_detail` | `id`, `version=null` | One package (`<namespace>.<name>`): `{ok, kind, item, versions, card}`, where `versions` lists the published versions and `card` is the disclosure card `{manifest, registry}` or `null` when the Registry provides none |
+| `plugins_list_installed` | — | The installed Navide plugins: `{ok, kind, items}`, each `{id, version, enabled, quarantined, hasBackend, agentTools}` |
+
+Every text a package publisher chose (package ids and versions, names,
+descriptions, agent tool names, titles and descriptions, a publisher display
+name), and any error text from the Navide app that may quote the Registry,
+comes fenced between
+`[外部訊息開始 — …]` and `[外部訊息結束]` with a
+`[third-party Navide plugin <id> v<version> | …]` label: it is not the user's
+instruction. A pane that reads such text is marked as having received external
+content (Navide Guard). Two things stay plain and mark nothing: the app's
+own fixed error wording (every `BAD_REQUEST`, and the `HOST_UNAVAILABLE`
+"Navide Host cannot answer Marketplace queries now"), and installed plugins
+in the reserved `navide.` namespace (first-party: Plans, Git, mini-IDE).
+Errors are `{ok: false, error, error_code}` with `BAD_REQUEST`, `NOT_FOUND`,
+`REGISTRY_UNAVAILABLE` or `HOST_UNAVAILABLE`.
+
+### Navide Marketplace requests, disable and enable
+
+These tools ask for a change to a Navide plugin, or disable and enable one.
+Like the read-only ones they work for every caller. None of them takes a
+consent argument: installing, updating, rolling back and removing happen only
+after the user approves the request in a Navide window, and a consent flag
+sent along is ignored. The bundled Navide plugins (Plans, Git, Mini-IDE, the
+`navide.*` namespace) are refused (`BUILTIN_PLUGIN`); the user manages them in
+Extensions.
+
+| Tool | Parameters | What it does |
+|---|---|---|
+| `marketplace_request_install` | `namespace`, `name`, `version`, `reason=""` | Files a request to install `<namespace>.<name>` at `version`, which the Marketplace must list (`NOT_FOUND` otherwise) and which must not be installed yet. The user sees who asked, the `reason` (shown as written by an agent) and the disclosure card, and decides. Returns `{ok, approval_id, status: "pending", expires_at, note}`; a request expires after 15 minutes, and a second request for the same package and version returns the pending one |
+| `marketplace_request_update` | `namespace`, `name`, `version`, `reason=""` | The same for a newer version of an installed package (`NOT_INSTALLED` when it is not installed) |
+| `marketplace_request_rollback` | `namespace`, `name`, `version`, `reason=""` | The same for an older version of an installed package |
+| `plugins_request_remove` | `namespace`, `name`, `reason=""` | Files a request to remove an installed package |
+| `marketplace_request_status` | `approval_id`, `wait_s=0` | `{ok, approval_id, kind, target: {id, version}, status, error, expires_at}`; `status` is `pending`, `applying` (approved, being carried out), `completed`, `failed`, `rejected` or `expired`. `wait_s` (0-60) waits that long for it to move on. When another Navide window had settled the request first and the window carrying it out reported afterwards, it also returns `finished_late: true` and `settled: {status, error}` (what had been recorded before); `status` and `error` are then the actual result |
+| `plugins_disable` | `namespace`, `name` | Disables an installed Marketplace package at once, as the user's Extensions switch does: its views, backend and agent tools stop, its files, grants and data stay. The user is told which caller did it, with a one-click undo, and the change is recorded. Returns `{ok, pluginId, pluginVersion, disabled: true, changed}`; when it was already disabled, `changed` is false, nothing happens and nobody is told |
+| `plugins_enable` | `namespace`, `name` | Enables a package an agent disabled at once, under the consent the user already gave, and returns `{ok, pluginId, pluginVersion, disabled: false, changed}`. A package the user disabled is not enabled: a request is filed for the user's decision and the answer is `{ok: false, error_code: "APPROVAL_REQUIRED", error, approval_id, status: "pending", expires_at}` |
+
+Errors are `{ok: false, error, error_code}` with `BAD_REQUEST`,
+`BUILTIN_PLUGIN`, `NOT_INSTALLED`, `NOT_FOUND`, `ACTION_FAILED`,
+`REGISTRY_UNAVAILABLE` or `HOST_UNAVAILABLE`. Every request, decision,
+result, disable and enable is recorded with the caller (pane name, external
+client or Navide Host) in the `plugin_agent_actions` table of navide.db.
 
 ### Pipelines
 

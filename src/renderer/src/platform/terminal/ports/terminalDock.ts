@@ -27,6 +27,9 @@ export interface TerminalSpawnOptions {
    *  `loginProfileId`, which only chooses an isolated home: a live login
    *  (signing in to the already-active account) sets this and not that. */
   isLogin?: boolean
+  /** A claude sign-in inside the pane's account's own config dir (the
+   *  account is the pane's `metadata.profile_id`). */
+  accountDirLogin?: boolean
 }
 
 export interface TerminalCreateRequest {
@@ -44,6 +47,7 @@ export interface TerminalCreateRequest {
   outputLogFile: string | null
   loginProfileId: string | null
   isLogin: boolean
+  accountDirLogin?: boolean
   replacesTerminalId: string | null
 }
 
@@ -75,6 +79,33 @@ export interface TerminalInputOptions {
   human?: boolean
 }
 
+/** What an embedded AI panel tells the roster about itself (see
+ *  TerminalDockPort.registerAgentPane). `surface` / `window_kind` name the
+ *  window it lives in; the backend refuses it as a message target. */
+export interface DockPaneRegistration {
+  pane_id: string
+  name: string
+  workspace_path: string
+  agent_key: string
+  surface: string
+  window_kind: string
+  /** The panel's window delivers messages into it (its port has
+   *  onAgentMessage), so the backend may accept it as a message target. Left
+   *  out otherwise, and the backend keeps refusing it. */
+  deliverable?: boolean
+}
+
+/** One message the backend routed to some pane, as a panel's port hands it
+ *  over: `text` is already the envelope the main window would inject. */
+export interface DockAgentMessage {
+  msgKey: string
+  targetPaneId: string
+  text: string
+  fromDisplay: string
+  /** cli_send(kind="ack"): reported, never typed. */
+  kind?: 'ack'
+}
+
 export interface TerminalDockPort {
   readonly status: ReactiveValue<'starting' | 'connecting' | 'connected' | 'disconnected' | 'error'>
   readonly shell: ReactiveValue<string>
@@ -99,7 +130,9 @@ export interface TerminalDockPort {
   reattach(sessionIds: string[], cols: number, rows: number): Promise<PortResponse<{ alive: string[]; dead: string[]; logs?: Record<string, string> }>>
   resize(sessionId: string, cols: number, rows: number): Promise<PortResponse>
   interrupt(sessionId: string): Promise<PortResponse>
-  kill(sessionId: string, force: boolean): Promise<PortResponse>
+  /** `retireRestore`: the user stopped this CLI (an embedded panel's Stop), so
+   *  the backend retires the panel's restore record. Every other kill keeps it. */
+  kill(sessionId: string, force: boolean, options?: { retireRestore?: boolean }): Promise<PortResponse>
   redraw(sessionId: string, cols: number, rows: number): Promise<PortResponse>
 
   onOutput(callback: (payload: TerminalOutputEvent) => void): () => void
@@ -111,7 +144,38 @@ export interface TerminalDockPort {
    *  unique section key for mention menus (a folder name is not unique), and
    *  `workspace_display_name` is the workspace's user-set alias — both
    *  optional, since a backend older than either field sends neither. */
-  listAgentPanes(): Promise<PortResponse<{ panes?: Array<{ pane_id?: string; qualified_name?: string; workspace_label?: string; workspace_path?: string; workspace_display_name?: string }> }>>
+  listAgentPanes(): Promise<PortResponse<{ panes?: Array<{ pane_id?: string; name?: string; qualified_name?: string; workspace_label?: string; workspace_path?: string; workspace_display_name?: string; surface?: string }> }>>
+  /** Register an embedded AI panel in the messaging roster, so the CLI running
+   *  in it can use Navide's MCP tools (they refuse a pane id the roster has
+   *  never seen). Optional: a host that omits it leaves the panel unregistered,
+   *  which is what every port did before. */
+  registerAgentPane?(pane: DockPaneRegistration): Promise<PortResponse>
+  /** Drop a panel registered with registerAgentPane. */
+  unregisterAgentPane?(paneId: string): Promise<PortResponse>
+  /** Every message the backend routes, for any pane — the panel picks out its
+   *  own. Optional: without it the panel registers as not deliverable. */
+  onAgentMessage?(callback: (message: DockAgentMessage) => void): () => void
+  /** Report a delivery outcome; `reason` is a `msg.reason-*` key. */
+  reportAgentDelivery?(msgKey: string, ok: boolean, reason?: string): Promise<PortResponse>
+  /** The host's fresh-launch session pinning (lib/sessionHeal
+   *  pinFreshSessionAtLaunch). Optional: without it the panel spawns unpinned. */
+  pinFreshSessionAtLaunch?(
+    agentKey: string,
+    isResume: boolean,
+    command: string,
+    requestedId: string | undefined,
+    generate: () => string,
+  ): { command: string; explicitSessionId: string }
+  /** The panel's restore record: the agent and session of its last CLI when
+   *  the backend still holds that record as 'spawned' (an app quit keeps it,
+   *  closing the panel's window retires it); null otherwise. Optional: without
+   *  it the panel never resumes on its own and shows Start, as before. */
+  readDockRestore?(workspacePath: string, paneId: string): Promise<{ agentKey: string; sessionId: string } | null>
+  /** Retire the panel's restore record when no plugin provides its surface any
+   *  more (a built-in panel whose plugin was removed), resolving true; false
+   *  while one does. Optional: a plugin's own port never needs it — its window
+   *  exists only while the plugin does. */
+  dockSurfaceRetired?(workspacePath: string, paneId: string, surface: string): Promise<boolean>
   statPath(path: string, timeoutMs?: number): Promise<PortResponse<{ exists: boolean }>>
   getHomeDirectory?(): Promise<string>
   /** `false` means the host could not open the file; `void` (older ports)

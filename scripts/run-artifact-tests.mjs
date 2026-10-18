@@ -15,9 +15,10 @@ if (!prepared) {
   ]) pnpm(['run', build])
   run(process.execPath, ['scripts/stage-official-plugin-artifacts.mjs'])
 }
+// Electron's lazy download must finish before parallel tests start: two
+// workers importing electron at once both extract into the same dist folder.
+run(process.execPath, ['node_modules/electron/install.js'])
 if (packaged) {
-  // Electron's lazy download must finish before parallel packaged tests start.
-  run(process.execPath, ['node_modules/electron/install.js'])
   pnpm(['run', 'build:plans:fixture'])
 }
 
@@ -27,7 +28,7 @@ if (packaged) {
   env.NAVIDE_TEST_PRODUCTION_PLANS_BACKEND = '1'
 }
 run(process.execPath, [
-  'node_modules/vitest/vitest.mjs', 'run', '--project', 'artifacts',
+  'node_modules/vitest/vitest.mjs', 'run', '--project', 'artifacts', '--project', 'artifacts-heavy',
   ...(packagedOnly ? [
     'tests/integration/plansPackagedRoundtrip.test.ts',
     'src/main/plugins/pluginBackendHost.test.ts',

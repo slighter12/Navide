@@ -27,8 +27,9 @@ import {
   type PlanStage,
 } from '../composables/usePlanHtml'
 import { sharePlanToGit } from '../composables/planShare'
-import { useNotify } from '@navide/plugin-ui/foundation'
+import { useNotify, vTruncate } from '@navide/plugin-ui/foundation'
 import { writePlanDragPayload } from '../lib/planDrag'
+import { recordDiagnostic } from '../lib/uiDiagnostics'
 import {
   isLegacyPlansRecoveryRuntime,
   readLegacyPlansPreferenceProjection,
@@ -137,7 +138,15 @@ async function loadPlans(): Promise<void> {
           workspace_path: planRoot.value,
           rel_path: doc.rel_path,
         })
-        if (!read.payload?.ok) return null
+        if (!read.payload?.ok) {
+          // Still left out of the list, but no longer without a trace.
+          recordDiagnostic({
+            level: 'warn',
+            code: 'plans.read_failed',
+            message: `${doc.rel_path}: ${read.payload?.error || read.error?.message || 'unreadable'}`,
+          })
+          return null
+        }
         const meta = resolvePlanStore(doc.rel_path).parseMeta(read.payload.content ?? '')
         // The read's own mtime, not the scan's: it is the one that matches the
         // bytes this meta was parsed from.
@@ -1200,7 +1209,7 @@ async function ctxUpgradeToPlan(): Promise<void> {
             @keydown.space.prevent="openPlan(row.item)"
             @contextmenu.prevent="openCtxMenu($event, row.item)"
           >
-            <span class="plan-row-name">{{ row.meta?.name ?? row.item.name }}</span>
+            <span class="plan-row-name" v-truncate>{{ row.meta?.name ?? row.item.name }}</span>
             <span v-if="row.meta" class="plan-chip" :class="`plan-chip--stage-${row.meta.stage}`">
               {{ row.meta.stage }}
             </span>
@@ -1257,9 +1266,9 @@ async function ctxUpgradeToPlan(): Promise<void> {
             @keydown.space.prevent="openPlan(row.item)"
             @contextmenu.prevent="openCtxMenu($event, row.item)"
           >
-            <span class="plan-row-name">{{ row.meta?.name ?? row.item.name }}</span>
-            <span v-if="row.meta?.overview" class="plan-row-overview">{{ row.meta.overview }}</span>
-            <span class="plan-row-path" :title="row.item.relPath">{{ row.item.relPath }}</span>
+            <span class="plan-row-name" v-truncate>{{ row.meta?.name ?? row.item.name }}</span>
+            <span v-if="row.meta?.overview" class="plan-row-overview" v-truncate>{{ row.meta.overview }}</span>
+            <span class="plan-row-path" v-truncate>{{ row.item.relPath }}</span>
             <span class="plan-row-meta">
               <span v-if="row.meta" class="plan-row-progress">
                 <span
@@ -1334,8 +1343,8 @@ async function ctxUpgradeToPlan(): Promise<void> {
             @keydown.space.prevent="openPlan(item)"
             @contextmenu.prevent="openCtxMenu($event, item)"
           >
-            <span class="plan-row-name">{{ item.name }}</span>
-            <span class="plan-row-path" :title="item.relPath">{{ item.relPath }}</span>
+            <span class="plan-row-name" v-truncate>{{ item.name }}</span>
+            <span class="plan-row-path" v-truncate>{{ item.relPath }}</span>
             <span class="plan-row-meta">
               <span>{{ item.name.endsWith('.html') ? t('pane.plans.format-html') : t('pane.plans.format-markdown') }}</span>
               <span class="plan-chip">{{ t('pane.plans.doc-badge') }}</span>
@@ -1384,9 +1393,9 @@ async function ctxUpgradeToPlan(): Promise<void> {
             @keydown.space.prevent="openPlan(row.item)"
             @contextmenu.prevent="openCtxMenu($event, row.item)"
           >
-            <span class="plan-row-name">{{ row.meta.name }}</span>
-            <span v-if="row.meta.overview" class="plan-row-overview">{{ row.meta.overview }}</span>
-            <span class="plan-row-path" :title="row.item.relPath">{{ row.item.relPath }}</span>
+            <span class="plan-row-name" v-truncate>{{ row.meta.name }}</span>
+            <span v-if="row.meta.overview" class="plan-row-overview" v-truncate>{{ row.meta.overview }}</span>
+            <span class="plan-row-path" v-truncate>{{ row.item.relPath }}</span>
             <span class="plan-row-meta">
               <span class="plan-row-progress">
                 <span
@@ -1448,9 +1457,9 @@ async function ctxUpgradeToPlan(): Promise<void> {
             @keydown.space.prevent="openPlan(row.item)"
             @contextmenu.prevent="openCtxMenu($event, row.item)"
           >
-            <span class="plan-row-name">{{ row.meta.name }}</span>
-            <span v-if="row.meta.overview" class="plan-row-overview">{{ row.meta.overview }}</span>
-            <span class="plan-row-path" :title="row.item.relPath">{{ row.item.relPath }}</span>
+            <span class="plan-row-name" v-truncate>{{ row.meta.name }}</span>
+            <span v-if="row.meta.overview" class="plan-row-overview" v-truncate>{{ row.meta.overview }}</span>
+            <span class="plan-row-path" v-truncate>{{ row.item.relPath }}</span>
             <span class="plan-row-meta">
               <span class="plan-row-progress">
                 <span
@@ -1573,7 +1582,7 @@ async function ctxUpgradeToPlan(): Promise<void> {
           @mousemove="quickOpenIndex = i"
           @click="confirmQuickOpen"
         >
-          <span class="plan-row-name">{{ row.meta?.name ?? row.item.name }}</span>
+          <span class="plan-row-name" v-truncate>{{ row.meta?.name ?? row.item.name }}</span>
           <span v-if="row.meta" class="plan-chip" :class="`plan-chip--stage-${row.meta.stage}`">
             {{ row.meta.stage }}
           </span>

@@ -36,7 +36,7 @@ import {
   PLUGIN_STAGING_DIR,
 } from './pluginInstallPaths'
 import { PluginActivationSelector } from './pluginActivationSelector'
-import type { ManifestPermissionsSummary } from '../../shared/executionPolicy'
+import { copyManifestPermissionsSummary, type ManifestPermissionsSummary } from '../../shared/executionPolicy'
 
 export {
   assertManifestFiles,
@@ -350,6 +350,8 @@ export interface InstalledPluginPackageSummary {
   warning?: string
   /** The v2 manifest's `engines.navide`, verbatim, when it declares one. */
   enginesNavide?: string
+  /** True when the v2 manifest declares a native `backend`; absent otherwise. */
+  hasBackend?: true
 }
 
 export function manifestToInstalledPackageSummary(
@@ -362,11 +364,13 @@ export function manifestToInstalledPackageSummary(
     ...(isManifestV2(manifest)
       ? {
           packageVersion: manifest.version,
-          manifestPermissions: {
-            system: [...(manifest.permissions.system ?? [])],
+          manifestPermissions: copyManifestPermissionsSummary({
+            system: manifest.permissions.system ?? [],
             ...(manifest.permissions.shell ? { shell: manifest.permissions.shell } : {}),
-          },
+            ...(manifest.permissions.scopes ? { scopes: manifest.permissions.scopes } : {}),
+          }),
           ...(manifest.engines ? { enginesNavide: manifest.engines.navide } : {}),
+          ...(manifest.backend ? { hasBackend: true as const } : {}),
         }
       : {}),
     ...(provenance ? { provenance } : {}),
@@ -415,7 +419,8 @@ export function loadPluginDir(dir: string): ScannedPlugin {
 export function scanInstalledPlugins(root: string): ScannedPlugin[] {
   let names: string[]
   try {
-    names = readdirSync(root)
+    // Sorted: readdir order differs between filesystems and runtimes.
+    names = readdirSync(root).sort()
   } catch {
     return []
   }

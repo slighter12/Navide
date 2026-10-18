@@ -17,6 +17,7 @@ import {
   HOST_EVENT_SOURCE_PLUGIN_ID,
   shellTopLevelExecutables,
   executionPolicyAllows,
+  isAuthenticatedInitiator,
   type PublicCapabilityDecision,
   type HostCapabilityContext,
   type CapabilityCall,
@@ -334,6 +335,27 @@ describe('Issue 03/04 public Host planner', () => {
       publisherEligible: true,
     }))).toMatchObject({ kind: 'allow', plan: { address: 'ui.openPlansWindow' } })
     expect(planPublicCapabilityCall(plansCall, plansPolicy, context({
+      runtimeBinding: plansBinding,
+      userGrant: { packageVersion: '1.0.0', system: ['ui'] },
+      publisherEligible: false,
+    }))).toMatchObject({ kind: 'deny', response: { error: { code: 'CAPABILITY_DENIED' } } })
+  })
+
+  it.each([
+    ['shareCaps', {}],
+    ['shareCreate', { path: '.agent-team/plans/example.html' }],
+    ['shareChatTargets', {}],
+  ])('requires first-party eligibility for share links: ui.%s', (method, args) => {
+    const plansBinding = { ...binding, pluginId: 'navide.plans' }
+    const plansPolicy = manifestV2CapabilityPolicy({ system: ['ui'] })
+    const shareCall = call({ pluginId: 'navide.plans', ns: 'ui', method, args })
+
+    expect(planPublicCapabilityCall(shareCall, plansPolicy, context({
+      runtimeBinding: plansBinding,
+      userGrant: { packageVersion: '1.0.0', system: ['ui'] },
+      publisherEligible: true,
+    }))).toMatchObject({ kind: 'allow', plan: { address: `ui.${method}` } })
+    expect(planPublicCapabilityCall(shareCall, plansPolicy, context({
       runtimeBinding: plansBinding,
       userGrant: { packageVersion: '1.0.0', system: ['ui'] },
       publisherEligible: false,
@@ -1240,5 +1262,35 @@ describe('Issue 16 broker Host-managed storage partitions', () => {
       kind: 'deny',
       response: { error: { code: 'INVALID_ARGUMENT' } },
     })
+  })
+})
+
+describe('agent initiator caller (plan B1-b)', () => {
+  const base = { kind: 'agent', source: 'mcp', id: 'a-1' }
+  it('keeps the three-key agent and the user initiators exactly as before', () => {
+    expect(isAuthenticatedInitiator(base)).toBe(true)
+    expect(isAuthenticatedInitiator({ kind: 'user', id: 'u' })).toBe(true)
+    expect(isAuthenticatedInitiator({ kind: 'user', id: 'u', caller: null })).toBe(false)
+  })
+
+  it('accepts a pane caller verified to the pane, and external or host callers verified to their kind', () => {
+    expect(isAuthenticatedInitiator({ ...base, caller: { kind: 'pane', paneId: 'p-1', workspace: '/w', verifiedTo: 'pane' } })).toBe(true)
+    expect(isAuthenticatedInitiator({ ...base, caller: { kind: 'pane', paneId: 'p-1', workspace: null, verifiedTo: 'pane' } })).toBe(true)
+    expect(isAuthenticatedInitiator({ ...base, caller: { kind: 'external', paneId: null, workspace: null, verifiedTo: 'caller-kind' } })).toBe(true)
+    expect(isAuthenticatedInitiator({ ...base, caller: { kind: 'host', paneId: null, workspace: null, verifiedTo: 'caller-kind' } })).toBe(true)
+  })
+
+  it('refuses a caller that claims more than it can prove', () => {
+    for (const caller of [
+      { kind: 'external', paneId: 'p-1', workspace: null, verifiedTo: 'caller-kind' },
+      { kind: 'external', paneId: null, workspace: null, verifiedTo: 'pane' },
+      { kind: 'pane', paneId: '', workspace: null, verifiedTo: 'pane' },
+      { kind: 'pane', paneId: 'p-1', workspace: null, verifiedTo: 'caller-kind' },
+      { kind: 'pane', paneId: 'p-1', workspace: null, verifiedTo: 'pane', model: 'x' },
+      { kind: 'user', paneId: null, workspace: null, verifiedTo: 'caller-kind' },
+      null,
+    ]) {
+      expect(isAuthenticatedInitiator({ ...base, caller })).toBe(false)
+    }
   })
 })

@@ -12,6 +12,12 @@ who may change any job; an agent (an MCP caller) may change only the jobs it
 created. A job whose creating pane is gone belongs to nobody an agent can act
 as, so only the user can change it — see :func:`may_change`.
 
+A job may also be owned by Navide itself (``{kind: "system"}``): a feature
+such as a workspace's self-evolution keeps its clock here. Nobody changes such
+a job through this module's public API — not an agent and not the user, whose
+window shows it read-only — only the feature that owns it, acting as that same
+system owner. A system job is not an agent's: no agent limits, no expiry.
+
 Jobs an agent owns are also limited (the user's own jobs are not): at most
 AGENT_ENABLED_PER_OWNER enabled per owner and AGENT_ENABLED_TOTAL enabled in
 all, no interval under AGENT_MIN_EVERY_MS, AGENT_RUNS_PER_DAY_TOTAL runs a day
@@ -91,6 +97,10 @@ SKIP_INTERRUPTED = "interrupted"
 SKIP_BUDGET_GLOBAL = "budget_global"
 #: An agent-owned periodic job disabled because it expired.
 SKIP_EXPIRED = "expired"
+#: A pane-id target that is gone (unknown-pane-id, never target-offline) this
+#: many runs in a row disables the job and tells its owner — or the user — once.
+#: A skip is still not an error; this is the one skip that stops a job.
+TARGET_GONE_DISABLE_AFTER = 3
 
 AGENT_ENABLED_PER_OWNER = 10
 AGENT_ENABLED_TOTAL = 100
@@ -104,6 +114,10 @@ AGENT_ONCE_KEEP_MS = 30 * 24 * 3600 * 1000
 #: The actor behind a change made in a Navide window.
 USER: dict[str, Any] = {"kind": "user"}
 NOT_OWNER = "SCHEDULER_NOT_OWNER"
+#: The owner kind of a job Navide itself keeps for one of its features.
+SYSTEM = "system"
+#: The refusal code for any change to a system job made through the public API.
+SYSTEM_JOB = "SCHEDULER_SYSTEM_JOB"
 LIMIT = "SCHEDULER_LIMIT"
 
 
@@ -253,6 +267,10 @@ def _normalize_schedule(raw: Any, now_ms: int, previous: dict | None) -> dict[st
 def _normalize_action(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise JobInvalid("action must be an object")
+    if raw.get("kind") == "evolve":
+        # A workspace's self-evolution run: no pane, no text — the feature
+        # that owns the job decides both when it fires.
+        return {"kind": "evolve", "workspace": _require_str(raw, "workspace", "action.workspace")}
     if raw.get("kind") != "message":
         raise JobInvalid('action.kind must be "message"')
     action: dict[str, Any] = {
@@ -302,7 +320,15 @@ def _initial_state() -> dict[str, Any]:
         "consecutive_errors": 0,
         "backoff_until": None,
         "last_msg_key": None,
+        "consecutive_target_gone": 0,
+        "disabled_reason": None,
     }
+
+
+def _clear_target_gone(state: dict[str, Any]) -> None:
+    """Forget a gone-target streak: the job was re-enabled or now aims elsewhere."""
+    state["consecutive_target_gone"] = 0
+    state["disabled_reason"] = None
 
 
 def _once_rearm(schedule: dict[str, Any], now_ms: int) -> int:
@@ -358,6 +384,8 @@ def normalize_job(raw: Any, existing: dict[str, Any] | None, now_ms: int) -> dic
             state["next_run_at"] = _once_rearm(schedule, now_ms)
     elif changed or reenabled or state.get("next_run_at") is None:
         state["next_run_at"] = next_run_after(schedule, now_ms)
+    if reenabled or (existing is not None and action != existing["action"]):
+        _clear_target_gone(state)
     return {
         "id": existing["id"] if existing else str(uuid.uuid4()),
         "name": name,
@@ -378,12 +406,24 @@ def owner_of(actor: dict[str, Any]) -> dict[str, Any]:
     """The owner record of a job ``actor`` creates."""
     if actor.get("kind") == "pane":
         return {key: actor.get(key, "") for key in ("kind", "pane_id", "pane_name", "workspace")}
+    if actor.get("kind") == SYSTEM:
+        return {key: actor.get(key, "") for key in ("kind", "feature", "workspace")}
     return {"kind": actor.get("kind") or "external"}
 
 
+def system_owner(feature: str, workspace: str) -> dict[str, Any]:
+    """The owner (and actor) record of a job Navide keeps for ``feature``."""
+    return {"kind": SYSTEM, "feature": feature, "workspace": workspace}
+
+
+def is_system(who: dict[str, Any] | None) -> bool:
+    """Whether an owner or actor is Navide itself."""
+    return (who or USER).get("kind") == SYSTEM
+
+
 def is_agent(who: dict[str, Any] | None) -> bool:
-    """Whether an owner or actor is an agent (anything but the user)."""
-    return (who or USER).get("kind") != "user"
+    """Whether an owner or actor is an agent (anything but the user or Navide)."""
+    return (who or USER).get("kind") not in ("user", SYSTEM)
 
 
 def _owner_pane(owner: dict[str, Any]) -> str | None:
@@ -404,16 +444,36 @@ def owner_gone(owner: dict[str, Any]) -> bool:
 
 def may_change(actor: dict[str, Any], job: dict[str, Any]) -> bool:
     """The user may change any job; an agent only a job it created itself."""
+    owner = job.get("owner") or USER
+    if is_system(owner):
+        # Checked before the user's blanket right: the user changes a system
+        # job through the feature that owns it, never directly.
+        return is_system(actor) and owner_of(actor) == owner_of(owner)
+    if is_system(actor):
+        return False  # a feature acts only on its own job
     if not is_agent(actor):
         return True
-    owner = job.get("owner") or USER
     if owner.get("kind") == "pane":
         return actor.get("kind") == "pane" and _owner_pane(owner) == actor.get("pane_id")
     return owner.get("kind") == "external" and actor.get("kind") == "external"
 
 
+def _system_job(job: dict[str, Any]) -> dict[str, Any]:
+    owner = job.get("owner") or USER
+    return {
+        "ok": False,
+        "code": SYSTEM_JOB,
+        "error": f'this job belongs to Navide\'s "{owner.get("feature") or "system"}" feature for '
+        f'{owner.get("workspace") or "a workspace"}; change it from that workspace '
+        "(sidebar workspace menu → Self-evolution), not from the Schedule panel",
+        "owner": dict(owner),
+    }
+
+
 def _not_owner(job: dict[str, Any]) -> dict[str, Any]:
     owner = job.get("owner") or USER
+    if is_system(owner):
+        return _system_job(job)
     if not is_agent(owner):
         why = "this job was created by the user"
     elif owner_gone(owner):
@@ -504,6 +564,16 @@ class LiveBridge:
         entry = mcp._mcp_message_status.get(msg_key)
         return entry is not None and entry.get("status") == "queued"
 
+    def message_outcome(self, msg_key: str | None) -> dict[str, Any] | None:
+        """Where a sent message stands, {status, reason}; None once the send is
+        no longer tracked (the table keeps about an hour, and a restart clears it)."""
+        if not msg_key:
+            return None
+        from .mcp_server import server as mcp
+
+        entry = mcp._mcp_message_status.get(msg_key)
+        return None if entry is None else {"status": entry.get("status"), "reason": entry.get("reason")}
+
     async def budget_limited(self, action: dict[str, Any]) -> bool:
         """True when the target pane's CLI is marked out of quota in the usage cache.
 
@@ -548,6 +618,48 @@ class LiveBridge:
             taint_detail=action.get(TAINT_KEY) or "",
         )
         return outcome_of_send(answer)
+
+    async def deliver_evolve(self, action: dict[str, Any], manual: bool) -> dict[str, Any]:
+        """Start a workspace's self-evolution run; the evolve service answers
+        with a run outcome of the same shape :meth:`deliver` returns."""
+        from . import evolve_service
+
+        return await evolve_service.get_service().start_from_scheduler(
+            action["workspace"], manual=manual
+        )
+
+    async def notify_disabled(self, job: dict[str, Any]) -> None:
+        """Tell whoever should know that ``job`` stopped because its target is gone.
+
+        The owner pane hears it as a message, through the same path; when the
+        owner is the user, or a pane that is gone too, every window gets a
+        ``scheduler.job_disabled`` event to show the user instead.
+        """
+        from . import app
+        from .ipc import make_event
+        from .mcp_server import server as mcp
+
+        owner = job.get("owner") or USER
+        name = job.get("name") or job.get("id")
+        target = (job.get("action") or {}).get("pane_id") or ""
+        count = (job.get("state") or {}).get("consecutive_target_gone") or TARGET_GONE_DISABLE_AFTER
+        pane = _owner_pane(owner) if owner.get("kind") == "pane" else None
+        if pane is not None:
+            text = (
+                f'[Navide scheduler] Your job "{name}" (id {job.get("id")}) was disabled: '
+                f"its target pane {target} was gone {count} runs in a row. Point it at a live "
+                "pane with scheduler_upsert and enable it again, or remove it."
+            )
+            answer = await mcp._send(
+                mcp._Caller(kind="host"), "", text, pane_id=pane, open_target=False,
+            )
+            if answer.get("ok"):
+                return
+            log.warning("scheduler: could not tell owner pane %s: %s", pane, answer.get("error"))
+        await app.broadcast(make_event("scheduler.job_disabled", {
+            "id": job.get("id"), "name": name, "reason": SKIP_TARGET_GONE,
+            "pane_id": target, "count": count,
+        }))
 
 
 #: Carries "scheduled by <agent>" from a job to LiveBridge.deliver; never stored.
@@ -798,9 +910,29 @@ class SchedulerService:
             return True
         return False
 
+    async def _resolve_queued(self, job: dict[str, Any]) -> None:
+        """A run whose message was handed over but still waiting is recorded "ok"
+        with detail "queued (...)". Once that message settles, the same run says
+        how it ended, and one that then failed or was rejected becomes an error."""
+        key = job["state"].get("last_msg_key")
+        outcome_of = getattr(self.bridge, "message_outcome", None)
+        if not key or outcome_of is None or self.bridge.still_queued(key):
+            return
+        outcome = outcome_of(key)
+        status = (outcome or {}).get("status")
+        if status in ("failed", "rejected"):
+            await self.store.resolve_queued_run(
+                job["id"], "error", status, f"then {status}: {(outcome or {}).get('reason') or status}"
+            )
+        elif outcome is None:
+            await self.store.resolve_queued_run(job["id"], "ok", None, "outcome no longer tracked")
+        elif status != "queued":
+            await self.store.resolve_queued_run(job["id"], "ok", None, f"then {status}")
+
     async def _gate(self, job: dict[str, Any], now: int) -> str | None:
         if not self.bridge.has_window():
             return SKIP_NO_WINDOW
+        await self._resolve_queued(job)
         if self.bridge.still_queued(job["state"].get("last_msg_key")):
             return SKIP_BUSY
         cap = int(job["policy"].get("max_runs_per_day", DEFAULT_POLICY["max_runs_per_day"]))
@@ -858,6 +990,12 @@ class SchedulerService:
             if job is None or job["state"].get("running_at") is not None:
                 return None
             started = self.now_ms()
+            # A scheduled start comes from a listing read before this lock; a
+            # run that finished meanwhile moved next_run_at past now, or, for a
+            # once job, disabled it and cleared next_run_at.
+            due = job["state"].get("next_run_at")
+            if not manual and (not job["enabled"] or due is None or due > started):
+                return None
             job["state"]["running_at"] = started
             # Written before anything is dispatched: this is the reentry lock.
             await self.store.set_state(job_id, job["state"])
@@ -870,7 +1008,10 @@ class SchedulerService:
 
     async def _execute(self, job: dict[str, Any], started: int, manual: bool) -> None:
         try:
-            outcome = await self.bridge.deliver(_with_origin(job))
+            if job["action"].get("kind") == "evolve":
+                outcome = await self.bridge.deliver_evolve(job["action"], manual)
+            else:
+                outcome = await self.bridge.deliver(_with_origin(job))
         except asyncio.CancelledError:
             raise
         except Exception as err:  # noqa: BLE001 — a failed run is an error row
@@ -880,21 +1021,29 @@ class SchedulerService:
     async def _finish(
         self, job_id: str, started: int, outcome: dict[str, Any], manual: bool
     ) -> None:
+        disabled = None
         try:
-            await self._settle(job_id, started, outcome, manual)
+            disabled = await self._settle(job_id, started, outcome, manual)
         finally:
             entry = self._runs.get(job_id)
             if entry is not None and entry[0] is asyncio.current_task():
                 self._runs.pop(job_id, None)
         await self._changed()
+        if disabled is not None:
+            try:
+                await self.bridge.notify_disabled(disabled)
+            except Exception as err:  # noqa: BLE001 — the job is disabled either way
+                log.warning("scheduler: disabled-job notice failed: %s", err)
 
     async def _settle(
         self, job_id: str, started: int, outcome: dict[str, Any], manual: bool
-    ) -> None:
+    ) -> dict[str, Any] | None:
+        """Record a finished run. Returns the job when this run disabled it
+        because its target stayed gone — the caller notifies, outside the lock."""
         async with self._lock:
             job = await self.store.get_job(job_id)
             if job is None or job["state"].get("running_at") != started:
-                return  # removed, or already settled by the stuck sweep
+                return None  # removed, or already settled by the stuck sweep
             now = self.now_ms()
             state = job["state"]
             status = outcome["status"]
@@ -914,9 +1063,21 @@ class SchedulerService:
                 state["consecutive_errors"] = errors
                 state["backoff_until"] = now + BACKOFF_S[min(errors, len(BACKOFF_S)) - 1] * 1000
                 state["last_error"] = outcome.get("detail") or outcome.get("reason") or "error"
+            if status == "skipped" and outcome.get("reason") == SKIP_TARGET_GONE:
+                state["consecutive_target_gone"] = int(state.get("consecutive_target_gone") or 0) + 1
+            elif status != "skipped":
+                state["consecutive_target_gone"] = 0
+            # Only an enabled job can be stopped by this run, so a manual run of
+            # one already stopped never notifies a second time.
+            gone_out = (
+                job["enabled"]
+                and state["consecutive_target_gone"] >= TARGET_GONE_DISABLE_AFTER
+            )
+            if gone_out:
+                state["disabled_reason"] = SKIP_TARGET_GONE
             if not manual:
                 state["next_run_at"] = next_run_after(job["schedule"], now)
-            if not manual and job["schedule"]["kind"] == "once":
+            if gone_out or (not manual and job["schedule"]["kind"] == "once"):
                 await self.store.set_enabled(job_id, False, state, now)
             else:
                 await self.store.set_state(job_id, state)
@@ -924,6 +1085,7 @@ class SchedulerService:
                 "started_at": started, "ended_at": now, "status": status,
                 "reason": outcome.get("reason"), "detail": outcome.get("detail"),
             })
+            return {**job, "enabled": False, "state": state} if gone_out else None
 
     async def _fail_stuck(self, job_id: str, now: int) -> None:
         entry = self._runs.pop(job_id, None)
@@ -999,6 +1161,11 @@ class SchedulerService:
                     return _not_owner(existing)
             now = self.now_ms()
             job = normalize_job(raw, existing, now)
+            if job["action"].get("kind") == "evolve" and not is_system(actor):
+                raise JobInvalid(
+                    'action.kind "evolve" is kept by Navide; turn self-evolution on '
+                    "from the workspace instead"
+                )
             job["owner"] = existing["owner"] if existing else owner_of(actor)
             job["updated_by"] = owner_of(actor)
             enabling = job["enabled"] and (existing is None or not existing["enabled"])
@@ -1033,6 +1200,8 @@ class SchedulerService:
             job = await self.store.get_job(job_id)
             if job is None:
                 return {"ok": False, "error": f'unknown job id "{job_id}"'}
+            if is_system(job.get("owner")):
+                return _system_job(job)
             job["owner"] = dict(USER)
             job["updated_by"] = dict(USER)
             job["updated_at"] = self.now_ms()
@@ -1045,6 +1214,8 @@ class SchedulerService:
             job = await self.store.get_job(job_id)
             if job is None:
                 return {"ok": False, "error": f'unknown job id "{job_id}"'}
+            if is_system(job.get("owner")):
+                return _system_job(job)
             if not is_agent(job["owner"]):
                 return {"ok": False, "error": "only an agent's job expires"}
             job["owner"] = {**job["owner"], "expires_at": None}
@@ -1081,6 +1252,8 @@ class SchedulerService:
                         return {"ok": False, "error": str(err)}
                 else:
                     state["next_run_at"] = next_run_after(job["schedule"], self.now_ms())
+                _clear_target_gone(state)
+                state["rebound_needs_enable"] = False
             await self.store.set_enabled(
                 job_id, enabled, state, self.now_ms(), updated_by=owner_of(actor), owner=owner
             )
@@ -1119,9 +1292,124 @@ class SchedulerService:
             return {"ok": False, "error": "that job is already running"}
         return {"ok": True, "enqueued": True}
 
+    async def system_put(
+        self, job_id: str, raw: dict[str, Any], owner: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Create or update the system job ``job_id`` for the feature ``owner`` names.
+
+        The one way a system job is written: the id is the feature's own (so a
+        workspace has exactly one), and the owner never changes. Raises
+        :class:`JobInvalid` for a bad definition, like :meth:`upsert`.
+        """
+        if not is_system(owner):
+            raise JobInvalid("system_put needs a system owner")
+        async with self._lock:
+            existing = await self.store.get_job(job_id)
+            if existing is not None and not may_change(owner, existing):
+                return _not_owner(existing)
+            now = self.now_ms()
+            job = normalize_job(raw, existing, now)
+            job["id"] = job_id
+            job["owner"] = owner_of(owner)
+            job["updated_by"] = owner_of(owner)
+            await self.store.put_job(job)
+        self.wake()
+        await self._changed()
+        return {"ok": True, "job": view(job)}
+
+    async def rebind_after_rebuild(
+        self, previous_pane_id: str, pane_id: str, previous_session_id: str, session_id: str
+    ) -> list[str]:
+        """Move jobs aimed at a rebuilt pane's old id onto its new id.
+
+        Only along the session lineage: the rebuild must have resumed exactly
+        the session the old pane held. A different or unknown session is a
+        different conversation, and a pane name is never evidence at all — the
+        same rule outcome_of_send keeps for a gone id. ``updated_by`` stays as
+        it was (this is not an edit by anyone, and must not mark a user's job
+        as agent-written); ``state.rebound_from`` records the hop. A job the
+        old pane owned is re-owned by the new one along the same lineage (see
+        :meth:`_move_owners`). Returns the ids of the jobs whose target moved.
+        """
+        if not (previous_pane_id and pane_id and session_id) or previous_pane_id == pane_id:
+            return []
+        if previous_session_id != session_id:
+            return []
+        moved: list[str] = []
+        async with self._lock:
+            for job in await self.store.list_jobs():
+                if job["action"].get("pane_id") != previous_pane_id:
+                    continue
+                job["action"] = {**job["action"], "pane_id": pane_id}
+                job["state"]["rebound_from"] = previous_pane_id
+                # The target is back, so a stopped job no longer reads as
+                # aimed at nothing; it still waits for someone to switch it on.
+                _clear_target_gone(job["state"])
+                if job["state"].get("last_skip_reason") == SKIP_TARGET_GONE:
+                    job["state"]["last_skip_reason"] = None
+                if not job["enabled"]:
+                    job["state"]["rebound_needs_enable"] = True
+                await self.store.put_job(job)
+                moved.append(job["id"])
+        if moved:
+            log.info("scheduler: rebound %s from pane %s to %s", moved, previous_pane_id, pane_id)
+        inherited = await self._move_owners({previous_pane_id}, pane_id, session_id, live_ok=True)
+        if moved or inherited:
+            await self._changed()
+            self.wake()
+        return moved
+
+    async def inherit_owner(
+        self, lineage: set[str], pane_id: str, session_id: str
+    ) -> list[str]:
+        """Hand jobs owned by a closed pane to the pane resuming its session.
+
+        ``lineage`` holds the ids of closed panes whose record held exactly
+        ``session_id``; the caller derives it from the project store, never
+        from a pane name. A job whose owner is still live keeps its owner: an
+        owner the registry does not know yet (a backend restart) was never
+        closed, so it is not in ``lineage`` either. Returns the ids moved.
+        """
+        moved = await self._move_owners(lineage, pane_id, session_id, live_ok=False)
+        if moved:
+            await self._changed()
+        return moved
+
+    async def _move_owners(
+        self, lineage: set[str], pane_id: str, session_id: str, *, live_ok: bool
+    ) -> list[str]:
+        """Re-own pane-owned jobs from a pane in ``lineage`` onto ``pane_id``.
+
+        ``state.owner_inherited`` and the log record each hop. ``updated_by``
+        stays as it was: nobody edited the job. ``live_ok`` is for a rebuild,
+        whose old id was just retired by the same session it resumed.
+        """
+        if not (lineage and pane_id and session_id) or pane_id in lineage:
+            return []
+        moved: list[str] = []
+        async with self._lock:
+            for job in await self.store.list_jobs():
+                owner = job.get("owner") or USER
+                if owner.get("kind") != "pane" or owner.get("pane_id") not in lineage:
+                    continue
+                if not live_ok and _owner_pane(owner) is not None:
+                    continue
+                job["owner"] = {**owner, "pane_id": pane_id}
+                job["state"]["owner_inherited"] = {
+                    "from": owner.get("pane_id"), "to": pane_id,
+                    "session_id": session_id, "at": self.now_ms(),
+                }
+                await self.store.put_job(job)
+                moved.append(job["id"])
+                log.info("scheduler: job %s owner %s inherited by pane %s (session %s)",
+                         job["id"], owner.get("pane_id"), pane_id, session_id)
+        return moved
+
     async def runs(self, job_id: str, limit: int = 20) -> dict[str, Any]:
-        if await self.store.get_job(job_id) is None:
+        job = await self.store.get_job(job_id)
+        if job is None:
             return {"ok": False, "error": f'unknown job id "{job_id}"'}
+        await self._resolve_queued(job)
         return {"ok": True, "runs": await self.store.list_runs(job_id, max(1, min(int(limit), 200)))}
 
 

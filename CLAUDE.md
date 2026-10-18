@@ -11,6 +11,9 @@ This file is a router — read the referenced file BEFORE doing the matching wor
 | Process boundaries, ownership, persistence and trust boundaries | `docs/en-US/architecture.md` |
 | Adding or changing an agent CLI integration | `docs/en-US/cli-extension-guide.md` |
 | Building or changing a plugin | `docs/en-US/plugin-development.md` |
+| Changing the plugin SDK, manifest schema or capability catalog | `docs/en-US/plugin-development-v2.md` (update it in the same PR) |
+| Any plugin permission, capability or Marketplace rule | "Design principle: disclose, don't restrict" in `docs/en-US/plugin-development-v2.md` |
+| Naming anything plugin-, extension- or marketplace-like in UI text or docs | `docs/en-US/glossary.md` |
 | Inter-CLI messaging: the bare-line protocol, handles, delivery rules | `docs/en-US/inter-cli-messaging.md` |
 | Editor, diff, or plan surfaces | `docs/en-US/editor-design.md` |
 | Keyboard shortcuts and the key resolver | `docs/en-US/keybindings.md` |
@@ -28,7 +31,11 @@ in-repo docs above.
 1. **Tests**: `pnpm test:run`, never `pnpm test` (watch mode hangs). Backend:
    `uv --project backend run pytest backend/tests` (the path argument is
    required — without it pytest misses backend's ini config). Run verification
-   commands bare — no pipe to tail/head (it eats the exit code).
+   commands bare — no pipe to tail/head (it eats the exit code). While
+   iterating, `pnpm vitest run --changed origin/main` and
+   `node scripts/changed-backend-tests.mjs` run only the affected tests (the
+   latter isolated like the release gate, see `CONTRIBUTING.md`); the full
+   suites stay the CI and release default.
 2. **Never clear terminal scrollback** — no `term.clear()` in any
    resize/redraw path.
 3. **No self-initiated commits** — the user decides when to commit, unless
@@ -68,6 +75,12 @@ When a plan exists or was explicitly requested:
    later. The user saying "開始" means: set `stage: approved` + `approvedAt`,
    then start.
 4. Legacy `.cursor/plans/*.plan.md` stay readable; never create new ones.
+5. **One topic, one plan document.** When a dispatched pane finishes work that
+   already has a plan, write the delivery report *into that plan* (a "Delivery"
+   section, the todo statuses, a review note) and move its stage to `done`.
+   Do not create a separate "delivery report" plan file. Create a new plan
+   document only for a topic that has none. Proposal-plus-report pairs doubled
+   the library (29 → 305 files in a month).
 
 ## Language
 

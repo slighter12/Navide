@@ -12,7 +12,38 @@ import time
 
 import pytest
 
-from tests.cli_regression.support.isolation import isolated_environment, real_cli_in
+
+# No test may start the real `security` binary — it is the developer's login
+# Keychain, and nothing a tmp_path cleans up. Installed here, before anything
+# imports app (whose vault is built at import with the real runner), and not
+# through monkeypatch: a test calling ``monkeypatch.undo()`` would remove a
+# monkeypatched guard along with its own patches, which on 2026-10-11 put a
+# `security -i` write in reach of a test.
+def _argv0(args) -> str:
+    if isinstance(args, (str, bytes, os.PathLike)):
+        first = os.fsdecode(args).strip().split(" ", 1)[0]
+    else:
+        args = list(args)
+        first = os.fsdecode(args[0]) if args else ""
+    return os.path.basename(first)
+
+
+class _NoKeychainPopen(subprocess.Popen):
+    def __init__(self, args, *rest, **kwargs):
+        if _argv0(args) == "security" or _argv0(kwargs.get("executable") or "x") == "security":
+            raise AssertionError(f"a test reached the real Keychain: {args!r}"[:200])
+        super().__init__(args, *rest, **kwargs)
+
+
+subprocess.Popen = _NoKeychainPopen
+
+# The same refusal in every Python process a test starts — a spawned backend
+# builds its own vault with the real runner and never sees this module.
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    filter(None, [str(Path(__file__).resolve().parent / "child_guard"), os.environ.get("PYTHONPATH")])
+)
+
+from tests.cli_regression.support.isolation import isolated_environment, real_cli_in  # noqa: E402
 
 pytest_plugins = ["tests.cli_regression.catalog"]
 
@@ -87,7 +118,7 @@ def _real_cli_in(args, env) -> str | None:
 
 
 @pytest.fixture(autouse=True)
-def _no_real_claude_cli(monkeypatch):
+def _no_real_claude_cli():
     """Never let a test start the developer's Claude Code — or any real CLI.
 
     Claude quota is read by driving the CLI's own ``/usage`` panel, so an
@@ -103,76 +134,128 @@ def _no_real_claude_cli(monkeypatch):
     patching the shim changed nothing), so it never reaches the Keychain
     either. And ``subprocess.Popen`` — which ``asyncio`` subprocesses go through
     as well — refuses any real agent CLI outside the temp dir."""
-    from agent_team_backend.cli_vendors import claude as claude_vendor
+    # Its own MonkeyPatch, undone at this fixture's teardown: a test calling
+    # ``monkeypatch.undo()`` must not undo the isolation along with its own.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        from agent_team_backend.cli_vendors import claude as claude_vendor
 
-    refused: list[str] = []
+        refused: list[str] = []
 
-    async def _refuse(*_args, **_kwargs):
-        refused.append("the Claude /usage read (cli_vendors.claude.fetch_claude_usage_via_cli)")
-        raise AssertionError(
-            "a test tried to read Claude usage through the real CLI; "
-            "stub usage_service.fetch_claude instead"
-        )
+        async def _refuse(*_args, **_kwargs):
+            refused.append("the Claude /usage read (cli_vendors.claude.fetch_claude_usage_via_cli)")
+            raise AssertionError(
+                "a test tried to read Claude usage through the real CLI; "
+                "stub usage_service.fetch_claude instead"
+            )
 
-    monkeypatch.setattr(claude_vendor, "fetch_claude_usage_via_cli", _refuse)
+        monkeypatch.setattr(claude_vendor, "fetch_claude_usage_via_cli", _refuse)
 
-    class _GuardedPopen(subprocess.Popen):
-        def __init__(self, args, *rest, **kwargs):
-            real = _real_cli_in(args, kwargs.get("env"))
+        class _GuardedPopen(subprocess.Popen):
+            def __init__(self, args, *rest, **kwargs):
+                real = _real_cli_in(args, kwargs.get("env"))
+                if real:
+                    refused.append(f"a real CLI spawn: {real}")
+                    raise PermissionError(f"a test tried to start the real CLI {real}; use a fake under tmp_path")
+                super().__init__(args, *rest, **kwargs)
+
+        monkeypatch.setattr(subprocess, "Popen", _GuardedPopen)
+        from agent_team_backend import osplat
+        original_spawn = osplat.terminal_backend.spawn
+
+        def guarded_spawn(argv, **kwargs):
+            real = _real_cli_in(argv, kwargs.get("env"))
             if real:
-                refused.append(f"a real CLI spawn: {real}")
+                refused.append(f"a native real CLI spawn: {real}")
                 raise PermissionError(f"a test tried to start the real CLI {real}; use a fake under tmp_path")
-            super().__init__(args, *rest, **kwargs)
+            return original_spawn(argv, **kwargs)
 
-    monkeypatch.setattr(subprocess, "Popen", _GuardedPopen)
-    from agent_team_backend import osplat
-    original_spawn = osplat.terminal_backend.spawn
-
-    def guarded_spawn(argv, **kwargs):
-        real = _real_cli_in(argv, kwargs.get("env"))
-        if real:
-            refused.append(f"a native real CLI spawn: {real}")
-            raise PermissionError(f"a test tried to start the real CLI {real}; use a fake under tmp_path")
-        return original_spawn(argv, **kwargs)
-
-    monkeypatch.setattr(osplat.terminal_backend, "spawn", guarded_spawn)
-    yield refused
-    if refused:
-        pytest.fail("test reached a real agent CLI: " + "; ".join(refused), pytrace=False)
+        monkeypatch.setattr(osplat.terminal_backend, "spawn", guarded_spawn)
+        yield refused
+        if refused:
+            pytest.fail("test reached a real agent CLI: " + "; ".join(refused), pytrace=False)
 
 
 @pytest.fixture(autouse=True)
-def _isolated_data_dir(tmp_path, monkeypatch):
+def _isolated_data_dir(tmp_path):
     """Keep app-data side effects (e.g. pty-registry.json written on every
     TerminalService.create) out of the real app-data dir during tests."""
-    monkeypatch.setenv("AGENT_TEAM_DATA_DIR", str(tmp_path))
+    # Its own MonkeyPatch, undone at this fixture's teardown: a test calling
+    # ``monkeypatch.undo()`` must not undo the isolation along with its own.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setenv("AGENT_TEAM_DATA_DIR", str(tmp_path))
+        yield
 
 
 @pytest.fixture(autouse=True)
-def _isolated_skills_home(tmp_path, monkeypatch):
+def _isolated_convenience_gate(tmp_path, monkeypatch):
+    """A fresh convenience gate per test, every feature allowed.
+
+    ``app`` installs a process-wide gate on import; without this a test that
+    deleted hooks would turn ``claude.hooks`` off for every test after it.
+    A sibling of tmp_path, like the skills home below.
+    """
+    import sys
+
+    from agent_team_backend import convenience, convenience_wiring
+    from agent_team_backend.db import Database
+
+    root = tmp_path.with_name(tmp_path.name + "-convenience")
+    gate = convenience.ConvenienceGate(Database(root / "navide.db"), backup_root=root / "backups")
+    previous = convenience_wiring.gate()
+    convenience_wiring.install(gate)
+    app = sys.modules.get("agent_team_backend.app")
+    if app is not None:
+        monkeypatch.setattr(app, "convenience_gate", gate)
+    yield gate
+    convenience_wiring.install(previous)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_skills_home(tmp_path):
     """The skills library and native-skills scan read the user's real home
     (``~/.agents/skills``, ``~/.copilot/skills``, ...). A test that spawns a
     pane through the plugin host would otherwise pick up whatever skills the
     developer happens to have installed. Point both at an empty home."""
-    from agent_team_backend import native_mcp, native_memory, native_skills, skills_store
+    # Its own MonkeyPatch, undone at this fixture's teardown: a test calling
+    # ``monkeypatch.undo()`` must not undo the isolation along with its own.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        from agent_team_backend import native_mcp, native_memory, native_skills, skills_store
 
-    # A sibling of tmp_path, not inside it: several tests enumerate tmp_path
-    # as the app-data dir and would see the fake home as a stray entry.
-    home = tmp_path.parent / f"{tmp_path.name}-skills-home"
-    home.mkdir(exist_ok=True)
-    monkeypatch.setattr(skills_store, "_real_home", lambda: home)
-    monkeypatch.setattr(native_skills, "_home", lambda: home)
-    # The native MCP scan reads the same real home (~/.claude.json,
-    # ~/.codex/config.toml, ...); keep it off the developer's own configs.
-    monkeypatch.setattr(native_mcp, "_home", lambda: home)
-    # The instruction-file scan reads the real home too (~/.claude/CLAUDE.md,
-    # ~/.codex/AGENTS.md, ...) and its handlers can write; never let a test
-    # near the developer's own instructions.
-    monkeypatch.setattr(native_memory, "_home", lambda: home)
+        # A sibling of tmp_path, not inside it: several tests enumerate tmp_path
+        # as the app-data dir and would see the fake home as a stray entry.
+        home = tmp_path.parent / f"{tmp_path.name}-skills-home"
+        home.mkdir(exist_ok=True)
+        monkeypatch.setattr(skills_store, "_real_home", lambda: home)
+        monkeypatch.setattr(native_skills, "_home", lambda: home)
+        # The native MCP scan reads the same real home (~/.claude.json,
+        # ~/.codex/config.toml, ...); keep it off the developer's own configs.
+        monkeypatch.setattr(native_mcp, "_home", lambda: home)
+        # The instruction-file scan reads the real home too (~/.claude/CLAUDE.md,
+        # ~/.codex/AGENTS.md, ...) and its handlers can write; never let a test
+        # near the developer's own instructions.
+        monkeypatch.setattr(native_memory, "_home", lambda: home)
+        yield
 
 
 @pytest.fixture(autouse=True)
-def _isolated_credential_vault(tmp_path, monkeypatch):
+def _no_real_security_binary():
+    """A CredentialVault built without a ``security_runner`` falls back to
+    ``/usr/bin/security`` — the developer's login Keychain. A write that goes
+    wrong there is not cleaned up by any tmp_path, so it is refused outright."""
+    # Its own MonkeyPatch, undone at this fixture's teardown: a test calling
+    # ``monkeypatch.undo()`` must not undo the isolation along with its own.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        from agent_team_backend import credential_vault
+
+        def refuse(args, input_text=None):
+            raise AssertionError(f"a test reached the real Keychain: security {args[:1]}")
+
+        monkeypatch.setattr(credential_vault, "_default_security_runner", refuse)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_credential_vault(tmp_path):
     """Tests must NEVER touch the real home or the real Keychain: swap the
     app-wide vault for one rooted in tmp, backed by an in-process stand-in for
     ``security``.
@@ -183,33 +266,37 @@ def _isolated_credential_vault(tmp_path, monkeypatch):
     it now behaves like the item store it is imitating: reads of an item nobody
     wrote still answer 44 (the state strict capture reads must be able to tell
     apart from a transient failure), and a write is a write."""
-    items: dict[str, str] = {}
+    # Its own MonkeyPatch, undone at this fixture's teardown: a test calling
+    # ``monkeypatch.undo()`` must not undo the isolation along with its own.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        items: dict[str, str] = {}
 
-    def runner(args: list[str], input_text: str | None = None) -> tuple[int, str]:
-        argv = list(args)
-        if argv[:1] == ["-i"]:
-            argv = shlex.split(input_text or "")
-        if not argv:
+        def runner(args: list[str], input_text: str | None = None) -> tuple[int, str]:
+            argv = list(args)
+            if argv[:1] == ["-i"]:
+                argv = shlex.split(input_text or "")
+            if not argv:
+                return 44, ""
+            command = argv[0]
+            service = argv[argv.index("-s") + 1] if "-s" in argv else ""
+            if command == "add-generic-password":
+                items[service] = argv[argv.index("-w") + 1] if "-w" in argv else ""
+                return 0, ""
+            if command == "find-generic-password":
+                if service not in items:
+                    return 44, "The specified item could not be found in the keychain."
+                return 0, security_g_output(items[service])
+            if command == "delete-generic-password":
+                return (0, "") if items.pop(service, None) is not None else (44, "")
             return 44, ""
-        command = argv[0]
-        service = argv[argv.index("-s") + 1] if "-s" in argv else ""
-        if command == "add-generic-password":
-            items[service] = argv[argv.index("-w") + 1] if "-w" in argv else ""
-            return 0, ""
-        if command == "find-generic-password":
-            if service not in items:
-                return 44, "The specified item could not be found in the keychain."
-            return 0, security_g_output(items[service])
-        if command == "delete-generic-password":
-            return (0, "") if items.pop(service, None) is not None else (44, "")
-        return 44, ""
 
-    vault = CredentialVault(
-        root=tmp_path / "vault-root",
-        real_home=tmp_path / "vault-home",
-        security_runner=runner,
-    )
-    monkeypatch.setattr(app, "credential_vault", vault)
+        vault = CredentialVault(
+            root=tmp_path / "vault-root",
+            real_home=tmp_path / "vault-home",
+            security_runner=runner,
+        )
+        monkeypatch.setattr(app, "credential_vault", vault)
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -221,7 +308,7 @@ def _isolated_trust_store():
     ask for it would find a marker with no state — which is exactly the locked
     state the module exists to enforce — and every later test would be refused
     for a reason belonging to an earlier one."""
-    from agent_team_backend import device_signing, sync_keyring, trust_store
+    from agent_team_backend import device_signing, remote_roster, sync_keyring, trust_store
 
     # Reset on the way in only. On the way out a test's own monkeypatching may
     # still be in force (one of them swaps pathlib.Path for the Windows flavour
@@ -233,6 +320,14 @@ def _isolated_trust_store():
     # The sync key is cached in-process for the same reason the others are
     # singletons, and it outlives the per-test vault above.
     sync_keyring._reset_for_test()
+    # Every connected link fills the remote roster from its directory, and a
+    # roster left behind adds remote_targets to a later test's cli_list_targets.
+    remote_roster._reset_for_test()
+    yield
+    # The one thing stopped on the way out: the delivered-message timer is a
+    # thread, and one left running fires after this test's vault and data dir
+    # are gone (review R2-9). Stopping it touches neither.
+    trust_store._stop_seen_timer_for_test()
 
 
 @pytest.fixture(autouse=True)
@@ -366,10 +461,16 @@ def pytest_addoption(parser):
         help="run only every Nth collected test, starting at the Kth (1-based); CI splits the Windows suite this way",
     )
     parser.addoption("--collection-report", default=None, help="write collected and selected node IDs as JSON")
+    parser.addoption("--run-slow", action="store_true", help="also run tests marked slow (skipped by default)")
 
 
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--run-slow"):
+        skip_slow = pytest.mark.skip(reason="slow: run with --run-slow")
+        for item in items:
+            if item.get_closest_marker("slow") is not None:
+                item.add_marker(skip_slow)
     # Round-robin over the collected order, not whole files: the slow files
     # (real git, PTY and subprocess spawns) then land on every shard evenly
     # instead of on whichever shard drew them.

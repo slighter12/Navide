@@ -17,6 +17,8 @@ degrades to "this panel shows nothing" instead of taking down the request.
 
 from __future__ import annotations
 
+import re
+
 import asyncio
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -87,6 +89,16 @@ class Paths(Protocol):
         `%APPDATA%\\GitHub CLI` — so the caller can express "the Windows
         directory if there is one, else the POSIX default" without asking
         which platform it is on.
+        """
+        ...
+
+    def system_dirs(self) -> list[Path]:
+        """Folders that hold the OS, installed programs, or stored credentials and
+        browser profiles; a chat attachment is never sent from inside one.
+
+        POSIX: `/etc`, `/bin`, `/System`, the keychains ... Windows: `%SystemRoot%`,
+        `%ProgramFiles%`, `%ProgramData%`, and the credential, DPAPI and browser
+        profile folders under `%APPDATA%` / `%LOCALAPPDATA%`.
         """
         ...
 
@@ -226,6 +238,17 @@ class Paths(Protocol):
         vacuous on NTFS, where `st_mode` is synthesised and never restricts
         anyone — so a caller that would refuse an over-permissive file
         asks this first.
+        """
+        ...
+
+    def file_name_refused(self, name: str) -> bool:
+        """Whether this platform's filesystem reads *name* (one path part) as
+        something other than a file of that name.
+
+        False on POSIX. On Windows: a reserved device name (``CON``, ``NUL``,
+        ``COM1`` ..., with any extension) opens the device, and a trailing dot
+        or space is stripped, so two names land on one file. A caller writing
+        names that arrived from elsewhere (a synced skill) asks this first.
         """
         ...
 
@@ -410,7 +433,8 @@ class ProcessTree(Protocol):
         ...
 
     def identity(self, pid: int) -> str:
-        """`"<pid>:<start_time>"` — stable across exec, different after pid reuse."""
+        """`"<pid>:<start_time>"` — stable across exec, different after pid reuse;
+        "" when the start time could not be read (a failed probe is not an answer)."""
         ...
 
     def command_of(self, pid: int) -> str | None:
@@ -450,6 +474,21 @@ class ProcessTree(Protocol):
 
     def kill_tree(self, pid: int, *, force: bool) -> None:
         """Kill `pid` and every descendant, including ones that left its group."""
+        ...
+
+    def contain(self, pid: int) -> None:
+        """Make a child the root of a tree `end_contained` can end whole.
+
+        On Windows the child joins a Job Object that kills its processes when
+        closed (processes it starts afterwards join too). On POSIX it must
+        have been started in a session of its own (`start_new_session`); that
+        is already the tree, so nothing is done.
+        """
+        ...
+
+    def end_contained(self, pid: int) -> None:
+        """Kill the tree `contain` made for `pid`, everything in it, even when
+        the root itself has exited: killpg on POSIX, closing the job on Windows."""
         ...
 
 
@@ -624,6 +663,25 @@ class SecretFiles(Protocol):
         ...
 
 
+class DurableSecretFiles(Protocol):
+    """A secret file that has to survive a power cut and is never read or
+    written through a link: fsync on the file and its directory, every byte
+    written, `O_NOFOLLOW`. Windows has no such writer and uses DPAPI through
+    `SecretFiles` instead.
+
+    Separate from `SecretFiles` because that writer is shared with CLI account
+    slots and is left exactly as it was.
+    """
+
+    def read(self, path: Path) -> bytes:
+        """The file's bytes. Raises `OSError` (including `FileNotFoundError`)."""
+        ...
+
+    def write(self, path: Path, data: bytes) -> None:
+        """Atomically and durably replace `path` with `data`, owner-only."""
+        ...
+
+
 class SchedulerError(Exception):
     """A scheduler operation failed for an operational reason.
 
@@ -748,3 +806,34 @@ class Scripts(Protocol):
         runs it through `powershell -NoExit -Command` there).
         """
         ...
+
+
+#: Device names Windows reserves in every directory, with any extension.
+#: COM/LPT take the superscript digits too (Win32 namespace rules), and
+#: CONIN$/CONOUT$ are the console's own.
+_WINDOWS_RESERVED = re.compile(r"(?i)^(con|prn|aux|nul|conin\$|conout\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])$")
+
+
+#: An 8.3 short name: up to six characters, ~ and a number, an extension of
+#: up to three ("REFERE~1.MD"). Only that shape — "v1~2.md" is a long name.
+_SHORT_NAME = re.compile(r"^[^.]{1,6}~\d+(\.[^.]{1,3})?$", re.IGNORECASE)
+
+
+def windows_short_name(name: str) -> bool:
+    """Whether *name* has the shape of an 8.3 short name ("REFERE~1.MD"):
+    on Windows it may open the long-named file it stands for, another
+    spelling of a path already there. Asked by the Windows file-name seam
+    only, not by the portability rule every install applies, since a name
+    like "v1~2.md" is an ordinary file everywhere else."""
+    return bool(_SHORT_NAME.match(name))
+
+
+def windows_refused_file_name(name: str) -> bool:
+    """``Paths.file_name_refused`` as Windows answers it. A pure string rule,
+    kept here so the tests of any platform can exercise it.
+
+    The device check is on the part before the first dot with trailing
+    spaces dropped, which is how Windows reads ``con .txt``."""
+    if not name:
+        return False
+    return name[-1] in ". " or bool(_WINDOWS_RESERVED.match(name.split(".", 1)[0].rstrip(" ")))

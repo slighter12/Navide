@@ -29,6 +29,16 @@ const validManifestFixtures = readdirSync(join(MANIFEST_FIXTURES, 'valid'))
 const invalidManifestFixtures = readdirSync(join(MANIFEST_FIXTURES, 'invalid'))
   .filter((name) => name.endsWith('.json'))
   .sort()
+// Agent-tools rules the manifest schema cannot express (contract section 2.6):
+// the public parser mirrors the schema, so only the Host and package seams
+// (and the Registry) refuse these.
+const contractRuleOnlyManifestFixtures = new Set([
+  'agent-tools-duplicate-name.json',
+  'agent-tools-fractional-number.json',
+  'agent-tools-method-undeclared.json',
+  'agent-tools-prefix-mismatch.json',
+  'agent-tools-reserved-prefix.json',
+])
 const rawManifestFixtures = readdirSync(join(MANIFEST_FIXTURES, 'invalid-raw'))
   .filter((name) => name.endsWith('.json'))
   .sort()
@@ -58,6 +68,8 @@ const childToHostWireFixtures = [
   'missing-result-type.json',
   'missing-result-value.json',
   'missing-server-info.json',
+  'result-chunk-without-request-id.json',
+  'result-chunks-with-value.json',
   'subscription-close-missing-id.json',
 ]
 const hostToChildWireFixtures = [
@@ -120,7 +132,8 @@ describe('B0 integrated Manifest v2 corpus gate', () => {
     const raw = readFixture('invalid', name)
     const source = parsePublicManifestJson(raw)
 
-    expect(() => parsePublicManifestV2(source)).toThrow()
+    if (contractRuleOnlyManifestFixtures.has(name)) expect(() => parsePublicManifestV2(source)).not.toThrow()
+    else expect(() => parsePublicManifestV2(source)).toThrow()
     expect(() => parseInstalledManifest(source)).toThrow()
     expect(() => parseInstalledManifest(readManifestFromEntries([manifestEntry(raw)]))).toThrow()
   })
@@ -370,10 +383,68 @@ describe('B0 capability and Backend Wire contract gate', () => {
     )
   })
 
+  it('answers a call whose agent initiator carries the additive agent-tool caller', () => {
+    const raw = readFileSync(join(WIRE_FIXTURES, 'valid', 'call-agent-tool-caller.json'), 'utf8').trimEnd()
+    const result = spawnSync(process.execPath, [BACKEND_WIRE_CHILD], {
+      encoding: 'utf8',
+      input: `${raw}\n`,
+      maxBuffer: 1_000_000,
+      timeout: 5_000,
+    })
+
+    expect(result.status).toBe(0)
+    const response = JSON.parse(result.stdout.trim()) as { id: string; error?: unknown; result?: { value?: { runtime?: unknown } } }
+    expect(response.error).toBeUndefined()
+    expect(response.id).toBe('req-3')
+    expect(response.result?.value?.runtime).toEqual(
+      (JSON.parse(raw) as { params: { runtime: unknown } }).params.runtime
+    )
+    const schema = JSON.parse(
+      readFileSync(join(CONTRACT_FIXTURES, 'backend-wire-v1.schema.json'), 'utf8')
+    ) as { $defs: { initiator: { oneOf: Array<{ required: string[]; properties: Record<string, unknown> }> } } }
+    const agent = schema.$defs.initiator.oneOf[1]
+    expect(agent.properties.caller).toBeDefined()
+    expect(agent.required).not.toContain('caller')
+  })
+
   it.each(rawWireFixtures)('rejects raw Backend Wire input %s at the Host framing seam', (name) => {
     const raw = readFileSync(join(WIRE_FIXTURES, 'invalid-raw', name), 'utf8')
     expect(() => parseBackendWireFrame(raw)).toThrow(
       'Backend plugin returned an invalid protocol message.'
     )
+  })
+})
+
+describe('Manifest v2 filesystem scopes are disclosure only', () => {
+  it('changes no capability policy or broker decision', () => {
+    const scoped = parsePublicManifestV2(
+      parsePublicManifestJson(readFixture('valid', 'fs-scopes-declared.json'))
+    )
+    const unscopedSource = parsePublicManifestJson(readFixture('valid', 'fs-scopes-declared.json')) as Record<string, any>
+    delete unscopedSource.permissions.scopes
+    const unscoped = parsePublicManifestV2(unscopedSource)
+    expect(scoped.permissions.scopes).toBeDefined()
+
+    const scopedPolicy = manifestV2CapabilityPolicy(scoped.permissions)
+    const unscopedPolicy = manifestV2CapabilityPolicy(unscoped.permissions)
+    expect(scopedPolicy).toEqual(unscopedPolicy)
+
+    const context = {
+      ...runtimeContext(),
+      runtimeBinding: { ...runtimeContext().runtimeBinding, pluginId: scoped.id },
+    }
+    const calls = [
+      { ns: 'fs', method: 'readFile', args: { path: '.acme/notes/today.md' } },
+      { ns: 'fs', method: 'readFile', args: { path: 'outside-the-scope.md' } },
+      { ns: 'fs', method: 'listDirectory', args: { path: '' } },
+      { ns: 'ui', method: 'openInEditor', args: { path: 'docs/readme.md' } },
+      { ns: 'shell', method: 'run', args: { command: 'git status' } },
+    ]
+    for (const [index, call] of calls.entries()) {
+      const request = { pluginId: scoped.id, reqId: `scope-${index}`, ...call }
+      expect(planPublicCapabilityCall(request, scopedPolicy, context)).toEqual(
+        planPublicCapabilityCall(request, unscopedPolicy, context)
+      )
+    }
   })
 })

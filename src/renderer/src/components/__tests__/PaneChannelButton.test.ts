@@ -25,6 +25,7 @@ function seed(opts: {
   extra?: Record<string, unknown>[]
   locations?: Record<string, unknown>[]
   bindings?: Record<string, unknown>[]
+  status?: Record<string, unknown>
 }): void {
   mock.setResponse('channels.list', {
     ok: true,
@@ -34,7 +35,7 @@ function seed(opts: {
           platform: 'telegram',
           configured: true,
           enabled: true,
-          status: { lifecycle: 'ready', connected: true, identity: '@navide_bot' },
+          status: { lifecycle: 'ready', connected: true, identity: '@navide_bot', ...opts.status },
           config: {},
           capabilities: { threads: true, create_location: true, edit: true, typing: true, buttons: true, text_limit: 4000 },
         }, ...(opts.extra ?? [])]
@@ -672,11 +673,54 @@ describe('PaneChannelButton', () => {
     })
   })
 
+  describe('chip label', () => {
+    // The pane's name is already on the pane header; the chip names where it talks to.
+    const label = (w: VueWrapper) => w.get('[data-testid="channel-chip-label"]').text()
+
+    it('names the bot, never the chat user or the pane; the tooltip keeps the chat', async () => {
+      seed({ configured: true, bound: true, locations: [{ chat_id: '-100', title: 'neillu123', kind: 'private', supports_topics: false }] })
+      const w = await render()
+      expect(label(w)).toBe('Telegram · @navide_bot')
+      const tip = w.get('[data-testid="channel-chip"]').attributes('title')
+      expect(tip).toBe('Telegram · @navide_bot · neillu123 · Chat replies only')
+      expect(tip).not.toContain('api-refactor')
+    })
+
+    it("prefers the bot's display name from the platform over its handle", async () => {
+      seed({ configured: true, bound: true, status: { display_name: 'Neil M4' } })
+      const w = await render()
+      expect(label(w)).toBe('Telegram · Neil M4')
+      expect(w.get('[data-testid="channel-chip"]').attributes('title')).toBe('Telegram · Neil M4 · Navide · Chat replies only')
+    })
+
+    it('falls back to the chat while the bot has no name', async () => {
+      seed({ configured: true, bound: true, status: { identity: '' } })
+      const w = await render()
+      expect(label(w)).toBe('Telegram · Navide')
+    })
+
+    it('shows the platform alone when neither chat nor bot has a name', async () => {
+      seed({
+        configured: true,
+        bindings: [{ pane_id: 'p1', platform: 'discord', account: 'default', chat_id: '9', thread_id: '', title: 'api-refactor' }],
+        extra: [{
+          platform: 'discord', configured: true, enabled: true,
+          status: { lifecycle: 'ready', connected: true, identity: '' }, config: {},
+          capabilities: { threads: true, create_location: false, edit: true, typing: true, buttons: true, text_limit: 2000 },
+        }],
+        locations: [],
+      })
+      const w = await render()
+      expect(label(w)).toBe('Discord')
+      expect(w.get('[data-testid="channel-chip"]').text()).not.toContain('api-refactor')
+    })
+  })
+
   it('shows a chip for a bound pane and unbinds from it', async () => {
     seed({ configured: true, bound: true })
     const w = await render()
     expect(w.find('[data-testid="channel-connect"]').exists()).toBe(false)
-    expect(w.get('[data-testid="channel-chip"]').text()).toContain('Telegram · api-refactor')
+    expect(w.get('[data-testid="channel-chip"]').text()).toContain('Telegram · @navide_bot')
     await w.get('[data-testid="channel-unbind"]').trigger('click')
     await flushPromises()
     expect(mock.sent.find((s) => s.type === 'channels.unbind')?.payload).toEqual({ pane_id: 'p1', pane_name: 'api-refactor' })
@@ -705,17 +749,93 @@ describe('PaneChannelButton', () => {
     }
   })
 
-  it('offers a chat whose holder is no pane this window knows, leaving the verdict to the backend', async () => {
-    // The holder closed without its unbind landing: a disabled row would lock the chat for good.
-    seed({
-      configured: true,
-      locations: [{ chat_id: '555', title: 'neillu123', kind: 'direct', supports_topics: false }],
-      bindings: [{ pane_id: 'ghost', platform: 'telegram', account: 'default', chat_id: '555', thread_id: '', title: 'closed-pane' }],
+  describe('a holder this window does not know', () => {
+    const dm = { chat_id: '555', title: 'neillu123', kind: 'direct', supports_topics: false }
+
+    function seedHeldBy(paneId: string, title: string): void {
+      seed({
+        configured: true,
+        locations: [dm],
+        bindings: [{ pane_id: paneId, platform: 'telegram', account: 'default', chat_id: '555', thread_id: '', title }],
+      })
+    }
+
+    function overviewWith(paneId: string, pane: { exists: boolean; name: string }): void {
+      mock.setResponse('channels.overview', {
+        ok: true,
+        bots: [{
+          platform: 'telegram', account: 'default', orphans: pane.exists ? [] : [paneId],
+          chats: [{
+            ...dm,
+            bindings: [{
+              pane_id: paneId, platform: 'telegram', account: 'default', chat_id: '555', thread_id: '', title: 'stale-title',
+              created_at: 1, pane: { ...pane, qualified_name: '', workspace_path: '', display_status: '', agent_key: '' },
+            }],
+          }],
+        }],
+      })
+    }
+
+    const overviewsSent = () => mock.sent.filter((s) => s.type === 'channels.overview')
+
+    it('names a live pane in another window and disables the row', async () => {
+      seedHeldBy('far', 'stale-title')
+      overviewWith('far', { exists: true, name: 'billing-check' })
+      const w = await render()
+      await openPopover(w)
+      expect(overviewsSent()).toHaveLength(1)
+      expect((q('[data-testid="channel-bind-existing"]') as HTMLButtonElement).disabled).toBe(true)
+      expect(q('[data-testid="channel-taken"]')?.textContent).toBe('Connected to billing-check')
     })
-    const w = await render()
-    await openPopover(w)
-    expect((q('[data-testid="channel-bind-existing"]') as HTMLButtonElement).disabled).toBe(false)
-    expect(q('[data-testid="channel-taken"]')).toBeNull()
+
+    it('offers a chat whose holder closed without its unbind landing, leaving the verdict to the backend', async () => {
+      // A disabled row would lock the chat for good.
+      seedHeldBy('ghost', 'closed-pane')
+      overviewWith('ghost', { exists: false, name: 'closed-pane' })
+      const w = await render()
+      await openPopover(w)
+      expect(overviewsSent()).toHaveLength(1)
+      expect((q('[data-testid="channel-bind-existing"]') as HTMLButtonElement).disabled).toBe(false)
+      expect(q('[data-testid="channel-taken"]')).toBeNull()
+      expect(q('[data-testid="channel-bind-existing"]')?.textContent).toContain('DM')
+    })
+
+    it('never asks for the overview when this window knows every holder', async () => {
+      seedHeldBy('p2', 'other-pane')
+      const messaging = useAgentMessaging()
+      messaging.registerPane('p2', 'claude', 'other-pane')
+      try {
+        const w = await render()
+        await openPopover(w)
+        expect(q('[data-testid="channel-taken"]')?.textContent).toBe('Connected to other-pane')
+        expect(overviewsSent()).toEqual([])
+      } finally {
+        messaging.unregisterPane('p2')
+      }
+    })
+
+    it('keeps the row free while the overview is pending or failed', async () => {
+      seedHeldBy('far', 'stale-title')
+      let answer: (v: unknown) => void = () => {}
+      const send = mock.backend.send
+      mock.backend.send = ((type: string, payload?: Record<string, unknown>) => {
+        if (type !== 'channels.overview') return send(type, payload)
+        mock.sent.push({ type, payload: payload ?? {} })
+        return new Promise((resolve) => { answer = resolve as (v: unknown) => void })
+      }) as typeof mock.backend.send
+      const w = await render()
+      await openPopover(w)
+      expect(overviewsSent()).toHaveLength(1)
+      const row = () => q('[data-testid="channel-bind-existing"]') as HTMLButtonElement
+      expect(row().disabled).toBe(false)
+      expect(row().textContent).toContain('DM')
+      answer({ ok: false, payload: null, error: { message: 'boom' } })
+      await flushPromises()
+      expect(lastStore!.overviewError.value).not.toBe('')
+      expect(row().disabled).toBe(false)
+      expect(row().textContent).toContain('DM')
+      expect(q('[data-testid="channel-taken"]')).toBeNull()
+    })
   })
 
   it('reloads an open picker when a new chat shows up', async () => {

@@ -6,6 +6,7 @@ import PlansPane from '../PlansPane.vue'
 import { i18n } from '@navide/plugin-ui/foundation'
 import { parseHtmlPlanMeta } from '../../composables/usePlanHtml'
 import { parsePlanMeta } from '../../composables/usePlanFile'
+import { _resetDiagnostics, readDiagnostics } from '../../lib/uiDiagnostics'
 
 i18n.global.locale.value = 'en-US'
 
@@ -559,7 +560,7 @@ describe('PlansPane', () => {
     ])
   })
 
-  it('shows each plan file path in the row (with a full-path title for the ellipsis)', async () => {
+  it('shows each plan file path in the row (full path on hover when cut off)', async () => {
     const wrapper = mountPane(
       makeBackend({
         htmlEntries: [
@@ -574,7 +575,8 @@ describe('PlansPane', () => {
       .findAll('.plan-row-path')
       .find((p) => p.text() === '.agent-team/plans/review_a1b2c3.html')
     expect(path).toBeTruthy()
-    expect(path!.attributes('title')).toBe('.agent-team/plans/review_a1b2c3.html')
+    expect(path!.attributes('title')).toBeUndefined()
+    expect(path!.attributes('data-truncate')).toBe('')
   })
 
   it('collapses and expands a section when its header is clicked', async () => {
@@ -660,6 +662,24 @@ describe('PlansPane', () => {
 
     expect(wrapper.text()).not.toContain('HTML Review Plan')
     expect(wrapper.text()).toContain('HTML Done Plan')
+  })
+
+  it('records a plan it could not read instead of dropping it silently', async () => {
+    _resetDiagnostics()
+    mountPane(
+      makeBackend({
+        htmlEntries: [
+          { name: 'review_a1b2c3.html', rel_path: '.agent-team/plans/review_a1b2c3.html', is_dir: false },
+        ],
+        readFailures: ['.agent-team/plans/review_a1b2c3.html'],
+      })
+    )
+    await flushPromises()
+
+    const [entry] = readDiagnostics().filter((e) => e.code === 'plans.read_failed')
+    expect(entry).toMatchObject({ level: 'warn' })
+    expect(entry.message).toContain('.agent-team/plans/review_a1b2c3.html')
+    expect(entry.message).toContain('read failed')
   })
 
   it('groups draft plans under Draft, not In Review', async () => {

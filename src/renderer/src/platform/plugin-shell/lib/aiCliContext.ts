@@ -40,6 +40,82 @@ export function aiTerminalPaneId(surface: string, workspacePath: string): string
   return `${hex8}-${surface}-ai-terminal`
 }
 
+/** Where an embedded AI panel writes its conversation log: the
+ *  `<ws>/.agent-team/manual/<yyyymmdd>/<agent>-<id8>.log` the main window
+ *  builds inline for a manual pane (App.vue spawnPane), with the panel's
+ *  surface before the extension — every panel of one workspace shares the id8
+ *  (the workspace hash), so without it they would all append to one file. A
+ *  source-scan test keeps the shared layout identical to the main window's. */
+export function dockOutputLogFile(
+  workspacePath: string,
+  agentKey: string,
+  paneId: string,
+  surface: string,
+  now: Date = new Date(),
+): string {
+  const ymd = now.toISOString().slice(0, 10).replace(/-/g, '')
+  return `${workspacePath}/.agent-team/manual/${ymd}/${agentKey}-${paneId.slice(0, 8)}-${surface}.log`
+}
+
+/** Which window an embedded AI panel lives in, as the messaging roster records
+ *  it: `surface` is the panel's host, `windowKind` the window that host is in
+ *  (the Pipeline Manager is a modal inside the main window). Derived from the
+ *  `origin` every host already passes, so no host has to learn a new prop. */
+export interface DockSurface {
+  surface: string
+  windowKind: string
+}
+
+const DOCK_SURFACES: Readonly<Record<string, DockSurface>> = {
+  'pipeline-manager': { surface: 'pm', windowKind: 'main' },
+  'plan-window': { surface: 'plans', windowKind: 'plans' },
+  'git-window': { surface: 'git', windowKind: 'git' },
+  'mini-ide': { surface: 'editor', windowKind: 'editor' },
+}
+
+export function dockSurfaceForOrigin(origin: string): DockSurface {
+  return DOCK_SURFACES[origin] ?? { surface: origin, windowKind: origin }
+}
+
+/** The window an embedded AI panel (AiCliDock) lives in, as other panes' menus
+ *  name it. A panel registers with a surface ('pm' for the Pipeline Manager
+ *  modal, else its own window); a window pane has none — or 'main' — and gets
+ *  no label, so it is drawn exactly as before. */
+const DOCK_WINDOW_KEYS: Readonly<Record<string, string>> = {
+  pm: 'dockWindow.pm',
+  plans: 'dockWindow.plans',
+  git: 'dockWindow.git',
+  editor: 'dockWindow.editor',
+}
+
+/** i18n key naming the panel's window, or null for a window pane. */
+export function dockWindowLabelKey(surface: string | undefined): string | null {
+  return (surface && DOCK_WINDOW_KEYS[surface]) || null
+}
+
+/** The roster name for an embedded panel: `base` (`<surface>-<agent>`), or the
+ *  first `base-2`, `base-3` … no other pane in the same workspace holds. Names
+ *  are only unique within a workspace, and a bare-name address resolving to
+ *  two panes is refused, so a collision would make both unreachable. */
+export function pickDockPaneName(
+  base: string,
+  workspacePath: string,
+  selfPaneId: string,
+  panes: ReadonlyArray<{ pane_id?: string; name?: string; workspace_path?: string }>,
+): string {
+  const norm = (p: string | undefined) => (p ?? '').replace(/\/+$/, '')
+  const ws = norm(workspacePath)
+  const taken = new Set(
+    panes
+      .filter((p) => p.pane_id !== selfPaneId && norm(p.workspace_path) === ws && p.name)
+      .map((p) => p.name as string),
+  )
+  if (!taken.has(base)) return base
+  let n = 2
+  while (taken.has(`${base}-${n}`)) n++
+  return `${base}-${n}`
+}
+
 /** Truncate `text` to `at` characters, marking the cut. Used to cap injected
  *  payload fragments so the CLI is not buried under a huge startup paste. */
 export function truncateText(text: string, at: number): string {

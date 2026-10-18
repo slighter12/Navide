@@ -20,8 +20,11 @@ function mockPlugins(overrides: Record<string, unknown> = {}) {
     checkUpdates: vi.fn().mockResolvedValue([]),
     remove: vi.fn().mockResolvedValue({ ok: true }),
     setPrerelease: vi.fn().mockResolvedValue({ id: '', enabled: false }),
+    setDisabled: vi.fn().mockResolvedValue({ id: '', disabled: false }),
     listPacks: vi.fn().mockResolvedValue([]),
     removePack: vi.fn().mockResolvedValue({ removed: true }),
+    disabledStoreStatus: vi.fn().mockResolvedValue({ status: 'ok' }),
+    resetDisabledStore: vi.fn().mockResolvedValue({ status: 'ok' }),
     ...overrides,
   }
   ;(window as unknown as Record<string, unknown>).agentTeam = { plugins: api }
@@ -172,7 +175,7 @@ describe('ExtensionsPane', () => {
     await wrapper.get('.ext-pack-remove').trigger('click')
     await flushPromises()
     await wrapper.get('.pack-uninstall-member input').setValue(true)
-    expect(wrapper.get('.pack-uninstall-confirm').text()).toBe('Uninstall pack and 1 extension(s)')
+    expect(wrapper.get('.pack-uninstall-confirm').text()).toBe('Uninstall pack and 1 Navide plugin(s)')
     await wrapper.get('.pack-uninstall-confirm').trigger('click')
     await flushPromises()
     // The Host removes the chosen members itself, so it can refuse a member
@@ -191,27 +194,125 @@ describe('ExtensionsPane', () => {
     expect(row.find('.ext-sensitive').text()).toContain('fs, terminal')
   })
 
-  it('shows an opted-out bundled Git package and restores it explicitly', async () => {
+  it('disables and enables a bundled built-in instead of removing or restoring it', async () => {
+    const enabled = { id: 'navide.git', version: '0.1.0', active: true, optedOut: false, disabled: false }
     const listFactoryPackages = vi
       .fn()
-      .mockResolvedValueOnce([
-        { id: 'navide.git', version: '0.1.0', active: false, optedOut: true },
-      ])
-      .mockResolvedValueOnce([
-        { id: 'navide.git', version: '0.1.0', active: true, optedOut: false },
-      ])
-    const api = mockPlugins({ listFactoryPackages })
+      .mockResolvedValueOnce([enabled])
+      .mockResolvedValueOnce([{ ...enabled, disabled: true }])
+      .mockResolvedValue([enabled])
+    const api = mockPlugins({ listInstalled: vi.fn().mockResolvedValue([]), listFactoryPackages })
     wrapper = mountExtensions()
     await flushPromises()
 
-    const row = wrapper.get('[data-factory-id="navide.git"]')
+    let row = wrapper.get('[data-factory-id="navide.git"]')
     expect(row.text()).toContain('Bundled Git')
-    expect(row.text()).toContain('Removed')
-    await row.get('.ext-restore').trigger('click')
+    expect(row.text()).toContain('Active')
+    expect(row.find('.ext-restore').exists()).toBe(false)
+    expect(row.find('.ext-remove').exists()).toBe(false)
+    await row.get('.ext-disable').trigger('click')
+    await flushPromises()
+    expect(api.setDisabled).toHaveBeenCalledWith('navide.git', true)
+
+    row = wrapper.get('[data-factory-id="navide.git"]')
+    expect(row.get('.ext-disabled-badge').text()).toBe('Disabled')
+    expect(row.get('.ext-disabled-note').text()).toContain('permissions and stored data are kept')
+    expect(row.find('.ext-disable').exists()).toBe(false)
+    await row.get('.ext-enable').trigger('click')
+    await flushPromises()
+    expect(api.setDisabled).toHaveBeenLastCalledWith('navide.git', false)
+    expect(api.restoreFactoryPackage).not.toHaveBeenCalled()
+  })
+
+  it('shows a built-in switch and the reset as busy until the Host finishes, however long that takes', async () => {
+    const enabled = { id: 'navide.plans', version: '0.1.0', active: true, optedOut: false, disabled: false }
+    let finishSwitch!: () => void
+    let finishReset!: () => void
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([]),
+      listFactoryPackages: vi.fn().mockResolvedValue([enabled]),
+      setDisabled: vi.fn(() => new Promise((resolve) => { finishSwitch = () => resolve({ id: 'navide.plans', disabled: true }) })),
+      disabledStoreStatus: vi.fn().mockResolvedValue({ status: 'unreadable' }),
+      resetDisabledStore: vi.fn(() => new Promise((resolve) => { finishReset = () => resolve({ status: 'ok' }) })),
+    })
+    wrapper = mountExtensions()
     await flushPromises()
 
-    expect(api.restoreFactoryPackage).toHaveBeenCalledWith('navide.git')
-    expect(wrapper.get('[data-factory-id="navide.git"]').text()).toContain('Active')
+    let row = wrapper.get('[data-factory-id="navide.plans"]')
+    expect(row.find('.ext-switch-busy').exists()).toBe(false)
+    await row.get('.ext-disable').trigger('click')
+    await flushPromises()
+    expect(api.setDisabled).toHaveBeenCalledWith('navide.plans', true)
+    row = wrapper.get('[data-factory-id="navide.plans"]')
+    const busy = row.get('.ext-switch-busy')
+    expect(busy.attributes('role')).toBe('status')
+    expect(busy.text()).toContain('Applying')
+    expect(row.get('.ext-disable').attributes('disabled')).toBeDefined()
+    finishSwitch()
+    await flushPromises()
+    expect(wrapper.find('[data-factory-id="navide.plans"] .ext-switch-busy').exists()).toBe(false)
+
+    await wrapper.get('.ext-store-reset').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.ext-store-unreadable .ext-switch-busy').text()).toContain('Applying')
+    expect(wrapper.get('.ext-store-reset').attributes('disabled')).toBeDefined()
+    finishReset()
+    await flushPromises()
+    expect(wrapper.find('.ext-switch-busy').exists()).toBe(false)
+  })
+
+  it('says a built-in removed by an earlier version lost its data and only offers Enable', async () => {
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([]),
+      listFactoryPackages: vi.fn().mockResolvedValue([
+        { id: 'navide.mini-ide', version: null, active: false, optedOut: false, disabled: true, dataDeletedByEarlierRemoval: true },
+      ]),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    const row = wrapper.get('[data-factory-id="navide.mini-ide"]')
+    expect(row.get('.ext-data-deleted-note').text()).toContain('deleted its stored data')
+    expect(row.find('.ext-enable').exists()).toBe(true)
+    expect(row.find('.ext-restore').exists()).toBe(false)
+    expect(row.text()).not.toContain('Removed')
+  })
+
+  it('says the Disabled switches were restored from their backup', async () => {
+    mockPlugins({ disabledStoreStatus: vi.fn().mockResolvedValue({ status: 'restored' }) })
+    wrapper = mountExtensions()
+    await flushPromises()
+    expect(wrapper.get('.ext-store-restored').text()).toContain('Restored from backup')
+    expect(wrapper.find('.ext-store-unreadable').exists()).toBe(false)
+  })
+
+  it('explains an unreadable Disabled store and resets it in one click', async () => {
+    const api = mockPlugins({
+      disabledStoreStatus: vi.fn().mockResolvedValue({ status: 'unreadable' }),
+      resetDisabledStore: vi.fn().mockResolvedValue({ status: 'ok' }),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+    const banner = wrapper.get('.ext-store-unreadable')
+    expect(banner.attributes('role')).toBe('alert')
+    expect(banner.text()).toContain('treated as disabled')
+    await banner.get('.ext-store-reset').trigger('click')
+    await flushPromises()
+    expect(api.resetDisabledStore).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.ext-store-unreadable').exists()).toBe(false)
+  })
+
+  it('offers no Uninstall for a Marketplace copy of a built-in', async () => {
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'navide.git', requires: [], sensitive: [], packageVersion: '2.0.0', provenance: 'official-registry' },
+        { id: 'acme.demo', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+      ]),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+    expect(wrapper.find('[data-id="navide.git"] .ext-remove').exists()).toBe(false)
+    expect(wrapper.find('[data-id="acme.demo"] .ext-remove').exists()).toBe(true)
   })
 
   it('shows an active factory Git package only in the Bundled section', async () => {
@@ -267,6 +368,97 @@ describe('ExtensionsPane', () => {
     expect(wrapper.find('[data-id="navide.git"]').exists()).toBe(false)
   })
 
+  function mockBundledPlansAndGit() {
+    return mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        {
+          id: 'navide.plans',
+          requires: ['fs', 'ui', 'aiCli'],
+          sensitive: ['fs'],
+          packageVersion: '0.1.0',
+          manifestPermissions: {
+            system: ['fs', 'ui', 'aiCli'],
+            scopes: {
+              fs: {
+                root: 'repository',
+                read: ['**/docs/plans/*', '**/docs/plans/.history/**', '.plans/*'],
+                write: ['**/docs/plans/*', '.plans/*'],
+              },
+            },
+          },
+          provenance: 'factory-bundled',
+        },
+        {
+          id: 'navide.git',
+          requires: ['fs', 'shell'],
+          sensitive: ['fs', 'shell'],
+          packageVersion: '2.0.0',
+          manifestPermissions: { system: ['fs'], shell: 'allowlist' },
+          provenance: 'factory-bundled',
+        },
+      ]),
+      listFactoryPackages: vi.fn().mockResolvedValue([
+        { id: 'navide.git', version: '2.0.0', active: true, optedOut: false },
+        { id: 'navide.plans', version: '0.1.0', active: true, optedOut: false },
+      ]),
+    })
+  }
+
+  it('discloses the bundled Plans file scope and that its backend runs unsandboxed', async () => {
+    mockBundledPlansAndGit()
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    const row = wrapper.get('[data-factory-id="navide.plans"]')
+    expect(row.get('.ext-manifest-scopes').text()).toBe(
+      'File scope (from the Git repository root): read and write **/docs/plans/*, .plans/*; read only **/docs/plans/.history/**'
+    )
+    const risk = row.get('.ext-risk-note').text()
+    expect(risk).toContain('own backend')
+    expect(risk).toContain('user permissions')
+    expect(risk).toContain('no sandbox')
+    expect(risk).toContain('Git repository root')
+    expect(risk).toContain('.history')
+    // Since the backend writes plan files itself, only deletes and renames
+    // still go through Navide.
+    expect(risk).toContain('Its backend reads and writes them directly')
+    expect(risk).toContain('deletes and renames still go through Navide')
+    expect(risk).not.toContain('writes, renames and deletes')
+    // The third-party sandbox wording never describes this package.
+    expect(risk).not.toContain('sandboxed')
+    expect(wrapper.find('[data-id="navide.plans"]').exists()).toBe(false)
+  })
+
+  it('keeps a bundled row without declared scopes as it was', async () => {
+    mockBundledPlansAndGit()
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    const row = wrapper.get('[data-factory-id="navide.git"]')
+    expect(row.find('.ext-manifest-scopes').exists()).toBe(false)
+    expect(row.find('.ext-risk-note').exists()).toBe(false)
+    expect(row.get('.ext-manifest-permissions').text()).toContain('allowlist')
+  })
+
+  it('discloses declared file scopes of an installed third-party package', async () => {
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        {
+          id: 'acme.notes',
+          requires: ['fs'],
+          sensitive: ['fs'],
+          packageVersion: '1.0.0',
+          manifestPermissions: { system: ['fs'], scopes: { fs: { read: ['docs'] } } },
+          provenance: 'official-registry',
+        },
+      ]),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    expect(wrapper.get('[data-id="acme.notes"] .ext-manifest-scopes').text()).toBe('File scope: read only docs')
+  })
+
   it('shows no matching Grant for a Bundled package version without a grant', async () => {
     mockPlugins({
       listInstalled: vi.fn().mockResolvedValue([
@@ -292,6 +484,25 @@ describe('ExtensionsPane', () => {
     )
   })
 
+  it('passes the native backend data choice from the remove dialog', async () => {
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([{ id: 'acme.backend', requires: [], sensitive: [] }]),
+      nativeBackendData: vi
+        .fn()
+        .mockResolvedValue({ exists: true, bytes: 5 * 1024 * 1024, path: '/userData/plugin-native-backends/data/acme.backend' }),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+    await wrapper.get('[data-id="acme.backend"] .ext-remove').trigger('click')
+    await flushPromises()
+    expect(useNotify().dialog.value?.message).toContain('5.0 MB')
+    expect(useNotify().dialog.value?.checkboxLabel).toBeTruthy()
+    expect(useNotify().dialogCheckbox.value).toBe(false)
+    useNotify().resolveDialog(true)
+    await flushPromises()
+    expect(api.remove).toHaveBeenCalledWith('acme.backend', 'delete')
+  })
+
   it('shows and removes a backend-only package with no capabilities', async () => {
     const listInstalled = vi
       .fn()
@@ -311,7 +522,7 @@ describe('ExtensionsPane', () => {
 
     expect(api.remove).toHaveBeenCalledWith('acme.backend')
     expect(wrapper.find('[data-id="acme.backend"]').exists()).toBe(false)
-    expect(wrapper.get('.ext-empty').text()).toContain('No extensions installed')
+    expect(wrapper.get('.ext-empty').text()).toContain('No Navide plugins installed')
   })
 
 
@@ -404,18 +615,19 @@ describe('ExtensionsPane', () => {
     expect(api.restart).toHaveBeenCalledWith('navide.mini-ide')
   })
 
-  it('keeps Restore, not the promote-back restart, on an opted-out bundled row', async () => {
+  it('offers Enable, not the promote-back restart, on a disabled bundled row', async () => {
     mockPlugins({
       listInstalled: vi.fn().mockResolvedValue([]),
       listFactoryPackages: vi.fn().mockResolvedValue([
-        { id: 'navide.mini-ide', version: '0.2.11', active: false, optedOut: true },
+        { id: 'navide.mini-ide', version: '0.2.11', active: true, optedOut: false, disabled: true },
       ]),
     })
     wrapper = mountExtensions()
     await flushPromises()
 
     const row = wrapper.get('[data-factory-id="navide.mini-ide"]')
-    expect(row.find('.ext-restore').exists()).toBe(true)
+    expect(row.find('.ext-restore').exists()).toBe(false)
+    expect(row.find('.ext-enable').exists()).toBe(true)
     expect(row.find('.ext-restart').exists()).toBe(false)
   })
 
@@ -461,22 +673,22 @@ describe('ExtensionsPane', () => {
     expect(wrapper.get('.ext-error').text()).toBe('candidate package failed verification')
   })
 
-  it('shows the main process message for a failed bundled restore, not the IPC wrapper', async () => {
+  it('shows the main process message for a failed bundled enable, not the IPC wrapper', async () => {
     mockPlugins({
       listFactoryPackages: vi.fn().mockResolvedValue([
-        { id: 'navide.mini-ide', version: '0.2.11', active: false, optedOut: true },
+        { id: 'navide.mini-ide', version: '0.2.11', active: true, optedOut: false, disabled: true },
       ]),
-      restoreFactoryPackage: vi.fn().mockRejectedValue(
-        new Error("Error invoking remote method 'plugins:restoreFactoryPackage': Error: an installed package already owns this plugin id"),
+      setDisabled: vi.fn().mockRejectedValue(
+        new Error("Error invoking remote method 'plugins:setDisabled': Error: bundled package missing"),
       ),
     })
     wrapper = mountExtensions()
     await flushPromises()
 
-    await wrapper.get('[data-factory-id="navide.mini-ide"] .ext-restore').trigger('click')
+    await wrapper.get('[data-factory-id="navide.mini-ide"] .ext-enable').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.ext-error').text()).toBe('an installed package already owns this plugin id')
+    expect(wrapper.get('.ext-error').text()).toBe('bundled package missing')
   })
 
   describe('in zh-TW', () => {
@@ -502,16 +714,31 @@ describe('ExtensionsPane', () => {
       expect(wrapper.get('[data-id="acme.prev"] .ext-rollback').text()).toBe('回復到 1.0.0')
       expect(wrapper.get('[data-id="acme.fact"] .ext-rollback').text()).toBe('回復為內建版本')
       expect(wrapper.get('[data-id="acme.staged"] .ext-candidate').text()).toBe('更新 3.1.0 已就緒')
-      expect(wrapper.get('[data-id="acme.staged"] .ext-restart').text()).toBe('重新啟動擴充功能')
+      expect(wrapper.get('[data-id="acme.staged"] .ext-restart').text()).toBe('重新啟動 Navide 外掛')
 
       await wrapper.get('[data-id="acme.prev"] .ext-rollback').trigger('click')
       await flushPromises()
       const dialog = useNotify().dialog.value as { message?: string; title?: string; confirmText?: string }
-      expect(dialog.title).toBe('回復擴充功能')
+      expect(dialog.title).toBe('回復 Navide 外掛')
       expect(dialog.confirmText).toBe('回復')
       expect(dialog.message).toContain('要將 acme.prev 回復到 1.0.0 嗎')
       useNotify().resolveDialog(false)
       await flushPromises()
+    })
+
+    it('discloses the bundled Plans scope and risk from the locale', async () => {
+      mockBundledPlansAndGit()
+      wrapper = mountExtensions()
+      await flushPromises()
+
+      const row = wrapper.get('[data-factory-id="navide.plans"]')
+      expect(row.get('.ext-manifest-scopes').text()).toBe(
+        '檔案範圍（從 Git 儲存庫根目錄起）：讀寫 **/docs/plans/*, .plans/*; 只讀 **/docs/plans/.history/**'
+      )
+      expect(row.get('.ext-risk-note').text()).toContain('沒有沙盒')
+      expect(row.get('.ext-risk-note').text()).toContain('使用者權限')
+      expect(row.get('.ext-risk-note').text()).toContain('讀取與寫入計畫文件都由此 Navide 外掛的後端直接進行')
+      expect(row.get('.ext-risk-note').text()).toContain('刪除與改名仍經由 Navide 進行')
     })
 
     it('shows a known Host refusal translated and an unknown one as written', async () => {
@@ -545,6 +772,28 @@ describe('ExtensionsPane', () => {
     })
   })
 
+  describe('in ja-JP', () => {
+    const original = i18n.global.locale.value
+    beforeEach(() => {
+      i18n.global.locale.value = 'ja-JP'
+    })
+    afterEach(() => {
+      i18n.global.locale.value = original
+    })
+
+    it('discloses that the Plans backend reads and writes directly without a sandbox', async () => {
+      mockBundledPlansAndGit()
+      wrapper = mountExtensions()
+      await flushPromises()
+
+      const risk = wrapper.get('[data-factory-id="navide.plans"] .ext-risk-note').text()
+      expect(risk).toContain('サンドボックスはありません')
+      expect(risk).toContain('ユーザー権限')
+      expect(risk).toContain('読み取りと書き込みはどちらもこの Navide プラグインのバックエンドが直接行い')
+      expect(risk).toContain('削除と名前変更は引き続き Navide を経由します')
+    })
+  })
+
   it('redraws from the Host after a rollback that failed once the package was switched', async () => {
     // The factory package became active before view restoration threw, so the
     // Host no longer lists the installed row or its rollback.
@@ -568,6 +817,67 @@ describe('ExtensionsPane', () => {
 
     expect(wrapper.get('.ext-error').text()).toBe('plugin views did not become ready')
     expect(wrapper.find('[data-id="acme.demo"]').exists()).toBe(false)
+  })
+
+  it('says why a removal failed and keeps the row', async () => {
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([{ id: 'acme.backend', requires: [], sensitive: [] }]),
+      remove: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'plugins:remove': Error: package is in use")),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    await wrapper.get('[data-id="acme.backend"] .ext-remove').trigger('click')
+    await flushPromises()
+    useNotify().resolveDialog(true)
+    await flushPromises()
+
+    expect(api.remove).toHaveBeenCalledWith('acme.backend')
+    expect(wrapper.get('.ext-error').text()).toBe('package is in use')
+    expect(wrapper.find('[data-id="acme.backend"]').exists()).toBe(true)
+  })
+
+  it('shows an inventory that fails to load instead of leaving the rejection unhandled', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      mockPlugins({ listInstalled: vi.fn().mockRejectedValue(new Error('backend gone')) })
+      wrapper = mountExtensions()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(wrapper.get('.ext-error').text()).toBe('Could not reload the installed Navide plugins: backend gone')
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  it('shows both the rollback failure and a failed redraw after it', async () => {
+    const listInstalled = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 'acme.demo', requires: [], sensitive: [], packageVersion: '1.0.1', rollbackKind: 'factory' },
+      ])
+      .mockRejectedValue(new Error('backend gone'))
+    mockPlugins({
+      listInstalled,
+      rollback: vi.fn().mockRejectedValue(new Error('plugin views did not become ready')),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    await wrapper.get('[data-id="acme.demo"] .ext-rollback').trigger('click')
+    await flushPromises()
+    useNotify().resolveDialog(true)
+    await flushPromises()
+
+    expect(wrapper.findAll('.ext-error').map((banner) => banner.text())).toEqual([
+      'plugin views did not become ready',
+      'Could not reload the installed Navide plugins: backend gone',
+    ])
   })
 
   it('keeps the Developer Mode local-unpacked warning visible in inventory', async () => {
@@ -672,6 +982,136 @@ describe('ExtensionsPane', () => {
     expect(row.find('.ext-restart').exists()).toBe(false)
   })
 
+  it('D2: badges whether an update adds permissions, labelled as unverified Registry data', async () => {
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'acme.more', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+        { id: 'acme.same', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+        { id: 'acme.unknown', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+      ]),
+      checkUpdates: vi.fn().mockResolvedValue([
+        { id: 'acme.more', namespace: 'acme', name: 'more', installedVersion: '1.0.0', latestVersion: '1.1.0', permissionChange: 'more' },
+        { id: 'acme.same', namespace: 'acme', name: 'same', installedVersion: '1.0.0', latestVersion: '1.1.0', permissionChange: 'same' },
+        { id: 'acme.unknown', namespace: 'acme', name: 'unknown', installedVersion: '1.0.0', latestVersion: '1.1.0' },
+      ]),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    const more = wrapper.get('[data-id="acme.more"] .ext-permission-change')
+    expect(more.text()).toBe('More permissions')
+    expect(more.attributes('title')).toContain('not yet verified')
+    expect(wrapper.get('[data-id="acme.same"] .ext-permission-change').text()).toBe('Same permissions')
+    expect(wrapper.find('[data-id="acme.unknown"] .ext-permission-change').exists()).toBe(false)
+  })
+
+  // User ruling 2026-10-17 (D-d option B): the update asks as on main; the
+  // dialog shows the diff, here that nothing changed.
+  it('D2: an update that adds no permissions still asks, and the dialog says nothing changed', async () => {
+    const commitInstall = vi.fn().mockResolvedValue({ id: 'acme.same', requires: [], restartRequired: true })
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'acme.same', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+      ]),
+      checkUpdates: vi.fn().mockResolvedValue([
+        { id: 'acme.same', namespace: 'acme', name: 'same', installedVersion: '1.0.0', latestVersion: '1.1.0', permissionChange: 'same' },
+      ]),
+      prepareInstall: vi.fn().mockResolvedValue({
+        id: 'acme.same', version: '1.1.0', trustTier: 'signed-verified', sensitive: ['shell'],
+        containsBackendExecutable: false, requiresConfirmation: true, publisherId: 'acme',
+        requiresPublisherTrust: false, requiresRiskConfirmation: true,
+        disclosureDiff: {
+          schemaVersion: 1,
+          from: { id: 'acme.same', version: '1.0.0', risk: 'high' },
+          to: { id: 'acme.same', version: '1.1.0', risk: 'high' },
+          added: [], removed: [], unchanged: [{ kind: 'shell', key: 'allowlist', detail: null }], widened: false,
+        },
+      }),
+      commitInstall,
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    await wrapper.get('[data-id="acme.same"] .ext-update').trigger('click')
+    await flushPromises()
+    expect(commitInstall).not.toHaveBeenCalled()
+    expect(wrapper.get('.ext-trust-dialog .nv-diff').text()).toContain('No permission was added or removed.')
+    await wrapper.get('.ext-confirm-risk').trigger('click')
+    await flushPromises()
+    expect(commitInstall).toHaveBeenCalledWith('acme.same', { publisherConfirmed: false, riskConfirmed: true })
+  })
+
+  // An update that needs no confirmation commits directly with no extra
+  // notice, exactly as on main (D-d option B).
+  it('D2: an update that needs no confirmation commits directly, as on main', async () => {
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'acme.wider', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+      ]),
+      checkUpdates: vi.fn().mockResolvedValue([
+        { id: 'acme.wider', namespace: 'acme', name: 'wider', installedVersion: '1.0.0', latestVersion: '1.1.0', permissionChange: 'more' },
+      ]),
+      prepareInstall: vi.fn().mockResolvedValue({
+        id: 'acme.wider', version: '1.1.0', trustTier: 'signed-verified', sensitive: [],
+        containsBackendExecutable: false, requiresConfirmation: false, publisherId: 'acme',
+        requiresPublisherTrust: false, requiresRiskConfirmation: false,
+        disclosureDiff: {
+          schemaVersion: 1,
+          from: { id: 'acme.wider', version: '1.0.0', risk: 'low' },
+          to: { id: 'acme.wider', version: '1.1.0', risk: 'low' },
+          added: [{ kind: 'system', key: 'ui', detail: null }], removed: [], unchanged: [], widened: true,
+        },
+      }),
+      commitInstall: vi.fn().mockResolvedValue({ id: 'acme.wider', requires: ['ui'], restartRequired: true }),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    await wrapper.get('[data-id="acme.wider"] .ext-update').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.ext-trust-dialog').exists()).toBe(false)
+    expect(useNotify().toasts.value.some((toast) => toast.message.startsWith('acme.wider'))).toBe(false)
+  })
+
+  // D-f / RULE ZERO: opening the page reads no activity; a row's activity is
+  // read only when the user opens it.
+  it('D-f: loads a plugin activity only when its permissions section is opened, adding no element', async () => {
+    const activityReport = vi.fn().mockResolvedValue({ ok: false, error: 'Navide Host session is not ready' })
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([
+        { id: 'acme.demo', requires: [], sensitive: [], packageVersion: '1.0.0', provenance: 'official-registry' },
+        { id: 'local.dev', requires: [], sensitive: [], packageVersion: '0.1.0', provenance: 'developer-local-unpacked' },
+      ]),
+      activityReport,
+      backendCallConcurrency: vi.fn().mockResolvedValue([]),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+
+    expect(activityReport).not.toHaveBeenCalled()
+    // RULE ZERO: no new element per row; the existing section only says activity is in it.
+    expect(wrapper.findAll('[data-id="acme.demo"] details')).toHaveLength(1)
+    expect(wrapper.find('.nv-activity').exists()).toBe(false)
+    expect(wrapper.find('.ext-activity-overview-link').exists()).toBe(false)
+    expect(wrapper.get('[data-id="acme.demo"] .ext-permission-details summary').text()).toBe('Permissions, grants and activity')
+    expect(wrapper.get('[data-id="local.dev"] .ext-permission-details summary').text()).toBe('Permissions and grants')
+
+    const details = wrapper.get('[data-id="acme.demo"] .ext-permission-details')
+    ;(details.element as HTMLDetailsElement).open = true
+    await details.trigger('toggle')
+    await flushPromises()
+    expect(activityReport).toHaveBeenCalledWith('acme.demo')
+    expect(details.text()).toContain('Activity is not available right now: Navide Host session is not ready')
+    await details.get('.ext-activity-overview-link').trigger('click')
+    expect(wrapper.emitted('openDisclosureOverview')).toHaveLength(1)
+
+    const local = wrapper.get('[data-id="local.dev"] .ext-permission-details')
+    ;(local.element as HTMLDetailsElement).open = true
+    await local.trigger('toggle')
+    await flushPromises()
+    expect(activityReport).toHaveBeenCalledTimes(1)
+  })
+
   it('restarts a staged Registry update without offering a second install', async () => {
     const listInstalled = vi.fn()
       .mockResolvedValueOnce([{ id: 'navide.mini-ide', packageVersion: '1.0.0', pendingCandidateVersion: '2.0.0', requires: [], sensitive: [] }])
@@ -696,30 +1136,107 @@ describe('ExtensionsPane', () => {
   })
 
   it('removes an installed plugin', async () => {
-    const api = mockPlugins()
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([{ id: 'acme.files', requires: ['fs'], sensitive: ['fs'] }]),
+    })
     wrapper = mountExtensions()
     await flushPromises()
-    await wrapper.get('[data-id="navide.mini-ide"] .ext-remove').trigger('click')
+    await wrapper.get('[data-id="acme.files"] .ext-remove').trigger('click')
     await flushPromises()
-    expect(useNotify().dialog.value?.message).toContain('navide.mini-ide')
+    expect(useNotify().dialog.value?.message).toContain('acme.files')
     expect(useNotify().dialog.value?.danger).toBe(true)
     // One term on the page and in the dialog.
-    expect(wrapper.get('[data-id="navide.mini-ide"] .ext-remove').text()).toBe('Uninstall')
+    expect(wrapper.get('[data-id="acme.files"] .ext-remove').text()).toBe('Uninstall')
     expect(useNotify().dialog.value?.confirmText).toBe('Uninstall')
     useNotify().resolveDialog(true)
     await flushPromises()
-    expect(api.remove).toHaveBeenCalledWith('navide.mini-ide')
+    expect(api.remove).toHaveBeenCalledWith('acme.files')
   })
 
   it('keeps the plugin when the removal confirmation is cancelled', async () => {
-    const api = mockPlugins()
+    const api = mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([{ id: 'acme.files', requires: ['fs'], sensitive: ['fs'] }]),
+    })
     wrapper = mountExtensions()
     await flushPromises()
-    await wrapper.get('[data-id="navide.mini-ide"] .ext-remove').trigger('click')
+    await wrapper.get('[data-id="acme.files"] .ext-remove').trigger('click')
     await flushPromises()
     useNotify().resolveDialog(false)
     await flushPromises()
     expect(api.remove).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-id="navide.mini-ide"]').exists()).toBe(true)
+    expect(wrapper.find('[data-id="acme.files"]').exists()).toBe(true)
+  })
+
+  it('disables an installed Navide plugin visibly and offers Enable while it is disabled', async () => {
+    const enabledRow = { id: 'acme.demo', requires: [], sensitive: [], packageVersion: '1.2.0', provenance: 'official-registry', disabled: false }
+    const disabledRow = { ...enabledRow, disabled: true }
+    const listInstalled = vi
+      .fn()
+      .mockResolvedValueOnce([
+        enabledRow,
+        { id: 'local.dev', requires: [], sensitive: [], provenance: 'developer-local-unpacked' },
+      ])
+      .mockResolvedValueOnce([disabledRow])
+      .mockResolvedValue([enabledRow])
+    const api = mockPlugins({
+      listInstalled,
+      setDisabled: vi.fn().mockResolvedValue({ id: 'acme.demo', disabled: true }),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+    let row = wrapper.get('[data-id="acme.demo"]')
+    expect(row.find('.ext-disabled-badge').exists()).toBe(false)
+    expect(row.find('.ext-enable').exists()).toBe(false)
+    // Only rows the Host reports a disabled state for get the switch.
+    expect(wrapper.find('[data-id="local.dev"] .ext-disable').exists()).toBe(false)
+
+    await row.get('.ext-disable').trigger('click')
+    await flushPromises()
+    expect(api.setDisabled).toHaveBeenCalledWith('acme.demo', true)
+    row = wrapper.get('[data-id="acme.demo"]')
+    expect(row.get('.ext-disabled-badge').text()).toBe('Disabled')
+    expect(row.find('.ext-disable').exists()).toBe(false)
+    // Disabling keeps the package: removing it stays a separate action.
+    expect(row.find('.ext-remove').exists()).toBe(true)
+
+    await row.get('.ext-enable').trigger('click')
+    await flushPromises()
+    expect(api.setDisabled).toHaveBeenLastCalledWith('acme.demo', false)
+    row = wrapper.get('[data-id="acme.demo"]')
+    expect(row.find('.ext-disabled-badge').exists()).toBe(false)
+    expect(row.find('.ext-disable').exists()).toBe(true)
+  })
+})
+
+// Review MED-2 on #396: a plugin's own text cannot hide or reorder the listing.
+describe('ExtensionsPane invisible characters', () => {
+  let wrapper: VueWrapper | undefined
+
+  afterEach(() => {
+    wrapper?.unmount()
+    delete (window as unknown as Record<string, unknown>).agentTeam
+  })
+
+  it('spells out invisible characters in installed ids, pack names, members and the uninstall dialog', async () => {
+    mockPlugins({
+      listInstalled: vi.fn().mockResolvedValue([{ id: 'acme.\u202edemo', requires: [], sensitive: [], provenance: 'official-registry' }]),
+      listPacks: vi.fn().mockResolvedValue([
+        { id: 'acme.pack', displayName: 'Web\u202e Pack', version: '1.0.0', members: ['acme.he\u200bllo'], installedByPack: ['acme.he\u200bllo'] },
+      ]),
+    })
+    wrapper = mountExtensions()
+    await flushPromises()
+    const row = wrapper.get('[data-pack-id="acme.pack"]')
+    expect(row.get('.ext-id').text()).toBe('Web\\u{202e} Pack')
+    expect(row.get('.ext-pack-includes').text()).toBe('Includes: acme.he\\u{200b}llo')
+    expect(wrapper.text()).toContain('acme.\\u{202e}demo')
+    // The letter tile shows the spelled-out form's first character, not the override.
+    expect(wrapper.get('[data-id="acme.\u202edemo"] .mkt-icon').text()).toBe('\\')
+    await row.get('.ext-pack-remove').trigger('click')
+    await flushPromises()
+    const dialog = wrapper.get('.pack-uninstall-dialog')
+    expect(dialog.get('h4').text()).toBe('Uninstall “Web\\u{202e} Pack”?')
+    expect(dialog.get('.pack-uninstall-member').text()).toContain('acme.he\\u{200b}llo')
+    expect(wrapper.text()).not.toMatch(/[\u200b\u202e]/)
   })
 })

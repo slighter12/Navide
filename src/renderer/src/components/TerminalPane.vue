@@ -10,6 +10,7 @@ import { CLI_CONTEXT_MIME, PANE_BATCH_MIME, PANE_ID_MIME, resolveCliDropSources,
 import type { MentionCandidate } from '@navide/terminal'
 import { PLAN_REF_MIME, isPlanDrag, parsePlanRefPayload, type PlanDragRef } from '../lib/planDrag'
 import { formatLoopTime } from '../lib/loopPrompt'
+import { PANE_STUCK_AFTER_MS } from '../lib/paneStuck'
 import PromptSkillPicker from './PromptSkillPicker.vue'
 import { usePromptSkills } from '../composables/usePromptSkills'
 import { castablePromptSkills } from '../lib/promptSkills'
@@ -17,6 +18,7 @@ import { paneStatusLabelText } from '../lib/paneStatusLabel'
 import { statusBadgeStyle } from '../composables/useStatusBadgePrefs'
 import { setBatchDragImage } from '../lib/batchDragImage'
 import { i18n } from '@navide/plugin-ui/foundation'
+import { vTruncate } from '@navide/plugin-ui/foundation'
 import { invokeCommand, isMacPlatform } from '@navide/plugin-ui/shared'
 import RebuildIcon from './RebuildIcon.vue'
 import UsageBadge from './UsageBadge.vue'
@@ -75,21 +77,44 @@ interface Props {
   /** Runtime-only login-expired badge — lit when the pane's CLI reported an
    *  expired login; clicking it asks App.vue to re-send the login command. */
   loginExpired?: boolean
+  /** The agent CLI's non-zero exit code, shown as a badge while the pane is
+   *  exited; null for a clean exit or a pane that never exited. */
+  exitCode?: number | null
+  /** When the pane went quiet mid-turn (App.vue's stuck poll); null when not
+   *  stuck. */
+  stuckSince?: number | null
   /** The user muted this pane: no desktop notification and no sound from it.
    *  Shown as a 🔇 badge; clicking it asks App.vue to unmute. */
   muted?: boolean
+  /** Read aloud is on in Settings: offer the 🔊 toggle that marks this pane. */
+  readbackAvailable?: boolean
+  /** This pane is marked 🔊: its done / needs-input notices are spoken. */
+  readback?: boolean
+  /** A readback line about this pane is being spoken right now. */
+  readbackSpeaking?: boolean
   /** Runtime-only quota badge — lit while this pane's CLI has announced it is
    *  out of quota. `usageLimitUntil` is when it comes back, or null when no
    *  reset time could be resolved (the badge then says so instead of naming a
    *  time it does not know). Not clickable: nothing here can grant quota. */
   usageLimitHit?: boolean
   usageLimitUntil?: number | null
+  /** Offer "switch account and resume" beside the quota badge. App.vue sets
+   *  it only with the follow-switch flag on, for a pane that can move. */
+  quotaSwitchOffered?: boolean
   /** Runtime-only continue affordance — lit when this pane came back from a
    *  restore with `--resume`: the CLI reloaded its transcript but is parked at
    *  the prompt, so whatever it was doing is never picked up on its own. */
   continueAvailable?: boolean
   terminalPort: TerminalDockPort
   cliProfiles: ReturnType<typeof useCliProfiles>
+  /** The CLI account this pane was started on (its restore pin). */
+  profileId?: string
+  /** Whether this pane follows the account (moves with an account switch) or
+   *  is fixed to its account's own config dir. Undefined hides the toggle:
+   *  App.vue offers it only to claude panes once some account runs on its own
+   *  config dir. A string, not a boolean: Vue reads an absent boolean prop as
+   *  false. */
+  accountFollow?: 'follow' | 'fixed'
   workspacePath?: string
   /** Resolves the addresses offered by this pane's @-mention menu (self
    *  excluded), with the group and status words already translated by the host.
@@ -111,6 +136,7 @@ const emit = defineEmits<{
   (e: 'set-focus', ev?: MouseEvent): void
   (e: 'minimize'): void
   (e: 'toggle-mute'): void
+  (e: 'toggle-readback'): void
   (e: 'rebuild'): void
   (e: 'rebuild-clean'): void
   (e: 'rename', name: string): void
@@ -136,6 +162,8 @@ const emit = defineEmits<{
   /** Quota badge clicked and the confirm accepted — App.vue clears the pane's
    *  quota flag and resumes a loop that was parked on that limit. */
   (e: 'usage-limit-dismiss'): void
+  /** Quota switch button clicked — App.vue asks which account to resume on. */
+  (e: 'quota-switch-account'): void
   /** Continue button clicked on a resumed pane — App.vue injects the resume
    *  prompt once so the interrupted work carries on. */
   (e: 'continue-resume'): void
@@ -149,6 +177,8 @@ const emit = defineEmits<{
   /** This pane's PTY did not survive a backend outage — App.vue resumes the
    *  CLI session so the conversation continues instead of leaving a dead pane. */
   (e: 'pty-lost'): void
+  /** Flip accountFollow; App.vue owns the flag. */
+  (e: 'toggle-account-follow'): void
 }>()
 const containerRef = ref<HTMLElement | null>(null)
 const isDragOver = ref(false)
@@ -352,6 +382,7 @@ defineExpose({
   lastCommand: terminal.lastCommand,
   cleanBuffer: terminal.cleanBuffer,
   cleanBytesSeen: terminal.cleanBytesSeen,
+  resumeSpawnedAt: terminal.resumeSpawnedAt,
   lastActivityAt: terminal.lastActivityAt,
   lastRawActivityAt: terminal.lastRawActivityAt,
   // The person at the keyboard, for App.vue's messaging idle gate.
@@ -380,6 +411,8 @@ defineExpose({
   readLineBeforeCursor: terminal.readLineBeforeCursor,
   fitTerminal: terminal.fitTerminal,
   lockCols: terminal.lockCols,
+  isColsCapped: terminal.isColsCapped,
+  unlockCols: terminal.unlockCols,
   redraw: terminal.redraw,
   // STOP badge: App.vue owns persistence; it reflects stored/broadcast truth
   // into this pane's composable ref via setStopped (no persist side-effect).
@@ -422,7 +455,11 @@ const selectModifierLabel = isMacPlatform() ? '⌥ Option' : 'Shift'
 
 // xterm's selection lives outside the DOM, so main cannot read it from the
 // context-menu params — pass it along with the request.
-function onTerminalContextMenu(): void {
+function onTerminalContextMenu(e: MouseEvent): void {
+  // Off macOS, a CLI with mouse reporting on already received this click —
+  // Claude Code pastes or copies on it — so a menu would offer a second
+  // Paste. Shift keeps the click from the CLI and still opens the menu.
+  if (!isMacPlatform() && !e.shiftKey && terminal.isMouseTracking()) return
   props.terminalPort.showContextMenu?.(terminal.getSelection())
 }
 
@@ -605,6 +642,7 @@ onMounted(() => {
     <button class="minimize-btn" @click.stop="emit('minimize')" :title="$t('pane.terminal.minimize-tooltip')">⊟</button>
     <header
       :class="['pane-header', { 'drag-over': isReorderDragOver }]"
+      data-tour="pane-header"
       :draggable="!editingTitle"
       :title="skillMenuActive ? '' : $t('pane.terminal.drag-to-tab-tooltip')"
       @click="emit('set-focus', $event)"
@@ -667,6 +705,14 @@ onMounted(() => {
           :title="$t('pane.terminal.muted-tooltip')"
           @click.stop="emit('toggle-mute')"
         ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"></path><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path><line x1="2" y1="2" x2="22" y2="22"></line></svg></span>
+        <button
+          v-if="readbackAvailable"
+          class="readback-toggle"
+          :class="{ on: readback }"
+          :aria-pressed="readback ? 'true' : 'false'"
+          :title="$t(readback ? 'pane.terminal.readback-on-tooltip' : 'pane.terminal.readback-off-tooltip')"
+          @click.stop="emit('toggle-readback')"
+        >🔊<span v-if="readbackSpeaking" class="readback-speaking">{{ $t('pane.terminal.readback-speaking') }}</span></button>
         <span
           v-if="loginExpired"
           class="login-expired-inline"
@@ -674,6 +720,16 @@ onMounted(() => {
           :title="$t('pane.terminal.login-expired-tooltip')"
           @click.stop="emit('fix-login')"
         >{{ $t('pane.terminal.login-expired-badge') }}</span>
+        <span
+          v-if="exitCode != null && (displayStatus === 'exited' || displayStatus === 'error')"
+          class="exit-fault-inline"
+          :title="$t('pane.terminal.exit-fault-tooltip', { code: exitCode })"
+        >{{ $t('pane.terminal.exit-fault-badge', { code: exitCode }) }}</span>
+        <span
+          v-if="stuckSince != null && displayStatus !== 'exited' && displayStatus !== 'error'"
+          class="stuck-inline"
+          :title="$t('pane.terminal.stuck-tooltip', { minutes: PANE_STUCK_AFTER_MS / 60_000 })"
+        >{{ $t('pane.terminal.stuck-badge', { minutes: PANE_STUCK_AFTER_MS / 60_000 }) }}</span>
         <span
           v-if="usageLimitHit"
           class="usage-limit-inline"
@@ -685,6 +741,14 @@ onMounted(() => {
         >{{ usageLimitUntil != null
           ? $t('pane.terminal.usage-limit-badge', { time: formatLoopTime(usageLimitUntil) })
           : $t('pane.terminal.usage-limit-badge-unknown') }}</span>
+        <span
+          v-if="usageLimitHit && quotaSwitchOffered"
+          class="usage-limit-switch"
+          role="button"
+          data-testid="usage-limit-switch"
+          :title="$t('account-follow.quota-button-tooltip')"
+          @click.stop="emit('quota-switch-account')"
+        >{{ $t('account-follow.quota-button') }}</span>
         <CliRiskPill
           v-if="cliRisk && cliRiskState?.signals.length && !restoring && onScreen !== false"
           :pane-id="cliRiskPaneId"
@@ -703,10 +767,27 @@ onMounted(() => {
           :style="statusBadgeVars"
           :title="statusTooltipKey ? $t(statusTooltipKey) : ''"
         >{{ statusBadgeText }}</span>
-        <UsageBadge v-if="agentKey" :agent-key="agentKey" :cli-profiles="cliProfiles" />
+        <UsageBadge
+          v-if="agentKey"
+          data-tour="usage-badge"
+          :agent-key="agentKey"
+          :cli-profiles="cliProfiles"
+          :pane-id="paneId"
+          :pane-profile-id="profileId"
+          :pane-follow="accountFollow"
+          @toggle-pane-follow="emit('toggle-account-follow')"
+        />
+        <span
+          v-if="accountFollow === 'fixed'"
+          class="account-pin-indicator"
+          data-testid="account-pin-indicator"
+          role="img"
+          :title="$t('account-follow.pinned-indicator-tooltip')"
+          :aria-label="$t('account-follow.pinned-indicator-label')"
+        >📌</span>
         <PaneChannelButton :pane-id="paneId" :pane-name="title" :agent-key="agentKey" />
       </div>
-      <div v-if="subtitle" class="header-sub">{{ subtitle }}</div>
+      <div v-if="subtitle" class="header-sub" v-truncate>{{ subtitle }}</div>
     </header>
     <div
       ref="containerRef"
@@ -726,7 +807,7 @@ onMounted(() => {
          selectable, since nothing about it stopped being true. -->
     <div v-if="disconnectedNotice" class="disconnected-banner" role="status" aria-live="polite">
       <span class="disconnected-dot" />
-      <span class="disconnected-text">{{ disconnectedNotice }}</span>
+      <span class="disconnected-text" v-truncate>{{ disconnectedNotice }}</span>
     </div>
     <!-- Optional-chained: the pane's tests stub useTerminal with partial objects. -->
     <div
@@ -751,7 +832,7 @@ onMounted(() => {
     <div v-if="isPreparing" class="prep-overlay" aria-live="polite">
       <div class="prep-panel">
         <div class="prep-spinner" />
-        <div class="prep-text">{{ preparingLabel || 'Preparing CLI' }}</div>
+        <div class="prep-text" v-truncate>{{ preparingLabel || 'Preparing CLI' }}</div>
       </div>
     </div>
     <RestoredPanePlaceholder
@@ -978,6 +1059,30 @@ onMounted(() => {
 .muted-inline:hover {
   color: var(--text-primary);
 }
+.readback-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 99px;
+  background: transparent;
+  font-size: var(--font-3xs);
+  line-height: 16px;
+  cursor: pointer;
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.readback-toggle:hover { opacity: 0.8; }
+.readback-toggle.on {
+  opacity: 1;
+  filter: none;
+  color: var(--accent-fg);
+  background: var(--accent-subtle);
+  border-color: var(--accent-muted);
+  font-weight: 600;
+}
 .login-expired-inline {
   font-size: var(--font-3xs);
   font-weight: 600;
@@ -994,6 +1099,30 @@ onMounted(() => {
 .login-expired-inline:hover {
   border-color: var(--attention-fg);
 }
+/* A non-zero exit of the agent CLI: informational, so not clickable. */
+.exit-fault-inline {
+  font-size: var(--font-3xs);
+  font-weight: 600;
+  color: var(--danger-fg);
+  background: var(--danger-subtle);
+  border: 1px solid var(--danger-muted);
+  border-radius: var(--radius-xs);
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* A turn in flight with no sign of life: a reminder, so not clickable. */
+.stuck-inline {
+  font-size: var(--font-3xs);
+  font-weight: 600;
+  color: var(--attention-fg);
+  background: var(--attention-subtle);
+  border: 1px solid var(--attention-muted);
+  border-radius: var(--radius-xs);
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 /* Quota exhausted. Deliberately louder than the login badge. Clicking it
    (after a confirm) dismisses the flag, e.g. when it is stale or moot. */
 .usage-limit-inline {
@@ -1005,6 +1134,28 @@ onMounted(() => {
   border-radius: var(--radius-xs);
   padding: 1px 6px;
   letter-spacing: 0.2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+/* Beside the account badge when the pane is fixed to its account's own
+   config dir; following (the default) shows nothing. The toggle is in the
+   badge's popover. */
+.account-pin-indicator {
+  flex-shrink: 0;
+  font-size: var(--font-3xs);
+  line-height: 1;
+  cursor: default;
+}
+/* Beside the quota badge, with the follow-switch flag on: reopen the pane
+   on another account. Quieter than the badge it sits next to. */
+.usage-limit-switch {
+  font-size: var(--font-3xs);
+  font-weight: 600;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-fg);
+  border-radius: var(--radius-xs);
+  padding: 1px 6px;
   white-space: nowrap;
   flex-shrink: 0;
   cursor: pointer;

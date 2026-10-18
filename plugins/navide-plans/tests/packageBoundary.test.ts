@@ -137,7 +137,12 @@ describe('navide.plans production package boundary', () => {
     expect(backend).not.toContain('"shell"')
     expect(backend).not.toContain('"network"')
     expect(backend).not.toContain('agentMethods')
-    expect(backend).not.toContain('agent_team_backend')
+    // The core modules it may bundle are the standard-library-only path guard
+    // and write path.
+    expect(backend.match(/^.*agent_team_backend.*$/gm)).toEqual([
+      'from agent_team_backend.fs_write import (',
+      'from agent_team_backend.path_guard import FsError, _resolve_safe',
+    ])
   })
 
   it.each(supportedLocales)('%s owns Plans messages while preserving the legacy recovery shadow', (locale) => {

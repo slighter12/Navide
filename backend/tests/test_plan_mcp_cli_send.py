@@ -52,7 +52,7 @@ def _ctx(pane_id: str | None = "pa", token: str | None = None) -> Any:
     """A Context whose HTTP request carries the pane-identifying query string."""
     if pane_id is None:
         return SimpleNamespace(request_context=SimpleNamespace(request=None))
-    params = {"pane": pane_id, "t": plan_mcp_wiring.caller_token() if token is None else token}
+    params = {"pane": pane_id, "t": plan_mcp_wiring.caller_token(pane_id) if token is None else token}
     return SimpleNamespace(
         request_context=SimpleNamespace(request=SimpleNamespace(query_params=params))
     )
@@ -399,6 +399,22 @@ async def test_check_message_decodes_the_windows_structured_failure_reason(
 
     assert result["status"] == "failed"
     assert result["reason"] == "rate-limit"
+
+
+@pytest.mark.asyncio
+async def test_check_message_keeps_the_note_on_a_message_delivered_into_a_busy_cli(
+    captured: list[dict[str, Any]],
+) -> None:
+    """A panel that waited out its quiet cap still pastes the message; the
+    sender should see it went in while the CLI was busy, still as delivered."""
+    _seed()
+    sent = await plan_mcp.cli_send("beta/reviewer", "hi", _ctx())
+    plan_mcp.record_delivery_result(sent["msg_key"], True, '{"key":"delivered-while-busy"}')
+
+    result = await plan_mcp.cli_check_message(sent["msg_key"], _ctx())
+
+    assert result["status"] == "delivered"
+    assert result["reason"] == "delivered-while-busy"
 
 
 @pytest.mark.asyncio
@@ -836,6 +852,9 @@ async def test_open_agent_from_an_external_caller_sends_target_workspace_with_no
 ) -> None:
     async def answer() -> None:
         for _ in range(200):
+            # The window holding /ws/ext answers the readiness probe first.
+            for probe in list(plan_mcp._ui_invoke_pending.pending):
+                plan_mcp.resolve_ui_invoke(probe, {"ok": True, "result": [], "error": None})
             keys = list(plan_mcp._pending_spawns)
             if keys:
                 agent_messaging.register("new-pane", "worker", "/ws/ext")
@@ -857,7 +876,7 @@ async def test_open_agent_from_an_external_caller_sends_target_workspace_with_no
         "pane_id": "new-pane",
         "kickoff": "sent",
     }
-    payload = captured[0]["payload"]
+    payload = next(e for e in captured if e["type"] == "agent_spawn.request")["payload"]
     assert payload["requester_pane_id"] == ""
     assert payload["target_workspace"] == "/ws/ext"
 

@@ -22,6 +22,8 @@ import type {
 } from '@navide/terminal'
 import type { Issue, IssueDetail, IssueProviderInfo } from '../../src/composables/useIssues'
 import type { GitTransportStatusSource } from '../../../shared/gitCompatibility'
+import { pinFreshSessionAtLaunch } from '../../src/lib/sessionHeal'
+import { dockRestoreFromResponse } from '../../src/lib/dockWindow'
 
 export interface PluginCapabilitySdk {
   readonly status: GitTransportStatusSource
@@ -210,6 +212,7 @@ export function createPluginTerminalDockPort(sdk: PluginCapabilitySdk): Terminal
       output_log_file: requestBody.outputLogFile,
       login_profile_id: requestBody.loginProfileId,
       is_login: requestBody.isLogin,
+      ...(requestBody.accountDirLogin ? { account_dir_login: true } : {}),
       replaces_terminal_id: requestBody.replacesTerminalId,
       ...(requestBody.quotaTransactionId ? { quota_transaction_id: requestBody.quotaTransactionId } : {}),
       ...(requestBody.quotaOriginalPaneId ? { quota_original_pane_id: requestBody.quotaOriginalPaneId } : {}),
@@ -229,7 +232,11 @@ export function createPluginTerminalDockPort(sdk: PluginCapabilitySdk): Terminal
       rows,
     }),
     interrupt: (sessionId) => request('terminal.interrupt', { terminal_session_id: sessionId }),
-    kill: (sessionId, force) => request('terminal.kill', { terminal_session_id: sessionId, force }),
+    kill: (sessionId, force, options) => request('terminal.kill', {
+      terminal_session_id: sessionId,
+      force,
+      ...(options?.retireRestore ? { retire_restore: true } : {}),
+    }),
     redraw: (sessionId, cols, rows) => request('terminal.redraw', {
       terminal_session_id: sessionId,
       cols,
@@ -245,6 +252,18 @@ export function createPluginTerminalDockPort(sdk: PluginCapabilitySdk): Terminal
       max_results: maxResults,
     }),
     listAgentPanes: () => request('agent_msg.list', {}),
+    registerAgentPane: (pane) => request('agent_msg.register_dock', { ...pane }),
+    unregisterAgentPane: (paneId) => request('agent_msg.unregister_dock', { pane_id: paneId }),
+    // No onAgentMessage / reportAgentDelivery: the broker does not forward
+    // agent_msg.* events, so this panel registers as not deliverable.
+    pinFreshSessionAtLaunch,
+    // The panel's restore record, so it resumes after an app quit as the host
+    // windows' panels do (read-only; panel records only — see capabilityMap).
+    async readDockRestore(workspacePath, paneId) {
+      return dockRestoreFromResponse(await request<{ record?: { agent?: string; session_id?: string } | null }>(
+        'terminal.dock_record', { workspace_path: workspacePath, pane_id: paneId },
+      ))
+    },
     statPath: (path, timeoutMs) => request('fs.stat_path', { path }, timeoutMs),
     openFile: async ({ workspacePath, filepath, line }) => {
       await requireOk(sdk.request('ui.open_in_editor', {

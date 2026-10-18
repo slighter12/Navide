@@ -66,6 +66,7 @@ Workspace。沒有 Pane 也意味著沒有分頁群組：host 與外部呼叫端
 | `plan_update_stage` | `workspace_path`、`rel_path`、`stage` | 設定 stage：`draft`、`in-review`、`approved`、`in-progress`、`done`、`abandoned` |
 | `plan_update_todo` | `workspace_path`、`rel_path`、`todo_id`、`status` | 設定單一 todo 的狀態：`pending`、`in-progress`、`done`、`skipped` |
 | `plan_add_note` | `workspace_path`、`rel_path`、`text`、`author?`（`ai`\|`user`，預設 `ai`） | 附加一則 Review Note |
+| `plan_add_todo` | `workspace_path`、`rel_path`、`content`、`id?`、`owner?`（`agent`\|`user`）、`status?`（預設 `pending`）、`after?` | 在既有 Plan 新增一個 todo（加在最後，或加在 `after` 指定的 todo 之後） |
 
 這裡必須給 `workspace_path`，因為外部 Client 不是 Pane；Pane 呼叫端省略它時，
 這些 Tool 會使用該 Pane 自己的 Workspace，而那正是 Plan 視窗用來解析 Plan 的
@@ -88,7 +89,7 @@ Tool 都回傳單一物件，因此這個問題只會在 `plan_list` 上出現�
 | Tool | 參數 | 功能 |
 |---|---|---|
 | `cli_list_targets` | — | 列出可定址的 CLI Pane：`name`、`address`、`pane_id`（每個 `ui.pane.*` action 都吃這個鍵，也可以在下面那幾個 Pane Tool 上取代 `address`）、`workspace_path`、`same_workspace`、`busy`、`realized`（還原用 placeholder 為 false：背後沒有 CLI 在跑，所以永遠 busy，訊息會停到有人打開它——`ui.pane.open`，或 `cli_send(open_target=true)`）、`hold_reason?` |
-| `cli_whoami` | — | **僅限 CLI Pane。** 自己的身分，形狀與名冊描述別人時完全相同：`{ok, caller, name, address, pane_id, workspace_path, agent_key, busy, offline, realized, delegation_hint, hold_reason?, spawned_by?, waiting_on_me?}`。`delegation_hint` 重述派工原則（見下方 `cli_open_agent`），給沒讀過 server instructions 的 Pane 看。`pane_id` 是所有 `ui.pane.*` 動作唯一接受的鍵，所以這是 pane 能對自己動作的前提；`spawned_by` 是開出你的那個 pane（它關掉後回 `{pane_id, gone: true}`）|
+| `cli_whoami` | — | **僅限 CLI Pane。** 自己的身分，形狀與名冊描述別人時完全相同：`{ok, caller, name, address, pane_id, workspace_path, agent_key, busy, offline, realized, delegation_hint, hold_reason?, surface?, window_kind?, spawned_by?, waiting_on_me?}`。`delegation_hint` 重述派工原則（見下方 `cli_open_agent`），給沒讀過 server instructions 的 Pane 看。`pane_id` 是所有 `ui.pane.*` 動作唯一接受的鍵，所以這是 pane 能對自己動作的前提；`spawned_by` 是開出你的那個 pane（它關掉後回 `{pane_id, gone: true}`）|
 | `cli_send` | `to`（Pane 位址，或 `"group"` 表示廣播）、`text`、`wait_for_delivery_s=0`（上限 120）、`pane_id?`、`reply_to?` | 在另一個 Pane 進入 Idle 後遞送一則指令（忙碌則排入佇列）；回傳 `msg_key`，若有等待則一併回傳它的結果。寄給一般 Terminal Pane（`agent_key: "terminal"`）時文字會裸打進去，**以使用者的權限當成 shell 指令執行**；`"group"` 會略過 Terminal，且 Terminal 會拒絕聊天管道來的內容 —— 見[一般 Terminal Pane](inter-cli-messaging.md#一般-terminal-pane) |
 | `cli_check_message` | `msg_key` | 某次 `cli_send` 的結果：`{status, target, age_seconds, reason?, settled_after_s?, hold?, held_for_s?, stale?}` |
 | `cli_cancel_message` | `msg_key` | 收回一則你送出、但還沒送進去的訊息。由擁有收件佇列的視窗裁決：還在排隊就丟棄、狀態轉為 `cancelled`；已經開始投遞則忽略撤回並回報它最終的狀態。撤回不是失敗，也不會寫任何通知回給你。回傳 `{ok, msg_key, status, reason?}` |
@@ -98,6 +99,7 @@ Tool 都回傳單一物件，因此這個問題只會在 `plan_list` 上出現�
 | `cli_send_and_wait` | `to`、`text`、`timeout_s=60`（上限 120）、`pane_id?` | `cli_send` 再加上等待該回合結束；回傳 `cli_wait_idle` 的結果，外加 `{ok, target, msg_key}`  **遠端 Pane**：送出與送達閘門與本機相同（`rejected` 仍與 `failed` 分開）；等待那半用名冊狀態字，弱點與 `cli_wait_idle` 相同。 |
 | `cli_open_agent` | `agent`、`name`、`task`、`workspace_path`（非 Pane 呼叫端必填）、`model`、`effort`、`pane_id?`、`session_id?`、`run_group_id?` | 帶著一項任務 Spawn 新的 CLI Pane；回傳 `{ok, name, address, pane_id}`，若該次 Spawn 跨過 Advisory 門檻則另附 `advisories`。**派工原則**（server instructions 也有同一句）：會改檔案、跑超過幾分鐘、或使用者可能想看、中斷或接手的工作，要派給這裡開出的 Pane —— 不是 Agent 自己的 subagent 機制（Claude Code 的 `Agent`／`Task` 工具）。Pane 在 Navide 裡看得到、跑到一半可以打開、比呼叫端的 Session 活得久；subagent 是只交回一段摘要的黑盒。純唯讀、整個結果只有一段話的短查詢仍適合用 subagent。`model` 與 `effort` 為選填，該 CLI 不支援時會「拒絕」而非忽略，Pane 不會悄悄用別的模型啟動。多數 CLI 接受 model；接受獨立 effort 的較少，其餘把 effort 編在 model id 裡（`gpt-5.3-codex-high`）。model id 不做驗證（每次改版都會變），effort 則會對照該 CLI 的合法值檢查。**`agent: "terminal"`** 會開一個一般登入 shell Pane：`task` 可省略 —— 是提示字元出現後打進去一次的指令列，後面不附加任何東西（沒有回報說明；shell 無法回報）—— 而 `model`、`effort`、`session_id` 會被拒絕。指令絕不重打，所以無法確認的 kickoff 會回 `unverified`；重送前先讀 `cli_read_log`，因為重送會讓指令再跑一次 |
 | `cli_close_agent` | `target`、`pane_id?` | 關掉一個 Pane —— `cli_open_agent` 的另一半。**這會直接終結對方的工作**：Pane 與它的 PTY 一併消失，正在跑的回合跟著死掉，排給它的訊息永遠不會送達，而且無法復原 —— 關掉的 Pane 是 Session 沒了，不是暫存起來。動手前先用 `cli_get_status` 看它是不是正在做事；`cli_interrupt` 是比較軟的一階，`cli_send` 更軟（它會等回合做完）。回傳 `{ok, target, name, closed, advisories?}`，`advisories` 說明這次關閉的代價，而且是別人不會回報的那些：Pane 正在回合中、有訊息排在它的佇列裡、它底下有子 Pane 現在變成孤兒。這些都在 Kill 之前先蒐集，因為事後就再也問不到了。僅限本機 Pane：`<device>/<workspace>/<pane>` 這種位址會以 `close-local-only` 失敗，那是這個 Tool 的限制，不是位址寫錯 |
+| `cli_reclaim_agent` | `target`、`pane_id?` | 回收一個做完的 Pane —— `cli_close_agent` 可復原的那一版。CLI 行程結束，Pane 留成可點擊接續的卡片、對話完整保留；等同狀態列的「立即回收」（`ui.pane.reclaim`），但用 `cli_send` 的位址指定單一 Pane，送到持有它的那個視窗。狀態列的守衛照樣適用：忙碌、被聚焦、無法接續，或有未送出輸入、排隊訊息的 Pane 會被拒絕。回傳 `{ok, target, name, reclaimed}`；被拒時是 `ok: false`、`reclaimed: false`、守衛的 `reason`，`error_code` 為 `reclaim-refused`。僅限本機 Pane（`reclaim-local-only`），不能回收自己（`self-reclaim`）；早於 v0.2.16 的視窗回 `reclaim-unsupported` —— 請更新 App，不要改用 `cli_close_agent` 代替 |
 
 **Choosing a tab group when opening a pane.** `cli_open_agent` accepts optional
 `run_group_id` for a fresh pane or a new pane opened with `session_id`:
@@ -139,6 +141,11 @@ group ID below with values returned for the target workspace:
 佇列已滿）、`inject-failed`（輸入到該 Pane 沒有生效）、`pane-closed`（目標在
 遞送前就消失了），或 `no-report`（該次嘗試從未回報結果）。
 
+`unconfirmed`（reason 為 `delivery-unconfirmed`）兩者都不是：文字和 Enter 已送進
+一個剛 resume 的 CLI，但該 CLI 還沒顯示收到。訊息已送出，可能正在執行，所以不要
+只憑這個狀態就重送 —— 先用 `cli_get_status` 或 `cli_read_log` 看一下該 Pane。
+若之後 CLI 的 transcript 出現這則訊息，狀態會改成 `delivered`。
+
 失敗也會在未被主動查詢的情況下推送到寄件 Pane：Navide 會在該 Pane 進入 Idle 後，
 透過與一般訊息相同的佇列與注入路徑，寫入一則 `[Navide MSG] delivery failed`
 通知，指出目標與原因。這是給從不輪詢的 Agent 的提醒 —— `cli_check_message`
@@ -163,7 +170,9 @@ group ID below with values returned for the target workspace:
 **訊息為何仍在佇列中。** `hold` 就是 Messages 面板顯示的同一個原因 —— `{key, n?}`，
 其中 `key` 可能是 `typing`、`mid-turn`、`behind`、`starting`、`settling`、
 `not-ready`、`gone`、`paused` 或 `remote-ack` —— 而 `held_for_s` 是它維持這個狀態
-多久了。它會出現在 `cli_check_message`，以及逾時的 `cli_send` 等待上；一旦訊息塵埃
+多久了。送往另一台裝置、超過一分鐘沒有回應的訊息，會透過 Server 查詢，之後顯示為
+`remote-busy`（目標 Pane 正在執行中）或 `remote-unreported`（沒有在執行，對方也仍然
+沒有任何回應）。它會出現在 `cli_check_message`，以及逾時的 `cli_send` 等待上；一旦訊息塵埃
 落定，或在還沒有任何視窗回報過原因時，它就不存在。`cli_list_targets` 以
 `hold_reason` 逐 Pane 呈現同一件事，那正是讓 `busy` 變得可以解釋的東西 —— 但只在
 從這裡送出的某則訊息正為那個 Pane 排隊時才有，所以它不存在並不說明任何事。
@@ -338,6 +347,7 @@ Action —— `ui.pane.create`、`ui.preview.show`、`ui.window.openGit` —— 
 | `ui.pane.open` | `{paneId}` | 打開一個還原用的 placeholder（`cli_list_targets` 列出 `realized: false` 的 Pane）並等它開完。回傳 `{realized, reason, paneId}`——`paneId` 是開完後這個 Pane 的 id，`reason` 是 `opened`、`fresh`（全新 session，不記得先前對話）、`already-open`，或它沒開起來的原因。Resume 行為設為 `ask` 時不會彈出 modal |
 | `ui.pane.getStatus` | `{paneId}` | 回傳該 Pane 的 `{status, buffer, logPath?, awaitingKind?, kickoff?, agentLabel?, model?, effort?, profileId?, loginExpired?, usageLimitUntil?}`——身分類欄位只在該 Pane 有值時出現 |
 | `ui.pane.interrupt` | `{paneId}` | 對該 Pane 按下它的中斷鍵。回傳 `{sent, status, advisories?}` —— `status` 是在按下**之前**讀的，因為這一按會改變它自己要回報的那個狀態 |
+| `ui.pane.reclaim` | `{paneId}`（單一 id 或陣列） | 回收做完的 Pane 的資源：CLI 行程結束、Pane 留成可點擊接續的卡片，等同狀態列的「立即回收」。忙碌或等待回答、被聚焦、有未送出輸入、有排隊訊息、無法接續的 Pane 會被拒絕。回傳 `{reclaimed, refused: [{paneId, reason, detail}]}` |
 | `ui.tab.switch` | `{tabId}` | 切換作用中的 Stage／Run-group 分頁 |
 | `ui.preview.show` | `{kind, …}` | 在右側 rail 的預覽面板顯示檔案、diff 或內嵌片段 |
 | `ui.window.openPlans` | `{rel_path?}` | 開啟 Plan 視窗；帶 `rel_path`（`.agent-team/plans/<name>.html`，相對路徑、不含 `..`）則聚焦開啟該份 plan |
@@ -452,6 +462,40 @@ Skills 工作流另提供經使用者授權的安裝與投遞變更；mutation a
 | `workspace_switch` | `path` | 把承載呼叫 Pane 的那個視窗切換到它已持有的另一個 Workspace（一視窗多專案）；Pane 不受影響。視窗未持有 `path` 時回錯誤並指向 `workspace_open`；該視窗有 Pipeline 在跑時也會拒絕（先 `pipeline_abort`，或從側欄切換）。只限 Pane 呼叫 —— host 或外部呼叫者沒有自己的視窗，會得到 `ok: false`（改用 `ui_invoke` 帶 `workspace_path` 與 action `ui.workspace.switch`）。回傳 `{ok, path}`，`path` 是現在畫面上的 Workspace |
 | `mcp_list` | — | 這裡設定的 MCP Server —— Navide 自己以 Client 身分連接的那些（附即時狀態），以及各家 CLI 自己設定檔裡（`~/.claude.json`、`~/.codex/config.toml` 等）反射出來的那些，照檔案寫的呈現。回傳 `{servers, native, agents}`。每個 Navide 管理的 Server 是 `{name, enabled, transport, command, args, env}` 或 `{name, enabled, transport, url, headers}`，外加 `status`（`disabled`／`connected`／`error`／`unknown`）與 `tool_count`；工具清單本身不帶。每個 native 條目是 `{name, agent, transport, path, command, args, url, env, headers, enabled, valid, error}`。`agents` 是每家廠商與 Navide 對它 MCP 能做的事（`wired`／`planned`／`unsupported`），以及它自己的設定有沒有被反射。所有長得像憑證的值 —— env 與 header 的值、`--api-key=` 這類引數、URL 裡的 userinfo 與機密查詢參數 —— 都已經遮成 `***`；名稱與主機保留，條目才認得出來。全域清單，不分 Workspace。唯讀 —— 新增、啟用或編輯 Server 是使用者在 Settings 裡的決定 |
 | `prompt_list` | `id=""` | 使用者放在 Settings → Prompts 的 Prompt 技能 —— 從 App 對 CLI Pane 發射的已存指示。不帶 `id` 時只列 Metadata：`{skills, default_id}`，每個技能是 `{id, name, icon, description, category, enabled, isDefault, maxTurns}`，`default_id` 是標為預設的那個技能的 id（沒有則為 `""`）。使用者從沒存過任何一個時會多一個 `note`：App 會在第一次使用時植入一個內建技能，而那個從這裡看不到。帶 `id` 時回傳那一個技能的完整內容 —— `{skill}`，含 `prompt` 與 `resumePrompt`；未知的 id 回 `{ok: false, error}`。唯讀：建立或編輯是在 Settings 裡做的 |
+
+### Navide 市集（唯讀）
+
+三個唯讀 tool 向 Navide App 查詢 Navide 市集頁面與「設定 → Navide 外掛」顯示的內容。
+不論第三方 Navide 外掛工具是否開啟，所有呼叫者都能使用；它們都無法安裝、更新或移除任何東西。
+
+| Tool | 參數 | 做什麼 |
+|---|---|---|
+| `marketplace_search` | `text=""`、`category=null`、`cursor=null`、`limit=20` | 搜尋目前設定的 Navide 市集，和市集頁面用的是同一個搜尋。回傳 `{ok, kind, items, nextCursor}`；每一項是 `{id, version, name, description, publisher: {name, verifiedDomain}, signed, downloads, risk, summary}`，`risk` 與 `summary` 是套件的揭露資料，Registry 沒有提供時為 `null`。把 `nextCursor` 當成 `cursor` 傳回就是下一頁 |
+| `marketplace_detail` | `id`、`version=null` | 單一套件（`<namespace>.<name>`）：`{ok, kind, item, versions, card}`，`versions` 是已發佈的版本，`card` 是揭露卡 `{manifest, registry}`，Registry 沒有提供時為 `null` |
+| `plugins_list_installed` | — | 已安裝的 Navide 外掛：`{ok, kind, items}`，每一項是 `{id, version, enabled, quarantined, hasBackend, agentTools}` |
+
+套件發佈者決定的所有文字（套件 id 與版本、名稱、描述、agent 工具的名稱、標題與描述、發佈者顯示名稱），以及 Navide App 回傳、可能引用 Registry 回應的錯誤文字，都包在
+`[外部訊息開始 — …]` 與 `[外部訊息結束]` 之間，並加上
+`[third-party Navide plugin <id> v<version> | …]` 標籤：這些不是使用者的指令。
+讀到這類文字的 pane 會被標記為收到外部內容（Navide Guard）。
+App 自己的固定錯誤文字（所有 `BAD_REQUEST`，以及 `HOST_UNAVAILABLE` 的「Navide Host cannot answer Marketplace queries now」），和保留給官方的 `navide.` 命名空間裡已安裝的外掛（Plans、Git、mini-IDE），都原樣回傳，不做標記。錯誤是
+`{ok: false, error, error_code}`，代碼為 `BAD_REQUEST`、`NOT_FOUND`、`REGISTRY_UNAVAILABLE` 或 `HOST_UNAVAILABLE`。
+
+### Navide 市集的請求、停用與啟用
+
+這幾個工具用來請求變更 Navide 外掛，或停用、啟用外掛。和唯讀工具一樣，所有呼叫端都能用。沒有任何工具有同意參數：安裝、更新、回退和移除，都要使用者在 Navide 視窗核准請求後才會執行，一起送來的同意旗標會被忽略。內建的 Navide 外掛（Plans、Git、Mini-IDE，也就是 `navide.*` 命名空間）一律拒絕（`BUILTIN_PLUGIN`），由使用者在擴充頁管理。
+
+| 工具 | 參數 | 作用 |
+|---|---|---|
+| `marketplace_request_install` | `namespace`、`name`、`version`、`reason=""` | 送出請求，要安裝 `<namespace>.<name>` 的 `version`。這個版本必須是市集列出的（否則回 `NOT_FOUND`），而且還沒安裝。使用者會看到誰提出、`reason`（標明是 agent 寫的）和揭露卡，再自己決定。回傳 `{ok, approval_id, status: "pending", expires_at, note}`；請求 15 分鐘後過期，同一個套件和版本再請求一次會拿到原本那筆等待中的請求 |
+| `marketplace_request_update` | `namespace`、`name`、`version`、`reason=""` | 同上，請求把已安裝的套件更新到較新的版本（沒安裝時回 `NOT_INSTALLED`） |
+| `marketplace_request_rollback` | `namespace`、`name`、`version`、`reason=""` | 同上，請求把已安裝的套件回退到較舊的版本 |
+| `plugins_request_remove` | `namespace`、`name`、`reason=""` | 請求移除已安裝的套件 |
+| `marketplace_request_status` | `approval_id`、`wait_s=0` | `{ok, approval_id, kind, target: {id, version}, status, error, expires_at}`；`status` 是 `pending`、`applying`（已核准，正在執行）、`completed`、`failed`、`rejected` 或 `expired`。`wait_s`（0–60）會等這麼久，看狀態有沒有變化。若另一個 Navide 視窗先結算了這筆請求，而原本在執行的視窗之後才回報實際結果，回應會多帶 `finished_late: true` 和 `settled: {status, error}`（先前記錄的結果），此時 `status` 和 `error` 是實際結果 |
+| `plugins_disable` | `namespace`、`name` | 立刻停用一個從市集安裝的套件，效果和使用者在擴充頁按停用一樣：畫面、後端和 agent 工具停止，檔案、授權和資料保留。使用者會收到通知，寫明是哪個呼叫端做的，並附一鍵還原；這次變更也會記錄下來。回傳 `{ok, pluginId, pluginVersion, disabled: true, changed}`；原本就已停用時 `changed` 為 false，什麼都不做，也不通知 |
+| `plugins_enable` | `namespace`、`name` | agent 停用的套件會立刻重新啟用，沿用使用者先前給的同意，回傳 `{ok, pluginId, pluginVersion, disabled: false, changed}`。使用者停用的套件不會被啟用，而是送出請求讓使用者決定，回傳 `{ok: false, error_code: "APPROVAL_REQUIRED", error, approval_id, status: "pending", expires_at}` |
+
+錯誤是 `{ok: false, error, error_code}`，代碼為 `BAD_REQUEST`、`BUILTIN_PLUGIN`、`NOT_INSTALLED`、`NOT_FOUND`、`ACTION_FAILED`、`REGISTRY_UNAVAILABLE` 或 `HOST_UNAVAILABLE`。每一次請求、決定、結果、停用和啟用，都會連同呼叫端（pane 名稱、外部用戶端或 Navide Host）記在 navide.db 的 `plugin_agent_actions` 表。
 
 ### Pipeline
 

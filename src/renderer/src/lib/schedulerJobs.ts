@@ -12,11 +12,12 @@ export type JobSchedule =
   /** One run at `at_ms`; the backend disables the job after it. */
   | { kind: 'once'; at_ms: number }
 
-/** The only action: wake a CLI pane and send it `text`. At least one of
- *  pane_id / pane_name is present; with pane_id the backend delivers to that
- *  exact pane and never falls back to a same-named one. */
+/** Wake a CLI pane and send it `text`. At least one of pane_id / pane_name is
+ *  present; with pane_id the backend delivers to that exact pane and never
+ *  falls back to a same-named one. A system job of the workspace
+ *  self-evolution feature carries `kind: 'evolve'` and only `workspace`. */
 export interface JobAction {
-  kind: 'message'
+  kind: 'message' | 'evolve'
   workspace: string
   pane_id?: string
   pane_name?: string
@@ -49,13 +50,25 @@ export interface JobState {
   consecutive_errors?: number
   backoff_until?: number | null
   last_skip_reason?: SkipReason | string | null
+  /** target_gone runs in a row; the backend disables the job at 3. */
+  consecutive_target_gone?: number
+  /** Why the backend disabled the job itself ('target_gone'); cleared on re-enable. */
+  disabled_reason?: string | null
+  /** The pane id a rebuild moved this job off (session lineage). */
+  rebound_from?: string
+  /** Rebound while disabled; cleared once the job is switched back on. */
+  rebound_needs_enable?: boolean
 }
 
 /** Who created a job (`owner`) or last changed it (`updated_by`). A job saved
  *  before owners were recorded is the user's (`legacy`). On an agent's periodic
  *  job `expires_at` is when it disables itself; null means the user kept it. */
 export interface JobOwner {
-  kind: 'user' | 'pane' | 'external'
+  /** 'system' = owned by the app itself (workspace self-evolution): read-only
+   *  everywhere, managed from that workspace's evolve panel. */
+  kind: 'user' | 'pane' | 'external' | 'system'
+  /** System jobs: the feature that owns it ('evolve'). */
+  feature?: string
   pane_id?: string
   pane_name?: string
   workspace?: string

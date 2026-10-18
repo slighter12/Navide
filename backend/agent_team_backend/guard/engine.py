@@ -102,8 +102,20 @@ def evaluate(
         log.warning("guard: evaluate failed (%s): %s", source, err, exc_info=True)
         action = "deny" if source == "relay" else "allow"
         reason = f"Navide Guard error, {'denied' if action == 'deny' else 'allowed'}: {err}"
-        _emit_failure(pane_id, reason, action="deny" if action == "deny" else "error")
+        if source == "relay" or not switched_off():
+            _emit_failure(pane_id, reason, action="deny" if action == "deny" else "error")
         return Decision(action, "normal", ("guard-error",), reason, False)
+
+
+def switched_off() -> bool:
+    """Whether the user turned Guard off. A failure that let an action through
+    is then not announced: the switch is off, so the notice would read as Guard
+    still checking. A switch that cannot be read, or was never read, counts
+    as on: this runs on the event loop, so it reads only the in-memory value."""
+    try:
+        return runtime.enabled_cached() is False
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _emit_failure(pane_id: str, reason: str, *, action: str = "error") -> None:
@@ -123,12 +135,12 @@ def _evaluate(*, pane_id, vendor, tool, tool_input, cwd, workspace, source) -> D
     overrides, branches = store.grading()
     verdict = classify(tool, tool_input, cwd=cwd, workspace=workspace, protected_branches=branches)
     excerpt = excerpt_of(tool, tool_input)
-    level = policy.apply_overrides(verdict.level, verdict.rule_ids, overrides)
-    level, rule_ids = policy.apply_user_rules(
-        level, verdict.rule_ids, _subject(tool_input) or excerpt, store.rules_list()
-    )
+    graded = policy.apply_overrides(verdict.level, verdict.rule_ids, overrides)
+    subject, rules = _subject(tool_input) or excerpt, store.rules_list()
+    level, rule_ids = policy.apply_user_rules(graded, verdict.rule_ids, subject, rules)
     tainted = is_tainted(pane_id)
-    level = policy.effective_level(level, parseable=verdict.parseable, tainted=tainted)
+    raised = policy.effective_level(level, parseable=verdict.parseable, tainted=tainted)
+    level, rule_ids = policy.apply_taint_allow(graded, level, raised, rule_ids, subject, rules, source)
     enforced = policy.enforced(store.enabled(), source)
     action = policy.decide(level, source, tainted=tainted) if enforced else "allow"
     reason = _reason(action, level, verdict.reasons, source, tainted, verdict.parseable)
@@ -138,7 +150,8 @@ def _evaluate(*, pane_id, vendor, tool, tool_input, cwd, workspace, source) -> D
     # Bookkeeping must never overturn the decision: an audit write failing
     # (database is locked) used to raise into evaluate()'s fail-open branch
     # and turn this ask/deny into an allow.
-    if level != "normal" or action != "allow":
+    # A taint raise an allow glob released (level != raised) is audited too.
+    if level != "normal" or action != "allow" or level != raised:
         try:
             store.audit_add({
                 "ts": time.time(), "pane_id": pane_id or "", "vendor": vendor or "", "source": source,

@@ -153,6 +153,9 @@ class TerminalSession:
     sequence: int = 0
     closed: bool = False
     close_reason: str | None = None
+    # Set by a shutdown or kill before it signals the child: a child that exits
+    # on that signal reaches EOF first, and its close must still say why.
+    pending_close_reason: str | None = None
     exit_code: int | None = None
     uptime_ms: int | None = None
     exit_signal: str | None = None
@@ -434,6 +437,11 @@ _DESCENDANT_SNAPSHOT_FAST_S = 5.0
 # window, leaving nothing to kill.
 _EXIT_ORPHAN_GRACE_S = 1.0
 
+# On EOF, how long _close waits for a not-yet-reapable child so the exit
+# event carries its exit code (correctness, not a limit: a normal exit is
+# reaped within milliseconds and returns at once).
+_EXIT_CODE_REAP_WAIT_S = 1.0
+
 
 def _same_process(recorded: str, current: str) -> bool:
     """Whether two start-time identities name the same process. Empty on
@@ -566,6 +574,9 @@ class TerminalService:
         self._lifecycle_futures: set[asyncio.Future[Any]] = set()
         self._pending_reaps: dict[int, str] = {}
         self._reap_task: "asyncio.Task[None] | None" = None
+        # Sessions closed by EOF while their child was not yet reapable; each
+        # task waits (bounded) for the child to die before its cleanup.
+        self._exit_settles: set[asyncio.Task[None]] = set()
         self._last_persisted: dict[int, dict[int, str]] = {}
 
     def create(
@@ -604,6 +615,16 @@ class TerminalService:
             final_env.update(env)
         for key in env_remove or ():
             final_env.pop(key, None)
+        # Settings → Resource limits: a per-session marker a detached server
+        # inherits, so it can be listed after this pane is gone. Inert, and
+        # skipped entirely when the user turned tracking off.
+        from . import detached_servers, resource_limits
+
+        pane_mark = detached_servers.new_mark() if resource_limits.track_detached(resource_limits.current()) else ""
+        if pane_mark:
+            final_env[detached_servers.MARK_ENV] = pane_mark
+            metadata = metadata if metadata is not None else {}
+            metadata["pane_mark"] = pane_mark
 
         try:
             risk_context = risk_runtime_context(final_env, cwd)
@@ -747,8 +768,12 @@ class TerminalService:
 
     async def _drain_lifecycle(self) -> None:
         """Wait for registry work that could still touch the shared database."""
-        while self._lifecycle_futures:
-            await asyncio.gather(*tuple(self._lifecycle_futures), return_exceptions=True)
+        # Only the unfinished ones: a finished write stays in the set until its
+        # discard callback runs, and gather() over futures that are all done
+        # completes without yielding (Python 3.12), so re-gathering it would
+        # spin without ever letting that callback run.
+        while pending := [f for f in self._lifecycle_futures if not f.done()]:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     def get(self, session_id: str) -> TerminalSession | None:
         """The session for ``session_id``, or None when unknown."""
@@ -771,6 +796,14 @@ class TerminalService:
             return fg == osplat.process_tree.group_of(session.proc.pid)
         except (ProcessLookupError, PermissionError):
             return None
+
+    def live_pane_marks(self) -> set[str]:
+        """The detached-server markers of every live session."""
+        return {
+            str(s.metadata.get("pane_mark"))
+            for s in self._sessions.values()
+            if not s.closed and s.metadata.get("pane_mark")
+        }
 
     def list_session_ids(self) -> list[str]:
         """Ids of all live (not closed) sessions."""
@@ -808,6 +841,29 @@ class TerminalService:
             for session in self._sessions.values()
             if session.pane_id == pane_id and not session.closed
         ]
+
+    def live_ids_for_surface(self, surface: str, workspace_path: str = "") -> list[tuple[str, str, str]]:
+        """(session id, pane id, workspace) of every running embedded AI panel
+        (AiCliDock) that `surface` hosts — in `workspace_path`, or in any
+        workspace when it is empty — read from the terminal metadata the
+        panel's create carried. A window pane's create names no surface (or
+        "main"), so it can never match."""
+        if not surface or surface == "main":
+            return []
+
+        def norm(path: str) -> str:
+            return path.rstrip("/") or path
+
+        workspace = norm(workspace_path)
+        hits: list[tuple[str, str, str]] = []
+        for session in self._sessions.values():
+            if session.closed or str(session.metadata.get("surface") or "") != surface:
+                continue
+            session_workspace = str(session.metadata.get("workspace_path") or "")
+            if workspace and norm(session_workspace) != workspace:
+                continue
+            hits.append((session.id, session.pane_id, session_workspace))
+        return hits
 
     def find_live_by_resume_id(
         self,
@@ -1298,6 +1354,7 @@ class TerminalService:
                 # escalation below still run so the session is unregistered
                 # and its crash-recovery record dropped.
                 pgid = 0
+            session.pending_close_reason = "killed"
             # Job control puts the CLI in a group the login shell's pgid does
             # not cover. Same guard as the direct path.
             for target in (pgid, fg_pgid if fg_pgid != pgid else 0):
@@ -1563,6 +1620,7 @@ class TerminalService:
                 # and its registry entry is dropped.
                 self._close(session, reason="shutdown")
         for session, pgid in targets:
+            session.pending_close_reason = "shutdown"
             try:
                 osplat.process_tree.kill_group(pgid, force=False)
             except (ProcessLookupError, PermissionError):
@@ -1613,6 +1671,11 @@ class TerminalService:
                 except subprocess.TimeoutExpired:
                     pass
             self._close(session, reason="shutdown")
+        # An EOF close still waiting for its child may yet queue a sweep and a
+        # registry write; let it settle first. Unfinished tasks only (see
+        # _drain_lifecycle).
+        if settling := [t for t in self._exit_settles if not t.done()]:
+            await asyncio.gather(*settling, return_exceptions=True)
         # Let the in-flight exit-orphan sweep finish: a CLI that EOF'd moments
         # before shutdown would otherwise leak its orphans when the loop
         # closes mid-grace.
@@ -1672,6 +1735,9 @@ class TerminalService:
         if raw:
             self._absorb_output(session, b"".join(raw), nbytes)
         if close_reason is not None:
+            pending = getattr(session, "pending_close_reason", None)
+            if close_reason == "exit" and pending:
+                close_reason = pending
             self._close(session, reason=close_reason)
 
     def _absorb_output(
@@ -1959,8 +2025,47 @@ class TerminalService:
             session.proc.poll()
         except Exception:
             pass
-        exit_code = session.proc.returncode
         uptime_ms = max(0, round((time.monotonic() - session.started_monotonic) * 1000))
+        # EOF can arrive before the child is reapable (it closed its end of
+        # the PTY but has not finished exiting, seen under load); the exit
+        # event goes out once, so give the reap a moment off the loop or its
+        # exit code is lost. The session leaves the table now, as it would.
+        if reason == "exit" and session.proc.returncode is None:
+            self._sessions.pop(session.id, None)
+            task = self._loop.create_task(self._close_after_reap(session, uptime_ms))
+            self._exit_settles.add(task)
+            task.add_done_callback(self._exit_settles.discard)
+            return
+        if self._finish_close(session, reason=reason, uptime_ms=uptime_ms):
+            # EOF can arrive before the child is reapable: it has closed its
+            # end of the PTY but not finished exiting (seen under load). Both
+            # cleanups need it confirmed dead, so wait for that, bounded.
+            # kill_all's EOF arrives as "shutdown" (its pending close reason),
+            # and kill_all awaits these settles before it returns.
+            task = self._loop.create_task(self._settle_exit(session))
+            self._exit_settles.add(task)
+            task.add_done_callback(self._exit_settles.discard)
+
+    async def _close_after_reap(self, session: TerminalSession, uptime_ms: int) -> None:
+        """The rest of an EOF close whose child was not yet reapable: wait for
+        the reap, bounded by _EXIT_CODE_REAP_WAIT_S, without blocking the loop
+        every pane shares, then emit the exit event with whatever is known. A
+        child still alive then is settled inline, so kill_all's one snapshot
+        of _exit_settles still covers it."""
+        deadline = self._loop.time() + _EXIT_CODE_REAP_WAIT_S
+        # ASYNC110 suppressed: bounded poll with awaited sleeps, as in _settle_exit.
+        while (  # noqa: ASYNC110
+            session.proc.poll() is None and self._loop.time() < deadline
+        ):
+            await asyncio.sleep(0.01)
+        if self._finish_close(session, reason="exit", uptime_ms=uptime_ms):
+            await self._settle_exit(session)
+
+    def _finish_close(self, session: TerminalSession, *, reason: str, uptime_ms: int) -> bool:
+        """Read the exit code, emit terminal.exit and run the post-exit
+        cleanups. Returns True when the child is not yet confirmed dead on an
+        EOF / shutdown close, i.e. the caller must run _settle_exit."""
+        exit_code = session.proc.returncode
         exit_signal: str | None = None
         if exit_code is not None and exit_code < 0:
             try:
@@ -1993,20 +2098,13 @@ class TerminalService:
         )
         self._loop.create_task(self._emit(event))
         self._sessions.pop(session.id, None)
+        child_gone = session.proc.poll() is not None
         # Child died on its own (no kill() ran, so no on-demand descendant
         # sweep happened) — queue its snapshot for the batch sweeper. The poll
         # gate skips the error path's still-alive child: its descendants are
         # not orphans, and killing under a live CLI would be wrong.
-        if (
-            reason in ("exit", "error")
-            and session.descendants
-            and session.proc.poll() is not None
-        ):
-            self._pending_reaps.update(session.descendants)
-            if self._reap_task is None or self._reap_task.done():
-                self._reap_task = self._loop.create_task(
-                    self._reap_pending_orphans()
-                )
+        if reason in ("exit", "error") and session.descendants and child_gone:
+            self._queue_exit_reap(session.descendants)
         # A read error closed the PTY while the child is still alive: it is
         # now unreachable (tty gone, session popped) — put it down, or it
         # escapes both terminal.kill and the shutdown sweep until the next
@@ -2017,8 +2115,41 @@ class TerminalService:
         # Drop the crash-recovery record only once the child is confirmed
         # dead: a still-live child (e.g. a TERM-trapping CLI) must stay
         # visible to the next start's reap_stale. kill()'s escalation task
-        # and kill_all() unregister the survivors they put down.
-        if session.proc.poll() is not None:
+        # unregisters the survivors it puts down; kill_all() relies on the
+        # settle below for a child its close found not yet reapable.
+        if child_gone:
             self._submit_lifecycle(
                 in_data_dir(self._data_dir, pty_registry.unregister, session.proc.pid),
             )
+            return False
+        return reason in ("exit", "shutdown")
+
+    def _queue_exit_reap(self, descendants: dict[int, str]) -> None:
+        self._pending_reaps.update(descendants)
+        if self._reap_task is None or self._reap_task.done():
+            self._reap_task = self._loop.create_task(self._reap_pending_orphans())
+
+    async def _settle_exit(self, session: TerminalSession) -> None:
+        """Finish an EOF close whose child was not yet reapable: once it is
+        confirmed dead, queue its descendant sweep and drop its registry
+        record. A child still alive after _EXIT_ORPHAN_GRACE_S kept running
+        without its PTY; it is left alone (never sweep under a live CLI), and
+        its record stays for the next start's reap_stale."""
+        deadline = self._loop.time() + _EXIT_ORPHAN_GRACE_S
+        # ASYNC110 suppressed: bounded poll with awaited sleeps, as in kill_all.
+        while (  # noqa: ASYNC110
+            session.proc.poll() is None and self._loop.time() < deadline
+        ):
+            await asyncio.sleep(0.05)
+        if session.proc.poll() is None:
+            log.warning(
+                "terminal session %s: EOF but pid %s still alive after %.1fs — "
+                "orphan sweep and registry cleanup skipped",
+                session.id, session.proc.pid, _EXIT_ORPHAN_GRACE_S,
+            )
+            return
+        if session.descendants:
+            self._queue_exit_reap(session.descendants)
+        self._submit_lifecycle(
+            in_data_dir(self._data_dir, pty_registry.unregister, session.proc.pid),
+        )

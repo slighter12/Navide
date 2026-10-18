@@ -12,9 +12,6 @@ from __future__ import annotations
 import base64
 import logging
 import os
-import re
-import stat as stat_mod
-import time
 import tarfile
 import zipfile
 from pathlib import Path
@@ -30,17 +27,34 @@ try:
 except ImportError:
     _HAVE_CHARDET = False
 
-from .projects import PROJECT_DIR_NAME
-from .git_security import is_git_internal_path
+from .path_guard import (
+    PROJECT_DIR_NAME,
+    _ALLOWED_AGENT_TEAM_SUBDIRS,
+    _READABLE_AGENT_TEAM_SUBDIRS,
+    FsError,
+    _internal_dir_index,
+    _reject_protected_internal_dir,
+    _resolve_safe,
+    _same_path,
+)
+from .fs_write import (  # noqa: F401 - re-exported: fs_service is the write path's public home
+    _ENC_DISPLAY,
+    _ENC_FROM_LABEL,
+    _STAGING_MAX_AGE_S,
+    _STAGING_NAME_RE,
+    _UPLOAD_ID_RE,
+    _WRITE_PART_MAX_BYTES,
+    _WRITE_SIZE_LIMIT,
+    _resolve_mutation_safe,
+    _staging_path,
+    _sweep_stale_staging,
+    write_abort,
+    write_commit,
+    write_file,
+    write_part,
+)
 
 _log = logging.getLogger(__name__)
-
-# User-facing plan documents live under <workspace>/.agent-team/plans/ and reports
-# live under <workspace>/.agent-team/reports/ (see plan_provisioning).
-# These subtrees are exempt from the internal-dir protection.
-_ALLOWED_AGENT_TEAM_SUBDIRS = frozenset({"plans", "reports"})
-# Mockups may be inspected and previewed, but filesystem mutations stay blocked.
-_READABLE_AGENT_TEAM_SUBDIRS = _ALLOWED_AGENT_TEAM_SUBDIRS | {"mockups"}
 
 # High-noise dirs the UI should not auto-expand (performance, NOT gitignore).
 # Mirrors git_watcher._IGNORE_SEGMENTS, plus `.git`.
@@ -54,103 +68,6 @@ _MAX_DIR_ENTRIES = 2_000  # cap to avoid hanging on huge dirs (e.g. node_modules
 _MAX_DIRECTORY_ENTRIES = _MAX_DIR_ENTRIES
 
 
-class FsError(Exception):
-    """Raised on invalid or unsafe filesystem operations."""
-
-    def __init__(self, message: str, *, code: str | None = None) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-def _resolve_safe(
-    workspace_path: str, rel_path: str, *, allow_internal_root: bool = False,
-    allow_mockups: bool = False,
-) -> Path:
-    """Resolve ``rel_path`` under the workspace root, rejecting any escape.
-
-    Guards against ``..`` traversal, absolute-path escapes, symlink escapes
-    (via ``resolve()``), and operations touching the internal ``.agent-team``
-    directory — except its user-facing subtrees. ``mockups/`` is read-only.
-    Only read-only callers may opt in with ``allow_mockups``.
-    """
-    if not workspace_path:
-        raise FsError("no workspace selected")
-    root = Path(workspace_path).resolve()
-    if not root.is_dir():
-        raise FsError("workspace not found")
-
-    rel = (rel_path or "").strip().replace("\\", "/").lstrip("/")
-    target = (root / rel).resolve()
-
-    if target != root and root not in target.parents:
-        raise FsError("path escapes workspace")
-
-    # Listing the workspace's OWN internal dir is allowed so the file tree can
-    # show it. The exemption is keyed on the root, not on the directory name:
-    # a caller that names `<ws>/.agent-team` as its root does not match this
-    # (its `internal_root` would be one level deeper), so the guard below still
-    # rejects it — that route is how a caller could otherwise enumerate the
-    # internal state. Nothing under the dir opens up either; every child except
-    # the allowed subtrees fails the guard on its own path.
-    if allow_internal_root and _same_path(target, root / PROJECT_DIR_NAME):
-        return target
-    _reject_protected_internal_dir(target, allow_mockups=allow_mockups)
-    return target
-
-
-def _same_path(a: Path, b: Path) -> bool:
-    """Whether two paths name the same directory entry on disk.
-
-    ``==`` compares strings, and on a case-insensitive filesystem (APFS by
-    default) ``.Agent-Team`` and ``.agent-team`` are different strings for the
-    same directory — ``Path.resolve()`` does not fold case, so a string
-    comparison lets the internal-dir guard be walked around by capitalising
-    one letter. ``samefile`` asks the filesystem, which also covers a symlink
-    that points into the internal dir. Either path missing means "not the
-    same" — the caller still gets its 404 later, but never a false pass.
-    """
-    if a == b:
-        return True
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return False
-
-
-def _internal_dir_index(parts: tuple[str, ...]) -> int | None:
-    """Index of the ``.agent-team`` component in an absolute, resolved path.
-
-    Matched by identity on disk, not by name: for each prefix of the path,
-    ask whether it is the same entry as ``<parent>/.agent-team``. A name that
-    differs only in case, in Unicode normalisation, or by way of a symlink
-    still lands on the internal dir and is still caught.
-    """
-    for i, part in enumerate(parts):
-        if part == PROJECT_DIR_NAME:
-            return i
-        if i == 0:
-            continue
-        prefix = Path(*parts[: i + 1])
-        candidate = prefix.parent / PROJECT_DIR_NAME
-        if _same_path(prefix, candidate):
-            return i
-    return None
-
-
-def _resolve_mutation_safe(workspace_path: str, rel_path: str) -> Path:
-    """Resolve a path and reject writes to Git's internal directory.
-
-    Host Explorer is allowed to inspect ``.git``. The stronger Git-internal
-    guard belongs only on filesystem mutation paths, where changing Git's
-    metadata could alter the execution policy or repository state.
-    """
-    target = _resolve_safe(workspace_path, rel_path)
-    root = Path(workspace_path).resolve()
-    if is_git_internal_path(root, target):
-        raise FsError("the Git internal directory is protected")
-    return target
-
-
 def _reject_git_internal_tree(target: Path) -> None:
     """Reject moving/removing a directory that contains a nested Git dir."""
     if not target.is_dir():
@@ -160,29 +77,6 @@ def _reject_git_internal_tree(target: Path) -> None:
             raise FsError("the Git internal directory is protected")
     except OSError as exc:
         raise FsError("cannot verify Git internal directory protection") from exc
-
-
-def _reject_protected_internal_dir(target: Path, *, allow_mockups: bool = False) -> None:
-    """Reject paths inside an internal ``.agent-team`` dir, wherever it sits.
-
-    The check walks the whole absolute path rather than only the part below the
-    root: a caller may name any existing directory as its root (that is how
-    files outside a workspace are opened), and rooting at
-    ``<ws>/.agent-team`` would otherwise leave the guard looking at a filename
-    where it expects the internal dir. ``plans/`` and ``reports/`` support
-    reads and mutations; ``mockups/`` is allowed only for reads.
-    """
-    parts = target.parts
-    i = _internal_dir_index(parts)
-    if i is None:
-        return
-    # `target` is already resolve()d, so a traversal like
-    # `.agent-team/plans/../chat-threads.json` normalizes to a protected
-    # path before reaching this check.
-    nxt = parts[i + 1] if i + 1 < len(parts) else None
-    allowed = _READABLE_AGENT_TEAM_SUBDIRS if allow_mockups else _ALLOWED_AGENT_TEAM_SUBDIRS
-    if nxt not in allowed:
-        raise FsError("the internal directory is protected")
 
 
 def _entry(root: Path, parent: Path, name: str, is_dir: bool) -> dict[str, Any]:
@@ -439,18 +333,6 @@ _ENCODINGS_TO_TRY = [
     "utf-8",
     "latin-1",     # always succeeds — last resort for Western text
 ]
-
-# Normalise encoding name for display (match VS Code labels).
-_ENC_DISPLAY: dict[str, str] = {
-    "utf_8": "UTF-8", "utf_8_sig": "UTF-8 with BOM",
-    "utf_16": "UTF-16", "utf_16_le": "UTF-16 LE", "utf_16_be": "UTF-16 BE",
-    "latin_1": "Latin-1", "latin-1": "Latin-1",
-    "cp1252": "Windows 1252", "cp1251": "Windows 1251",
-    "gb2312": "GB2312", "gbk": "GBK", "big5": "Big5",
-    "shift_jis": "Shift JIS", "euc_jp": "EUC-JP", "euc_kr": "EUC-KR",
-}
-# Reverse map so write_file also accepts the display labels read_file returns.
-_ENC_FROM_LABEL: dict[str, str] = {v: k for k, v in _ENC_DISPLAY.items()}
 
 
 def _detect_encoding(raw: bytes) -> str:
@@ -848,229 +730,6 @@ def convert_office(workspace_path: str, rel_path: str) -> dict[str, Any]:
         return {"ok": True, "kind": "xlsx", "sheets": sheets}
 
     return {"ok": False, "error": "unsupported office file type (expected .docx or .xlsx)"}
-
-
-_WRITE_SIZE_LIMIT = 50 * 1024 * 1024  # 50 MB — prevent disk-fill via AI tool
-
-
-def write_file(
-    workspace_path: str,
-    rel_path: str,
-    content: str,
-    encoding: str = "utf-8",
-    expected_mtime: float | None = None,
-) -> dict[str, Any]:
-    """Overwrite (or create) a text file with `content`.
-
-    ``encoding`` is the codec used to encode ``content`` (read_file's display
-    labels, e.g. "UTF-8 with BOM", are accepted too). When ``expected_mtime``
-    is given and the file on disk has a different mtime, the write is refused
-    with ``conflict=True`` so the caller can surface a conflict dialog.
-    Success responses include the file's new ``mtime``.
-    """
-    try:
-        target = _resolve_mutation_safe(workspace_path, rel_path)
-        if target == Path(workspace_path).resolve():
-            raise FsError("invalid path")
-        if target.exists() and target.is_dir():
-            raise FsError("path is a directory")
-        codec = _ENC_FROM_LABEL.get(encoding, encoding)
-        try:
-            encoded = content.encode(codec)
-        except (LookupError, UnicodeEncodeError) as exc:
-            return {"ok": False, "error": f"cannot encode content as {encoding}: {exc}"}
-        if len(encoded) > _WRITE_SIZE_LIMIT:
-            raise FsError(f"content too large ({len(encoded) // 1024} KB; limit 50 MB)")
-        orig_mode: int | None = None
-        if target.exists():
-            st = target.stat()
-            orig_mode = st.st_mode
-            if expected_mtime is not None and abs(st.st_mtime - expected_mtime) > 1e-4:
-                return {
-                    "ok": False,
-                    "conflict": True,
-                    "mtime": st.st_mtime,
-                    "error": "file changed on disk",
-                }
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic write: write to a temp file then rename so a crash can't
-        # leave the target half-written/truncated.
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        try:
-            tmp.write_bytes(encoded)
-            if orig_mode is not None:
-                # os.replace swaps the inode; keep the original permission
-                # bits (e.g. a script's executable bit) on the replacement.
-                os.chmod(tmp, stat_mod.S_IMODE(orig_mode))
-            os.replace(tmp, target)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
-    except (FsError, OSError) as exc:
-        return {"ok": False, "error": str(exc)}
-    return {"ok": True, "mtime": target.stat().st_mtime}
-
-
-# ── chunked (multi-part) writes ─────────────────────────────────────────────
-#
-# write_file takes the whole content in one message, which cannot carry a
-# document past one WebSocket / Backend Wire frame. A chunked write stages the
-# bytes in a sibling file part by part, then swaps it in with the same atomic
-# rename and the same mtime conflict check write_file uses. Only the size of
-# one part is bounded; the document is not.
-
-_UPLOAD_ID_RE = re.compile(r"[0-9a-f]{32}")
-_WRITE_PART_MAX_BYTES = 1024 * 1024
-
-
-def _staging_path(workspace_path: str, rel_path: str, upload_id: str) -> tuple[Path, Path]:
-    if not isinstance(upload_id, str) or _UPLOAD_ID_RE.fullmatch(upload_id) is None:
-        raise FsError("invalid upload id")
-    target = _resolve_mutation_safe(workspace_path, rel_path)
-    if target == Path(workspace_path).resolve():
-        raise FsError("invalid path")
-    if target.exists() and target.is_dir():
-        raise FsError("path is a directory")
-    return target, target.parent / f".{target.name}.{upload_id}.upload"
-
-
-_STAGING_NAME_RE = re.compile(r"\..+\.[0-9a-f]{32}\.upload")
-_STAGING_MAX_AGE_S = 3600
-
-
-def _sweep_stale_staging(directory: Path) -> None:
-    """Remove abandoned chunked-write staging files (older than an hour).
-
-    Only names of the exact staging shape are touched, and never symlinks'
-    targets: an upload killed mid-way must not leave litter forever.
-    """
-    cutoff = time.time() - _STAGING_MAX_AGE_S
-    try:
-        for entry in directory.iterdir():
-            if _STAGING_NAME_RE.fullmatch(entry.name) is None:
-                continue
-            try:
-                if entry.lstat().st_mtime < cutoff:
-                    entry.unlink()
-            except OSError:
-                continue
-    except OSError:
-        return
-
-
-def write_part(
-    workspace_path: str, rel_path: str, upload_id: str, offset: int, data_base64: str
-) -> dict[str, Any]:
-    """Append one part to the staging file of a chunked write.
-
-    Parts must arrive in order: ``offset`` is the number of bytes already
-    staged (0 starts the upload). Returns the new staged size.
-    """
-    try:
-        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
-            raise FsError("invalid offset")
-        if not isinstance(data_base64, str):
-            raise FsError("invalid data")
-        try:
-            data = base64.b64decode(data_base64, validate=True)
-        except ValueError:
-            raise FsError("invalid data") from None
-        if len(data) > _WRITE_PART_MAX_BYTES:
-            raise FsError("part too large")
-        target, staging = _staging_path(workspace_path, rel_path, upload_id)
-        # O_NOFOLLOW does not exist on Windows: there a symlink staging file is
-        # refused by the explicit lstat check instead (also done on POSIX, so
-        # the refusal does not depend on the flag alone).
-        nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-        if staging.is_symlink():
-            raise FsError("cannot create upload file")
-        if offset == 0:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            _sweep_stale_staging(target.parent)
-            if not staging.is_symlink():
-                staging.unlink(missing_ok=True)
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow
-        else:
-            flags = os.O_WRONLY | os.O_APPEND | nofollow
-        try:
-            fd = os.open(staging, flags, 0o600)
-        except OSError as exc:
-            if offset != 0:
-                raise FsError("upload part out of order") from exc
-            raise FsError("cannot create upload file") from exc
-        out_of_order = False
-        try:
-            with os.fdopen(fd, "ab") as handle:
-                st = os.fstat(handle.fileno())
-                owned = not hasattr(os, "getuid") or st.st_uid == os.getuid()
-                # Without O_NOFOLLOW a link planted after the is_symlink check
-                # is followed by the open: the name must be the file we opened.
-                same = os.path.samestat(st, os.lstat(staging))
-                if not stat_mod.S_ISREG(st.st_mode) or not owned or not same:
-                    raise FsError("upload file is not a regular file")
-                if offset != 0 and st.st_size != offset:
-                    out_of_order = True
-                    raise FsError("upload part out of order")
-                handle.write(data)
-        except Exception:
-            if not out_of_order:
-                staging.unlink(missing_ok=True)
-            raise
-        return {"ok": True, "size": offset + len(data)}
-    except (FsError, OSError) as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-def write_commit(
-    workspace_path: str,
-    rel_path: str,
-    upload_id: str,
-    total_size: int,
-    expected_mtime: float | None = None,
-) -> dict[str, Any]:
-    """Swap a fully staged upload in as ``rel_path``.
-
-    Same contract as :func:`write_file`: when ``expected_mtime`` is given and
-    the file on disk has a different mtime the write is refused with
-    ``conflict=True`` (the staging file is discarded); success returns the new
-    ``mtime``. The replace is one atomic rename, so a reader never sees a
-    half-written document.
-    """
-    staging: Path | None = None
-    try:
-        if isinstance(total_size, bool) or not isinstance(total_size, int) or total_size < 0:
-            raise FsError("invalid size")
-        target, staging = _staging_path(workspace_path, rel_path, upload_id)
-        _sweep_stale_staging(target.parent)
-        if staging.is_symlink() or not staging.is_file():
-            raise FsError("no such upload")
-        if staging.stat().st_size != total_size:
-            raise FsError("upload incomplete")
-        orig_mode: int | None = None
-        if target.exists():
-            st = target.stat()
-            orig_mode = st.st_mode
-            if expected_mtime is not None and abs(st.st_mtime - expected_mtime) > 1e-4:
-                staging.unlink(missing_ok=True)
-                return {"ok": False, "conflict": True, "mtime": st.st_mtime, "error": "file changed on disk"}
-        if orig_mode is not None:
-            os.chmod(staging, stat_mod.S_IMODE(orig_mode))
-        os.replace(staging, target)
-        return {"ok": True, "mtime": target.stat().st_mtime}
-    except (FsError, OSError) as exc:
-        if staging is not None:
-            staging.unlink(missing_ok=True)
-        return {"ok": False, "error": str(exc)}
-
-
-def write_abort(workspace_path: str, rel_path: str, upload_id: str) -> dict[str, Any]:
-    """Discard the staging file of a chunked write (idempotent)."""
-    try:
-        _target, staging = _staging_path(workspace_path, rel_path, upload_id)
-        staging.unlink(missing_ok=True)
-        return {"ok": True}
-    except (FsError, OSError) as exc:
-        return {"ok": False, "error": str(exc)}
 
 
 def stat_path(abs_path: str) -> dict[str, Any]:

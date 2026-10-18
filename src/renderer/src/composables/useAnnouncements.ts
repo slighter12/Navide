@@ -4,6 +4,9 @@ import { settingsGet, settingsSet } from '@navide/plugin-ui/shared'
 import { WHATS_NEW, cmpSemver, pickText } from '../lib/whatsNew'
 import type { CandidateTier, ExclusionReason, FailureCause } from '../lib/quotaFailover'
 import type { UpdateState } from '../../../shared/updater'
+import type { EvolveRun } from './useEvolve'
+import type { ConvenienceSnapshot } from './useConvenience'
+import { convenienceText } from '../lib/convenienceText'
 
 /**
  * Announcements centre — the status-bar feed of version news.
@@ -21,7 +24,8 @@ import type { UpdateState } from '../../../shared/updater'
  * popover read the same feed without prop drilling.
  */
 
-export type AnnouncementKind = 'release' | 'update' | 'quota'
+export type AnnouncementKind =
+  | 'release' | 'update' | 'quota' | 'scheduler' | 'evolve' | 'share' | 'convenience' | 'plugin-agent'
 /** The button an update row offers, when its status affords one. */
 export type AnnouncementAction = 'download' | 'install'
 
@@ -40,7 +44,39 @@ export type QuotaAnnouncementAction =
 /** A release row's "Take the tour": that version's WhatsNewEntry.tour. */
 export type ReleaseTourAction = { kind: 'tour'; version: string }
 
-export type AnnouncementActionSpec = { kind: AnnouncementAction } | QuotaAnnouncementAction | ReleaseTourAction
+/** A workspace self-evolution row's button. Each names the workspace and,
+ *  for the pane buttons, the run's pane; App.vue maps them onto the existing
+ *  pane actions (focus / interrupt / reclaim) or opens the evolve panel. */
+export type EvolveAnnouncementAction = {
+  kind: 'evolve-open-pane' | 'evolve-resume-pane' | 'evolve-interrupt' | 'evolve-reclaim' | 'evolve-panel' | 'evolve-result'
+  workspace: string
+  paneId?: string
+}
+
+/** A convenience-feature row's button (docs/en-US/convenience-features.md).
+ *  App.vue maps them onto the overview, `convenience.*` RPCs and, for the
+ *  account prompt, the existing cli_profiles default-account switch. */
+export type ConvenienceAnnouncementAction =
+  | { kind: 'convenience-overview' }
+  | { kind: 'convenience-reallow'; featureId: string }
+  | { kind: 'convenience-keep-login'; rowId: string }
+  /** Acknowledges a notice that offers nothing else (an outside sign-out). */
+  | { kind: 'convenience-dismiss'; rowId: string }
+  /** Back to the account Navide would restore, named by the prompt's slotId. */
+  | { kind: 'convenience-switch-back'; rowId: string; agentKey: string; slotId: string; label: string; liveFingerprint: string }
+  | { kind: 'convenience-upgrade-ack' }
+
+/** The undo on a "an agent disabled / enabled a Navide plugin" row (B2-c):
+ *  the user's own Extensions switch, set back. */
+export type PluginAgentAnnouncementAction = { kind: 'plugin-agent-undo'; pluginId: string; disable: boolean }
+
+export type AnnouncementActionSpec =
+  | { kind: AnnouncementAction }
+  | QuotaAnnouncementAction
+  | ReleaseTourAction
+  | EvolveAnnouncementAction
+  | ConvenienceAnnouncementAction
+  | PluginAgentAnnouncementAction
 
 export interface Announcement {
   /** Stable across renders: `release:<version>`, `update:<version>`,
@@ -282,6 +318,424 @@ function backendItems(): Announcement[] {
       read: false,
     },
   ]
+}
+
+/** What the backend's `scheduler.job_disabled` event carries: a job it
+ *  disabled because its target pane stayed gone, whose owner pane could not be
+ *  told (the user owns it, or that pane is gone too). */
+export interface SchedulerDisabledNotice {
+  id: string
+  name: string
+  reason: string
+  pane_id?: string
+  count?: number
+}
+
+/** Disabled-job notices this window heard, newest first. Not persisted: the
+ *  job's own row in the Schedule panel keeps showing why it stopped. */
+const schedulerNotices = ref<{ notice: SchedulerDisabledNotice; at: number }[]>([])
+
+function schedulerAnnouncementId(jobId: string, at: number): string {
+  return `scheduler-disabled:${jobId}:${at}`
+}
+
+function schedulerItems(): Announcement[] {
+  const t = i18n.global.t
+  return schedulerNotices.value.map(({ notice, at }) => ({
+    id: schedulerAnnouncementId(notice.id, at),
+    kind: 'scheduler' as const,
+    title: t('announce.scheduler-disabled', { name: notice.name }),
+    highlights: [],
+    note: t('announce.scheduler-disabled-note', { n: notice.count ?? 0 }),
+    createdAt: at,
+    read: false,
+  }))
+}
+
+/** Record a job the backend disabled; the same notice twice is one row. */
+function noteSchedulerDisabled(notice: SchedulerDisabledNotice, at: number = Date.now()): void {
+  if (!notice?.id) return
+  const id = schedulerAnnouncementId(notice.id, at)
+  if (schedulerNotices.value.some((n) => schedulerAnnouncementId(n.notice.id, n.at) === id)) return
+  schedulerNotices.value = [{ notice, at }, ...schedulerNotices.value]
+}
+
+// ── Workspace self-evolution ────────────────────────────────────────────────
+
+export type EvolveNoticeKind =
+  | 'started'
+  | 'finished'
+  | 'timeout'
+  | 'failed'
+  | 'skipped'
+  | 'fallback_auto'
+  | 'not_git'
+  /** Passed 1.5× the token budget (cache reads left out); Navide interrupted and ended the run. */
+  | 'over_budget'
+
+/** What the backend's `evolve.notice` broadcast carries. */
+export interface EvolveNotice {
+  workspace: string
+  kind: EvolveNoticeKind
+  run: EvolveRun | null
+}
+
+/** Evolve notices this window heard, newest first. Not persisted: the
+ *  workspace's evolve panel keeps the run history. */
+const evolveNotices = ref<{ notice: EvolveNotice; at: number }[]>([])
+const MAX_EVOLVE_NOTICES = 50
+
+function evolveAnnouncementId(notice: EvolveNotice, at: number): string {
+  return `evolve:${notice.workspace}:${notice.run?.id ?? at}:${notice.kind}`
+}
+
+function workspaceName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+
+function evolveReason(reason: string | null | undefined): string {
+  if (!reason) return ''
+  const key = `evolve.reason.${reason}`
+  return i18n.global.te(key) ? i18n.global.t(key) : reason
+}
+
+function evolveActions(notice: EvolveNotice): EvolveAnnouncementAction[] {
+  const workspace = notice.workspace
+  const paneId = notice.run?.pane_id || undefined
+  const pane = (kind: EvolveAnnouncementAction['kind']): EvolveAnnouncementAction[] =>
+    paneId ? [{ kind, workspace, paneId }] : []
+  switch (notice.kind) {
+    case 'started':
+    case 'fallback_auto':
+    case 'over_budget':
+      return pane('evolve-open-pane')
+    case 'finished':
+      return [{ kind: 'evolve-result', workspace }, ...pane('evolve-resume-pane')]
+    case 'timeout':
+      return [...pane('evolve-open-pane'), ...pane('evolve-interrupt'), ...pane('evolve-reclaim')]
+    default:
+      return [{ kind: 'evolve-panel', workspace }]
+  }
+}
+
+function evolveHighlights(notice: EvolveNotice): string[] {
+  const t = i18n.global.t
+  const run = notice.run
+  const pane = run?.pane_name || run?.pane_id || ''
+  const agent = [run?.agent, run?.model].filter(Boolean).join(' · ')
+  switch (notice.kind) {
+    case 'started':
+      return [t('evolve.notice.started-body', { pane, agent })]
+    case 'finished': {
+      const lines: string[] = []
+      if (run?.summary) lines.push(run.summary)
+      lines.push(
+        t('evolve.notice.finished-body', {
+          fixes: run?.commits?.length ?? 0,
+          proposals: run?.proposals?.length ?? 0,
+          tokens: typeof run?.tokens === 'number' ? `${Math.round(run.tokens / 1000)}k` : '—',
+        })
+      )
+      if (run?.reclaimed) lines.push(t('evolve.notice.reclaimed'))
+      return lines
+    }
+    case 'timeout':
+      return [t('evolve.notice.timeout-body')]
+    case 'fallback_auto':
+      return [t('evolve.notice.fallback-body', { pane })]
+    case 'not_git':
+      return [t('evolve.notice.not-git-body')]
+    case 'over_budget':
+      return [t('evolve.notice.over-budget-body')]
+    default: {
+      const why = evolveReason(run?.reason) || run?.detail || ''
+      return why ? [why] : []
+    }
+  }
+}
+
+function evolveItems(): Announcement[] {
+  const t = i18n.global.t
+  return evolveNotices.value.map(({ notice, at }) => ({
+    id: evolveAnnouncementId(notice, at),
+    kind: 'evolve' as const,
+    title: t(`evolve.notice.${notice.kind}`, { workspace: workspaceName(notice.workspace) }),
+    highlights: evolveHighlights(notice),
+    note: notice.run?.detail && notice.kind !== 'failed' && notice.kind !== 'skipped' ? notice.run.detail : undefined,
+    createdAt: at,
+    read: false,
+    actions: evolveActions(notice),
+  }))
+}
+
+/** Record an evolve notice; the same run's same kind twice is one row. */
+function noteEvolveNotice(notice: EvolveNotice, at: number = Date.now()): void {
+  if (!notice?.workspace || !notice.kind) return
+  const id = evolveAnnouncementId(notice, at)
+  if (evolveNotices.value.some((n) => evolveAnnouncementId(n.notice, n.at) === id)) return
+  evolveNotices.value = [{ notice, at }, ...evolveNotices.value].slice(0, MAX_EVOLVE_NOTICES)
+}
+
+/** A share-link event worth telling the user (see useShareNotices): a link
+ *  was created, or opened for the first time or by a new viewer. Never the
+ *  URL — the key in it belongs to whoever the creator gave it to. */
+export interface ShareNotice {
+  kind: 'created' | 'opened' | 'feedback'
+  linkId: string
+  createdBy?: 'user' | 'agent'
+  pane?: string
+  agent?: string
+  maskedTotal?: number
+  openCount?: number
+  newViewer?: boolean
+  /** Phone feedback: approved | noted | already | rejected, and why. */
+  title?: string
+  result?: string
+  reason?: string
+}
+
+/** Share notices this window heard, newest first. Not persisted: the Share
+ *  tab in Settings is the record. */
+const shareNotices = ref<{ notice: ShareNotice; at: number }[]>([])
+const MAX_SHARE_NOTICES = 50
+
+function shareItems(): Announcement[] {
+  const t = i18n.global.t
+  return shareNotices.value.map(({ notice, at }) => {
+    const short = notice.linkId.slice(0, 6)
+    const highlights: string[] = []
+    let title: string
+    if (notice.kind === 'created') {
+      title =
+        notice.createdBy === 'agent'
+          ? t('share.notice.created-agent', { pane: notice.pane || '—', id: short })
+          : t('share.notice.created-user', { id: short })
+      if (notice.maskedTotal) highlights.push(t('share.notice.masked', { count: notice.maskedTotal }))
+    } else if (notice.kind === 'feedback') {
+      const name = notice.title || short
+      const result = ['approved', 'noted', 'already', 'rejected'].includes(notice.result ?? '') ? notice.result : 'rejected'
+      title = t(`share.notice.feedback-${result}`, { title: name })
+      if (result === 'rejected') {
+        highlights.push(
+          notice.reason === 'content-changed'
+            ? t('share.notice.reason-content-changed')
+            : t('share.notice.reason-other', { reason: notice.reason || '—' })
+        )
+      }
+    } else {
+      title = notice.newViewer ? t('share.notice.opened-new-viewer', { id: short }) : t('share.notice.opened-first', { id: short })
+      highlights.push(t('share.notice.open-count', { count: notice.openCount ?? 0 }))
+    }
+    return { id: `share:${notice.kind}:${notice.linkId}:${at}`, kind: 'share' as const, title, highlights, createdAt: at, read: false }
+  })
+}
+
+/** Record a share notice. */
+function noteShareNotice(notice: ShareNotice, at: number = Date.now()): void {
+  if (!notice?.linkId) return
+  shareNotices.value = [{ notice, at }, ...shareNotices.value].slice(0, MAX_SHARE_NOTICES)
+}
+
+// ── Agent plugin actions (B2-c) ─────────────────────────────────────────────
+
+/** An agent disabled or enabled a Navide plugin, as the Host reported it. */
+export interface PluginAgentNotice {
+  action: 'disable' | 'enable'
+  pluginId: string
+  pluginVersion: string
+  requester: { paneId: string | null; paneName: string | null; workspace: string | null; callerKind: 'pane' | 'external' | 'host' }
+}
+
+/** Notices this window heard, newest first. Not persisted: the activity page
+ *  (plugin_agent_actions) is the record. */
+const pluginAgentNotices = ref<{ notice: PluginAgentNotice; at: number }[]>([])
+
+/** Who did it, for the row and the toast: the pane's name, or the kind of caller. */
+export function pluginAgentCaller(requester: PluginAgentNotice['requester']): string {
+  const t = i18n.global.t
+  if (requester.callerKind === 'external') return t('plugin-agent.caller.external')
+  if (requester.callerKind === 'host') return t('plugin-agent.caller.host')
+  return requester.paneName ? t('plugin-agent.caller.pane', { pane: requester.paneName }) : t('plugin-agent.caller.pane-unknown')
+}
+
+/** One line naming the caller, what it did and the plugin. */
+export function pluginAgentNoticeTitle(notice: PluginAgentNotice): string {
+  return i18n.global.t(`plugin-agent.notice.${notice.action === 'disable' ? 'disabled' : 'enabled'}`, {
+    caller: pluginAgentCaller(notice.requester),
+    plugin: notice.pluginId,
+  })
+}
+
+function pluginAgentItems(): Announcement[] {
+  return pluginAgentNotices.value.map(({ notice, at }) => ({
+    id: `plugin-agent:${notice.action}:${notice.pluginId}:${at}`,
+    kind: 'plugin-agent' as const,
+    title: pluginAgentNoticeTitle(notice),
+    highlights: [i18n.global.t('plugin-agent.notice.version', { version: notice.pluginVersion })],
+    createdAt: at,
+    read: false,
+    actions: [{ kind: 'plugin-agent-undo' as const, pluginId: notice.pluginId, disable: notice.action === 'enable' }],
+  }))
+}
+
+/** Whether the undo still sets back what the agent did: the package is still
+ *  in the state the agent left it in (the user has not changed it since). */
+export function pluginAgentUndoApplies(
+  action: PluginAgentAnnouncementAction,
+  installed: ReadonlyArray<{ id: string; disabled?: boolean }>,
+): boolean {
+  const current = installed.find((pkg) => pkg.id === action.pluginId)
+  // The undo enables when the agent disabled, and the other way round.
+  return current !== undefined && current.disabled === !action.disable
+}
+
+/** Record that an agent disabled or enabled a Navide plugin. */
+function notePluginAgentNotice(notice: PluginAgentNotice, at: number = Date.now()): void {
+  if (!notice?.pluginId) return
+  pluginAgentNotices.value = [{ notice, at }, ...pluginAgentNotices.value]
+}
+
+// ── Convenience features ────────────────────────────────────────────────────
+
+/** The last `convenience.list` useConvenience read. Not persisted: the
+ *  backend's log is the record, and it is re-read on every connect. */
+const convenienceState = shallowRef<ConvenienceSnapshot | null>(null)
+const convenienceAgentLabel = shallowRef<(agentKey: string) => string>((key) => key)
+
+export const CONVENIENCE_UPGRADE_ID = 'convenience:upgrade'
+
+/** `detail` of a credentials.auto-repair prompt entry (a JSON string). */
+interface ConveniencePromptDetail {
+  agentKey?: string
+  slotId?: string | null
+  slotLabel?: string
+  liveEmail?: string
+  slotEmail?: string
+  /** Hash of the live login the prompt is about; the switch-back sends it
+   *  back and the backend refuses it once another login is live. */
+  liveFingerprint?: string
+  /** "logout": the user signed out outside Navide; no slot to switch back to. */
+  reason?: string
+}
+
+function parsePromptDetail(detail: string): ConveniencePromptDetail {
+  try {
+    const parsed = JSON.parse(detail) as unknown
+    return parsed && typeof parsed === 'object' ? (parsed as ConveniencePromptDetail) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function convenienceAnnouncementId(entryId: number): string {
+  return `convenience:${entryId}`
+}
+
+function convenienceItems(seen: Set<string>): Announcement[] {
+  const state = convenienceState.value
+  if (!state) return []
+  const t = i18n.global.t
+  const overview: ConvenienceAnnouncementAction = { kind: 'convenience-overview' }
+  const items: Announcement[] = []
+  if (state.upgrade && state.upgrade.features.length > 0) {
+    items.push({
+      id: CONVENIENCE_UPGRADE_ID,
+      kind: 'convenience',
+      title: t('convenience.notice.upgrade'),
+      highlights: state.upgrade.features.map((id) => convenienceText(id, 'name')),
+      note: t('convenience.notice.upgrade-note'),
+      read: false,
+      actions: [{ kind: 'convenience-upgrade-ack' }, overview],
+    })
+  }
+  const entries = state.notices.filter((entry) => entry.notify).slice().sort((a, b) => b.at - a.at || b.id - a.id)
+  for (const entry of entries) {
+    const id = convenienceAnnouncementId(entry.id)
+    const feature = convenienceText(entry.feature, 'name')
+    const actions: ConvenienceAnnouncementAction[] = []
+    let title: string
+    let note: string | undefined
+    const highlights: string[] = []
+    switch (entry.action) {
+      case 'first':
+      case 'repair':
+        title = t('convenience.notice.wrote', { feature, target: entry.target, purpose: convenienceText(entry.feature, 'purpose') })
+        if (entry.action === 'repair') note = t('convenience.notice.repair-note')
+        break
+      case 'reset':
+        title = t('convenience.notice.reset', { feature, target: entry.target, purpose: convenienceText(entry.feature, 'purpose') })
+        note = t('convenience.notice.reset-note')
+        break
+      case 'removed': {
+        title = t('convenience.notice.removed', { feature, target: entry.target })
+        const current = state.features.find((f) => f.id === entry.feature)
+        // Offered only while the removal is still what keeps it off.
+        if (current?.state === 'off' && current.reason === 'removed') {
+          actions.push({ kind: 'convenience-reallow', featureId: entry.feature })
+        }
+        break
+      }
+      case 'prompt': {
+        const detail = parsePromptDetail(entry.detail)
+        const agentKey = detail.agentKey || entry.target
+        if (detail.reason === 'logout') {
+          // Navide did not sign the user back in; there is nothing to choose.
+          const agent = convenienceAgentLabel.value(agentKey)
+          title = t('convenience.notice.prompt-logout', { agent })
+          note = t('convenience.notice.prompt-logout-note', { agent })
+          if (!seen.has(id)) actions.push({ kind: 'convenience-dismiss', rowId: id })
+          break
+        }
+        const label = detail.slotLabel || detail.slotEmail || ''
+        title = t('convenience.notice.prompt', { agent: convenienceAgentLabel.value(agentKey) })
+        if (detail.liveEmail || label) {
+          highlights.push(t('convenience.notice.prompt-accounts', { live: detail.liveEmail || '?', slot: label || '?' }))
+        }
+        note = t('convenience.notice.prompt-note')
+        // A prompt is answered once: reading the row is the answer "keep"
+        // (Navide already follows the live account). Switching back needs the
+        // slot the prompt names; a missing one must never become a switch to
+        // Default, so then only "keep" is offered. The same goes for the live
+        // login's fingerprint, without which the backend refuses the switch.
+        if (!seen.has(id)) {
+          actions.push({ kind: 'convenience-keep-login', rowId: id })
+          if (typeof detail.slotId === 'string' && detail.slotId && typeof detail.liveFingerprint === 'string') {
+            actions.push({
+              kind: 'convenience-switch-back', rowId: id, agentKey, slotId: detail.slotId, label,
+              liveFingerprint: detail.liveFingerprint,
+            })
+          }
+        }
+        break
+      }
+      case 'refused-name': {
+        // The target is the link Navide did not create: its folder, then its name.
+        const cut = Math.max(entry.target.lastIndexOf('/'), entry.target.lastIndexOf('\\'))
+        title = t('convenience.notice.action.refused-name', {
+          feature, name: entry.target.slice(cut + 1), target: entry.target.slice(0, Math.max(cut, 0)),
+        })
+        break
+      }
+      // 'refused-unsafe' among them: a workspace left alone for safety; and
+      // 'refused-exclude': a git exclude behind a link, left unwritten.
+      default:
+        title = t(`convenience.notice.action.${entry.action}`, { feature, target: entry.target })
+    }
+    actions.push(overview)
+    items.push({ id, kind: 'convenience', title, highlights, note, createdAt: entry.at * 1000, read: false, actions })
+  }
+  return items
+}
+
+/** Hand in the latest `convenience.list` (useConvenience does, on every read). */
+function noteConvenience(snapshot: ConvenienceSnapshot): void {
+  convenienceState.value = snapshot
+}
+
+/** How the account prompt names a CLI (App.vue passes the agent specs' labels). */
+function setConvenienceAgentLabel(label: (agentKey: string) => string): void {
+  convenienceAgentLabel.value = label
 }
 
 /** Live quota incidents by id, newest update first when listed. Not
@@ -603,6 +1057,11 @@ const items: ComputedRef<Announcement[]> = computed(() => {
   const locale = i18n.global.locale.value
   const seen = new Set(readIds.value)
   const merged = [
+    ...convenienceItems(seen),
+    ...pluginAgentItems(),
+    ...shareItems(),
+    ...evolveItems(),
+    ...schedulerItems(),
     ...backendItems(),
     ...updateItems(updateSource.value?.state.value ?? null),
     ...releaseItems(locale, appVersion.value),
@@ -671,6 +1130,27 @@ export function __resetQuotaAnnouncementsForTest(): void {
   quotaReadMarks.value = new Map()
 }
 
+/** Test-only: forget every share notice (the module is a singleton). */
+export function __resetShareAnnouncementsForTest(): void {
+  shareNotices.value = []
+}
+
+/** Test-only: forget every agent plugin notice (the module is a singleton). */
+export function __resetPluginAgentAnnouncementsForTest(): void {
+  pluginAgentNotices.value = []
+}
+
+/** Test-only: forget the convenience snapshot (the module is a singleton). */
+export function __resetConvenienceAnnouncementsForTest(): void {
+  convenienceState.value = null
+  convenienceAgentLabel.value = (key) => key
+}
+
+/** Test-only: forget every evolve notice (the module is a singleton). */
+export function __resetEvolveAnnouncementsForTest(): void {
+  evolveNotices.value = []
+}
+
 export function useAnnouncements() {
   load()
   return {
@@ -680,6 +1160,12 @@ export function useAnnouncements() {
     markAllRead,
     setUpdateSource,
     noteBackendUpgrade,
+    noteSchedulerDisabled,
+    noteEvolveNotice,
+    noteShareNotice,
+    notePluginAgentNotice,
+    noteConvenience,
+    setConvenienceAgentLabel,
     noteQuotaIncident,
     invalidateQuotaActions,
     dismissQuotaIncident,

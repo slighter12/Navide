@@ -5,7 +5,7 @@ import { SafeAiCliPanel } from '@navide/plugin-ui'
 import {
   preparePlanDocHtml,
 } from './planSecurity'
-import { useNotify, useTheme } from '@navide/plugin-ui/foundation'
+import { useNotify, useTheme, vTruncate } from '@navide/plugin-ui/foundation'
 import {
   backendErrorMessage,
   callCapability,
@@ -21,6 +21,7 @@ import { workspaceDisplayName } from './workspaceAlias'
 import PlanReviewToolbar from './retained/PlanReviewToolbar.vue'
 import PlanMarkdownBody from './retained/PlanMarkdownBody.vue'
 import HtmlFilePreview from './HtmlFilePreview.vue'
+import PlanShareButton from './PlanShareButton.vue'
 import NotificationHost from './retained/NotificationHost.vue'
 import { resolvePlanStore, type SectionBody } from './retained/planStore'
 import { htmlPlanAwaitingUser, parseHtmlPlanMeta } from './retained/usePlanHtml'
@@ -33,6 +34,7 @@ import { buildPlanRuntimeScript, buildTodoStatusRuntime, createPlanRuntimeMessag
 interface TodoSummary {
   total: number
   by_status: Record<string, number>
+  awaiting_user?: number
 }
 
 interface PlanTodo {
@@ -66,6 +68,8 @@ interface PlanSummary {
    *  listed regardless, so no plan ever disappears from the view. */
   reason?: string
   size?: number
+  /** Set when the entry had to drop its meta but the plan is archived. */
+  archivedAt?: string
 }
 
 interface PlanDocument {
@@ -90,7 +94,9 @@ type GroupMode = 'flat' | 'stage'
 
 const params = new URLSearchParams(window.location.search)
 const workspacePath = params.get('workspace_path') ?? ''
-const initialRelPath = params.get('rel_path') ?? ''
+// Plan rel_paths are '/'-separated; a Windows Host may hand over '\\' ones.
+const toPlanRelPath = (path: string): string => path.replace(/\\/g, '/')
+const initialRelPath = toPlanRelPath(params.get('rel_path') ?? '')
 const initialFilePath = params.get('filepath') ?? ''
 // What the window title calls this workspace: the alias the user gave it,
 // resolved by the Host and passed as `workspace_display_name`, else the folder
@@ -145,6 +151,37 @@ const contextMenu = ref<{ x: number; y: number; relPath: string } | null>(null)
 const renameInput = ref<HTMLInputElement | null>(null)
 const renameTarget = ref<string | null>(null)
 const renameValue = ref('')
+// The share entry exists only after the Host confirmed share links work for
+// this plan (Cloud linked, server supports links); any failure keeps the
+// toolbar exactly as it is without the feature.
+const shareAvailable = ref(false)
+let shareCapsToken = 0
+watch(() => selected.value?.rel_path, (relPath) => {
+  shareAvailable.value = false
+  void refreshShareCaps(relPath)
+})
+/** Ask the Host again whether share links work; the answer for a plan that
+ *  is no longer open is dropped. The Cloud link has no event a plugin can
+ *  follow, so this also runs when the window regains focus (back from
+ *  linking in the account window) and before the share dialog opens. */
+async function refreshShareCaps(relPath = selected.value?.rel_path): Promise<boolean> {
+  const token = ++shareCapsToken
+  if (!relPath || isLeftContribution()) return false
+  let available = false
+  try {
+    const caps = await callCapability('ui', 'shareCaps', {}) as { ok?: unknown } | null
+    available = caps?.ok === true
+  } catch {
+    // Unavailable: leave the toolbar unchanged.
+  }
+  if (token === shareCapsToken) shareAvailable.value = available
+  return token === shareCapsToken && available
+}
+function onShareWindowFocus(): void {
+  void refreshShareCaps()
+}
+window.addEventListener('focus', onShareWindowFocus)
+onUnmounted(() => window.removeEventListener('focus', onShareWindowFocus))
 let stopTarget: (() => void) | null = null
 let plansSubscription: ReturnType<typeof plansBackend.subscribe> | null = null
 /** One saved document produces several plans.changed events and a file storm
@@ -378,7 +415,10 @@ function planProgress(plan: PlanSummary): { done: number; total: number } {
  *  the retained HTML parser so both carriers count the same way. */
 function planAwaiting(plan: PlanSummary): number {
   const todos = plan.meta?.todos
-  return todos ? htmlPlanAwaitingUser(todos as unknown as RetainedTodo[]) : 0
+  if (todos) return htmlPlanAwaitingUser(todos as unknown as RetainedTodo[])
+  // An entry too big for one list page arrives without meta; the backend's
+  // todo summary still carries the count.
+  return plan.todos?.awaiting_user ?? 0
 }
 
 function progressRatio(plan: PlanSummary): number {
@@ -387,7 +427,15 @@ function progressRatio(plan: PlanSummary): number {
 }
 
 function isArchived(plan: PlanSummary): boolean {
-  return typeof plan.meta?.archivedAt === 'string' && plan.meta.archivedAt.length > 0
+  const archivedAt = plan.meta?.archivedAt ?? plan.archivedAt
+  return typeof archivedAt === 'string' && archivedAt.length > 0
+}
+
+/** A plan rather than a plain document. The backend's kind decides: a plan
+ *  whose entry was too big for one list page arrives without its meta. */
+function isPlan(plan: PlanSummary | null | undefined): boolean {
+  if (!plan) return false
+  return plan.kind ? plan.kind === 'plan' : Boolean(plan.meta)
 }
 
 function matchesSearch(plan: PlanSummary): boolean {
@@ -471,12 +519,12 @@ const pinnedAndRecent = computed(() => {
 })
 
 const archivableDone = computed(() =>
-  plans.value.filter((plan) => planStage(plan) === 'done' && !isArchived(plan) && plan.meta),
+  plans.value.filter((plan) => planStage(plan) === 'done' && !isArchived(plan) && isPlan(plan)),
 )
 
 const deletablePlans = computed(() =>
   plans.value.filter(
-    (plan) => plan.meta && !isArchived(plan) && ['done', 'abandoned'].includes(planStage(plan) ?? ''),
+    (plan) => isPlan(plan) && !isArchived(plan) && ['done', 'abandoned'].includes(planStage(plan) ?? ''),
   ),
 )
 
@@ -931,7 +979,7 @@ async function deleteCompleted(): Promise<void> {
  *  context menu can invoke it without opening the document first. */
 async function promotePath(relPath: string): Promise<void> {
   const plan = plans.value.find((item) => item.rel_path === relPath)
-  if (!relPath || plan?.meta) return
+  if (!relPath || isPlan(plan)) return
   busy.value = true
   try {
     await plansBackend.call('plans.promote', { rel_path: relPath })
@@ -964,7 +1012,7 @@ async function shareToGitPath(relPath: string): Promise<void> {
  *  confirmation the way the legacy pane did. */
 async function toggleArchivePath(relPath: string): Promise<void> {
   const plan = plans.value.find((item) => item.rel_path === relPath)
-  if (!plan?.meta) return
+  if (!plan || !isPlan(plan)) return
   const archiving = !isArchived(plan)
   if (archiving) {
     const ok = await confirm(t('pane.plans.archive-confirm', { name: planTitle(plan) }), {
@@ -1169,7 +1217,7 @@ function receiveTarget(target: Record<string, string>): void {
     openHtmlPreview(htmlTarget)
     return
   }
-  if (target.rel_path) void openPlan(target.rel_path)
+  if (target.rel_path) void openPlan(toPlanRelPath(target.rel_path))
 }
 
 async function beginRename(): Promise<void> {
@@ -1416,7 +1464,7 @@ onUnmounted(() => {
                 @keydown.enter.prevent="void openPlan(plan.rel_path)"
                 @contextmenu.prevent="openContextMenu($event, plan.rel_path)"
               >
-                <span class="plan-row-title plan-row-name">{{ planTitle(plan) }}</span>
+                <span class="plan-row-title plan-row-name" v-truncate>{{ planTitle(plan) }}</span>
                 <span v-if="planStage(plan)" class="plan-chip" :class="`plan-chip--stage-${planStage(plan)}`">
                   {{ planStageLabel(planStage(plan)) }}
                 </span>
@@ -1467,11 +1515,11 @@ onUnmounted(() => {
                 @click="void openPlan(plan.rel_path)"
                 @contextmenu.prevent="openContextMenu($event, plan.rel_path)"
               >
-                <span class="plan-row-title plan-row-name">{{ planTitle(plan) }}</span>
-                <span v-if="plan.meta?.overview || plan.overview" class="plan-row-overview">
+                <span class="plan-row-title plan-row-name" v-truncate>{{ planTitle(plan) }}</span>
+                <span v-if="plan.meta?.overview || plan.overview" class="plan-row-overview" v-truncate>
                   {{ plan.meta?.overview || plan.overview }}
                 </span>
-                <span class="plan-row-path" :title="plan.rel_path">{{ plan.rel_path }}</span>
+                <span class="plan-row-path" v-truncate>{{ plan.rel_path }}</span>
                 <span class="plan-row-meta">
                   <span class="plan-row-progress">
                     <span class="plan-progress-bar" :class="`plan-progress-bar--${planStage(plan) ?? 'draft'}`">
@@ -1549,11 +1597,11 @@ onUnmounted(() => {
                 @click="void openPlan(plan.rel_path)"
                 @contextmenu.prevent="openContextMenu($event, plan.rel_path)"
               >
-                <span class="plan-row-title plan-row-name">{{ planTitle(plan) }}</span>
-                <span v-if="plan.meta?.overview || plan.overview" class="plan-row-overview">
+                <span class="plan-row-title plan-row-name" v-truncate>{{ planTitle(plan) }}</span>
+                <span v-if="plan.meta?.overview || plan.overview" class="plan-row-overview" v-truncate>
                   {{ plan.meta?.overview || plan.overview }}
                 </span>
-                <span class="plan-row-path" :title="plan.rel_path">{{ plan.rel_path }}</span>
+                <span class="plan-row-path" v-truncate>{{ plan.rel_path }}</span>
                 <span class="plan-row-meta">
                   <span v-if="planStage(plan)" class="plan-chip" :class="`plan-chip--stage-${planStage(plan)}`">
                     {{ planStageLabel(planStage(plan)) }}
@@ -1625,7 +1673,11 @@ onUnmounted(() => {
             @scroll-to-anchor="scrollToAnchor"
             @preview-snapshot="void previewSnapshot($event)"
             @deleted="void onToolbarDeleted($event)"
-          />
+          >
+            <template v-if="shareAvailable" #actions>
+              <PlanShareButton :rel-path="selected.rel_path" :before-open="refreshShareCaps" />
+            </template>
+          </PlanReviewToolbar>
           <div v-if="snapshotPreview" class="plan-snapshot-banner">
             <span class="plan-snapshot-label">{{ snapshotPreview.label }}</span>
             <span class="plan-snapshot-note">{{ t('pane.plans.snapshot-readonly') }}</span>
@@ -1701,10 +1753,10 @@ onUnmounted(() => {
       <button type="button" @click="void openPlan(contextMenu.relPath); closeContextMenu()">{{ t('pane.plans.v2.select') }}</button>
       <button v-if="isHtmlPath(contextMenu.relPath)" type="button" @click="selectedPath = contextMenu!.relPath; void beginRename()">{{ t('action.rename') }}</button>
       <button v-if="isHtmlPath(contextMenu.relPath)" type="button" class="plans-ctx-share" @click="void shareToGitPath(contextMenu!.relPath); closeContextMenu()">{{ t('pane.plans.share-git') }}</button>
-      <button v-if="contextMenuPlan?.meta" type="button" class="plans-ctx-archive" @click="void toggleArchivePath(contextMenu!.relPath); closeContextMenu()">
+      <button v-if="isPlan(contextMenuPlan)" type="button" class="plans-ctx-archive" @click="void toggleArchivePath(contextMenu!.relPath); closeContextMenu()">
         {{ contextMenuPlan && isArchived(contextMenuPlan) ? t('pane.plans.unarchive') : t('pane.plans.archive') }}
       </button>
-      <button v-if="contextMenuPlan && !contextMenuPlan.meta" type="button" class="plans-ctx-promote" @click="void promotePath(contextMenu!.relPath); closeContextMenu()">{{ t('pane.plans.menu-upgrade') }}</button>
+      <button v-if="contextMenuPlan && !isPlan(contextMenuPlan)" type="button" class="plans-ctx-promote" @click="void promotePath(contextMenu!.relPath); closeContextMenu()">{{ t('pane.plans.menu-upgrade') }}</button>
       <button type="button" class="danger" @click="void deletePath(contextMenu!.relPath); closeContextMenu()">{{ t('action.delete') }}</button>
     </div>
 

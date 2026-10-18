@@ -37,6 +37,7 @@ from agent_team_backend import (
 
 from .test_server_link import (  # noqa: F401 - broadcasts is a fixture
     ALLOW_ALL_POLICY,
+    CONNECT_TIMEOUT_S,
     _CONFIRM_KEY,
     _confirmation,
     _ws_session,
@@ -52,6 +53,14 @@ from .test_server_link import (  # noqa: F401 - broadcasts is a fixture
     default_responder,
     make_link,
 )
+
+
+@pytest.fixture(autouse=True)
+def _keychain_store(monkeypatch):
+    """These pin down the record kept in its Keychain item — the store before
+    the sealed file, and still the one used when the move cannot happen. The
+    sealed file's own cases are in test_trust_store_file_mode."""
+    monkeypatch.setattr(trust_store, "FILE_STORE", False)
 
 DENY_ALL = {"version": 1, "default": "deny", "rules": []}
 
@@ -698,7 +707,19 @@ def test_the_state_document_is_written_on_one_line():
     assert raw and "\n" not in raw
 
 
-def test_the_device_cap_denies_rather_than_evicting():
+@pytest.fixture
+def file_vault(tmp_path, monkeypatch):
+    """The caps below are about the store's logic, not its backing. A macOS
+    Keychain item holds about eighteen pins before `security -i`'s line limit
+    refuses the write, so these run on the file vault Linux and Windows use."""
+    from agent_team_backend.credential_vault import CredentialVault
+
+    monkeypatch.setattr(app, "credential_vault", CredentialVault(
+        root=tmp_path / "file-vault", real_home=tmp_path / "file-home", platform="linux",
+    ))
+
+
+def test_the_device_cap_denies_rather_than_evicting(file_vault):
     """An evicted pin is a protection that disappears with nothing going wrong
     on screen — the exact shape this module treats as an error. Refusing the new
     one denies a device instead, which is visible."""
@@ -766,7 +787,7 @@ def test_device_identity_is_the_one_this_process_signs_as():
     assert device_identity.device_id()
 
 
-def test_a_flood_of_first_sightings_cannot_bury_a_key_change():
+def test_a_flood_of_first_sightings_cannot_bury_a_key_change(file_vault):
     """The relay chooses device ids, so it chooses how many first sightings get
     recorded. If the notice cap evicted whichever was oldest it could push a
     key-change warning off the end — the refusal would stand, but the only thing
@@ -1786,6 +1807,45 @@ def test_a_block_survives_a_policy_that_will_not_verify() -> None:
     # By member as well, the same alternatives the policy list is read with.
     assert device_trust.is_blocked(None, member_id="m-banned", device_id="other") is True
     assert device_trust.is_blocked(None, member_id="", device_id="dev-fine") is False
+
+
+def test_a_block_only_the_policy_holds_survives_the_policy_being_withdrawn() -> None:
+    """A block that exists only in the signed policy — written before the local
+    copy existed, or by an editor that never wrote one — must still refuse the
+    device once the server stops serving that policy. Verifying the document is
+    what copies its block list here."""
+    trust_store.load()
+    link = _trust_link()
+    policy = {
+        "version": 1, "default": "deny", "rules": [],
+        "blocked": [{"deviceId": "dev-policy-only", "memberId": ""},
+                    {"deviceId": "", "memberId": "m-policy-only"}],
+    }
+    signature = device_signing.sign_policy(device_id=link._device_id, seq=0, document=policy)
+    signed = {**policy, server_link.POLICY_SIGNATURE_FIELD: {"seq": 0, "sig": signature}}
+
+    assert link._verified_policy(signed) == policy
+
+    assert device_trust.is_blocked(None, member_id="", device_id="dev-policy-only") is True
+    assert device_trust.is_blocked(None, member_id="m-policy-only", device_id="other") is True
+    assert device_trust.ring(
+        None, member_id="", device_id="dev-policy-only", own_device=True
+    ) == device_trust.RING_BLOCKED
+
+
+def test_an_unverified_policy_adds_nothing_to_the_local_copy() -> None:
+    """Only a document this machine signed may add a block here; anything else
+    would let the server fill this machine's block list."""
+    trust_store.load()
+    link = _trust_link()
+    forged = {
+        "version": 1, "default": "deny", "rules": [],
+        "blocked": [{"deviceId": "dev-forged", "memberId": ""}],
+        server_link.POLICY_SIGNATURE_FIELD: {"seq": 0, "sig": "bm9wZQ=="},
+    }
+
+    assert link._verified_policy(forged) is None
+    assert device_trust.is_blocked(None, member_id="", device_id="dev-forged") is False
 
 
 def test_a_locally_blocked_device_stays_off_the_pending_card_with_no_policy() -> None:
@@ -3209,7 +3269,9 @@ async def test_the_replacement_is_tried_once_and_not_in_a_loop(tmp_path, monkeyp
     )
     task = asyncio.create_task(link._run())
     try:
-        await _until(lambda: bool(server.opened and len(server.opened[0].hellos) >= 2))
+        # The hellos wait on the first key writes, which go through DPAPI on
+        # Windows: see CONNECT_TIMEOUT_S.
+        await _until(lambda: bool(server.opened and len(server.opened[0].hellos) >= 2), timeout=CONNECT_TIMEOUT_S)
         await asyncio.sleep(0.05)
 
         assert len(server.opened[0].hellos) == 2, "one retry, not a loop"
@@ -3246,7 +3308,8 @@ async def test_a_conflict_that_survives_the_retry_says_what_it_is(tmp_path, monk
     )
     task = asyncio.create_task(link._run())
     try:
-        await _until(lambda: bool(link.terminated_reason))
+        # Reached through the hello: see CONNECT_TIMEOUT_S.
+        await _until(lambda: bool(link.terminated_reason), timeout=CONNECT_TIMEOUT_S)
 
         assert "already registered to another account" in link.terminated_reason
         # It used to read as a credential problem, which is where people looked.
@@ -3289,7 +3352,8 @@ async def test_an_id_the_server_refused_is_never_recorded(tmp_path, monkeypatch)
     )
     task = asyncio.create_task(link._run())
     try:
-        await _until(lambda: bool(link.terminated_reason))
+        # Reached through the hello: see CONNECT_TIMEOUT_S.
+        await _until(lambda: bool(link.terminated_reason), timeout=CONNECT_TIMEOUT_S)
 
         doc = json.loads(device_identity.device_identity_path().read_text(encoding="utf-8"))
         assert "m1" not in doc.get("nodes", {}), doc

@@ -7,7 +7,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type Ref } from 'vue'
 import { resolve } from 'node:path'
 import { CLI_AGENT_SPECS } from '../../agents'
-import { bracketedPaste } from '../../lib/aiCliContext'
+import { bracketedPaste, dockOutputLogFile } from '../../lib/aiCliContext'
 import type { MentionCandidate, TerminalDockPort } from '@navide/terminal'
 
 let i18n: typeof import('@navide/plugin-ui/foundation').i18n
@@ -307,9 +307,55 @@ describe('AiCliDock — start guards and spawn path', () => {
       command: ['bash', '-lc', 'claude --dangerously-skip-permissions'],
       cwd: '/tmp/ws',
       agentKey: 'claude',
-      metadata: { workspace_path: '/tmp/ws', origin: 'test-window', yolo: true },
+      metadata: {
+        workspace_path: '/tmp/ws',
+        origin: 'test-window',
+        yolo: true,
+        surface: 'test-window',
+        window_kind: 'test-window',
+        cli_command: 'claude --dangerously-skip-permissions',
+        agent_label: 'Claude Code (Anthropic)',
+      },
+      outputLogFile: dockOutputLogFile('/tmp/ws', 'claude', 'ab12cd34-test-cli-dock', 'test-window'),
       skipReattach: true,
     })
+  })
+
+  it('pins a fresh session id through the host port and files it in the metadata', async () => {
+    const pin = vi.fn((_agent: string, _resume: boolean, command: string) => ({
+      command: `${command} --session-id S-1`,
+      explicitSessionId: 'S-1',
+    }))
+    const terminalPort = { ...makeTerminalPort(), pinFreshSessionAtLaunch: pin } as unknown as TerminalDockPort
+    const wrapper = mountDock({ terminalPort, origin: 'plan-window' })
+    await openDock(wrapper)
+    await wrapper.find('.ai-cli-btn.primary').trigger('click')
+    await flushPromises()
+    expect(pin).toHaveBeenCalledWith(
+      'claude', false, 'claude --dangerously-skip-permissions', undefined, expect.any(Function),
+    )
+    const opts = (termSpies.spawn.mock.calls[0] as unknown as [Record<string, unknown>])[0]
+    expect(opts.command).toEqual(['bash', '-lc', 'claude --dangerously-skip-permissions --session-id S-1'])
+    expect(opts.metadata).toMatchObject({
+      explicit_session_id: 'S-1',
+      cli_command: 'claude --dangerously-skip-permissions --session-id S-1',
+      surface: 'plans',
+      window_kind: 'plans',
+    })
+    // resumeKey would rewrite useTerminal's persist key and break the
+    // connect-time reattach, which looks the PTY up by pane id.
+    expect(opts).not.toHaveProperty('resumeKey')
+  })
+
+  it('sends no explicit session id when the vendor cannot pin one', async () => {
+    const pin = vi.fn((_agent: string, _resume: boolean, command: string) => ({ command, explicitSessionId: '' }))
+    const terminalPort = { ...makeTerminalPort(), pinFreshSessionAtLaunch: pin } as unknown as TerminalDockPort
+    const wrapper = mountDock({ terminalPort })
+    await openDock(wrapper)
+    await wrapper.find('.ai-cli-btn.primary').trigger('click')
+    await flushPromises()
+    const opts = (termSpies.spawn.mock.calls[0] as unknown as [{ metadata: Record<string, unknown> }])[0]
+    expect(opts.metadata).not.toHaveProperty('explicit_session_id')
   })
 
   it('lets the host port build the spawn argv when it offers to', async () => {
@@ -394,6 +440,8 @@ describe('AiCliDock — running controls and lifecycle events', () => {
     expect(termSpies.interrupt).toHaveBeenCalledTimes(1)
     await wrapper.find('.ai-cli-btn.danger').trigger('click')
     expect(termSpies.kill).toHaveBeenCalledTimes(1)
+    // Stop is the one kill that tells the backend not to restore this CLI.
+    expect(termSpies.kill).toHaveBeenCalledWith({ retireRestore: true })
     expect(termSpies.cancelPendingCreate).not.toHaveBeenCalled()
   })
 
@@ -546,6 +594,18 @@ describe('AiCliDock — @-mention sections key on the workspace path', () => {
     expect(readCandidates(wrapper)[0].groupLabel).toBe('api')
   })
 
+  it('names the window an embedded panel lives in, and nothing for a window pane', async () => {
+    const wrapper = mountWithRoster([
+      { pane_id: 'p1', qualified_name: 'ws/pm-claude', workspace_path: '/tmp/ws', surface: 'pm' },
+      { pane_id: 'p2', qualified_name: 'ws/claude-1', workspace_path: '/tmp/ws' },
+    ])
+    await flushPromises()
+
+    const byAddress = new Map(readCandidates(wrapper).map((c) => [c.address, c]))
+    expect(byAddress.get('ws/pm-claude')!.windowLabel).toBe('Pipeline Manager')
+    expect('windowLabel' in byAddress.get('ws/claude-1')!).toBe(false)
+  })
+
   it('leaves this panel out of its own mention list', async () => {
     const wrapper = mountWithRoster([
       {
@@ -562,5 +622,482 @@ describe('AiCliDock — @-mention sections key on the workspace path', () => {
     await flushPromises()
 
     expect(readCandidates(wrapper).map((c) => c.address)).toEqual(['ws/claude-1'])
+  })
+})
+
+describe('AiCliDock — messaging roster registration', () => {
+  function registeringPort(panes: Array<Record<string, string>> = []) {
+    const registerAgentPane = vi.fn(async (_pane: Record<string, string>) => ({ ok: true }))
+    const unregisterAgentPane = vi.fn(async () => ({ ok: true }))
+    const port = {
+      ...makeTerminalPort(),
+      listAgentPanes: vi.fn(async () => ({ ok: true, payload: { panes } })),
+      registerAgentPane,
+      unregisterAgentPane,
+    } as unknown as TerminalDockPort
+    return { port, registerAgentPane, unregisterAgentPane }
+  }
+
+  it('registers once its CLI is running, naming the window it lives in', async () => {
+    const { port, registerAgentPane } = registeringPort()
+    mountDock({ terminalPort: port, origin: 'pipeline-manager' })
+    await flushPromises()
+    expect(registerAgentPane).not.toHaveBeenCalled()
+
+    termState.status.value = 'running'
+    await flushPromises()
+    expect(registerAgentPane).toHaveBeenCalledTimes(1)
+    expect(registerAgentPane).toHaveBeenCalledWith({
+      pane_id: 'ab12cd34-test-cli-dock',
+      name: 'pm-claude',
+      workspace_path: '/tmp/ws',
+      agent_key: 'claude',
+      surface: 'pm',
+      window_kind: 'main',
+    })
+  })
+
+  it('takes the next free name when the workspace already has one', async () => {
+    const { port, registerAgentPane } = registeringPort([
+      { pane_id: 'other', name: 'pm-claude', workspace_path: '/tmp/ws' },
+    ])
+    mountDock({ terminalPort: port, origin: 'pipeline-manager' })
+    termState.status.value = 'running'
+    await flushPromises()
+    expect(registerAgentPane.mock.calls[0][0]).toMatchObject({ name: 'pm-claude-2' })
+  })
+
+  it('unregisters when the CLI exits, and again on unmount only if still registered', async () => {
+    const { port, registerAgentPane, unregisterAgentPane } = registeringPort()
+    const wrapper = mountDock({ terminalPort: port, origin: 'plan-window' })
+    termState.status.value = 'running'
+    await flushPromises()
+    expect(registerAgentPane).toHaveBeenCalledTimes(1)
+
+    termState.status.value = 'exited'
+    await flushPromises()
+    expect(unregisterAgentPane).toHaveBeenCalledWith('ab12cd34-test-cli-dock')
+
+    wrapper.unmount()
+    mounted.splice(mounted.indexOf(wrapper), 1)
+    await flushPromises()
+    expect(unregisterAgentPane).toHaveBeenCalledTimes(1)
+  })
+
+  it('unregisters on unmount while the CLI is still running', async () => {
+    const { port, unregisterAgentPane } = registeringPort()
+    const wrapper = mountDock({ terminalPort: port, origin: 'git-window' })
+    termState.status.value = 'running'
+    await flushPromises()
+    wrapper.unmount()
+    mounted.splice(mounted.indexOf(wrapper), 1)
+    await flushPromises()
+    expect(unregisterAgentPane).toHaveBeenCalledWith('ab12cd34-test-cli-dock')
+  })
+
+  it('re-registers after the backend connection comes back', async () => {
+    const { port, registerAgentPane } = registeringPort()
+    mountDock({ terminalPort: port, origin: 'pipeline-manager' })
+    termState.status.value = 'running'
+    await flushPromises()
+    const status = (port as unknown as { status: Ref<string> }).status
+    status.value = 'disconnected'
+    await flushPromises()
+    status.value = 'connected'
+    await flushPromises()
+    expect(registerAgentPane).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows its address in the header once the backend accepts the registration', async () => {
+    const { port } = registeringPort()
+    const wrapper = mountDock({ terminalPort: port, origin: 'pipeline-manager' })
+    termState.status.value = 'running'
+    await flushPromises()
+    expect(wrapper.find('.ai-cli-address').text()).toBe('@pm-claude')
+  })
+
+  it('shows no address when the backend refuses the registration', async () => {
+    const { port, registerAgentPane } = registeringPort()
+    // A host whose bridge cannot map the call answers ok:false rather than
+    // throwing (the plugin shim's UNMAPPED_CAPABILITY), as does a backend refusal.
+    registerAgentPane.mockImplementation(async () => ({
+      ok: false,
+      error: { code: 'UNMAPPED_CAPABILITY', message: 'no capability mapping' },
+    }) as never)
+    const wrapper = mountDock({ terminalPort: port, origin: 'mini-ide' })
+    termState.status.value = 'running'
+    await flushPromises()
+    expect(registerAgentPane).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.ai-cli-address').exists()).toBe(false)
+  })
+
+  it('retries a failed registration and shows the address once it succeeds', async () => {
+    vi.useFakeTimers()
+    try {
+      const { port, registerAgentPane } = registeringPort()
+      // A Plan window reload: the old window's connection still holds the id.
+      registerAgentPane.mockImplementationOnce(async () => ({
+        ok: false,
+        error: { code: 'FORBIDDEN', message: 'pane is held by another window' },
+      }) as never)
+      const wrapper = mountDock({ terminalPort: port, origin: 'plan-window' })
+      termState.status.value = 'running'
+      await flushPromises()
+      expect(registerAgentPane).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('.ai-cli-address').exists()).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1000)
+      await flushPromises()
+      expect(registerAgentPane).toHaveBeenCalledTimes(2)
+      expect(wrapper.find('.ai-cli-address').text()).toBe('@plans-claude')
+      expect(wrapper.find('.ai-cli-roster-error').exists()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says why in the panel when every registration attempt fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const { port, registerAgentPane } = registeringPort()
+      registerAgentPane.mockImplementation(async () => ({
+        ok: false,
+        error: { code: 'FORBIDDEN', message: 'pane is held by another window' },
+      }) as never)
+      const wrapper = mountDock({ terminalPort: port, origin: 'plan-window' })
+      termState.status.value = 'running'
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(10_000)
+      await flushPromises()
+      expect(registerAgentPane).toHaveBeenCalledTimes(4)
+      const error = wrapper.find('.ai-cli-roster-error')
+      expect(error.exists()).toBe(true)
+      expect(error.text()).toContain('pane is held by another window')
+
+      // The CLI ends: nothing is left to be unreachable.
+      termState.status.value = 'exited'
+      await flushPromises()
+      expect(wrapper.find('.ai-cli-roster-error').exists()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops retrying once the CLI ends', async () => {
+    vi.useFakeTimers()
+    try {
+      const { port, registerAgentPane } = registeringPort()
+      registerAgentPane.mockImplementation(async () => { throw new Error('socket closed') })
+      mountDock({ terminalPort: port, origin: 'plan-window' })
+      termState.status.value = 'running'
+      await flushPromises()
+      termState.status.value = 'exited'
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(registerAgentPane).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does nothing on a port that cannot register (older host)', async () => {
+    mountDock({ origin: 'pipeline-manager' })
+    termState.status.value = 'running'
+    await flushPromises()
+    // No throw, no unhandled rejection: the dock simply stays unregistered.
+    expect(termSpies.spawn).not.toHaveBeenCalled()
+  })
+})
+
+describe('AiCliDock — message delivery into the panel', () => {
+  type Delivery = { msgKey: string; targetPaneId: string; text: string; fromDisplay: string; kind?: 'ack' }
+  function deliveringPort() {
+    let listener: ((m: Delivery) => void) | null = null
+    const off = vi.fn(() => { listener = null })
+    const reportAgentDelivery = vi.fn(async (_k: string, _ok: boolean, _reason?: string) => ({ ok: true }))
+    const registerAgentPane = vi.fn(async (_pane: Record<string, unknown>) => ({ ok: true }))
+    const port = {
+      ...makeTerminalPort(),
+      listAgentPanes: vi.fn(async () => ({ ok: true, payload: { panes: [] } })),
+      registerAgentPane,
+      unregisterAgentPane: vi.fn(async () => ({ ok: true })),
+      onAgentMessage: vi.fn((cb: (m: Delivery) => void) => { listener = cb; return off }),
+      reportAgentDelivery,
+    } as unknown as TerminalDockPort
+    const send = (m: Partial<Delivery>) => listener?.({
+      msgKey: 'k-1',
+      targetPaneId: 'ab12cd34-test-cli-dock',
+      text: 'ENVELOPE',
+      fromDisplay: 'reviewer',
+      ...m,
+    })
+    return { port, send, off, reportAgentDelivery, registerAgentPane }
+  }
+
+  function runningQuiet(): void {
+    termState.status.value = 'running'
+    termState.lastRawActivityAt.value = Date.now() - 60000
+  }
+
+  it('registers as deliverable when its port can deliver', async () => {
+    const { port, registerAgentPane } = deliveringPort()
+    mountDock({ terminalPort: port, origin: 'plan-window' })
+    termState.status.value = 'running'
+    await flushPromises()
+    expect(registerAgentPane.mock.calls[0][0]).toMatchObject({ surface: 'plans', deliverable: true })
+  })
+
+  it('pastes a message for this panel once the CLI is quiet, submits it and reports ok', async () => {
+    const { port, send, reportAgentDelivery } = deliveringPort()
+    mountDock({ terminalPort: port })
+    runningQuiet()
+    await flushPromises()
+    send({})
+    await flushPromises()
+    expect(termSpies.pasteText).toHaveBeenCalledWith(bracketedPaste('ENVELOPE'))
+    await new Promise((r) => setTimeout(r, 350))
+    expect(termSpies.pasteText).toHaveBeenCalledWith('\r')
+    expect(reportAgentDelivery).toHaveBeenCalledWith('k-1', true)
+  })
+
+  it('ignores a message for another pane without reporting', async () => {
+    const { port, send, reportAgentDelivery } = deliveringPort()
+    mountDock({ terminalPort: port })
+    runningQuiet()
+    await flushPromises()
+    send({ targetPaneId: 'someone-else' })
+    await new Promise((r) => setTimeout(r, 350))
+    expect(termSpies.pasteText).not.toHaveBeenCalled()
+    expect(reportAgentDelivery).not.toHaveBeenCalled()
+  })
+
+  it('delivers a repeated msgKey only once', async () => {
+    const { port, send, reportAgentDelivery } = deliveringPort()
+    mountDock({ terminalPort: port })
+    runningQuiet()
+    await flushPromises()
+    send({})
+    send({})
+    await new Promise((r) => setTimeout(r, 400))
+    expect(termSpies.pasteText.mock.calls.filter((c) => (c as unknown[])[0] === bracketedPaste('ENVELOPE'))).toHaveLength(1)
+    expect(reportAgentDelivery).toHaveBeenCalledTimes(1)
+  })
+
+  it('still delivers to a CLI that never goes quiet, reporting it went in while busy', async () => {
+    const { port, send, reportAgentDelivery } = deliveringPort()
+    mountDock({ terminalPort: port, injectTimeoutMs: 300 })
+    termState.status.value = 'running'
+    // Output keeps arriving: the CLI is busy for the whole wait.
+    termState.lastRawActivityAt.value = Date.now() + 60000
+    await flushPromises()
+    send({})
+    await new Promise((r) => setTimeout(r, 1000))
+    expect(termSpies.pasteText).toHaveBeenCalledWith(bracketedPaste('ENVELOPE'))
+    expect(termSpies.pasteText).toHaveBeenCalledWith('\r')
+    expect(reportAgentDelivery).toHaveBeenCalledWith('k-1', true, 'delivered-while-busy')
+  })
+
+  it('reports pane-closed when no CLI is running', async () => {
+    const { port, send, reportAgentDelivery } = deliveringPort()
+    mountDock({ terminalPort: port })
+    await flushPromises()
+    send({})
+    await flushPromises()
+    expect(termSpies.pasteText).not.toHaveBeenCalled()
+    expect(reportAgentDelivery).toHaveBeenCalledWith('k-1', false, 'pane-closed')
+  })
+
+  it('reports inject-failed when the paste does not leave', async () => {
+    const { port, send, reportAgentDelivery } = deliveringPort()
+    termSpies.pasteText.mockReturnValueOnce(false)
+    mountDock({ terminalPort: port })
+    runningQuiet()
+    await flushPromises()
+    send({})
+    await flushPromises()
+    expect(termSpies.pasteText).not.toHaveBeenCalledWith('\r')
+    expect(reportAgentDelivery).toHaveBeenCalledWith('k-1', false, 'inject-failed')
+  })
+
+  it('reports an ack without typing it', async () => {
+    const { port, send, reportAgentDelivery } = deliveringPort()
+    mountDock({ terminalPort: port })
+    runningQuiet()
+    await flushPromises()
+    send({ kind: 'ack' })
+    await flushPromises()
+    expect(termSpies.pasteText).not.toHaveBeenCalled()
+    expect(reportAgentDelivery).toHaveBeenCalledWith('k-1', true, 'ack')
+  })
+
+  it('stops listening on unmount', async () => {
+    const { port, off } = deliveringPort()
+    const wrapper = mountDock({ terminalPort: port })
+    await flushPromises()
+    wrapper.unmount()
+    mounted.splice(mounted.indexOf(wrapper), 1)
+    expect(off).toHaveBeenCalledTimes(1)
+  })
+
+  it('registers without the flag on a port that cannot deliver', async () => {
+    const registerAgentPane = vi.fn(async (_pane: Record<string, unknown>) => ({ ok: true }))
+    const port = {
+      ...makeTerminalPort(),
+      listAgentPanes: vi.fn(async () => ({ ok: true, payload: { panes: [] } })),
+      registerAgentPane,
+      unregisterAgentPane: vi.fn(async () => ({ ok: true })),
+    } as unknown as TerminalDockPort
+    mountDock({ terminalPort: port, origin: 'git-window' })
+    termState.status.value = 'running'
+    await flushPromises()
+    expect(registerAgentPane.mock.calls[0][0]).not.toHaveProperty('deliverable')
+  })
+})
+
+describe('AiCliDock — restore from the panel record', () => {
+  // The backend keeps a panel's record 'spawned' across an app quit (closing
+  // its window retires it). When the window comes back and its PTY is gone, the
+  // panel resumes that conversation instead of waiting for Start.
+  function restorePort(record: { agentKey: string; sessionId: string } | null): TerminalDockPort {
+    return {
+      ...makeTerminalPort(),
+      readDockRestore: vi.fn(async () => record),
+    } as unknown as TerminalDockPort
+  }
+
+  it('resumes the recorded session when the reattach finds no PTY', async () => {
+    const terminalPort = restorePort({ agentKey: 'claude', sessionId: 'sess-123' })
+    const pin = vi.fn()
+    mountDock({ terminalPort: { ...terminalPort, pinFreshSessionAtLaunch: pin } as unknown as TerminalDockPort, origin: 'plan-window' })
+    await flushPromises()
+    expect(terminalPort.readDockRestore).toHaveBeenCalledWith('/tmp/ws', 'ab12cd34-test-cli-dock')
+    expect(termSpies.spawn).toHaveBeenCalledTimes(1)
+    const opts = (termSpies.spawn.mock.calls[0] as unknown as [Record<string, unknown>])[0]
+    expect(opts.command).toEqual(['bash', '-lc', 'claude --resume sess-123 --dangerously-skip-permissions'])
+    expect(opts.skipReattach).toBe(true)
+    expect(opts.outputLogFile).toBe(dockOutputLogFile('/tmp/ws', 'claude', 'ab12cd34-test-cli-dock', 'plans'))
+    expect(opts.metadata).toMatchObject({
+      surface: 'plans',
+      window_kind: 'plans',
+      cli_command: 'claude --resume sess-123 --dangerously-skip-permissions',
+      explicit_session_id: 'sess-123',
+    })
+    // A resume is not a fresh launch: no new pin.
+    expect(pin).not.toHaveBeenCalled()
+  })
+
+  it('retires instead of resuming when the plugin providing its surface is gone', async () => {
+    const terminalPort = {
+      ...restorePort({ agentKey: 'claude', sessionId: 'sess-123' }),
+      dockSurfaceRetired: vi.fn(async () => true),
+    } as unknown as TerminalDockPort
+    mountDock({ terminalPort, origin: 'git-window' })
+    await flushPromises()
+    expect(terminalPort.dockSurfaceRetired).toHaveBeenCalledWith('/tmp/ws', 'ab12cd34-test-cli-dock', 'git')
+    expect(termSpies.spawn).not.toHaveBeenCalled()
+  })
+
+  it('resumes when the plugin providing its surface is still there', async () => {
+    const terminalPort = {
+      ...restorePort({ agentKey: 'claude', sessionId: 'sess-123' }),
+      dockSurfaceRetired: vi.fn(async () => false),
+    } as unknown as TerminalDockPort
+    mountDock({ terminalPort, origin: 'plan-window' })
+    await flushPromises()
+    expect(termSpies.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('injects no context into a resumed conversation', async () => {
+    const buildContext = vi.fn(() => 'CTX')
+    termSpies.spawn.mockImplementation(async () => { termState.status.value = 'running' })
+    mountDock({ terminalPort: restorePort({ agentKey: 'claude', sessionId: 'sess-123' }), buildContext })
+    await flushPromises()
+    expect(termSpies.spawn).toHaveBeenCalledTimes(1)
+    expect(buildContext).not.toHaveBeenCalled()
+    expect(termSpies.pasteText).not.toHaveBeenCalled()
+  })
+
+  it('resumes with the recorded agent, not the picker default', async () => {
+    settingsState.stored['test-cli-panel-width.agent'] = 'claude'
+    mountDock({ terminalPort: restorePort({ agentKey: 'codex', sessionId: 'abc-1' }) })
+    await flushPromises()
+    const opts = (termSpies.spawn.mock.calls[0] as unknown as [{ agentKey: string }])[0]
+    expect(opts.agentKey).toBe('codex')
+  })
+
+  it('leaves the Start UI when there is no record', async () => {
+    const terminalPort = restorePort(null)
+    mountDock({ terminalPort })
+    await flushPromises()
+    expect(terminalPort.readDockRestore).toHaveBeenCalledTimes(1)
+    expect(termSpies.spawn).not.toHaveBeenCalled()
+  })
+
+  it('leaves the Start UI when the record has no session id', async () => {
+    mountDock({ terminalPort: restorePort({ agentKey: 'claude', sessionId: '' }) })
+    await flushPromises()
+    expect(termSpies.spawn).not.toHaveBeenCalled()
+  })
+
+  it('refuses a session id that is not shell-safe', async () => {
+    mountDock({ terminalPort: restorePort({ agentKey: 'claude', sessionId: 'x; rm -rf ~' }) })
+    await flushPromises()
+    expect(termSpies.spawn).not.toHaveBeenCalled()
+  })
+
+  it('does not resume when the reattach claimed a live PTY', async () => {
+    termSpies.tryReattach.mockImplementation(async () => {
+      termState.status.value = 'running'
+      return true as unknown as undefined
+    })
+    const terminalPort = restorePort({ agentKey: 'claude', sessionId: 'sess-123' })
+    mountDock({ terminalPort })
+    await flushPromises()
+    expect(terminalPort.readDockRestore).not.toHaveBeenCalled()
+    expect(termSpies.spawn).not.toHaveBeenCalled()
+  })
+
+  it('does nothing on a port that cannot read the record (older host)', async () => {
+    mountDock()
+    await flushPromises()
+    expect(termSpies.spawn).not.toHaveBeenCalled()
+  })
+})
+
+describe('AiCliDock — the header names the address other panes reach it by', () => {
+  function rosterPort() {
+    return {
+      ...makeTerminalPort(),
+      listAgentPanes: vi.fn(async () => ({ ok: true, payload: { panes: [] } })),
+      registerAgentPane: vi.fn(async () => ({ ok: true })),
+      unregisterAgentPane: vi.fn(async () => ({ ok: true })),
+    } as unknown as TerminalDockPort
+  }
+  // `<!--v-if-->` is Vue's invisible placeholder for an untaken branch.
+  const head = (w: VueWrapper): string => w.find('.ai-cli-head').element.outerHTML.replace(/<!--v-if-->/g, '')
+
+  it('shows the roster name once the panel is registered', async () => {
+    const wrapper = mountDock({ terminalPort: rosterPort(), origin: 'pipeline-manager' })
+    termState.status.value = 'running'
+    await flushPromises()
+    const address = wrapper.find('.ai-cli-head .ai-cli-address')
+    expect(address.exists()).toBe(true)
+    expect(address.text()).toBe('@pm-claude')
+    expect(address.attributes('title')).toContain('pm-claude')
+  })
+
+  it('draws the header exactly as before while nothing is registered', async () => {
+    const wrapper = mountDock({ terminalPort: rosterPort(), origin: 'pipeline-manager' })
+    await flushPromises()
+    expect(wrapper.find('.ai-cli-address').exists()).toBe(false)
+    expect(head(wrapper)).toMatchSnapshot()
+
+    // And again once the CLI has ended and the panel left the roster.
+    termState.status.value = 'running'
+    await flushPromises()
+    termState.status.value = 'exited'
+    await flushPromises()
+    expect(wrapper.find('.ai-cli-address').exists()).toBe(false)
+    expect(head(wrapper)).toMatchSnapshot()
   })
 })

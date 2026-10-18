@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import functools
+import hashlib
+import hmac
 import json
 import logging
 import mimetypes
@@ -31,11 +33,13 @@ from . import hook_drain
 from . import guard_hooks
 from .guard import runtime as guard_runtime
 from . import ws_auth
+from . import error_ledger
 from . import loop_watchdog
 from . import mem_probe
 from . import osplat
 from . import portable_credentials
 from . import push_delivery
+from . import resource_limits
 from . import subagent_tracker
 from .analyzer import DEFAULT_MODEL as ANALYZER_DEFAULT_MODEL
 from .analyzer import (
@@ -101,9 +105,13 @@ from .tokens_store import TokensStore
 
 
 # Electron gives the backend one bearer used only for the private Host WebSocket
-# registration. Keep it in this process, not in os.environ: backend-launched
-# shells, PTYs, Git hooks, and CLI helpers must not inherit a Host credential.
-_HOST_SESSION_TOKEN = os.environ.pop("NAVIDE_BACKEND_HOST_TOKEN", "")
+# registration. It arrives on stdin, on the confirm key's line after a space (see
+# __main__ and set_host_session_token) -- never in the environment: on macOS a
+# same-uid process reads the spawn env block with `ps -E` even after a pop.
+# The variable is still scrubbed, never adopted, so a stale launcher that sets
+# it cannot leak it into backend-launched shells, PTYs, Git hooks or helpers.
+os.environ.pop("NAVIDE_BACKEND_HOST_TOKEN", None)
+_HOST_SESSION_TOKEN = ""
 from .ui_settings import UiSettingsStore
 from .cli_risk import CliRiskService
 from .cli_risk_store import CliRiskStore
@@ -184,6 +192,17 @@ async def reject_foreign_host(request: Request, call_next: Any) -> Response:
     return await call_next(request)
 
 database = Database(app_data_dir() / DB_FILENAME)
+# Every write outside Navide's own data goes through this gate
+# (docs/en-US/convenience-features.md).
+from . import convenience_wiring  # noqa: E402
+from .convenience import ConvenienceGate  # noqa: E402
+
+convenience_gate = ConvenienceGate(
+    database,
+    backup_root=app_data_dir() / "convenience-backups",
+    notify=convenience_wiring.broadcast_change,
+)
+convenience_wiring.install(convenience_gate)
 workspace_databases = WorkspaceDatabases()
 project_store = ProjectStore(databases=workspace_databases)
 spawn_history_store = SpawnHistoryStore(databases=workspace_databases)
@@ -193,6 +212,12 @@ stages_store = StagesStore(db=database)
 tokens_store = TokensStore(db=database)
 # Which account each pane was pinned to, and when — global like the pane ids.
 pane_account_history = PaneAccountHistory(db=database)
+# Navide plugin audit (plan B, B1-d): agent tool calls and plugin activity,
+# write-only. Creating the tables is the only work done here; writing and
+# pruning run in the background task started at startup.
+from .plugins.audit_log import PluginAuditLog  # noqa: E402
+
+plugin_audit_log = PluginAuditLog(db=database)
 # Quota cycles per account: the usage poller files samples here; an open
 # cycle's token side is summed from the store's per-account slices.
 quota_ledger = QuotaLedger(db=database, totals_provider=tokens_store.account_window_totals)
@@ -383,13 +408,17 @@ async def unicast_to(session: "Session | None", event: dict[str, Any]) -> bool:
 
 
 async def unicast_any(event: dict[str, Any]) -> bool:
-    """Send *event* to one arbitrary connected session.
+    """Send *event* to one connected window that runs the UI action bus.
 
     For requests any live window can service (e.g. a global UI action with no
     fixed owner), so a broadcast that every window would otherwise have to
-    ignore is unnecessary. Returns False when no session is connected.
+    ignore is unnecessary. Only sessions that announced `ui.invoke.ready` are
+    candidates — any other session (a plugin or editor window) would drop the
+    request and leave the caller to time out — and the most recently focused
+    one goes first. Returns False when no such window is connected.
     """
-    for session in list(_SESSIONS):
+    ready = [s for s in _SESSIONS if s.ui_bus_ready]
+    for session in sorted(ready, key=lambda s: s.ui_focused_at, reverse=True):
         if session.dead:
             continue
         try:
@@ -400,8 +429,61 @@ async def unicast_any(event: dict[str, Any]) -> bool:
             log.warning("unicast send failed: %s", err)
             _SESSIONS.discard(session)
             continue
+        if session.dead:
+            # send_json marks a vanished peer dead instead of raising.
+            continue
         return True
     return False
+
+
+def is_main_window(session: "Session") -> bool:
+    """A proven Navide window that runs the UI action bus: a main window."""
+    return bool(getattr(session, "navide_window", False) and getattr(session, "ui_bus_ready", False))
+
+
+async def broadcast_main_windows(event: dict[str, Any]) -> None:
+    """Send *event* to every connected main window only (not plugin, editor
+    or other WS clients): for records naming a requester's pane and workspace."""
+    for session in list(_SESSIONS):
+        if session.dead or not is_main_window(session):
+            continue
+        try:
+            await session.send_json(event)
+        except Exception as err:  # noqa: BLE001
+            log.warning("main-window broadcast send failed: %s", err)
+            _SESSIONS.discard(session)
+
+
+async def nudge_plugin_request_recovery(session: "Session") -> None:
+    """A main window went away (review-370 R1): if it was carrying out approved
+    plugin requests, ask the main windows still open to settle them, instead of
+    leaving them ``applying`` until another window opens. Each window waits a
+    short grace before settling, so a window that is only reconnecting claims
+    its request back first (R2). Never raises."""
+    window_id = getattr(session, "window_id", "")
+    if not window_id or not is_main_window(session):
+        return
+    try:
+        from .ipc import make_event
+        from .plugins import agent_tools_contract as contract
+        from .skills_approvals import registry
+
+        held = [
+            r["approval_id"] for r in registry.plugin_requests()
+            if r["status"] == "applying" and registry.applying_by(r["approval_id"]) == window_id
+        ]
+        if held:
+            await broadcast_main_windows(make_event(contract.PLUGIN_APPROVAL_RECOVER_EVENT, {"approval_ids": held}))
+    except Exception as err:  # noqa: BLE001 - a closing socket must not fail on this
+        log.warning("plugin request recovery nudge failed: %s", err)
+
+
+def live_main_window_ids() -> set[str]:
+    """The page-load ids (``ui.invoke.ready`` window_id) of the main windows connected now."""
+    return {
+        s.window_id for s in list(_SESSIONS)
+        if not s.dead and is_main_window(s) and getattr(s, "window_id", "")
+    }
 
 
 async def unicast_host(event: dict[str, Any]) -> bool:
@@ -427,13 +509,84 @@ def host_supports_plans_backend() -> bool:
     )
 
 
+#: The Navide plugins whose Disabled switch the Host reports.
+DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide"})
+#: Set by main on every backend start: the built-ins disabled at that moment,
+#: comma-separated. Absent when none is.
+DISABLED_BUILTIN_PLUGINS_ENV = "NAVIDE_DISABLED_BUILTIN_PLUGINS"
+#: What the last authenticated Host registration reported, kept across a Host
+#: reconnect. None until a Host has registered in this process.
+_host_reported_disabled: frozenset[str] | None = None
+
+
+def note_host_disabled_plugins(disabled: frozenset[str]) -> None:
+    """Record a Host registration's disabled built-ins (see host.register)."""
+    global _host_reported_disabled
+    _host_reported_disabled = frozenset(disabled)
+
+
+def _disabled_at_spawn() -> frozenset[str]:
+    raw = os.environ.get(DISABLED_BUILTIN_PLUGINS_ENV, "")
+    return frozenset(item for item in raw.split(",") if item in DISABLEABLE_BUILTIN_PLUGINS)
+
+
+def host_disabled_plugins() -> frozenset[str]:
+    """Built-in Navide plugins the user disabled.
+
+    An authenticated Host session is authoritative. Without one (before the
+    Host registers, or while it reconnects) the last registration's answer
+    stands, and before any registration the set main passed at spawn. With
+    nothing disabled every source is empty, which is main's behaviour."""
+    disabled: set[str] = set()
+    hosted = False
+    for session in list(_SESSIONS):
+        if not session.dead and session.host_authenticated:
+            hosted = True
+            disabled |= session.disabled_plugins
+    if hosted:
+        return frozenset(disabled)
+    if _host_reported_disabled is not None:
+        return _host_reported_disabled
+    return _disabled_at_spawn()
+
+
+def plans_plugin_disabled() -> bool:
+    """Whether the user disabled the built-in Plans plugin."""
+    return "navide.plans" in host_disabled_plugins()
+
+
+def navide_window_proof_matches(challenge: str, proof: Any) -> bool:
+    """Whether `proof` answers this connection's window challenge: main
+    returns HMAC-SHA256(host token, "navide-window/v2\\0" + challenge) to its
+    main windows (backend:proveWindow) and to nothing else. The token file is
+    readable by every pane process, so it cannot say this; the host token
+    never leaves main and this process. The challenge is per connection, so a
+    proof seen once is worth nothing on any other."""
+    expected = _HOST_SESSION_TOKEN
+    if not isinstance(proof, str) or not expected or not challenge:
+        return False
+    digest = hmac.new(
+        expected.encode(), b"navide-window/v2\0" + challenge.encode(), hashlib.sha256
+    ).hexdigest()
+    # Bytes, not str: compare_digest raises on a str with non-ASCII in it.
+    return secrets.compare_digest(proof.encode(), digest.encode())
+
+
+def set_host_session_token(token: str) -> bool:
+    """Adopt the host token main handed over on stdin. Returns whether there
+    was one; without it host.register refuses and no session is a window."""
+    global _HOST_SESSION_TOKEN
+    _HOST_SESSION_TOKEN = token if isinstance(token, str) else ""
+    return bool(_HOST_SESSION_TOKEN)
+
+
 def host_session_token_matches(token: Any) -> bool:
     """Validate the per-backend token used by Electron's Host session."""
     expected = _HOST_SESSION_TOKEN
     return (
         isinstance(token, str)
         and bool(expected)
-        and secrets.compare_digest(token, expected)
+        and secrets.compare_digest(token.encode(), expected.encode())
     )
 
 
@@ -488,6 +641,24 @@ class Session:
         # appears in renderer/backend-info payloads.
         self.host_authenticated = False
         self.plans_backend_v2 = False
+        # Built-in Navide plugins the user disabled, as the Host registered them.
+        self.disabled_plugins: frozenset[str] = frozenset()
+        # Set by `ui.invoke.ready`: only a main window runs the UI action bus,
+        # while plugin, editor and manager windows share this server and never
+        # answer a ui.invoke.request. unicast_any picks among these alone, the
+        # most recently focused first.
+        self.ui_bus_ready = False
+        self.ui_focused_at = 0.0
+        # A main window's page-load id (`ui.invoke.ready` window_id): stays the
+        # same across reconnects, changes when the window reloads (B2-c).
+        self.window_id = ""
+        # Set by `window.prove` answering this connection's challenge (see
+        # navide_window_proof_matches): a Navide window, as opposed to any
+        # other client holding the token. ui_bus_ready is self-declared.
+        self.navide_window = False
+        # The nonce sent in `ws.welcome`; cleared by the first right
+        # `window.prove`, so a connection is proved at most once.
+        self.window_challenge = secrets.token_hex(32)
         # Throttle state for the slow-send probe (see _note_send_timing).
         # None rather than 0.0: the first slow send must always report, which a
         # zero baseline would swallow whenever the clock starts near zero.
@@ -708,7 +879,10 @@ async def _broadcast_plans_changed(ws_path: str) -> None:
     file directly). Record stage-transition snapshots first so subscribers
     refreshing on the event see up-to-date history, then notify."""
     try:
-        await asyncio.to_thread(plan_history.snapshot_plans, ws_path)
+        # Snapshots are plan-document writes (`.history/`); none while the user
+        # has Plans disabled. The change is still announced.
+        if not plans_plugin_disabled():
+            await asyncio.to_thread(plan_history.snapshot_plans, ws_path)
     except Exception as err:  # noqa: BLE001
         log.warning("plan snapshot scan failed for %s: %s", ws_path, err)
     await broadcast(make_event("plans.changed", {"workspace_path": ws_path}))
@@ -898,10 +1072,14 @@ async def _active_emit(event: dict[str, Any] | bytes) -> None:
         exit_pane_id = payload.get("pane_id")
         if exit_pane_id:
             _schedule_pane_unregister(exit_pane_id)
+            # The CLI holding the pane's /plan-mcp token is gone; the token
+            # goes too unless the pane is still on screen (see wiring).
+            mcp_server_wiring.release_pane_token(str(exit_pane_id))
             # A CLI that exits with subagents still running never reports their
             # stops, so the count would stay above zero for a pane id that no
             # longer has a CLI behind it.
             subagent_tracker.reset(str(exit_pane_id))
+        await ws_handlers.note_terminal_exit_async(payload)
     session_id = payload.get("terminal_session_id") if isinstance(payload, dict) else None
     if session_id and event.get("type") == "terminal.exit":
         sess = _PTY_OWNERS.pop(session_id, None)
@@ -949,6 +1127,7 @@ _OWNERLESS_SINCE: dict[str, float] = {}
 _ownerless_sweeper_task: "asyncio.Task[None] | None" = None
 _mem_probe_task: "asyncio.Task[None] | None" = None
 _dev_time_sweeper_task: "asyncio.Task[None] | None" = None
+_plugin_audit_task: "asyncio.Task[None] | None" = None
 
 
 async def _sweep_ownerless_ptys_once(now: float | None = None) -> list[str]:
@@ -1433,14 +1612,16 @@ def _scan_live_session(
     )
     if grew_in_place:
         delta, cursor = reader.usage_since_for_session(
-            path, session_id, state["cursor"]
+            path, session_id, state["cursor"], with_cache_read=True
         )
         totals = {
-            field: state["totals"][field] + delta[field]
-            for field in ("input", "output", "calls")
+            field: state["totals"].get(field, 0) + delta[field]
+            for field in ("input", "output", "calls", "cache_read")
         }
     else:
-        totals, cursor = reader.usage_since_for_session(path, session_id, {})
+        totals, cursor = reader.usage_since_for_session(
+            path, session_id, {}, with_cache_read=True
+        )
     return {
         **state,
         "session_file": str(path),
@@ -1490,9 +1671,10 @@ def _schedule_live_scan(key: tuple[str, str], *, only_if_changed: bool = False) 
             if current is None:
                 return  # the last pane closed while we were reading
             current.update(scanned)
-            if tokens_store.set_live_total(
-                workspace_path, session_key, scanned["totals"]
-            ):
+            published = {
+                field: scanned["totals"][field] for field in ("input", "output", "calls")
+            }
+            if tokens_store.set_live_total(workspace_path, session_key, published):
                 _schedule_tokens_broadcast(workspace_path)
         except Exception as err:  # noqa: BLE001 — cosmetic tally, never fatal
             log.warning("live token scan failed for session=%s: %s", session_key, err)
@@ -1535,6 +1717,20 @@ def track_live_session(
     state["panes"].add(pane_id)
     pane_account_history.bind_session(session_id, pane_id)
     _schedule_live_scan(key)
+
+
+def pane_token_total(pane_id: str) -> dict[str, int] | None:
+    """The live token totals of every session ``pane_id`` is bound to, summed;
+    None when the pane has no tracked session. Read-only."""
+    found = False
+    total = _empty_totals()
+    for state in list(_live_scans.values()):
+        if pane_id and pane_id in state["panes"]:
+            found = True
+            for key, value in (state.get("totals") or {}).items():
+                if isinstance(value, int):
+                    total[key] = total.get(key, 0) + value
+    return total if found else None
 
 
 def refresh_live_scans(workspace_path: str) -> None:
@@ -1930,8 +2126,9 @@ def _register_workspace_and_backfill(workspace_path: str) -> None:
     attribution.register_workspace(workspace_path)
     # Provision plan-document infrastructure (_spec.md + _template.html) into
     # <workspace>/.agent-team/plans/. Idempotent, never overwrites, never
-    # raises — see plan_provisioning.
-    ensure_plan_assets(workspace_path)
+    # raises — see plan_provisioning. Not while the user has Plans disabled.
+    if not plans_plugin_disabled():
+        ensure_plan_assets(workspace_path)
     # Start watching for disk changes here rather than waiting for the GitPane's
     # first `git.status`: the watcher is the only catch-all writer of the
     # preview record, and until this call it never saw a workspace nobody had
@@ -2087,6 +2284,9 @@ async def _start_log_watcher() -> None:
             ui_settings_store.get().get(push_delivery.DISABLED_SETTING_KEY) or []
         )
     )
+    # Settings → Resource limits, for code with no handle on the store
+    # (terminals marks new panes for the leftover-server list).
+    resource_limits.set_settings_reader(lambda: ui_settings_store.get())
     # Per-pane watch files hold message text in the clear and belong to panes
     # that died with the previous process. Only a startup sweep ever removes
     # the ones a killed backend left behind.
@@ -2157,6 +2357,10 @@ async def _start_log_watcher() -> None:
         lambda ws: broadcast(make_event("devtime.changed", {"workspace_path": ws}))
     ))
 
+    # Navide plugin audit: flush queued rows every second, prune hourly.
+    global _plugin_audit_task
+    _plugin_audit_task = asyncio.create_task(plugin_audit_log.run())
+
     # Navide's in-process scheduler (timed messages to CLI panes). Built off
     # the loop: its first use runs the schema migration.
     from . import scheduler
@@ -2166,10 +2370,22 @@ async def _start_log_watcher() -> None:
     except Exception as err:  # noqa: BLE001
         log.warning("scheduler startup failed: %s", err)
 
+    # Each workspace's self-evolution: its watchdog notices runs that ran past
+    # their time or budget, and runs a missed slot once its workspace opens.
+    from . import evolve_service
+
+    try:
+        await evolve_service.get_service().start()
+    except Exception as err:  # noqa: BLE001
+        log.warning("evolve startup failed: %s", err)
+
     # Name a frozen backend the moment it freezes: a daemon thread logs the
     # loop thread's stack when the loop stops turning (issue #24), instead of
     # the freeze being reproducible only under sample(1).
     loop_watchdog.start(asyncio.get_running_loop())
+    # Exceptions nobody retrieved (a create_task without a done-callback)
+    # reached only stderr; record them in the error ledger as well.
+    error_ledger.install_loop_handler(asyncio.get_running_loop())
     # Guard events raised in hook worker threads are handed back to this loop.
     guard_runtime.remember_loop(asyncio.get_running_loop())
 
@@ -2228,15 +2444,16 @@ async def _start_log_watcher() -> None:
     # backend for reliable "agent active / turn complete / parked on a prompt"
     # signals that buffer scanning cannot give. Each installer no-ops when its
     # CLI's config root is absent, and failure is non-fatal — the orchestrator
-    # falls back to log-tail + sentinel detection.
-    for _key, _spec in _CLI_VENDORS.items():
-        if _spec.install_hooks is None:
-            continue
-        try:
-            result = _spec.install_hooks(str(backend_port_file()))
-            log.info("%s hooks install: %s", _key, result)
-        except Exception as err:  # noqa: BLE001
-            log.warning("%s hooks install failed: %s", _key, err)
+    # falls back to log-tail + sentinel detection. Each is the convenience
+    # feature "<cli>.hooks": announced when it changes a file, skipped when the
+    # user turned it off or deleted the hooks by hand.
+    convenience_wiring.remember_loop(asyncio.get_running_loop())
+    # Claude's hooks ride on the panes Navide starts (--settings), not on the
+    # user's ~/.claude/settings.json; registered before the pass that moves them
+    # (the CLI hooks pass below, after the plugins).
+    from . import claude_hooks
+
+    convenience_wiring.register_pane_carrier("claude", claude_hooks.prepare_pane_settings)
 
     # Backend plugin host: load and activate only bundled legacy v1 plugins.
     # The Host-bound Manifest v2 activation catalog is validated by the wiring
@@ -2258,6 +2475,14 @@ async def _start_log_watcher() -> None:
         await plugin_wiring.run_startup_hooks(plugin_host)
     except Exception as err:  # noqa: BLE001
         log.warning("plugin host startup failed: %s", err)
+
+    # The CLI hooks pass (see above), after the plugins: Copilot's hooks ride
+    # on the pane shims the skills plugin builds (copilot_hooks), and fall
+    # back to the shared file when that plugin is not running.
+    from . import copilot_hooks
+
+    convenience_wiring.register_pane_carrier("copilot", copilot_hooks.prepare_pane_hooks)
+    convenience_wiring.install_cli_hooks(str(backend_port_file()))
 
     # Navide's own MCP server. Deliberately outside the guard above: this is
     # the endpoint every CLI pane is wired to, and it must come up even if
@@ -2285,77 +2510,126 @@ async def _start_log_watcher() -> None:
 @app.on_event("shutdown")
 async def _stop_log_watcher() -> None:
     global _log_watcher, _git_watcher, _credential_watcher
-    await cli_risk_service.close()
-    if _ownerless_sweeper_task is not None:
-        _ownerless_sweeper_task.cancel()
-    if _mem_probe_task is not None:
-        _mem_probe_task.cancel()
-    if _dev_time_sweeper_task is not None:
-        _dev_time_sweeper_task.cancel()
-    from . import scheduler
+    try:
+        await cli_risk_service.close()
+        if _ownerless_sweeper_task is not None:
+            _ownerless_sweeper_task.cancel()
+        if _mem_probe_task is not None:
+            _mem_probe_task.cancel()
+        if _dev_time_sweeper_task is not None:
+            _dev_time_sweeper_task.cancel()
+        if _plugin_audit_task is not None:
+            # Cancelling runs its final flush; wait for it so queued rows land.
+            _plugin_audit_task.cancel()
+            await asyncio.gather(_plugin_audit_task, return_exceptions=True)
+        from . import scheduler
 
-    await scheduler.shutdown()
-    from . import voice_handlers
+        await scheduler.shutdown()
+        from . import evolve_service
 
-    await voice_handlers.shutdown()
-    await loop_watchdog.stop()
-    # PTY children are detached process groups (start_new_session=True); they
-    # must be killed here or they outlive the app as CPU-spinning orphans.
-    # Guarded so a sweep failure never skips the watcher/MCP teardown below.
-    if _TERMINALS is not None:
+        await evolve_service.shutdown()
+        from . import voice_handlers
+
+        await voice_handlers.shutdown()
+        await loop_watchdog.stop()
+        # PTY children are detached process groups (start_new_session=True); they
+        # must be killed here or they outlive the app as CPU-spinning orphans.
+        # Guarded so a sweep failure never skips the watcher/MCP teardown below.
+        if _TERMINALS is not None:
+            try:
+                await _TERMINALS.kill_all()
+            except Exception as err:  # noqa: BLE001
+                log.warning("pty shutdown sweep failed: %s", err)
+        if _log_watcher is not None:
+            # Settle what the drain has read but not yet counted, BEFORE stop()
+            # cancels the flush task that would have done it. See
+            # LogWatcher.drain_pending_tokens.
+            await _log_watcher.drain_pending_tokens()
+            _log_watcher.stop()
         try:
-            await _TERMINALS.kill_all()
+            tokens_store.flush()
         except Exception as err:  # noqa: BLE001
-            log.warning("pty shutdown sweep failed: %s", err)
-    if _log_watcher is not None:
-        # Settle what the drain has read but not yet counted, BEFORE stop()
-        # cancels the flush task that would have done it. See
-        # LogWatcher.drain_pending_tokens.
-        await _log_watcher.drain_pending_tokens()
-        _log_watcher.stop()
-    try:
-        tokens_store.flush()
-    except Exception as err:  # noqa: BLE001
-        log.warning("token store shutdown flush failed: %s", err)
-    try:
-        dev_time_store.shutdown()
-    except Exception as err:  # noqa: BLE001
-        log.warning("dev time store shutdown failed: %s", err)
-    if _git_watcher is not None:
-        _git_watcher.stop()
-    if _credential_watcher is not None:
-        _credential_watcher.stop()
-    await channels.stop()
-    await server_link.stop()
+            log.warning("token store shutdown flush failed: %s", err)
+        try:
+            dev_time_store.shutdown()
+        except Exception as err:  # noqa: BLE001
+            log.warning("dev time store shutdown failed: %s", err)
+        if _git_watcher is not None:
+            _git_watcher.stop()
+        if _credential_watcher is not None:
+            _credential_watcher.stop()
+        await channels.stop()
+        await server_link.stop()
+    finally:
+        # Delivered message keys still in the batch: written now, or a message
+        # received just before a normal restart could be replayed after it.
+        # After channels and the link stop, since they record keys until then,
+        # and in a finally so no earlier step that raises can skip it (R2-1).
+        try:
+            from . import trust_store
+
+            trust_store.flush_seen_messages()
+        except Exception as err:  # noqa: BLE001
+            log.warning("delivered-message ledger shutdown flush failed: %s", err)
     await mcp_manager.shutdown()
+    log.info("shutdown: MCP clients stopped")
     try:
         await plugin_wiring.run_shutdown_hooks(plugin_host)
     except Exception as err:  # noqa: BLE001
         log.warning("plugin shutdown hooks failed: %s", err)
+    log.info("shutdown: plugin hooks done")
     try:
         await mcp_server.shutdown()
     except Exception as err:  # noqa: BLE001
         log.warning("MCP server shutdown failed: %s", err)
+    log.info("shutdown: MCP server stopped")
     try:
         plugin_wiring.shutdown(plugin_host)
     except Exception as err:  # noqa: BLE001
         log.warning("plugin host shutdown failed: %s", err)
+    log.info("shutdown: plugin host stopped")
     try:
         guard_runtime.flush()
     except Exception as err:  # noqa: BLE001
         log.warning("guard audit flush failed: %s", err)
+    log.info("shutdown: guard audit flushed")
     # Last: nothing may touch the databases after this point.
     try:
         workspace_databases.close_all()
     except Exception as err:  # noqa: BLE001
         log.warning("workspace database close failed: %s", err)
+    log.info("shutdown: workspace databases closed")
     try:
         database.close()
     except Exception as err:  # noqa: BLE001
         log.warning("database close failed: %s", err)
+    log.info("shutdown: database closed")
     _log_watcher = None
     _git_watcher = None
     _credential_watcher = None
+
+
+def _default_pool_reading(loop: asyncio.AbstractEventLoop) -> dict[str, int]:
+    """The shared default executor's size and backlog. It is created lazily,
+    so before the first to_thread it reads as empty. Private attributes of
+    ThreadPoolExecutor — read-only, and the caller drops the reading on error."""
+    executor = getattr(loop, "_default_executor", None)
+    if executor is None:
+        return {"threads": 0, "max_workers": 0, "queued": 0}
+    return {
+        "threads": len(executor._threads),  # noqa: SLF001
+        "max_workers": int(executor._max_workers),  # noqa: SLF001
+        "queued": int(executor._work_queue.qsize()),  # noqa: SLF001
+    }
+
+
+async def _loop_lag_ms(loop: asyncio.AbstractEventLoop) -> float:
+    """How long a callback waits behind the work already queued on the loop."""
+    started = time.monotonic()
+    ran = loop.create_future()
+    loop.call_soon(ran.set_result, None)
+    await ran
+    return round((time.monotonic() - started) * 1000, 3)
 
 
 @app.get("/health")
@@ -2363,11 +2637,22 @@ async def health() -> dict[str, Any]:
     # backend_log is deliberately absent: the absolute path carries the account
     # name, and this is the one route that answers without a credential. The
     # clients that need it read it from the ws settings.paths reply instead.
-    return {
+    body: dict[str, Any] = {
         "status": "ok",
         "version": __version__,
         "started_at": STARTED_AT,
     }
+    # A load reading for diagnosing starvation. Measuring must never cost the
+    # route its answer, so any failure just leaves the block out.
+    try:
+        loop = asyncio.get_running_loop()
+        body["diagnostics"] = {
+            "loop_lag_ms": await _loop_lag_ms(loop),
+            "default_pool": _default_pool_reading(loop),
+        }
+    except Exception as err:  # noqa: BLE001 — fail open
+        log.debug("health diagnostics unavailable: %s", err)
+    return body
 
 
 # Font mimes served inline (specimen @font-face fetch, /fs/page subresources).
@@ -2725,7 +3010,12 @@ async def cli_hook(vendor: str, request: Request) -> Any:
             # call the pane idle and start injecting the NEXT queued message
             # over stdin, into a pane that is already working.
             event_type = "agent_active"
-    if pane_id:
+    # idle_prompt fires about a minute after EVERY finished turn (draft in the
+    # composer or not). It reports the pane waiting, not working, so recording
+    # it as agent_active would replace the turn_complete entry for good —
+    # cli_get_status would show a finished pane as active, with no turn text.
+    # The broadcast below still carries it for the renderer to judge.
+    if pane_id and notification_type != "idle_prompt":
         # The log-reader sink is not the only writer of _pane_activity any
         # more: for the hook vendors the Stop hook is the earliest and most
         # reliable end-of-turn signal there is, and cli_wait_idle could not see
@@ -2922,6 +3212,13 @@ async def ws(websocket: WebSocket) -> None:
     log.info("ws client connected")
     session = Session(websocket)
     _SESSIONS.add(session)
+    # First thing on every connection: the challenge a Navide main window
+    # answers through main (window.prove) to be told apart from any other
+    # client holding the token. Fresh per connection, so a reconnect proves
+    # again and a proof seen once cannot be replayed.
+    await session.send_json(
+        make_event("ws.welcome", {"windowChallenge": session.window_challenge})
+    )
     # An MCP client reads this backend's tool list once, when it connects, so a
     # CLI that was already talking to the previous backend keeps the tools it
     # saw then. Told to the window rather than logged: only the window can put
@@ -2966,6 +3263,7 @@ async def ws(websocket: WebSocket) -> None:
         # Peer is gone: silence any in-flight sends before cancelling tasks.
         session.dead = True
         _SESSIONS.discard(session)
+        await nudge_plugin_request_recovery(session)
         await _kill_onboarding_runs(session)
         # Release PTY ownership so their output is dropped until reattached.
         orphaned = [tid for tid, owner in _PTY_OWNERS.items() if owner is session]
@@ -3639,6 +3937,7 @@ async def handle_message(session: Session, msg: dict[str, Any]) -> None:
         )
     except Exception as err:  # noqa: BLE001
         log.exception("handle_message failed for type=%s", msg_type)
+        error_ledger.record("backend", "error", "ws.internal_error", f"{msg_type}: {type(err).__name__}: {err}")
         if not session.dead:
             await session.send_json(
                 make_error(msg_id, msg_type, "INTERNAL_ERROR", _redact_home(str(err)))

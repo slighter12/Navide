@@ -43,6 +43,7 @@ import {
   groupPosToRowCol,
   groupRowColToPos,
   installTerminalLinks,
+  isTerminalLinkModifierKey,
   cellColToStrCol,
   strColToCellCol,
   splitTerminalLinkSuffix,
@@ -375,11 +376,14 @@ function openInEditor(
   workspacePath?: string,
   onFailure?: (filepath: string) => void,
 ): void {
-  const slash = absPath.lastIndexOf('/')
+  // A Windows drive path (C:\…) separates with '\' as well as '/'.
+  const win = /^[A-Za-z]:[\\/]/.test(absPath)
+  const slash = win ? Math.max(absPath.lastIndexOf('/'), absPath.lastIndexOf('\\')) : absPath.lastIndexOf('/')
   const dir = slash > 0 ? absPath.slice(0, slash) : '/'
-  const root = workspacePath?.replace(/\/+$/, '')
-  const inWorkspace = !!root && absPath.startsWith(`${root}/`)
-  const filepath = inWorkspace ? absPath.slice(root.length + 1) : absPath.slice(slash + 1)
+  const root = workspacePath?.replace(win ? /[\\/]+$/ : /\/+$/, '')
+  const inWorkspace = !!root && (absPath.startsWith(`${root}/`) || (win && absPath.startsWith(`${root}\\`)))
+  const rel = inWorkspace ? absPath.slice(root.length + 1) : absPath.slice(slash + 1)
+  const filepath = win ? rel.replace(/\\/g, '/') : rel
   // Called synchronously so the request leaves at pick time; a sync throw is
   // folded into the same failure path as a rejection.
   let pending: Promise<boolean | void>
@@ -745,6 +749,11 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
   // memory predictable across long-running panes.
   const cleanBuffer = ref<string>('')
   const cleanBytesSeen = ref(0)
+  // When this terminal created a PTY for a resume spawn (0 otherwise, and for a
+  // reattach, whose CLI never stopped). The messaging gate reads it: a resumed
+  // CLI reloads its transcript in silence, so quiet alone does not mean ready —
+  // see lib/resumeBoot.ts.
+  const resumeSpawnedAt = ref(0)
   // `lastActivityAt` only updates when CLEANED text changes — i.e. real content.
   // Used for analyzer triggers and sentinel scans.
   const lastActivityAt = ref<number>(0)
@@ -1795,12 +1804,12 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
     el.addEventListener('mousemove', _mousePosTracker)
 
     _cmdKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Meta' || _isCmdHeld) return
+      if (!isTerminalLinkModifierKey(e.key) || _isCmdHeld) return
       _isCmdHeld = true
       el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: _lastMX, clientY: _lastMY, metaKey: true }))
     }
     _cmdKeyUp = (e: KeyboardEvent) => {
-      if (e.key !== 'Meta') return
+      if (!isTerminalLinkModifierKey(e.key)) return
       _isCmdHeld = false
       el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: _lastMX, clientY: _lastMY }))
     }
@@ -1849,7 +1858,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
           const home = await fetchHomeDir(terminalPort)
           const resolveAbs = (fp: string): string | undefined => {
             const expanded = expandHomePath(fp, home)
-            return expanded.startsWith('/')
+            return expanded.startsWith('/') || /^[A-Za-z]:[\\/]/.test(expanded)
               ? expanded
               : wsPath ? `${wsPath}/${expanded.replace(/^\.\//, '')}` : undefined
           }
@@ -1866,7 +1875,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
           const chosenRaw = okIdx >= 0 ? request.candidates[okIdx] : request.fallback
           const { filepath, line: lineNum } = splitTerminalLinkSuffix(chosenRaw)
           if (!filepath) return
-          const basename = filepath.split('/').filter(Boolean).pop() ?? filepath
+          const basename = filepath.split(/[\\/]/).filter(Boolean).pop() ?? filepath
           filePicker.open({
             initialQuery: basename,
             lineNum,
@@ -2781,6 +2790,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
         outputLogFile: opts.outputLogFile ?? null,
         loginProfileId: opts.loginProfileId ?? null,
         isLogin: opts.isLogin ?? false,
+        ...(opts.accountDirLogin ? { accountDirLogin: true } : {}),
         replacesTerminalId: replacesPtyId || null,
         quotaTransactionId: opts.quotaTransactionId,
         quotaOriginalPaneId: opts.quotaOriginalPaneId,
@@ -2808,6 +2818,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
       startingStartedAt.value = null
       sessionId.value = resp.payload.terminal_session_id
       rememberSessionId(sessionId.value)  // enable reattach after a reload
+      resumeSpawnedAt.value = opts.isResume ? Date.now() : 0
       status.value = 'running'
       const probe = resp.payload.startup_probe
       if (probe?.binary_path) {
@@ -3238,10 +3249,24 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
     return !(reply && typeof reply === 'object' && (reply as { ok?: unknown }).ok === false)
   }
 
-  async function kill(opts?: { force?: boolean }): Promise<void> {
+  async function kill(opts?: { force?: boolean; retireRestore?: boolean }): Promise<void> {
     if (!sessionId.value) return
+    const killedId = sessionId.value
     rememberSessionId('')  // explicit kill — never reattach to this PTY
-    await terminalPort.kill(sessionId.value, opts?.force ?? false)
+    const force = opts?.force ?? false
+    // Only an explicit Stop carries the flag; every other kill stays two-argument.
+    const reply = opts?.retireRestore
+      ? await terminalPort.kill(killedId, force, { retireRestore: true })
+      : await terminalPort.kill(killedId, force)
+    // wsClient resolves an `ok: false` rather than rejecting it (see interrupt).
+    // A refused kill left the PTY running, so it must not read as done: keep the
+    // id the pane still owns and let the caller sweep.
+    if (reply && typeof reply === 'object' && (reply as { ok?: unknown }).ok === false) {
+      rememberSessionId(killedId)
+      const error = (reply as { error?: unknown }).error
+      const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : error
+      throw new Error(`terminal kill refused: ${String(code ?? 'unknown')}`)
+    }
   }
 
   // Pin this pane's width at its current column count, so a layout mode that
@@ -3251,6 +3276,22 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
   // false lifts the cap and lets the next fit use the full container.
   function lockCols(locked: boolean): void {
     resizeCtrl.setColsCap(locked ? term.cols : null)
+  }
+
+  // True while a cols cap leaves part of the visible container blank — what the
+  // pane menu's "Fit to pane width" is offered for. A hidden pane proposes no
+  // dimensions, so it never reads as capped.
+  function isColsCapped(): boolean {
+    const dims = fit.proposeDimensions()
+    return !!dims && Number.isFinite(dims.cols) && resizeCtrl.capCols(dims.cols) < dims.cols
+  }
+
+  // The user's explicit opt-out of the cap: widen to the full container now.
+  // Widening reflows the scrollback, which is the cost the cap exists to avoid,
+  // so this only ever runs from a user action — never from a layout path.
+  function unlockCols(): void {
+    lockCols(false)
+    fitTerminal({ redrawAfterSettle: true })
   }
 
   function fitTerminal(opts?: { redrawAfterSettle?: boolean }): void {
@@ -3386,6 +3427,8 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
     focus,
     fitTerminal,
     lockCols,
+    isColsCapped,
+    unlockCols,
     redraw,
     pasteText,
     pasteFromClipboard,
@@ -3403,6 +3446,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
     lastCommand,
     cleanBuffer,
     cleanBytesSeen,
+    resumeSpawnedAt,
     lastActivityAt,
     lastRawActivityAt,
     hasDraft,
@@ -3430,6 +3474,8 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
     rendererKind,
     optionSelectHint,
     getSelection: () => term.getSelection(),
+    /** True while the CLI has mouse reporting on, so xterm forwards clicks to it. */
+    isMouseTracking: () => term.modes.mouseTrackingMode !== 'none',
     setDisableStdin: (disabled: boolean) => {
       if (_stdinGated === disabled) return
       _stdinGated = disabled

@@ -47,12 +47,16 @@ class Bridge:
         self.delivered: list[dict[str, Any]] = []
         self.gate: asyncio.Event | None = None
         self.counter = 0
+        self.final: dict[str, dict[str, Any]] = {}
 
     def has_window(self) -> bool:
         return self.window
 
     def still_queued(self, msg_key: str | None) -> bool:
         return bool(msg_key) and msg_key in self.queued
+
+    def message_outcome(self, msg_key: str | None) -> dict[str, Any] | None:
+        return self.final.get(msg_key or "")
 
     async def budget_limited(self, action: dict[str, Any]) -> bool:
         return self.limited
@@ -105,6 +109,14 @@ def every_job(minutes: int = 2, **over) -> dict:
 async def settle(service: SchedulerService) -> None:
     for task, _manual in list(service._runs.values()):  # noqa: SLF001
         await task
+
+
+async def caught_up(service: SchedulerService) -> None:
+    """Wait for the catch-up task to finish. No wall-clock budget: the fake
+    clock makes its sleeps instant, so all its time is real SQLite commits,
+    and eight jobs' worth took over 5 s on the Windows runner. A hang still
+    fails there, on the per-test --timeout the Windows CI job passes."""
+    await service._catch_up_task  # noqa: SLF001
 
 
 async def create(service: SchedulerService, **over) -> dict:
@@ -276,7 +288,7 @@ async def test_catch_up_runs_one_slot_per_job_burst_then_spaced(env) -> None:
     try:
         assert restarted._catch_up_task is not None  # noqa: SLF001
         # The regular tick must leave pending catch-up jobs to the catch-up task.
-        await asyncio.wait_for(restarted._catch_up_task, 5)  # noqa: SLF001
+        await caught_up(restarted)
         await settle(restarted)
         assert len(env["bridge"].delivered) == 7  # one per job, not one per missed slot
         spacing = [s for s in env["sleeps"] if s == CATCH_UP_SPACING_S]
@@ -290,6 +302,29 @@ async def test_catch_up_runs_one_slot_per_job_burst_then_spaced(env) -> None:
         ]
     finally:
         await restarted.close()
+
+
+async def test_a_tick_acting_on_a_stale_listing_does_not_fire_a_caught_up_job_again(env) -> None:
+    """The tick reads every job, then fires the overdue ones. When catch-up ran
+    a job in between, the tick's row still shows the old next_run_at; starting
+    the run must re-check the fresh row or the job is delivered twice."""
+    service = env["make"]()
+    job = await create(service, minutes=1, name="j0")
+    env["clock"].advance_ms(60 * MINUTE)
+    stale = await service.store.list_jobs()
+    await service._catch_up([job["id"]])  # noqa: SLF001
+    await settle(service)
+    assert len(env["bridge"].delivered) == 1
+
+    async def stale_listing() -> list[dict]:
+        return stale
+
+    service.store.list_jobs = stale_listing  # type: ignore[method-assign]
+    await service.tick()
+    await settle(service)
+
+    assert len(env["bridge"].delivered) == 1
+    assert [r["status"] for r in await runs(service, job["id"])] == ["ok"]
 
 
 async def test_catch_up_is_sequential(env) -> None:
@@ -315,7 +350,7 @@ async def test_catch_up_is_sequential(env) -> None:
     restarted = env["make"]()
     await restarted.start()
     try:
-        await asyncio.wait_for(restarted._catch_up_task, 5)  # noqa: SLF001
+        await caught_up(restarted)
         assert len(bridge.delivered) == 3 and active["max"] == 1
     finally:
         await restarted.close()
@@ -336,7 +371,7 @@ async def test_catch_up_waits_for_a_window(env) -> None:
     restarted._sleep = window_appears  # noqa: SLF001
     await restarted.start()
     try:
-        await asyncio.wait_for(restarted._catch_up_task, 5)  # noqa: SLF001
+        await caught_up(restarted)
         await settle(restarted)
         assert len(env["bridge"].delivered) == 1
     finally:
@@ -536,13 +571,84 @@ async def test_once_missed_while_closed_is_caught_up_once(env) -> None:
     restarted = env["make"]()
     await restarted.start()
     try:
-        await asyncio.wait_for(restarted._catch_up_task, 5)  # noqa: SLF001
+        await caught_up(restarted)
         await settle(restarted)
         assert len(env["bridge"].delivered) == 1
         row = await job_row(restarted, job["id"])
         assert row["enabled"] is False and row["state"]["last_status"] == "ok"
     finally:
         await restarted.close()
+
+
+async def test_a_tick_acting_on_a_stale_listing_does_not_fire_a_caught_up_once_job_again(env) -> None:
+    """Restart race: the tick listed the overdue once job, then the catch-up
+    ran it to completion before the tick got to start it. The finished run
+    disabled the job and cleared next_run_at, so the start must refuse it."""
+    service = env["make"]()
+    job = (await service.upsert(once_job()))["job"]
+    env["clock"].advance_ms(60 * MINUTE)
+    stale = await service.store.list_jobs()
+    await service._catch_up([job["id"]])  # noqa: SLF001
+    await settle(service)
+    assert len(env["bridge"].delivered) == 1
+
+    async def stale_listing() -> list[dict]:
+        return stale
+
+    service.store.list_jobs = stale_listing  # type: ignore[method-assign]
+    await service.tick()
+    await settle(service)
+
+    assert len(env["bridge"].delivered) == 1
+    assert [r["status"] for r in await runs(service, job["id"])] == ["ok"]
+    row = await job_row(service, job["id"])
+    assert row["enabled"] is False and row["state"]["next_run_at"] is None
+
+
+async def test_a_periodic_job_caught_up_against_a_stale_tick_keeps_its_next_slot(env) -> None:
+    service = env["make"]()
+    job = await create(service, minutes=2)
+    env["clock"].advance_ms(60 * MINUTE)
+    stale = await service.store.list_jobs()
+    await service._catch_up([job["id"]])  # noqa: SLF001
+    await settle(service)
+    real_listing = service.store.list_jobs
+
+    async def stale_listing() -> list[dict]:
+        return stale
+
+    service.store.list_jobs = stale_listing  # type: ignore[method-assign]
+    await service.tick()
+    await settle(service)
+    assert len(env["bridge"].delivered) == 1
+    service.store.list_jobs = real_listing  # type: ignore[method-assign]
+    env["clock"].advance_ms(2 * MINUTE)
+    await service.tick()
+    await settle(service)
+    assert len(env["bridge"].delivered) == 2
+
+
+async def test_run_now_still_runs_a_disabled_job(env) -> None:
+    service = env["make"]()
+    job = await create(service)
+    await service.set_enabled(job["id"], False)
+    assert await service.run_now(job["id"]) == {"ok": True, "enqueued": True}
+    await settle(service)
+    assert len(env["bridge"].delivered) == 1
+    assert (await job_row(service, job["id"]))["enabled"] is False
+
+
+async def test_run_now_still_runs_a_once_job_that_already_ran(env) -> None:
+    service = env["make"]()
+    job = (await service.upsert(once_job()))["job"]
+    env["clock"].advance_ms(5 * MINUTE)
+    await service.tick()
+    await settle(service)
+    assert await service.run_now(job["id"]) == {"ok": True, "enqueued": True}
+    await settle(service)
+    assert len(env["bridge"].delivered) == 2
+    row = await job_row(service, job["id"])
+    assert row["enabled"] is False and row["state"]["next_run_at"] is None
 
 
 async def test_once_missed_with_catch_up_skip_is_recorded_and_disabled(env) -> None:
@@ -588,3 +694,64 @@ async def test_run_now_works_on_a_once_job(env) -> None:
     # A manual run is not its slot: the job stays armed for its moment.
     assert row["enabled"] is True and row["state"]["next_run_at"] == job["schedule"]["at_ms"]
     assert len(env["bridge"].delivered) == 1
+
+
+# ── a run whose message was still queued ──────────────────────────────────
+
+
+async def _queued_run(env) -> tuple[SchedulerService, dict]:
+    service = env["make"]()
+    job = await create(service)
+    env["bridge"].outcomes.append({"status": "ok", "detail": "queued (mid-turn)", "msg_key": "kq"})
+    env["bridge"].queued.add("kq")
+    env["clock"].advance_ms(2 * MINUTE)
+    await service.tick()
+    await settle(service)
+    return service, job
+
+
+async def test_a_queued_run_says_so_until_its_message_settles(env) -> None:
+    service, job = await _queued_run(env)
+    env["bridge"].final["kq"] = {"status": "queued", "reason": None}
+    listed = (await service.runs(job["id"]))["runs"]
+    assert (listed[0]["status"], listed[0]["detail"]) == ("ok", "queued (mid-turn)")
+
+
+async def test_a_queued_message_that_then_failed_turns_its_run_into_an_error(env) -> None:
+    service, job = await _queued_run(env)
+    env["bridge"].queued.discard("kq")
+    env["bridge"].final["kq"] = {"status": "failed", "reason": "target closed"}
+    listed = (await service.runs(job["id"]))["runs"]
+    assert (listed[0]["status"], listed[0]["reason"]) == ("error", "failed")
+    assert listed[0]["detail"] == "queued (mid-turn), then failed: target closed"
+    # Resolved once: reading again changes nothing.
+    assert (await service.runs(job["id"]))["runs"] == listed
+
+
+async def test_a_queued_message_that_was_delivered_stays_ok_and_says_so(env) -> None:
+    service, job = await _queued_run(env)
+    env["bridge"].queued.discard("kq")
+    env["bridge"].final["kq"] = {"status": "delivered", "reason": None}
+    listed = (await service.runs(job["id"]))["runs"]
+    assert (listed[0]["status"], listed[0]["detail"]) == ("ok", "queued (mid-turn), then delivered")
+
+
+async def test_a_queued_message_no_longer_tracked_is_disclosed(env) -> None:
+    service, job = await _queued_run(env)
+    env["bridge"].queued.discard("kq")
+    listed = (await service.runs(job["id"]))["runs"]
+    assert listed[0]["detail"] == "queued (mid-turn), outcome no longer tracked"
+
+
+async def test_the_next_fire_resolves_the_queued_run_before_its_own(env) -> None:
+    service, job = await _queued_run(env)
+    env["bridge"].queued.discard("kq")
+    env["bridge"].final["kq"] = {"status": "rejected", "reason": "policy"}
+    env["clock"].advance_ms(2 * MINUTE)
+    await service.tick()
+    await settle(service)
+    rows = await service.store.list_runs(job["id"], 5)
+    assert [(r["status"], r["detail"]) for r in rows] == [
+        ("ok", "delivered"),
+        ("error", "queued (mid-turn), then rejected: policy"),
+    ]

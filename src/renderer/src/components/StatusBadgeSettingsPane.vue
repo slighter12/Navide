@@ -11,6 +11,7 @@
 // swatches render their real resolved colour under the current theme by binding
 // the palette's token expressions straight into the button.
 import { useI18n } from 'vue-i18n'
+import { vTruncate } from '@navide/plugin-ui/foundation'
 
 import { paneStatusLabelKey, type PaneStatusValue } from '../lib/paneStatusLabel'
 import {
@@ -96,7 +97,7 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
           {{ previewLabel(status, locale) }}
         </span>
         <span class="sb-key">
-          {{ status }}
+          <span class="sb-key-name" v-truncate>{{ status }}</span>
           <em v-if="ROW_ONLY.includes(status)" class="sb-rowonly">
             {{ $t('statusBadges.row-only') }}
           </em>
@@ -179,9 +180,14 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
 
 <style scoped>
 .sb {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: max-content minmax(120px, 2fr) repeat(3, minmax(108px, 1fr)) max-content max-content;
+  column-gap: 12px;
+  row-gap: 2px;
+}
+.sb-intro,
+.sb-foot {
+  grid-column: 1 / -1;
 }
 .sb-intro {
   margin: 0 0 14px;
@@ -191,14 +197,15 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
   max-width: 68ch;
 }
 
-/* One grid template shared by the header and every row, so the columns line up
- * without either knowing the other's widths. */
+/* The header and every row are subgrids of .sb, so the auto-sized colour and
+ * reset columns take one width for all of them and the headers sit over their
+ * own column. */
 .sb-head,
 .sb-row {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(190px, 1.4fr) repeat(3, minmax(96px, 1fr)) auto auto;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 12px;
   padding: 8px 10px;
 }
 .sb-head {
@@ -224,28 +231,44 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
   background: var(--bg-hover-faint);
 }
 
+/* The pill gets its own .sb column, as wide as the widest pill in the current
+ * locale, so every key and description starts at the same x. */
+.sb-h-status,
+.sb-status {
+  grid-column: span 2;
+}
 .sb-status {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: subgrid;
   grid-template-areas: 'preview key' 'preview when';
   align-items: center;
-  column-gap: 10px;
   min-width: 0;
 }
 .sb-preview {
   grid-area: preview;
   align-self: center;
+  justify-self: start;
   font-size: var(--font-3xs);
   text-transform: uppercase;
   padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
 }
+/* When the key and the "list only" tag do not fit on one line the tag wraps
+ * under the key, so neither of them is cut. */
 .sb-key {
   grid-area: key;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
   font-family: var(--font-mono, monospace);
   font-size: var(--font-row-desc);
   color: var(--text-primary);
+}
+.sb-key-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -253,22 +276,24 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
 .sb-rowonly {
   font-family: inherit;
   font-style: normal;
-  font-size: 9px;
+  font-size: var(--font-3xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
   border: 1px solid var(--border-muted);
   border-radius: 4px;
   padding: 0 4px;
-  margin-left: 6px;
+  white-space: nowrap;
 }
+/* Wraps instead of truncating: the description is the only place that says
+ * when a status applies, and ja-JP runs about twice as long as en-US. */
 .sb-when {
   grid-area: when;
   font-size: var(--font-row-desc);
   color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .sb-field {
@@ -278,6 +303,27 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
 .sb-field input {
   width: 100%;
   box-sizing: border-box;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-sm);
+  line-height: var(--lh-base);
+  padding: 4px 8px;
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+/* The placeholder is the label in effect, not a hint, so it reads at the
+ * secondary text colour rather than the muted one. */
+.sb-field input::placeholder {
+  color: var(--text-secondary);
+}
+.sb-field input:hover {
+  border-color: var(--border-strong);
+}
+.sb-field input:focus {
+  outline: none;
+  border-color: var(--accent-focus);
 }
 /* Visually hidden but read aloud: each input needs its own name, and a visible
  * one would repeat the column header nine times. */
@@ -290,13 +336,16 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
   white-space: nowrap;
 }
 
+/* Two rows of five keep the column narrow enough that the reset button stays
+ * inside the card in every locale, and leave each swatch a 24px target. */
 .sb-colors {
-  display: flex;
-  gap: 5px;
+  display: grid;
+  grid-template-columns: repeat(5, 24px);
+  gap: 4px;
 }
 .sb-swatch {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 1px solid var(--border-muted);
   padding: 0;
@@ -331,9 +380,13 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
 .sb-reset-all:hover:not(:disabled) {
   background: var(--bg-hover-strong);
 }
+/* Disabled drops the fill and border instead of fading the whole button, so
+ * the label stays readable next to the inputs. */
 .sb-reset:disabled,
 .sb-reset-all:disabled {
-  opacity: 0.4;
+  background: transparent;
+  border-color: var(--border-muted);
+  color: var(--text-secondary);
   cursor: default;
 }
 
@@ -357,8 +410,17 @@ function onLabel(status: PaneStatusValue, locale: 'zh-TW' | 'en-US' | 'ja-JP', v
 /* Below the three-input width the grid stops being a table and becomes stacked
  * cards, which is the only way nine rows of six columns stay usable. */
 @media (max-width: 920px) {
+  .sb {
+    display: flex;
+    flex-direction: column;
+  }
   .sb-head {
     display: none;
+  }
+  .sb-status {
+    grid-column: auto;
+    grid-template-columns: auto 1fr;
+    column-gap: 10px;
   }
   .sb-row {
     grid-template-columns: 1fr;

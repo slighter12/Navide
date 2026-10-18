@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { vTruncate } from '@navide/plugin-ui/foundation'
 import { CLI_AGENT_SPECS } from '@navide/plugin-shell'
 import type { useBackend } from '../../composables/useBackend'
 import { useAgentMessaging } from '../../composables/useAgentMessaging'
@@ -201,14 +202,14 @@ async function runTest(): Promise<void> {
           </tbody>
         </table>
       </SettingsCard>
-      <p class="gd-hint">{{ t('guard.policy.levels') }}</p>
+      <p class="gd-hint gd-footnote">{{ t('guard.policy.levels') }}</p>
     </SettingsSection>
 
     <SettingsSection :label="t('guard.vendors.title')">
       <p class="gd-hint">{{ t('guard.vendors.hint') }}</p>
-      <SettingsCard>
+      <SettingsCard class="gd-vendors">
         <div v-for="v in vendors" :key="v.key" class="gd-item" data-testid="guard-vendor-row" :data-vendor="v.key">
-          <span class="gd-item-name">{{ v.label }}</span>
+          <span class="gd-item-name" v-truncate>{{ v.label }}</span>
           <span
             class="gd-pill"
             :class="v.support === 'block' ? 'ok' : v.support === 'none' ? 'warn' : 'muted'"
@@ -224,7 +225,7 @@ async function runTest(): Promise<void> {
         <SettingsCard>
           <div v-for="rule in g.rules" :key="rule.id" class="gd-item" data-testid="guard-builtin-row" :data-rule="rule.id">
             <div class="gd-item-text">
-              <span class="gd-item-name">{{ ruleTitle(rule) }}</span>
+              <span class="gd-item-name" v-truncate>{{ ruleTitle(rule) }}</span>
               <code class="gd-code">{{ rule.example }}</code>
               <span class="gd-item-meta">{{ t('guard.builtin.default', { level: t(`guard.level.${rule.default_level}`) }) }}<template v-if="rule.floor"> · {{ t('guard.builtin.floor') }}</template></span>
             </div>
@@ -260,6 +261,10 @@ async function runTest(): Promise<void> {
 
     <SettingsSection :label="t('guard.rules.title')">
       <p class="gd-hint">{{ t('guard.rules.hint') }}</p>
+      <details class="gd-more">
+        <summary>{{ t('guard.terminal.more') }}</summary>
+        <p>{{ t('guard.rules.hint-detail') }}</p>
+      </details>
       <SettingsCard>
         <div v-for="rule in store.rules.value" :key="rule.id" class="gd-item" data-testid="guard-rule-row">
           <span class="gd-pill" :class="rule.kind === 'deny' ? 'bad' : 'ok'">{{ t(`guard.rules.kind.${rule.kind}`) }}</span>
@@ -324,7 +329,7 @@ async function runTest(): Promise<void> {
         <div v-if="!store.taint.value.length" class="gd-item gd-empty">{{ t('guard.taint.empty') }}</div>
         <div v-for="entry in store.taint.value" :key="entry.pane_id" class="gd-item" data-testid="guard-taint-row">
           <div class="gd-item-text">
-            <span class="gd-item-name">{{ paneLabel(entry.pane_id) }}</span>
+            <span class="gd-item-name" v-truncate>{{ paneLabel(entry.pane_id) }}</span>
             <span class="gd-item-meta">{{ (entry.sources ?? []).map(sourceText).join(', ') }} · {{ formatTime(entry.since) }}<template v-if="entry.detail"> · {{ entry.detail }}</template></span>
           </div>
           <button type="button" class="gd-btn ghost sm" :disabled="busy" data-testid="guard-taint-clear-row" @click="run(() => store.clearTaint(entry.pane_id))">{{ t('guard.pane.clear') }}</button>
@@ -349,7 +354,7 @@ async function runTest(): Promise<void> {
 
 <style scoped>
 .security-pane { display: flex; flex-direction: column; }
-.gd-hint { margin: 0 0 8px; font-size: var(--font-row-desc); color: var(--text-secondary); line-height: 1.4; }
+.gd-hint { margin: 0 0 8px; font-size: var(--font-row-desc); color: var(--text-secondary); line-height: 1.5; text-wrap: pretty; word-break: auto-phrase; }
 .gd-error { margin: 8px 0 0; font-size: var(--font-2xs); color: var(--danger-fg); word-break: break-word; }
 .gd-inset { margin: 0; padding: 0 var(--space-row-x) 8px; }
 .gd-counts { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px var(--space-row-x); }
@@ -399,7 +404,24 @@ async function runTest(): Promise<void> {
 .gd-check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-2xs); color: var(--text-secondary); }
 .gd-test-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 var(--space-row-x) 10px; }
 .gd-test-matched .gd-item { padding-top: 4px; padding-bottom: 4px; }
-.gd-subhead { margin: 10px 0 6px; font-size: var(--font-2xs); font-weight: 600; color: var(--text-secondary); }
+.gd-subhead { margin: 16px 0 6px; font-size: var(--font-xs); font-weight: 600; color: var(--text-primary); }
+.gd-footnote { margin: 8px 0 0; }
+/* Edge cases fold away under the one-sentence summary. */
+.gd-more { margin: -4px 0 8px; font-size: var(--font-row-desc); color: var(--text-secondary); line-height: 1.5; }
+.gd-more summary { width: fit-content; cursor: pointer; color: var(--accent-fg); }
+.gd-more p { margin: 4px 0 0; max-width: 72ch; text-wrap: pretty; word-break: auto-phrase; }
+/* 15 vendors read as two columns instead of one long list. */
+.gd-vendors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* The card draws a divider above every child after the first; in two
+   columns the second item is on the first row too, and odd items sit in the
+   left column, which gets a rule on its right. */
+.gd-vendors > .gd-item:nth-child(2) { border-top-color: transparent; }
+.gd-vendors > .gd-item:nth-child(odd) { border-right: 1px solid var(--border-muted); }
+@media (max-width: 760px) {
+  .gd-vendors { grid-template-columns: minmax(0, 1fr); }
+  .gd-vendors > .gd-item:nth-child(2) { border-top-color: var(--border-muted); }
+  .gd-vendors > .gd-item:nth-child(odd) { border-right: none; }
+}
 .gd-input.bad { color: var(--danger-fg); }
 .gd-input.warn { color: var(--attention-fg); }
 
@@ -416,6 +438,8 @@ async function runTest(): Promise<void> {
 }
 .gd-btn.sm { font-size: var(--font-2xs); padding: 3px 8px; }
 .gd-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* A primary waiting for input keeps its frame instead of fading to a ghost of itself. */
+.gd-btn.primary:disabled { opacity: 1; background: transparent; border-color: var(--border-default); color: var(--text-secondary); }
 .gd-btn.primary { background: var(--accent-emphasis); border-color: var(--accent-emphasis); color: var(--text-on-emphasis); }
 .gd-btn.primary:hover:not(:disabled) { background: var(--accent-fg); border-color: var(--accent-fg); }
 .gd-btn.ghost { color: var(--text-secondary); }

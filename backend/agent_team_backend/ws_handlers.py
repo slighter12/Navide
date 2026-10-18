@@ -15,9 +15,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import functools
+import itertools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -57,6 +59,7 @@ from .mcp_settings import (
     restore_mcp_server_secrets,
 )
 from .plan_index import resolve_plan_root
+from .stages_store import GraphNonLinearError
 from .plan_provisioning import SPEC_FILENAME, TEMPLATE_FILENAME, ensure_plan_assets
 from .profiles_store import SUPPORTED_AGENT_KEYS as PROFILE_AGENT_KEYS
 from .skills_events import notify_skills_changed
@@ -70,6 +73,7 @@ from .skills_store import (
 from .spawn_history import (
     canonical_workspace_path,
     filter_foreign_entries,
+    MAX_ENTRIES as SPAWN_HISTORY_MAX_ENTRIES,
     read_pane_transcript,
     TRANSCRIPT_MAX_BYTES,
     TRANSCRIPT_CHUNK_CHARS,
@@ -158,6 +162,19 @@ def lookup(msg_type: str) -> Handler | None:
 
 
 # ── Editor AI (editor.*) ────────────────────────────────────────────────────
+#: The Navide plugins whose Disabled switch the Host reports (sent only while
+#: one is disabled).
+_DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide"})
+
+
+def _valid_disabled_plugins(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) <= len(_DISABLEABLE_BUILTIN_PLUGINS)
+        and all(isinstance(item, str) and item in _DISABLEABLE_BUILTIN_PLUGINS for item in value)
+    )
+
+
 @handler("host.register")
 async def host_register(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     """Authenticate Electron's private Host WebSocket session."""
@@ -171,13 +188,15 @@ async def host_register(session: "Session", msg_id: str, msg_type: str, payload:
             "features" in payload
             and (
                 not isinstance(payload["features"], dict)
-                or set(payload["features"]) - {"plans_backend_v2"}
+                or set(payload["features"]) - {"plans_backend_v2", "disabled_plugins"}
                 or not isinstance(payload["features"].get("plans_backend_v2", False), bool)
+                or not _valid_disabled_plugins(payload["features"].get("disabled_plugins", []))
             )
         )
     ):
         session.host_authenticated = False
         session.plans_backend_v2 = False
+        session.disabled_plugins = frozenset()
         await session.send_json(
             make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session authentication failed")
         )
@@ -185,7 +204,62 @@ async def host_register(session: "Session", msg_id: str, msg_type: str, payload:
     session.host_authenticated = True
     features = payload.get("features", {})
     session.plans_backend_v2 = isinstance(features, dict) and features.get("plans_backend_v2") is True
+    session.disabled_plugins = frozenset(features.get("disabled_plugins", []) if isinstance(features, dict) else [])
+    app.note_host_disabled_plugins(session.disabled_plugins)
     await session.send_json(make_response(msg_id, msg_type, {"registered": True}))
+    # A Host that connects again (its session dropped, this backend did not)
+    # starts from idle: tell it the result helper's state when there is one.
+    from .mcp_server.plugin_agent_tools import _result_worker
+    from .plugins.agent_tools_contract import AGENT_TOOLS_RESULT_HELPER_EVENT
+
+    if _result_worker.state != "idle":
+        await session.send_json(make_event(AGENT_TOOLS_RESULT_HELPER_EVENT, _result_worker.snapshot()))
+
+
+@handler("window.prove")
+async def window_prove(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Answer this connection's `ws.welcome` challenge. Accepted once per
+    connection: a right proof spends the challenge. A wrong one does not -- a
+    proof meant for the previous socket can arrive on a fresh one during a
+    reconnect, and must not lock that window out."""
+    from . import app
+
+    challenge = getattr(session, "window_challenge", "")
+    proof = payload.get("proof") if isinstance(payload, dict) else None
+    if not app.navide_window_proof_matches(challenge, proof):
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "window proof refused")
+        )
+        return
+    session.window_challenge = ""
+    session.navide_window = True
+    await session.send_json(make_response(msg_id, msg_type, {"proved": True}))
+
+
+@handler("diagnostics.record")
+async def diagnostics_record(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """A renderer warn/error diagnostic, kept in the on-disk error ledger so a
+    reload does not wipe it (the window's own ring buffer still has it too)."""
+    from . import error_ledger
+
+    if (
+        not isinstance(payload, dict)
+        or payload.get("level") not in error_ledger.LEVELS
+        or not isinstance(payload.get("code"), str) or not payload["code"]
+        or not isinstance(payload.get("message"), str)
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "expected {level: warn|error, code, message}")
+        )
+        return
+    pane_id = payload.get("paneId")
+    workspace = payload.get("workspace")
+    entry = await asyncio.to_thread(
+        error_ledger.record, "renderer", payload["level"], payload["code"], payload["message"],
+        pane_id=pane_id if isinstance(pane_id, str) else "",
+        workspace=workspace if isinstance(workspace, str) else "",
+    )
+    await session.send_json(make_response(msg_id, msg_type, {"recorded": entry is not None}))
 
 
 @handler("agent.capability.result")
@@ -214,6 +288,375 @@ async def agent_capability_result(
         return
     delivered = plan_mcp.resolve_agent_capability(request_id, response)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
+@handler("agent.capability.result_chunk")
+async def agent_capability_result_chunk(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """One piece of a Host agent tool result (agent-tools contract 4.4, R2)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    if not isinstance(payload, dict) or set(payload) != {"request_id", "seq", "data"} or not isinstance(
+        payload.get("request_id"), str
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "agent.capability.result_chunk is malformed")
+        )
+        return
+    accepted = plan_mcp.accept_agent_result_piece(payload["request_id"], payload["seq"], payload["data"])
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+@handler("agent.capability.progress")
+async def agent_capability_progress(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """The Host says a pending agent tool call is alive (contract 4.4, Timing)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"request_id", "phase"}
+        or not isinstance(payload.get("request_id"), str)
+        or payload.get("phase") not in ("arguments", "execution", "result")
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "agent.capability.progress is malformed")
+        )
+        return
+    accepted = plan_mcp.note_agent_capability_activity(payload["request_id"])
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+@handler("plugins.agentTools.sync")
+async def plugins_agent_tools_sync(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """The Host's full catalog of third-party agent tools (contract 4.1).
+
+    Only the authenticated Host session may send it. A snapshot replaces the
+    previous one; one from a new Host session starts again from its revision.
+    """
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import plugin_agent_tools
+
+    result = plugin_agent_tools.apply_sync(payload, plugin_agent_tools.session_key(session))
+    if not result["applied"] and result["error"] == "malformed snapshot":
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugins.agentTools.sync is malformed")
+        )
+        return
+    await session.send_json(make_response(msg_id, msg_type, result))
+
+
+@handler("marketplace.query.result")
+async def marketplace_query_result(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Return the Host's answer to a ``marketplace.query.request`` (plan B, B2-a)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    request_id = payload.get("request_id") if isinstance(payload, dict) else None
+    if not isinstance(request_id, str) or not request_id or not isinstance(payload.get("ok"), bool):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "marketplace.query.result is malformed")
+        )
+        return
+    response = {key: value for key, value in payload.items() if key != "request_id"}
+    delivered = plan_mcp.resolve_marketplace_query(request_id, response)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
+@handler("plugins.agent_action.result")
+async def plugins_agent_action_result(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Return the Host's answer to a ``plugins.agent_action.request`` (plan B, B2-c)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    request_id = payload.get("request_id") if isinstance(payload, dict) else None
+    if not isinstance(request_id, str) or not request_id or not isinstance(payload.get("ok"), bool):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugins.agent_action.result is malformed")
+        )
+        return
+    response = {key: value for key, value in payload.items() if key != "request_id"}
+    delivered = plan_mcp.resolve_plugin_agent_action(request_id, response)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
+_ACTIVITY_ROW_REQUIRED = frozenset(("plugin_id", "plugin_version", "source", "address", "outcome"))
+_ACTIVITY_ROW_FIELDS = _ACTIVITY_ROW_REQUIRED | {"workspace", "denied_reason", "fs_path", "shell_command", "at", "count"}
+#: The Host records broker and shell-broker calls; agent tool calls are the
+#: backend's own rows (B1).
+_HOST_ACTIVITY_SOURCES = frozenset(("broker", "shell"))
+#: Calls into a plugin's own backend, counted by the Host per batch.
+_BACKEND_CALL_ROW_FIELDS = frozenset(("plugin_id", "plugin_version", "workspace", "source", "address", "outcome", "count"))
+
+
+def _backend_call_row(app: Any, row: dict) -> str | None:
+    """Record one counted backend-call row; the skip reason when it is not recorded.
+
+    Exact fields (``at`` optional: the minute the calls fell in, Unix ms), a
+    ``backend.`` address and a positive count.
+    """
+    from .plugins import agent_tools_contract as contract
+
+    if set(row) - {"at"} != _BACKEND_CALL_ROW_FIELDS:
+        return "malformed"
+    if not all(isinstance(row[key], str) for key in _BACKEND_CALL_ROW_FIELDS - {"count"}):
+        return "malformed"
+    if not row["address"].startswith(contract.PLUGIN_BACKEND_CALL_ADDRESS_PREFIX):
+        return "malformed"
+    at = row.get("at")
+    if "at" in row and (isinstance(at, bool) or not isinstance(at, int) or at < 0):
+        return "bad at"
+    recorded = app.plugin_audit_log.record_backend_calls(
+        plugin_id=row["plugin_id"], plugin_version=row["plugin_version"], workspace=row["workspace"],
+        address=row["address"], outcome=row["outcome"], count=row["count"], at_ms=at,
+    )
+    return None if recorded else "refused"
+
+
+@handler("plugin.activity.record")
+async def plugin_activity_record(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Store the Host's batch of broker and shell-broker calls (plan B, D-e).
+
+    Write-only: each row (calls the Host counted per key and minute, with
+    ``count``) is redacted and counted by ``record_activity``; a row
+    it refuses is skipped, and nothing here can fail the calls it records.
+    Rows with source ``backend`` (calls into a plugin's own backend, counted)
+    go to the per-minute counts instead. The ``backend.`` address prefix and
+    the source must agree: a backend row with another address, or another row
+    with a ``backend.`` address, is skipped.
+    """
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    rows = payload.get("rows") if isinstance(payload, dict) and set(payload) == {"rows"} else None
+    if not isinstance(rows, list):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugin.activity.record is malformed")
+        )
+        return
+    accepted = 0
+    # Skipped rows are counted by reason and logged, never their content (#373 F3).
+    skipped = {"malformed": 0, "bad at": 0, "refused": 0}
+    for row in rows:
+        if isinstance(row, dict) and row.get("source") == "backend":
+            reason = _backend_call_row(app, row)
+            if reason is None:
+                accepted += 1
+            else:
+                skipped[reason] += 1
+            continue
+        if (
+            not isinstance(row, dict)
+            or not _ACTIVITY_ROW_REQUIRED <= set(row) <= _ACTIVITY_ROW_FIELDS
+            or row.get("source") not in _HOST_ACTIVITY_SOURCES
+            or (isinstance(row.get("address"), str) and row["address"].startswith("backend."))
+        ):
+            skipped["malformed"] += 1
+            continue
+        # `at`: when the call happened on the Host (Unix ms); record_activity
+        # clamps it to now. Without it, the row is dated when it arrives.
+        at = row.get("at")
+        if "at" in row and (isinstance(at, bool) or not isinstance(at, int) or at < 0):
+            skipped["bad at"] += 1
+            continue
+        # `count`: calls the Host counted under this key in that minute (1 when absent).
+        count = row.get("count", 1)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            skipped["malformed"] += 1
+            continue
+        fields = {key: value for key, value in row.items() if key not in ("at", "count") and isinstance(value, str)}
+        if len(fields) != len(row) - ("at" in row) - ("count" in row):
+            skipped["malformed"] += 1
+            continue
+        if app.plugin_audit_log.record_activity(**fields, at_ms=at, count=count):
+            accepted += 1
+        else:
+            skipped["refused"] += 1
+    if accepted < len(rows):
+        reasons = ", ".join(f"{reason}: {n}" for reason, n in skipped.items() if n)
+        log.warning("plugin activity: %d of %d rows skipped (%s)", len(rows) - accepted, len(rows), reasons)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+_DECLARED_KINDS = frozenset(("system", "shell", "backendMethod", "agentTool"))
+
+
+def _declared_items(value: Any) -> list[dict[str, str]] | None:
+    """``declared`` of a report request: ``[{kind, key}]``, None when malformed."""
+    if not isinstance(value, list):
+        return None
+    items = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"kind", "key"}
+            or item["kind"] not in _DECLARED_KINDS
+            or not isinstance(item["key"], str)
+        ):
+            return None
+        items.append({"kind": item["kind"], "key": item["key"]})
+    return items
+
+
+_RESOURCE_DECISION_FIELDS = frozenset(
+    ("plugin_id", "plugin_version", "item", "usage", "threshold", "decision", "at")
+)
+_MAX_SAFE_INTEGER = 2**53 - 1
+
+
+def _resource_decision_row(row: Any) -> dict[str, Any] | None:
+    """A ``plugin.resource.decision`` row with exactly the contract's fields
+    and types (``parsePluginResourceDecisionRow``'s rules), or None."""
+    from .plugins import agent_tools_contract as contract
+
+    if not isinstance(row, dict) or set(row) != _RESOURCE_DECISION_FIELDS:
+        return None
+
+    def number(value: Any) -> bool:
+        return (
+            not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value) and value >= 0
+        )
+
+    at = row["at"]
+    if (
+        not isinstance(row["plugin_id"], str) or not row["plugin_id"]
+        or not isinstance(row["plugin_version"], str)
+        or row["item"] not in contract.PLUGIN_RESOURCE_ITEMS
+        or row["decision"] not in contract.PLUGIN_RESOURCE_DECISIONS
+        or not number(row["usage"]) or not number(row["threshold"])
+        or isinstance(at, bool) or not isinstance(at, int) or not 0 <= at <= _MAX_SAFE_INTEGER
+    ):
+        return None
+    return dict(row)
+
+
+@handler("plugin.resource.decision")
+async def plugin_resource_decision(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Store the Host's watchdog notices and the user's decisions (contract 5.2).
+
+    Write-only: rows are queued for the audit's batched flush. A row that is
+    not exactly the contract's shape is skipped and only counted in the log.
+    """
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    rows = payload.get("rows") if isinstance(payload, dict) and set(payload) == {"rows"} else None
+    if not isinstance(rows, list):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugin.resource.decision is malformed")
+        )
+        return
+    accepted = 0
+    for raw in rows:
+        row = _resource_decision_row(raw)
+        if row is not None and app.plugin_audit_log.record_resource_decision(**row):
+            accepted += 1
+    if accepted < len(rows):
+        log.warning("plugin resource decision: %d of %d rows skipped", len(rows) - accepted, len(rows))
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+@handler("plugin.activity.forget")
+async def plugin_activity_forget(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """A plugin was removed: forget its first-seen rows (Host-authenticated)."""
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    plugin_id = payload.get("plugin_id") if isinstance(payload, dict) else None
+    if not isinstance(plugin_id, str) or not plugin_id or set(payload) != {"plugin_id"}:
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugin.activity.forget is malformed")
+        )
+        return
+    await asyncio.to_thread(app.plugin_audit_log.forget_plugin, plugin_id)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+
+
+@handler("plugins.activity.report")
+async def plugins_activity_report(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """One plugin's ``PluginActivityReport`` for the activity page (contract 5.1, D-f).
+
+    Host-authenticated: the main window asks the Host over IPC and the Host
+    forwards, adding the ``declared`` items from the installed manifest.
+    """
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    plugin_id = payload.get("plugin_id") if isinstance(payload, dict) else None
+    declared = _declared_items(payload.get("declared", [])) if isinstance(payload, dict) else None
+    # When the Host installed this package (Unix ms), optional (#373 F1).
+    installed_at = payload.get("installedAt") if isinstance(payload, dict) else None
+    if installed_at is not None and (isinstance(installed_at, bool) or not isinstance(installed_at, int) or installed_at < 0):
+        declared = None
+    if (
+        not isinstance(plugin_id, str)
+        or not plugin_id
+        or not set(payload) <= {"plugin_id", "declared", "installedAt"}
+        or declared is None
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugins.activity.report is malformed")
+        )
+        return
+    report = await asyncio.to_thread(
+        app.plugin_audit_log.activity_report, plugin_id, declared=declared, installed_at=installed_at
+    )
+    await session.send_json(make_response(msg_id, msg_type, report))
 
 
 @handler("editor.rewrite")
@@ -554,6 +997,13 @@ async def plans_ensure_assets(session: "Session", msg_id: str, msg_type: str, pa
             make_error(msg_id, msg_type, "BAD_REQUEST", "Plans asset request is malformed")
         )
         return
+    from . import app
+
+    if app.plans_plugin_disabled():
+        await session.send_json(
+            make_error(msg_id, msg_type, "PLUGIN_TOOL_UNAVAILABLE", "Navide plugin Plans is disabled")
+        )
+        return
     workspace_path = payload["workspace_path"]
     root = await asyncio.to_thread(resolve_plan_root, workspace_path)
     await asyncio.to_thread(ensure_plan_assets, workspace_path)
@@ -572,6 +1022,12 @@ async def plans_ensure_assets(session: "Session", msg_id: str, msg_type: str, pa
 @handler("plans.list_docs")
 async def plans_list_docs(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+
+    if app.plans_plugin_disabled():
+        await session.send_json(
+            make_error(msg_id, msg_type, "PLUGIN_TOOL_UNAVAILABLE", "Navide plugin Plans is disabled")
+        )
+        return
 
     # Plans live in the project root (plan_provisioning writes the spec there,
     # and every writer resolves to it), so a workspace opened on a
@@ -606,6 +1062,12 @@ async def plans_resolve_root(session: "Session", msg_id: str, msg_type: str, pay
 @handler("plans.cache_put")
 async def plans_cache_put(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+
+    if app.plans_plugin_disabled():
+        await session.send_json(
+            make_error(msg_id, msg_type, "PLUGIN_TOOL_UNAVAILABLE", "Navide plugin Plans is disabled")
+        )
+        return
 
     # Same root as the scan that produced these entries, or the cache keys
     # would never match on the next list.
@@ -1702,6 +2164,7 @@ def _profile_account_view() -> dict:
     doc = app.cli_profiles_store.list()
     identities: dict[str, dict] = {}
     duplicates: dict[str, dict] = {}
+    account_dirs: dict[str, dict] = {}
     for agent_key in PROFILE_AGENT_KEYS:
         active = doc["defaults"].get(agent_key) or DEFAULT_SLOT_ID
         slot_ids = [DEFAULT_SLOT_ID] + [
@@ -1723,6 +2186,22 @@ def _profile_account_view() -> dict:
             key = email.casefold()
             groups.setdefault(key, []).append(sid)
             labels.setdefault(key, email)
+        if agent_key == "claude":
+            # Accounts that signed in inside their own config dir: their row
+            # shows that login — the one their panes run on — whatever the
+            # swap slot still holds.
+            dirs: dict[str, dict] = {}
+            for sid in slot_ids:
+                if sid == DEFAULT_SLOT_ID:
+                    continue
+                signed_in = app.credential_vault.account_dir_signed_in(sid)
+                account = app.credential_vault.account_dir_identity(sid) if signed_in else None
+                email = account.get("emailAddress") if isinstance(account, dict) else None
+                email = email if isinstance(email, str) and email else None
+                dirs[sid] = {"signedIn": signed_in, "email": email}
+                if signed_in:
+                    rows[sid] = {"email": email or rows[sid].get("email"), "signedIn": True}
+            account_dirs[agent_key] = dirs
         identities[agent_key] = rows
         dupes = {
             sid: {"email": labels[key], "slotIds": ids}
@@ -1732,7 +2211,7 @@ def _profile_account_view() -> dict:
         }
         if dupes:
             duplicates[agent_key] = dupes
-    return {"identities": identities, "duplicates": duplicates}
+    return {"identities": identities, "duplicates": duplicates, "accountDirs": account_dirs}
 
 
 def _profile_pin_for_spawn(agent_key: str, payload_profile_id: object) -> str:
@@ -1751,8 +2230,62 @@ def _profile_pin_for_spawn(agent_key: str, payload_profile_id: object) -> str:
     pin = str(payload_profile_id or "")
     if pin:
         return pin
+    pane_default = _pane_default_profile_id(agent_key)
+    if pane_default:
+        return pane_default
     active = app.cli_profiles_store.get_default_profile(agent_key)
     return active["id"] if active else DEFAULT_SLOT_ID
+
+
+#: Terminal metadata key naming the claude account whose own config dir the
+#: pane runs on (CLAUDE_CONFIG_DIR). Set by the backend only; such a pane does
+#: not use the live credential, so an account switch never touches it.
+ACCOUNT_DIR_METADATA_KEY = "account_dir_profile_id"
+
+
+def _pane_default_profile_id(agent_key: str) -> str:
+    """The account new panes start on when one was chosen apart from the
+    live credential's owner (``paneDefaults``), or "". A choice whose profile
+    is gone reads as none."""
+    from . import app
+
+    getter = getattr(app.cli_profiles_store, "get_pane_default", None)
+    chosen = getter(agent_key) if callable(getter) else None
+    if chosen and app.cli_profiles_store.get(chosen) is not None:
+        return str(chosen)
+    return ""
+
+
+def _account_dir_for_spawn(
+    agent_key: str, payload_profile_id: object, *, login: bool
+) -> str:
+    """The claude account whose own config dir this spawn runs on, or "" for
+    the live credential (the swap model, unchanged). A sign-in into the dir
+    (``login``) prepares it for the named profile even before it holds a
+    login; any other spawn uses a dir only once its account signed in there,
+    so an account that never did keeps running exactly as before. Blocking
+    (directory I/O and, on macOS, a Keychain presence check).
+
+    Only an explicit pin (``payload_profile_id``: a pane fixed to its account,
+    or a dir sign-in) runs on a dir. A spawn without one follows the live
+    credential even when the pane default or the live owner signed in inside
+    its dir, so an account switch reaches it (plan claude_f1bf4b, scheme A).
+    The pin recorded for bookkeeping is still _profile_pin_for_spawn's."""
+    from . import app
+
+    if agent_key != "claude":
+        return ""
+    slot = str(payload_profile_id or "")
+    if not slot or slot == DEFAULT_SLOT_ID:
+        return ""
+    profile = app.cli_profiles_store.get(slot)
+    if profile is None or profile.get("agentKey") != agent_key:
+        return ""
+    vault = app.credential_vault
+    if not login and not vault.account_dir_signed_in(slot):
+        return ""
+    vault.prepare_account_dir(slot)
+    return slot
 
 
 #: Terminal metadata key carrying the portable slot a launch was injected
@@ -1816,6 +2349,10 @@ async def _broadcast_profiles_changed(
         # Account rows storing the same login as another row of the same agent
         # — the Accounts pane flags them so the user can delete the spare.
         "duplicates": view["duplicates"],
+        # claude accounts' own config-dir logins: {"claude": {slotId:
+        # {signedIn, email}}}, and the account new panes start on.
+        "accountDirs": view["accountDirs"],
+        "paneDefaults": doc["paneDefaults"],
         # Pasted portable credentials, metadata only (never the value):
         # {"<agentKey>/<slotId>": {configured, enabled, kind, updatedAt, ...}}.
         "portable_credentials": portable,
@@ -1859,6 +2396,8 @@ async def cli_profiles_list(session: "Session", msg_id: str, msg_type: str, payl
                 "defaultNames": doc["defaultNames"],
                 "identities": view["identities"],
                 "duplicates": view["duplicates"],
+                "accountDirs": view["accountDirs"],
+                "paneDefaults": doc["paneDefaults"],
                 "supported_agents": list(PROFILE_AGENT_KEYS),
                 "portable_credentials": portable,
                 "portable_supported": portable_credentials.supported_agent_keys(),
@@ -2110,6 +2649,19 @@ async def cli_profiles_delete(session: "Session", msg_id: str, msg_type: str, pa
                 )
             )
             return
+        # A pane running on the account's own config dir would lose that dir
+        # when the slot is archived below and drop to "Login expired".
+        dir_panes = _running_account_dir_terminals(profile_id)
+        if dir_panes:
+            await session.send_json(
+                make_error(
+                    msg_id, msg_type, "ACCOUNT_DIR_IN_USE",
+                    f"{len(dir_panes)} running {agent_key} pane(s) use this "
+                    "account's own config dir; close them before deleting it",
+                    {"count": len(dir_panes), "agent_key": agent_key},
+                )
+            )
+            return
         # Remove secrets the archived slot dir cannot carry (claude's slot
         # Keychain item + oauth-account.json) and any leftover login home,
         # BEFORE the store renames the slot dir away. Cleanup failures must
@@ -2137,6 +2689,24 @@ async def cli_profiles_delete(session: "Session", msg_id: str, msg_type: str, pa
             {"profiles": doc["profiles"], "defaults": doc["defaults"]},
         )
     )
+
+
+def _running_account_dir_terminals(profile_id: str) -> list[str]:
+    """Terminal ids of the live panes running on ``profile_id``'s own claude
+    config dir (``ACCOUNT_DIR_METADATA_KEY``)."""
+    from . import app
+
+    running: list[str] = []
+    for tid, owner in list(app._PTY_OWNERS.items()):
+        lookup = getattr(getattr(owner, "terminals", None), "get", None)
+        term = lookup(tid) if callable(lookup) else None
+        if (
+            term is not None
+            and not getattr(term, "closed", False)
+            and getattr(term, "metadata", {}).get(ACCOUNT_DIR_METADATA_KEY) == profile_id
+        ):
+            running.append(tid)
+    return running
 
 
 def _live_login_pending(agent_key: str) -> bool:
@@ -2315,6 +2885,81 @@ def _slot_login_reason(agent_key: str, slot_id: str) -> str | None:
     return None
 
 
+@handler("cli_profiles.account_dir_expired")
+async def cli_profiles_account_dir_expired(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """A pane running on a claude account's own config dir reported "Login
+    expired". The dir stops counting as signed in until its login changes, so
+    new panes fall back to the live credential and the account list offers
+    the sign-in again. ``marked`` is False when the login carries no change
+    stamp to clear the mark by — then only the pane's own hint applies."""
+    from . import app
+
+    profile_id = str(payload.get("profile_id") or "")
+    profile = app.cli_profiles_store.get(profile_id) if profile_id else None
+    if profile is None or profile.get("agentKey") != "claude":
+        await session.send_json(make_error(
+            msg_id, msg_type, "NOT_FOUND", f"claude profile not found: {profile_id}",
+        ))
+        return
+    marked = await vault_to_thread(app.credential_vault.mark_account_dir_expired, profile_id)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "marked": marked}))
+    if marked:
+        await _broadcast_profiles_changed("account_dir_expired")
+
+
+@handler("cli_profiles.set_pane_default")
+async def cli_profiles_set_pane_default(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Choose the claude account new panes start on, by its own config dir.
+    Nothing is swapped and no running pane changes account — that is what
+    ``set_default`` (the live-credential switch) is for. Only an account that
+    signed in inside its config dir can be chosen; ``profile_id`` null/""
+    clears the choice so new panes follow the live credential again."""
+    from . import app
+
+    agent_key = str(payload.get("agent_key") or "")
+    profile_id = str(payload.get("profile_id") or "")
+    if agent_key != "claude":
+        await session.send_json(make_error(
+            msg_id, msg_type, "BAD_REQUEST",
+            f"per-account config dirs are claude-only, not {agent_key!r}",
+        ))
+        return
+    if profile_id:
+        profile = app.cli_profiles_store.get(profile_id)
+        if profile is None or profile.get("agentKey") != agent_key:
+            await session.send_json(make_error(
+                msg_id, msg_type, "NOT_FOUND", f"profile not found: {profile_id}",
+            ))
+            return
+        if not await vault_to_thread(app.credential_vault.account_dir_signed_in, profile_id):
+            await session.send_json(make_error(
+                msg_id, msg_type, "ACCOUNT_DIR_SIGNED_OUT",
+                "this account has not signed in inside its own config dir yet",
+                {"agent_key": agent_key, "profile_id": profile_id},
+            ))
+            return
+    pane_defaults = app.cli_profiles_store.set_pane_default(agent_key, profile_id or None)
+    await session.send_json(make_response(
+        msg_id, msg_type, {"ok": True, "paneDefaults": pane_defaults},
+    ))
+    await _broadcast_profiles_changed("set_pane_default")
+
+
+def _record_switch_back(agent_key: str, failure: str) -> None:
+    """The audit row of an account prompt's "switch back" (credentials.auto-repair)."""
+    from .convenience_wiring import gate as convenience_gate
+
+    g = convenience_gate()
+    if g is not None:
+        detail = "switched back from the account prompt"
+        g.record("credentials.auto-repair", "repair", f"{agent_key} live login",
+                 detail=f"{detail}; {failure}" if failure else detail)
+
+
 @handler("cli_profiles.set_default")
 async def cli_profiles_set_default(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     """Switch the agent's active account: capture the live credentials into the
@@ -2447,7 +3092,65 @@ async def cli_profiles_set_default(session: "Session", msg_id: str, msg_type: st
                     )
                 )
                 return
-        if current_id == profile_id:
+        # The account prompt's "switch back" (restore_live) answers one prompt
+        # about one live login. It carries that login's fingerprint and is
+        # refused once another login is live, so a stale prompt never
+        # overwrites, or captures into a slot, a login it did not name.
+        restore_live = bool(payload.get("restore_live"))
+        prompt_live: str | None = None
+        prompt_kw: dict[str, Any] = {}
+        if restore_live:
+            from .convenience_wiring import login_fingerprint
+
+            expected_fingerprint = payload.get("restore_live_fingerprint")
+            if not isinstance(expected_fingerprint, str):
+                await session.send_json(
+                    make_error(
+                        msg_id, msg_type, "BAD_REQUEST",
+                        "restore_live requires the prompt's restore_live_fingerprint",
+                    )
+                )
+                return
+            prompt_scope = quota_failover.profile_scope(
+                agent_key, app.cli_profiles_store.get(profile_id) if profile_id else None
+            )
+            prompt_kw = {"scope": prompt_scope} if prompt_scope else {}
+            try:
+                prompt_live = await vault_to_thread(
+                    lambda: app.credential_vault.read_live(agent_key, strict=True, **prompt_kw).secret
+                )
+            except Exception as err:  # noqa: BLE001 — unread is not signed out
+                await session.send_json(
+                    make_error(msg_id, msg_type, "PROFILE_SWAP_FAILED", _profile_error(err))
+                )
+                return
+            if login_fingerprint(prompt_live) != expected_fingerprint:
+                await session.send_json(
+                    make_error(
+                        msg_id, msg_type, "LIVE_CHANGED",
+                        f"another {agent_key} login is live since this prompt; nothing was switched",
+                    )
+                )
+                return
+        # The switch-back while its account is still the active one: the live
+        # login is someone else's (or nobody's), so "already active" would be
+        # a false ok. It runs as the normal switch below, guards and all, from
+        # the profile that keeps the live login (see restore_over_live).
+        restore_over_live = restore_live and current_id == profile_id
+        if restore_over_live:
+            try:
+                own = await vault_to_thread(
+                    lambda: app.credential_vault.read_slot(
+                        agent_key, profile_id or DEFAULT_SLOT_ID, **prompt_kw
+                    ).secret
+                )
+            except Exception as err:  # noqa: BLE001
+                await session.send_json(
+                    make_error(msg_id, msg_type, "PROFILE_SWAP_FAILED", _profile_error(err))
+                )
+                return
+            restore_over_live = prompt_live != own
+        if current_id == profile_id and not restore_over_live:
             # Already active — nothing to swap, nothing changed.
             await session.send_json(
                 make_response(
@@ -2544,6 +3247,38 @@ async def cli_profiles_set_default(session: "Session", msg_id: str, msg_type: st
                 )
                 return
 
+        if restore_over_live and prompt_live is not None:
+            # Keep the live login before it is replaced: the profile holding
+            # it becomes the outgoing account (one registered for it when
+            # none does), so the switch below captures it there.
+            from .usage_service import _follow_live_account
+
+            try:
+                live_email = await vault_to_thread(
+                    lambda: app.credential_vault.identity(agent_key, strict=True, **prompt_kw).get("email")
+                )
+            except Exception as err:  # noqa: BLE001 — nothing moved; refuse cleanly
+                await session.send_json(
+                    make_error(msg_id, msg_type, "PROFILE_SWAP_FAILED", _profile_error(err))
+                )
+                return
+            followed = await vault_to_thread(
+                _follow_live_account, agent_key, profile_id or DEFAULT_SLOT_ID,
+                live_email or None, switch_scope,
+            )
+            if followed is None:
+                await session.send_json(
+                    make_error(
+                        msg_id, msg_type, "PROFILE_SWAP_FAILED",
+                        f"the live {agent_key} login could not be kept in a profile; nothing was switched",
+                    )
+                )
+                return
+            current_id = None if followed == DEFAULT_SLOT_ID else followed
+        # Nobody is signed in: there is nothing to capture, only the slot to
+        # bring back.
+        restore_only = restore_over_live and prompt_live is None
+
         # Judged BEFORE the swap, while the slot still holds what will become
         # live: an empty or dead-token slot signs the CLI out, and the caller
         # opens a sign-in instead of leaving the user at a "not logged in"
@@ -2562,7 +3297,7 @@ async def cli_profiles_set_default(session: "Session", msg_id: str, msg_type: st
         # pick wins: a manual switch is never refused for drift (the
         # reconcile gate belongs to the quota failover transaction alone),
         # so the risk is logged and reported as ``warning``.
-        drift = await vault_to_thread(
+        drift = "none" if restore_only else await vault_to_thread(
             quota_failover.live_drift, app.credential_vault, agent_key,
             current_id or DEFAULT_SLOT_ID, scope_from,
         )
@@ -2602,20 +3337,30 @@ async def cli_profiles_set_default(session: "Session", msg_id: str, msg_type: st
             login_reason = None
         else:
             try:
-                await vault_to_thread(
-                    functools.partial(
-                        app.credential_vault.switch,
-                        agent_key,
-                        current_id or DEFAULT_SLOT_ID,
-                        profile_id or DEFAULT_SLOT_ID,
-                        scope=switch_scope,
+                if restore_only:
+                    await vault_to_thread(functools.partial(
+                        app.credential_vault.restore, agent_key,
+                        profile_id or DEFAULT_SLOT_ID, **prompt_kw,
+                    ))
+                else:
+                    await vault_to_thread(
+                        functools.partial(
+                            app.credential_vault.switch,
+                            agent_key,
+                            current_id or DEFAULT_SLOT_ID,
+                            profile_id or DEFAULT_SLOT_ID,
+                            scope=switch_scope,
+                        )
                     )
-                )
             except Exception as err:  # noqa: BLE001 — switch() already rolled the live state back
+                if restore_live:
+                    _record_switch_back(agent_key, f"failed: {err}")
                 await session.send_json(
                     make_error(msg_id, msg_type, "PROFILE_SWAP_FAILED", _profile_error(err))
                 )
                 return
+        if restore_live:
+            _record_switch_back(agent_key, "")
 
         # The credentials moved — count it, whatever happens to the bookkeeping
         # below (a persisted-default failure still leaves the new account live).
@@ -2988,6 +3733,7 @@ async def mcp_save_servers(session: "Session", msg_id: str, msg_type: str, paylo
             },
         )
     )
+    server_link.sync_soon("mcp")
 
 
 # ── Managed Skills (skills.*) ────────────────────────────────────────────────
@@ -3009,6 +3755,7 @@ async def _run_skill_operation(
             "skills.delete",
         }:
             await notify_skills_changed(name, msg_type.removeprefix("skills."))
+            server_link.sync_soon("skills")
         return result
     except SkillNotFoundError as err:
         await session.send_json(
@@ -3281,6 +4028,115 @@ async def skills_install_approval_decide(session: "Session", msg_id: str, msg_ty
     await session.send_json(make_response(msg_id, msg_type, {"approval": approval}))
 
 
+@handler("plugins.agent_request.decide")
+async def plugins_agent_request_decide(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The user's decision on an agent's plugin request (contract section 6).
+
+    Only the main window can mint the confirmation, bound to this approval_id
+    and to the decision, so an agent cannot approve its own request and a
+    reject confirmation cannot be spent as an approval; no other field grants
+    anything.
+    """
+    from .skills_approvals import SkillApprovalError, decide_plugin
+
+    approval_id = str(payload.get("approval_id") or "")
+    approve = payload.get("approve") is True
+    subject = f"{approval_id}:{'approve' if approve else 'reject'}"
+    if not await _confirmed(
+        session, msg_id, msg_type, {"confirm": payload.get("confirmation")}, subject=subject
+    ):
+        return
+    from . import app
+
+    try:
+        approval = await decide_plugin(
+            approval_id, approve, window_id=session.window_id if app.is_main_window(session) else "",
+        )
+    except SkillApprovalError as err:
+        await session.send_json(make_error(msg_id, msg_type, err.code, str(err), {"approval_id": approval_id}))
+        return
+    _audit_user_decision(approval, "decide-approve" if approve else "decide-reject")
+    await session.send_json(make_response(msg_id, msg_type, {"approval": approval}))
+
+
+def _audit_user_decision(approval: dict, action: str, error_code: str = "") -> None:
+    """A person's decision or result on a plugin request, in plugin_agent_actions (B2-c)."""
+    from . import app
+
+    target = approval.get("target") if isinstance(approval.get("target"), dict) else {}
+    app.plugin_audit_log.record_agent_action(
+        plugin_id=str(target.get("id") or ""), plugin_version=str(target.get("version") or ""),
+        action=action, caller_kind="user", approval_id=str(approval.get("approval_id") or ""),
+        outcome="allowed" if not error_code else "error", error_code=error_code,
+    )
+
+
+@handler("plugins.agent_requests.list")
+async def plugins_agent_requests_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The plugin requests still open (pending and applying), e.g. to recover after a window restart.
+
+    Main windows only: a record names the requester's pane and workspace.
+    ``applyingInLiveWindow`` lists the applying requests a connected main
+    window approved and is still carrying out; recovery leaves those alone.
+    """
+    from . import app
+    from .skills_approvals import registry
+
+    if not app.is_main_window(session):
+        await session.send_json(make_error(msg_id, msg_type, "FORBIDDEN", "only a Navide main window may list plugin requests"))
+        return
+    requests = registry.plugin_requests()
+    live = app.live_main_window_ids()
+    in_live_window = [
+        r["approval_id"] for r in requests
+        if r["status"] == "applying" and registry.applying_by(r["approval_id"]) in live
+    ]
+    await session.send_json(make_response(msg_id, msg_type, {"requests": requests, "applyingInLiveWindow": in_live_window}))
+
+
+@handler("plugins.agent_request.finish")
+async def plugins_agent_request_finish(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The window carried out an approved plugin request: applying -> completed | failed.
+
+    Only a window can mint the confirmation, bound to the approval_id and the
+    status (``<approval_id>:completed|failed``), so an agent cannot report a
+    change that never happened and a "failed" confirmation cannot report success.
+    """
+    from . import app
+    from .ipc import make_event
+    from .plugins import agent_tools_contract as contract
+    from .skills_approvals import SkillApprovalError, registry
+
+    approval_id = str(payload.get("approval_id") or "")
+    status = payload.get("status")
+    error = payload.get("error")
+    if status not in {"completed", "failed"} or (error is not None and not isinstance(error, str)):
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "status must be completed or failed"))
+        return
+    if not await _confirmed(
+        session, msg_id, msg_type, {"confirm": payload.get("confirmation")}, subject=f"{approval_id}:{status}"
+    ):
+        return
+    try:
+        approval = registry.finish_plugin(
+            approval_id, status, error=error if status == "failed" else None,
+            window_id=session.window_id if app.is_main_window(session) else "",
+        )
+    except SkillApprovalError as err:
+        await session.send_json(make_error(msg_id, msg_type, err.code, str(err), {"approval_id": approval_id}))
+        return
+    late = approval.get("finished_late") is True
+    _audit_user_decision(
+        approval, f"finish-late-{status}" if late else f"finish-{status}",
+        "" if status == "completed" else ("INTERRUPTED" if error == "interrupted" else "ACTION_FAILED"),
+    )
+    resolved = {"approval_id": approval_id, "status": approval["status"], "error": approval["error"]}
+    if late:
+        resolved.update(finished_late=True, settled=approval.get("settled"))
+    await app.broadcast(make_event(contract.PLUGIN_APPROVAL_RESOLVED_EVENT, resolved))
+    await session.send_json(make_response(msg_id, msg_type, {"approval": approval}))
+
+
 # ── CLI instruction files (memory.*) ────────────────────────────────────────
 def _memory_workspace(payload: dict) -> Path | None:
     """The workspace root a memory request is scoped to, or None.
@@ -3367,6 +4223,7 @@ async def memory_save(session: "Session", msg_id: str, msg_type: str, payload: d
         )
         return
     await session.send_json(make_response(msg_id, msg_type, result))
+    server_link.sync_soon("memory")
 
 
 # ── Cross-device sync (sync.*) ──────────────────────────────────────────────
@@ -3384,6 +4241,7 @@ async def sync_status(session: "Session", msg_id: str, msg_type: str, payload: d
     # Reading the key touches the Keychain, which can block on a dialog.
     has_key, key_id, legacy_pending = await asyncio.to_thread(_sync_key_facts)
     conflicts = await asyncio.to_thread(app.sync_store.conflicts, None)
+    link = await server_link.status()
     await session.send_json(
         make_response(
             msg_id,
@@ -3391,6 +4249,8 @@ async def sync_status(session: "Session", msg_id: str, msg_type: str, payload: d
             {
                 "available": list(sync_engine.SCOPES),
                 "scopes": scopes,
+                # Scopes no round ever syncs, whatever their switch above says.
+                "neverSynced": sorted(sync_scopes.NEVER_SYNCED),
                 "hasKey": has_key,
                 # The active key's id (never the key) so a person can see a
                 # rotation took, and whether a ring from before accounts were
@@ -3398,7 +4258,16 @@ async def sync_status(session: "Session", msg_id: str, msg_type: str, payload: d
                 "keyId": key_id,
                 "legacyRingPending": legacy_pending,
                 "conflicts": len(conflicts),
-                "link": await server_link.status(),
+                "link": link,
+                # Each scope's last round, the same payload ``sync.result``
+                # carries, so a pane opened after the round still sees it.
+                "last": server_link.sync_last_results(),
+                # Which account these scopes sync with — said beside them,
+                # because switching accounts switches them all off.
+                "account": {
+                    "email": str(link.get("accountEmail") or ""),
+                    "memberId": str(link.get("memberId") or ""),
+                },
             },
         )
     )
@@ -3533,6 +4402,73 @@ async def sync_conflicts(session: "Session", msg_id: str, msg_type: str, payload
     await session.send_json(make_response(msg_id, msg_type, {"conflicts": rows}))
 
 
+@handler("sync.approvals")
+async def sync_approvals_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Synced skills and MCP servers waiting for approval (decision D1), and
+    the scopes whose queue is full (new records there are being refused)."""
+    from . import sync_approvals
+
+    rows = await asyncio.to_thread(server_link.sync_approvals)
+    full = await asyncio.to_thread(sync_approvals.full_scopes)
+    await session.send_json(make_response(msg_id, msg_type, {"approvals": rows, "full": full}))
+
+
+@handler("sync.approval.detail")
+async def sync_approval_detail(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """One held record whole, for a card the listing sent collapsed."""
+    from . import sync_approvals
+
+    scope = str(payload.get("scope") or "")
+    item_id = str(payload.get("itemId") or "")
+    try:
+        row = await asyncio.to_thread(sync_approvals.detail, scope, item_id)
+    except Exception as err:  # noqa: BLE001 - a hold that went away is a normal race
+        await session.send_json(make_error(msg_id, msg_type, "SYNC_APPROVAL_FAILED", str(err)))
+        return
+    await session.send_json(make_response(msg_id, msg_type, {"approval": row}))
+
+
+@handler("sync.approval.decide")
+async def sync_approval_decide(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    scope = str(payload.get("scope") or "")
+    item_id = str(payload.get("itemId") or "")
+    approve = payload.get("approve")
+    shown = str(payload.get("digest") or "")
+    if not isinstance(approve, bool) or not shown:
+        await session.send_json(
+            make_error(msg_id, msg_type, "SYNC_BAD_CHOICE", "approve must be true or false, with the digest shown")
+        )
+        return
+    try:
+        result = await asyncio.to_thread(server_link.decide_sync_approval, scope, item_id, approve, shown)
+    except Exception as err:  # noqa: BLE001 - a hold that went away is a normal race
+        await session.send_json(make_error(msg_id, msg_type, "SYNC_APPROVAL_FAILED", str(err)))
+        return
+    rows = await asyncio.to_thread(server_link.sync_approvals)
+    await session.send_json(make_response(msg_id, msg_type, {"approval": result, "approvals": rows}))
+
+
+@handler("sync.secret_warnings")
+async def sync_secret_warnings(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Items that look like they carry a secret, before they sync (decision
+    D2): a warning, never a block. Names where, never what."""
+    from . import sync_scopes
+
+    rows = await asyncio.to_thread(sync_scopes.secret_warnings)
+    await session.send_json(make_response(msg_id, msg_type, {"warnings": rows}))
+
+
+@handler("sync.secret_warning.dismiss")
+async def sync_secret_warning_dismiss(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import sync_scopes
+
+    scope = str(payload.get("scope") or "")
+    item_id = str(payload.get("itemId") or "")
+    await asyncio.to_thread(sync_scopes.dismiss_secret_warning, scope, item_id)
+    rows = await asyncio.to_thread(sync_scopes.secret_warnings)
+    await session.send_json(make_response(msg_id, msg_type, {"warnings": rows}))
+
+
 @handler("sync.resolve")
 async def sync_resolve(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import sync_engine
@@ -3600,6 +4536,41 @@ async def sync_pull_items(session: "Session", msg_id: str, msg_type: str, payloa
     await session.send_json(make_response(msg_id, msg_type, {"scope": scope, "results": results}))
 
 
+@handler("sync.versions")
+async def sync_versions(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    scope = str(payload.get("scope") or "")
+    item_id = str(payload.get("itemId") or "")
+    if not scope or not item_id:
+        await session.send_json(make_error(msg_id, msg_type, "SYNC_BAD_CHOICE", "scope and itemId are required"))
+        return
+    try:
+        versions = await server_link.sync_versions(scope, item_id)
+    except Exception as err:  # noqa: BLE001 - a link that went down is not a crash
+        await session.send_json(make_error(msg_id, msg_type, "SYNC_VERSIONS_FAILED", str(err)))
+        return
+    await session.send_json(
+        make_response(msg_id, msg_type, {"scope": scope, "itemId": item_id, "versions": versions})
+    )
+
+
+@handler("sync.restore_version")
+async def sync_restore_version(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    scope = str(payload.get("scope") or "")
+    item_id = str(payload.get("itemId") or "")
+    rev = payload.get("rev")
+    if not scope or not item_id or not isinstance(rev, int) or isinstance(rev, bool) or rev < 1:
+        await session.send_json(
+            make_error(msg_id, msg_type, "SYNC_BAD_CHOICE", "scope, itemId and a positive rev are required")
+        )
+        return
+    try:
+        result = await server_link.sync_restore_version(scope, item_id, rev)
+    except Exception as err:  # noqa: BLE001 - same reason as the listing above
+        await session.send_json(make_error(msg_id, msg_type, "SYNC_RESTORE_FAILED", str(err)))
+        return
+    await session.send_json(make_response(msg_id, msg_type, result))
+
+
 def _sync_item_ids(payload: dict) -> list[str]:
     raw = payload.get("itemIds")
     return [str(i) for i in raw if isinstance(i, str) and i] if isinstance(raw, list) else []
@@ -3615,11 +4586,16 @@ async def _sync_selection_ok(
     missing list as "all" would make a UI that failed to collect a tick box
     upload the whole scope.
     """
-    from . import sync_engine
+    from . import sync_approvals, sync_engine
 
     if scope not in sync_engine.SCOPES:
         await session.send_json(
             make_error(msg_id, msg_type, "SYNC_UNKNOWN_SCOPE", f"unknown scope {scope!r}")
+        )
+        return False
+    if scope in sync_approvals.RETIRED_SCOPES:
+        await session.send_json(
+            make_error(msg_id, msg_type, "SYNC_SCOPE_RETIRED", str(sync_approvals.RetiredScopeError(scope)))
         )
         return False
     if not item_ids:
@@ -3631,6 +4607,35 @@ async def _sync_selection_ok(
 
 
 # ── Recent workspaces (workspace.*) ─────────────────────────────────────────
+def _live_pane_workspaces_for_recent() -> list[str]:
+    """Workspaces with a live CLI pane — open somewhere, so never trimmed."""
+    from . import app
+
+    try:
+        terminals = app.get_terminals()
+        sessions = list(getattr(terminals, "_sessions", {}).values())
+    except Exception:  # noqa: BLE001 — protection is best-effort, never fatal
+        return []
+    out: list[str] = []
+    for s in sessions:
+        try:
+            if s.closed:
+                continue
+            meta = s.metadata if isinstance(s.metadata, dict) else {}
+            out.append(str(meta.get("workspace_path") or s.cwd))
+        except AttributeError:
+            continue
+    return out
+
+
+def _recent_payload() -> dict:
+    """The Recent list plus its safety bound, as every workspace.* reply sends it."""
+    from . import app
+
+    store = app.recent_workspaces_store
+    return {"recent": store.list(), **store.info()}
+
+
 @handler("workspace.list_recent")
 async def workspace_list_recent(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
@@ -3638,13 +4643,13 @@ async def workspace_list_recent(session: "Session", msg_id: str, msg_type: str, 
     # list() reads the JSON file and os.path.isdir()s every recent path; a stale
     # or slow path would block the event loop. Offload it like the other fs
     # handlers so it can't stall other requests.
-    recent = await asyncio.to_thread(app.recent_workspaces_store.list)
+    payload = await asyncio.to_thread(_recent_payload)
     await session.send_json(
         make_response(
             msg_id,
             msg_type,
             {
-                "recent": recent,
+                **payload,
                 "path": str(app.recent_workspaces_store.path),
             },
         )
@@ -3655,10 +4660,14 @@ async def workspace_list_recent(session: "Session", msg_id: str, msg_type: str, 
 async def workspace_touch(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
 
+    # Workspaces open in the asking window (its own list, which knows
+    # pane-less ones) and anywhere a CLI pane runs are never trimmed.
+    open_paths = [p for p in payload.get("open") or [] if isinstance(p, str)]
     app.recent_workspaces_store.touch(
         payload["path"],
         state=payload.get("state", ""),
         task=payload.get("task", ""),
+        keep=[*open_paths, *_live_pane_workspaces_for_recent()],
     )
     # Re-seed the display-name mirror from the project document, which is the
     # truth for it. The entry this touch just created — a workspace dropped
@@ -3682,12 +4691,30 @@ async def workspace_touch(session: "Session", msg_id: str, msg_type: str, payloa
             app.recent_workspaces_store.set_name(payload["path"], project.display_name)
 
     await asyncio.to_thread(_reseed_display_name_mirror)
-    recent = app.recent_workspaces_store.list()
+    data = _recent_payload()
     await session.send_json(
-        make_response(msg_id, msg_type, {"recent": recent})
+        make_response(msg_id, msg_type, data)
     )
     await app.broadcast(
-        make_event("workspace.recent_changed", {"recent": recent, "reason": "touch"})
+        make_event("workspace.recent_changed", {**data, "reason": "touch"})
+    )
+
+
+@handler("workspace.set_recent_limit")
+async def workspace_set_recent_limit(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app
+
+    try:
+        app.recent_workspaces_store.set_limit(
+            payload.get("limit"), keep=_live_pane_workspaces_for_recent()
+        )
+    except ValueError as err:
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", str(err)))
+        return
+    data = _recent_payload()
+    await session.send_json(make_response(msg_id, msg_type, data))
+    await app.broadcast(
+        make_event("workspace.recent_changed", {**data, "reason": "limit"})
     )
 
 
@@ -3765,11 +4792,22 @@ async def _reinstall_claude_hooks() -> None:
     spec = CLI_VENDORS.get("claude")
     if spec is None or spec.install_hooks is None:
         return
+    from . import convenience_wiring
+
     try:
-        result = await asyncio.to_thread(spec.install_hooks, str(backend_port_file()))
+        result = await asyncio.to_thread(
+            convenience_wiring.install_hooks_gated, "claude", spec.install_hooks, str(backend_port_file())
+        )
         app.log.info("claude hooks reinstalled after a push-channel switch: %s", result)
     except Exception as err:  # noqa: BLE001
         app.log.warning("claude hooks reinstall failed: %s", err)
+
+
+#: UI settings only the backend writes: sync's own bookkeeping (detached
+#: marks, dismissed secret warnings, and the key an earlier build kept sync
+#: approvals under). A window writing them could hide items from sync or
+#: approve what the user never saw, so ui.settings.set drops them.
+UI_SETTINGS_BACKEND_ONLY_KEYS = frozenset({"sync-detached", "sync-secret-dismissed", "sync-approvals"})
 
 
 @handler("ui.settings.set")
@@ -3779,6 +4817,12 @@ async def ui_settings_set(session: "Session", msg_id: str, msg_type: str, payloa
     from . import push_delivery
 
     updates = payload.get("updates")
+    if isinstance(updates, dict) and UI_SETTINGS_BACKEND_ONLY_KEYS & set(updates):
+        log.warning(
+            "ui.settings.set: ignoring backend-only keys %s",
+            sorted(UI_SETTINGS_BACKEND_ONLY_KEYS & set(updates)),
+        )
+        updates = {k: v for k, v in updates.items() if k not in UI_SETTINGS_BACKEND_ONLY_KEYS}
     touches_channels = (
         isinstance(updates, dict) and push_delivery.DISABLED_SETTING_KEY in updates
     )
@@ -3787,6 +4831,11 @@ async def ui_settings_set(session: "Session", msg_id: str, msg_type: str, payloa
     )
     delta = app.ui_settings_store.set(updates) if isinstance(updates, dict) else {}
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+    from . import sync_scopes
+
+    if sync_scopes.PROMPT_SKILLS_KEY in delta or sync_scopes.LOOP_PROMPT_KEY in delta:
+        # The prompt list is saved as a setting; nothing else tells sync.
+        server_link.sync_soon("prompts")
     if push_delivery.DISABLED_SETTING_KEY in delta:
         # A pane already running keeps its port and its watch file; what changes
         # is whether anything is pushed to it. Both directions are announced —
@@ -3895,7 +4944,7 @@ async def p2p_link_configure(session: "Session", msg_id: str, msg_type: str, pay
     delta = app.ui_settings_store.set({server_link.SERVER_URL_SETTING: None})
     if token is not None:
         try:
-            await vault_to_thread(server_link.set_access_token, token)
+            await vault_to_thread(server_link.replace_access_token, token)
         except Exception as err:  # noqa: BLE001
             await session.send_json(
                 make_error(msg_id, msg_type, "P2P_TOKEN_WRITE_FAILED", str(err))
@@ -3978,7 +5027,7 @@ async def _account_call(
         }
     )
     try:
-        await vault_to_thread(server_link.set_access_token, token)
+        await vault_to_thread(server_link.replace_access_token, token)
     except Exception as err:  # noqa: BLE001
         await session.send_json(
             make_error(msg_id, msg_type, "P2P_TOKEN_WRITE_FAILED", str(err))
@@ -4130,13 +5179,26 @@ async def p2p_account_logout(session: "Session", msg_id: str, msg_type: str, pay
     """
     from . import app
 
+    # Revoke the token on the server first, while the link can still carry the
+    # request; offline that is skipped and the local token is erased anyway.
+    revoked = await server_link.logout_on_server()
+    # N1b: this token is never used again here, so its member pin goes too;
+    # otherwise every sign-out and sign-in adds an entry to the trust record.
+    # R4-4: only once the token reads back erased — a delete that failed
+    # quietly leaves it stored, and a stored token keeps its pin.
     try:
-        await vault_to_thread(server_link.set_access_token, None)
+        await vault_to_thread(server_link.replace_access_token, None)
     except Exception as err:  # noqa: BLE001
         await session.send_json(
             make_error(msg_id, msg_type, "P2P_TOKEN_WRITE_FAILED", str(err))
         )
         return
+    if not revoked:
+        log.info(
+            "signed out locally only: the navide-server did not confirm the sign-out "
+            "(offline, or a server without auth.logout), so this device's token may "
+            "stay valid there until it is revoked from another device"
+        )
     delta = app.ui_settings_store.set({server_link.ACCOUNT_EMAIL_SETTING: None})
     await server_link.reconfigure()
     await session.send_json(
@@ -4187,8 +5249,8 @@ async def p2p_policy_set(session: "Session", msg_id: str, msg_type: str, payload
     # document and keeps it; the account view's "sign rules now" composes the
     # default for a machine that has no rules at all, and would have dropped it.
     # Absent means keep; only an explicit list clears one.
+    cached = (await server_link.policy_state()).get("policy")
     if isinstance(policy, dict) and "blocked" not in policy:
-        cached = (await server_link.policy_state()).get("policy")
         carried = cached.get("blocked") if isinstance(cached, dict) else None
         if carried:
             log.warning(
@@ -4220,7 +5282,26 @@ async def p2p_policy_set(session: "Session", msg_id: str, msg_type: str, payload
             )
         )
         return
+    # The block list goes to the local copy too, as p2p.trust.block and
+    # unblock send it, so a server that stops serving this document cannot
+    # lift a block made here — nor keep one lifted here.
+    await asyncio.to_thread(_mirror_blocks_locally, cached, policy)
     await session.send_json(make_response(msg_id, msg_type, await _policy_payload()))
+
+
+def _mirror_blocks_locally(before: Any, after: Any) -> None:
+    """Apply the change from *before*'s block list to *after*'s to the local copy."""
+    def keys(policy: Any) -> set[tuple[str, str]]:
+        return {(e["deviceId"], e["memberId"]) for e in device_trust.blocked_entries(policy)}
+
+    old, new = keys(before), keys(after)
+    for device_id, member_id in old - new:
+        trust_store.note_unblocked(device_id, member_id)
+    for device_id, member_id in new:
+        try:
+            trust_store.note_blocked(device_id, member_id)
+        except Exception as err:  # noqa: BLE001 - held in memory by note_blocked
+            log.warning("could not keep a local copy of a block: %s", err)
 
 
 @handler("p2p.access_requests.list")
@@ -4527,6 +5608,10 @@ async def p2p_trust_device_unpair(
     # paired is a state where one silently refuses everything the other sends,
     # and the sender's only symptom is silence.
     await server_link.revoke_pairing(device_id)
+    if removed.get("found") and server_link.trust_full():
+        # R4-3: the room this made is what a full record was waiting for, and
+        # only a hello re-adopts the pin (see p2p.trust.rebuild).
+        await server_link.reconfigure()
     if removed.get("found"):
         # The pin and its notices both feed this event, so the panel that was
         # showing the device empties in the same tick it is forgotten.
@@ -4636,10 +5721,38 @@ async def p2p_trust_block(session: "Session", msg_id: str, msg_type: str, payloa
     # succeeded so the two cannot disagree about a block that was never made.
     # The local copy is what still refuses this device when the policy document
     # cannot be verified — see device_trust.is_blocked.
-    await asyncio.to_thread(trust_store.note_blocked, device_id, member_id)
+    problem: Exception | None = None
+    try:
+        await asyncio.to_thread(trust_store.note_blocked, device_id, member_id)
+    except Exception as err:  # noqa: BLE001
+        problem = err
     if device_id and server_link.forget_access_requests_for_device(device_id):
         await _announce_requests()
+    if problem is not None:
+        # Fail closed. The server's block stands, and note_blocked holds the
+        # local one in memory until the restart; only the saved copy is missing.
+        # Taking the server's block back instead left the device trusted.
+        await session.send_json(_block_not_kept(problem, msg_id, msg_type))
+        return
     await session.send_json(make_response(msg_id, msg_type, await _policy_payload()))
+
+
+def _block_not_kept(err: Exception, msg_id: str, msg_type: str) -> dict:
+    # Its own code even for a full record (review F2): p2p-trust-store-full is
+    # also what a block refused before it reached the server answers, and the
+    # two must not read alike — this one is in force.
+    code = (
+        "P2P_BLOCK_NOT_SAVED_LOCALLY_FULL"
+        if isinstance(err, trust_store.TrustStoreFull)
+        else "P2P_BLOCK_NOT_SAVED_LOCALLY"
+    )
+    return make_error(
+        msg_id,
+        msg_type,
+        code,
+        "the block is in force on the server, and on this machine until it restarts, "
+        f"but this machine could not save its own copy ({err})",
+    )
 
 
 @handler("p2p.trust.unblock")
@@ -5279,6 +6392,187 @@ async def share_revoke_published(
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "shareId": share_id}))
 
 
+# ── Share links (share.* → links.* on Navide-Server) ─────────────────────────
+# Encrypted, read-only links to a plan or report (share_links). A server
+# without links answers UNKNOWN_TYPE or UNSUPPORTED, passed through as the
+# error code so the UI can hide the feature rather than show a failure.
+
+
+async def _share_links_call(
+    session: "Session", msg_id: str, msg_type: str, call: Callable[[Any], Awaitable[dict]]
+) -> None:
+    from . import share_links, sync_keyring
+
+    # The link first: without it nothing may reach the account key or the server.
+    state = server_link.link_state()
+    if state != server_link.STATE_CONNECTED:
+        code = "NOT_CONFIGURED" if state == server_link.STATE_UNCONFIGURED else "LINK_OFFLINE"
+        await session.send_json(make_error(msg_id, msg_type, code, f"Navide Cloud is {state}"))
+        return
+    try:
+        result = await call(share_links.ServerLinksClient())
+    except share_links.ShareRefused as err:
+        await session.send_json(make_error(msg_id, msg_type, "SHARE_REFUSED", str(err), {"reason": err.code}))
+        return
+    except share_links.ShareRemoteError as err:
+        await session.send_json(make_error(msg_id, msg_type, err.code, str(err)))
+        return
+    except sync_keyring.KeyringError as err:
+        await session.send_json(make_error(msg_id, msg_type, "NO_SYNC_KEY", str(err)))
+        return
+    except share_links.ShareError as err:
+        await session.send_json(make_error(msg_id, msg_type, "SHARE_FAILED", str(err)))
+        return
+    await session.send_json(make_response(msg_id, msg_type, result))
+
+
+def _link_id_of(payload: dict) -> str:
+    raw = payload.get("linkId")
+    return raw.strip() if isinstance(raw, str) else ""
+
+
+def _ttl_of(payload: dict) -> int | None:
+    raw = payload.get("ttlSeconds")
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+
+
+@handler("share.caps")
+async def share_caps(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import share_links
+
+    await _share_links_call(session, msg_id, msg_type, share_links.caps)
+
+
+@handler("share.create")
+async def share_create(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Share one file the user picked: {path, kind?, ttlSeconds?, requireLogin?,
+    sendToChat?} — sendToChat posts the link to the user's chat (Channels)."""
+    from . import app, share_links
+
+    path = payload.get("path")
+    kind = payload.get("kind") or "plan"
+    if not isinstance(path, str) or not path or not isinstance(kind, str):
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "path must be a non-empty string"))
+        return
+    require_login = payload.get("requireLogin")
+
+    async def call(client: Any) -> dict:
+        created = await share_links.create_share(
+            client,
+            path,
+            kind,
+            ttl_seconds=_ttl_of(payload),
+            require_login=require_login if isinstance(require_login, bool) else None,
+            created_by="user",
+        )
+        result = share_created_payload(created, created_by="user")
+        try:
+            await app.broadcast(make_event("share.created", {k: v for k, v in result.items() if k != "url"}))
+        except Exception as err:  # noqa: BLE001 - the link exists; its creator must still get the URL
+            log.warning("announcing a new share link failed: %s", err)
+        if payload.get("sendToChat") is True:
+            chat_id = payload.get("chatId") if isinstance(payload.get("chatId"), str) else ""
+            await share_links.announce_to_chat(created, created_by="user", chat_id=chat_id)
+        return result
+
+    await _share_links_call(session, msg_id, msg_type, call)
+
+
+def share_created_payload(created: Any, *, created_by: str, pane: str = "", agent: str = "") -> dict:
+    """What a new link's creator is told: the URL (the only copy of its key the
+    creator gets) and where the content was masked, never the masked values."""
+    return {
+        "linkId": created.link_id,
+        "url": created.url,
+        "expiresAt": created.expires_at,
+        "createdBy": created_by,
+        "pane": pane,
+        "agent": agent,
+        "masked": [{"line": f.line, "category": f.category, "action": f.action} for f in created.findings],
+    }
+
+
+@handler("share.list")
+async def share_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import share_links
+
+    async def call(client: Any) -> dict:
+        return {"links": await share_links.list_links(client)}
+
+    await _share_links_call(session, msg_id, msg_type, call)
+
+
+@handler("share.copy_link")
+async def share_copy_link(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import share_links
+
+    link_id = _link_id_of(payload)
+
+    async def call(client: Any) -> dict:
+        return {"linkId": link_id, "url": await share_links.copy_link(client, link_id)}
+
+    await _share_links_call(session, msg_id, msg_type, call)
+
+
+@handler("share.revoke")
+async def share_revoke(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import share_links
+
+    link_id = _link_id_of(payload)
+    await _share_links_call(session, msg_id, msg_type, lambda client: share_links.revoke(client, link_id))
+
+
+@handler("share.revoke_all")
+async def share_revoke_all(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import share_links
+
+    device_id = payload.get("deviceId") if isinstance(payload.get("deviceId"), str) else ""
+    await _share_links_call(session, msg_id, msg_type, lambda client: share_links.revoke_all(client, device_id))
+
+
+@handler("share.extend")
+async def share_extend(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import share_links
+
+    link_id = _link_id_of(payload)
+    ttl = _ttl_of(payload)
+    if ttl is None:
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "ttlSeconds must be an integer"))
+        return
+    await _share_links_call(session, msg_id, msg_type, lambda client: share_links.extend(client, link_id, ttl))
+
+
+@handler("share.rekey")
+async def share_rekey(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import share_links
+
+    link_id = _link_id_of(payload)
+
+    async def call(client: Any) -> dict:
+        moved = await share_links.rekey(client, link_id)
+        return {
+            "linkId": moved.link_id,
+            "url": moved.url,
+            "expiresAt": moved.expires_at,
+            "replaces": link_id,
+            "oldRevoked": moved.replaced,
+        }
+
+    await _share_links_call(session, msg_id, msg_type, call)
+
+
+@handler("share.update")
+async def share_update(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Publish the source file's current content under the same link."""
+    from . import share_links
+
+    link_id = _link_id_of(payload)
+    path = payload.get("path") if isinstance(payload.get("path"), str) else ""
+    await _share_links_call(
+        session, msg_id, msg_type, lambda client: share_links.update_content(client, link_id, path)
+    )
+
+
 # ── Roles registry (roles.*) ────────────────────────────────────────────────
 async def _broadcast_stage_role_changes(pipeline_ids: list[str], reason: str) -> None:
     """Publish the rewritten stages of every pipeline a role edit touched.
@@ -5333,6 +6627,7 @@ async def roles_upsert(session: "Session", msg_id: str, msg_type: str, payload: 
         label=payload.get("label", ""),
         one_line=payload.get("one_line", ""),
         system_prompt=payload.get("system_prompt", ""),
+        properties=payload.get("properties"),
     )
     await session.send_json(
         make_response(msg_id, msg_type, {"role": role, "roles": app.roles_store.list()})
@@ -5376,11 +6671,16 @@ async def roles_rename(session: "Session", msg_id: str, msg_type: str, payload: 
             )
         )
         return
+    # A rename must not drop the role's declarative properties.
+    properties = payload.get("properties")
+    if properties is None:
+        properties = (app.roles_store.get(old_key) or {}).get("properties")
     role = app.roles_store.upsert(
         key=new_key,
         label=payload.get("label", ""),
         one_line=payload.get("one_line", ""),
         system_prompt=payload.get("system_prompt", ""),
+        properties=properties,
     )
     touched = app.stages_store.repoint_role_references(old_key, new_key)
     if new_key != old_key:
@@ -5639,7 +6939,11 @@ async def stages_upsert(session: "Session", msg_id: str, msg_type: str, payload:
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot edit stages while the active pipeline is running")
         )
         return
-    stage = app.stages_store.upsert(payload["stage"], pipeline_id)
+    try:
+        stage = app.stages_store.upsert(payload["stage"], pipeline_id)
+    except GraphNonLinearError as err:
+        await session.send_json(make_error(msg_id, msg_type, "GRAPH_NONLINEAR", str(err)))
+        return
     effective_pipeline_id = pipeline_id or app.stages_store.get_active_pipeline_id()
     updated_stages = app.stages_store.list(pipeline_id)
     await session.send_json(
@@ -5664,7 +6968,11 @@ async def stages_reorder(session: "Session", msg_id: str, msg_type: str, payload
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot reorder stages while the active pipeline is running")
         )
         return
-    updated_stages = app.stages_store.reorder(payload["ids"], pipeline_id)
+    try:
+        updated_stages = app.stages_store.reorder(payload["ids"], pipeline_id)
+    except GraphNonLinearError as err:
+        await session.send_json(make_error(msg_id, msg_type, "GRAPH_NONLINEAR", str(err)))
+        return
     effective_pipeline_id = pipeline_id or app.stages_store.get_active_pipeline_id()
     await session.send_json(
         make_response(msg_id, msg_type, {"stages": updated_stages})
@@ -5688,7 +6996,11 @@ async def stages_delete(session: "Session", msg_id: str, msg_type: str, payload:
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot delete stages while the active pipeline is running")
         )
         return
-    updated_stages = app.stages_store.delete(payload["id"], pipeline_id)
+    try:
+        updated_stages = app.stages_store.delete(payload["id"], pipeline_id)
+    except GraphNonLinearError as err:
+        await session.send_json(make_error(msg_id, msg_type, "GRAPH_NONLINEAR", str(err)))
+        return
     effective_pipeline_id = pipeline_id or app.stages_store.get_active_pipeline_id()
     await session.send_json(
         make_response(msg_id, msg_type, {"stages": updated_stages})
@@ -5723,6 +7035,83 @@ async def stages_reset(session: "Session", msg_id: str, msg_type: str, payload: 
         "reason": "reset",
     }))
     await _broadcast_pipeline_summaries("stage_reset")
+
+
+# ── Pipeline graph (pipelines.graph.*) ──────────────────────────────────────
+# Contract: src/renderer/src/lib/pipelineGraph.ts (file header).
+@handler("pipelines.graph.get")
+async def pipelines_graph_get(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app
+
+    try:
+        out = app.stages_store.get_graph(payload.get("pipeline_id") or None)
+    except KeyError as err:
+        await session.send_json(_pipeline_not_found(msg_id, msg_type, err))
+        return
+    await session.send_json(make_response(msg_id, msg_type, out))
+
+
+def _pipeline_not_found(msg_id: str, msg_type: str, err: KeyError) -> dict:
+    return make_error(msg_id, msg_type, "PIPELINE_NOT_FOUND", str(err.args[0] if err.args else err))
+
+
+async def _write_graph(session: "Session", msg_id: str, msg_type: str, payload: dict, write: Any, reason: str) -> None:
+    from . import app
+    from .pipeline_graph import GraphError
+
+    pipeline_id = payload.get("pipeline_id") or None
+    ws_path = payload.get("workspace_path", "") or ""
+    if _stage_edit_hits_running_pipeline(ws_path, pipeline_id):
+        await session.send_json(
+            make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot edit the graph while the pipeline is running")
+        )
+        return
+    try:
+        out = write(pipeline_id)
+    except GraphError as err:
+        await session.send_json(make_error(msg_id, msg_type, "GRAPH_INVALID", str(err), {"errors": err.errors}))
+        return
+    except KeyError as err:
+        await session.send_json(_pipeline_not_found(msg_id, msg_type, err))
+        return
+    await session.send_json(make_response(msg_id, msg_type, out))
+    await _broadcast_graph_change(out, reason)
+
+
+async def _broadcast_graph_change(out: dict, reason: str) -> None:
+    """graph_changed first (the canvas), then the two events every legacy
+    view already listens to, since the derived stages changed with it."""
+    from . import app
+
+    await app.broadcast(make_event("pipeline.graph_changed", {**out, "reason": reason}))
+    await app.broadcast(make_event("stages.changed", {
+        "stages": out["stages"],
+        "pipeline_id": out["pipeline_id"],
+        "reason": reason,
+    }))
+    await _broadcast_pipeline_summaries(reason)
+
+
+@handler("pipelines.graph.set")
+async def pipelines_graph_set(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app
+
+    graph = payload["graph"]
+    await _write_graph(
+        session, msg_id, msg_type, payload,
+        lambda pid: app.stages_store.set_graph(pid, graph), "graph_set",
+    )
+
+
+@handler("pipelines.graph.apply")
+async def pipelines_graph_apply(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app
+
+    ops = payload["ops"]
+    await _write_graph(
+        session, msg_id, msg_type, payload,
+        lambda pid: app.stages_store.apply_graph_ops(pid, ops), "graph_apply",
+    )
 
 
 # ── Analyzer (local LLM / Ollama) (analyzer.*) ──────────────────────────────
@@ -6229,6 +7618,24 @@ async def issues_public(session: "Session", msg_id: str, msg_type: str, payload:
 # - Frontend shows full command in confirm dialog before invoking.
 # - This is a local-only Electron app; the WebSocket server binds to
 #   localhost only, reducing (but not eliminating) external attack surface.
+_SHELL_RUN_TIMEOUT_S = 30
+# Each text field of a shell.run response carries at most this many characters
+# (unchanged). What was cut is disclosed with ``truncated`` and the full UTF-8
+# size (``stdoutBytes``; ``stderrBytes`` when stderr was cut too).
+_SHELL_RUN_OUTPUT_CHARS = 8000
+
+
+def _shell_run_truncation(stdout: str, stderr: str = "") -> dict:
+    """``truncated`` plus the full sizes of what shell.run cut at 8000 characters."""
+    fields: dict = {
+        "truncated": len(stdout) > _SHELL_RUN_OUTPUT_CHARS or len(stderr) > _SHELL_RUN_OUTPUT_CHARS,
+        "stdoutBytes": len(stdout.encode("utf-8", "replace")),
+    }
+    if len(stderr) > _SHELL_RUN_OUTPUT_CHARS:
+        fields["stderrBytes"] = len(stderr.encode("utf-8", "replace"))
+    return fields
+
+
 @handler("shell.run")
 async def shell_run(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
@@ -6272,15 +7679,20 @@ async def shell_run(session: "Session", msg_id: str, msg_type: str, payload: dic
             "stdout": stdout[:8000],
             "stderr": stderr[:8000],
             "exit_code": rc,
+            **_shell_run_truncation(stdout, stderr),
         }))
         return
     if not cmd:
         await session.send_json(make_response(msg_id, msg_type, {"ok": False, "error": "no command"}))
+    elif not isinstance(ws_path, str) or not ws_path.strip():
+        # Required here too: without one this branch skipped the workspace
+        # check below and ran the command in the backend's own cwd (d1).
+        await session.send_json(make_response(msg_id, msg_type, {"ok": False, "error": "workspace path is required"}))
     else:
-        resolved_cwd = app.Path(ws_path).resolve() if ws_path else None
+        resolved_cwd = app.Path(ws_path).resolve()
         # Validate that cwd is a known registered workspace (or its subdirectory)
         known_roots = app.attribution.existing_workspace_roots()
-        cwd_allowed = resolved_cwd is None or any(
+        cwd_allowed = any(
             resolved_cwd == r or resolved_cwd.is_relative_to(r)
             for r in known_roots
         )
@@ -6295,17 +7707,23 @@ async def shell_run(session: "Session", msg_id: str, msg_type: str, payload: dic
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     cwd=str(resolved_cwd) if resolved_cwd else None,
+                    # Own group, so a timeout reaches what sh started too.
+                    start_new_session=True,
                 )
                 try:
-                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=_SHELL_RUN_TIMEOUT_S)
                     output = stdout.decode("utf-8", errors="replace")
                     await session.send_json(make_response(msg_id, msg_type, {
                         "ok": True, "output": output[:8000], "exit_code": proc.returncode,
+                        **_shell_run_truncation(output),
                     }))
                 except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.communicate()
-                    await session.send_json(make_response(msg_id, msg_type, {"ok": False, "error": "timeout after 30s"}))
+                    from .ai_chat_cli_engine import _terminate_proc_tree
+
+                    # Killing only sh orphaned its children, and one still
+                    # holding the stdout pipe kept communicate() waiting.
+                    await _terminate_proc_tree(proc)
+                    await session.send_json(make_response(msg_id, msg_type, {"ok": False, "error": f"timeout after {_SHELL_RUN_TIMEOUT_S}s"}))
             except Exception as exc:
                 await session.send_json(make_response(msg_id, msg_type, {"ok": False, "error": str(exc)}))
 
@@ -6796,6 +8214,159 @@ async def _rollback_terminal_create(
     await asyncio.shield(cleanup_task)
 
 
+# A panel CLI that exits non-zero this soon after its spawn never got going —
+# typically a restore resuming a session its vendor no longer has. Left
+# 'spawned', its record would make every window open retry the same launch.
+_DOCK_FAILED_START_MS = 15_000
+# Live panel PTYs whose launch outcome is still open:
+# terminal session id -> (workspace, pane id, surface, session id).
+_DOCK_PTYS: dict[str, tuple[str, str, str, str]] = {}
+
+
+def _note_dock_pty(term_id: str, workspace_path: str, pane_id: str, surface: str, session_id: str) -> None:
+    _DOCK_PTYS[term_id] = (workspace_path, pane_id, surface, session_id)
+
+
+def _dock_target(metadata: dict, cwd: str = "") -> tuple[str, str] | None:
+    """(workspace, surface) when terminal metadata names a panel surface."""
+    surface = str(metadata.get("surface") or "")
+    workspace_path = str(metadata.get("workspace_path") or cwd or "")
+    if not surface or surface == "main" or not workspace_path:
+        return None
+    return workspace_path, surface
+
+
+def _retire_dock_record(workspace_path: str, pane_id: str, surface: str, session_id: str = "") -> None:
+    """Retire a panel's restore record, as manual_pane.unspawn retires one.
+
+    Only the panel's own record — never a window pane's under the same id — and,
+    given a session id, only while the record still names that session (a newer
+    Start in the same panel keeps its own)."""
+    from . import app
+
+    try:
+        project = app.project_store.load_or_create(workspace_path)
+        if any(
+            p.pane_id == pane_id
+            and p.surface == surface
+            and (not session_id or not p.session_id or p.session_id == session_id)
+            for p in project.panes
+        ):
+            app.project_store.record_manual_pane_unspawn(workspace_path, pane_id=pane_id)
+    except Exception:  # noqa: BLE001 — the PTY is already gone; a lost record update must not fail its caller
+        log.exception("retiring panel record %s in %s failed", pane_id, workspace_path)
+
+
+def note_terminal_exit(payload: dict) -> None:
+    """A PTY ended: retire its panel's record when the CLI failed at launch or
+    the user ended it cleanly from inside (/exit, a zero exit).
+
+    A crash after a working start (the panel restores it), a shutdown (the app
+    quit — the panel restores next launch) and a kill (Stop and window close
+    retire on their own paths) leave the record as it is."""
+    entry = _dock_record_to_retire(payload)
+    if entry is not None:
+        _retire_dock_record(*entry)
+
+
+async def note_terminal_exit_async(payload: dict) -> None:
+    """note_terminal_exit with the record update run off the event loop: it
+    reads and writes the project store on disk."""
+    entry = _dock_record_to_retire(payload)
+    if entry is not None:
+        await asyncio.to_thread(_retire_dock_record, *entry)
+
+
+def _dock_record_to_retire(payload: dict) -> tuple[str, str, str, str] | None:
+    """The panel record an exit retires (see note_terminal_exit), or None."""
+    entry = _DOCK_PTYS.pop(str(payload.get("terminal_session_id") or ""), None)
+    if entry is None or payload.get("reason") not in ("exit", "error"):
+        return None
+    exit_code = payload.get("exit_code")
+    uptime_ms = payload.get("uptime_ms")
+    if payload.get("reason") == "exit" and exit_code == 0:
+        return entry
+    if not isinstance(exit_code, int) or exit_code <= 0:
+        return None
+    if not isinstance(uptime_ms, int) or uptime_ms > _DOCK_FAILED_START_MS:
+        return None
+    return entry
+
+
+def _record_dock_spawn(payload: dict, metadata: dict, agent_key: str, term_id: str = "") -> None:
+    """File an embedded AI panel's restore record and Agent History entry.
+
+    A window pane is recorded by its own window (manual_pane.spawn plus the
+    set_ui_state history snapshot); a panel (AiCliDock) has no window running
+    either, so its terminal.create does it here, reusing the same two writers.
+    Only metadata naming a panel surface reaches this — the main window never
+    sends `surface`, so its creates write nothing new."""
+    from . import app
+
+    surface = str(metadata.get("surface") or "")
+    if not surface or surface == "main":
+        return
+    workspace_path = str(metadata.get("workspace_path") or payload.get("cwd") or "")
+    if not workspace_path:
+        return
+    pane_id = str(payload["pane_id"])
+    window_kind = str(metadata.get("window_kind") or "")
+    origin = str(metadata.get("origin") or "")
+    command = str(metadata.get("cli_command") or "")
+    session_id = str(metadata.get("explicit_session_id") or "")
+    output_log_file = str(payload.get("output_log_file") or "")
+    try:
+        # A window pane's Agent History entry under this id — its history can
+        # outlive its project record — stays exactly as its window wrote it:
+        # merge() replaces by paneId. So the id is not recorded as a panel's.
+        rows, _total = app.spawn_history_store.read_page(workspace_path, limit=SPAWN_HISTORY_MAX_ENTRIES)
+        if any(
+            r.get("paneId") == pane_id and str(r.get("surface") or "main") == "main"
+            for r in rows
+        ):
+            log.warning("terminal.create: pane %s is a window pane's; not recorded as a panel", pane_id)
+            return
+        project = app.project_store.record_manual_pane_spawn(
+            workspace_path,
+            pane_id=pane_id,
+            agent=agent_key,
+            command=command,
+            session_id=session_id,
+            output_log_file=output_log_file,
+            origin=origin,
+            surface=surface,
+            window_kind=window_kind,
+        )
+        # The store leaves a window pane's record alone when a panel's create
+        # names its id; its Agent History entry must be left alone with it.
+        record = next((p for p in project.panes if p.pane_id == pane_id), None)
+        if record is None or record.surface != surface:
+            log.warning("terminal.create: pane %s is a window pane's; not recorded as a panel", pane_id)
+            return
+        # Same shape the main window pushes for its panes (App.vue spawnPane).
+        entry: dict[str, Any] = {
+            "paneId": pane_id,
+            "agentKey": agent_key,
+            "command": command,
+            "origin": origin,
+            "workspacePath": workspace_path,
+            "spawnedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "outputLogFile": output_log_file,
+            "surface": surface,
+            "windowKind": window_kind,
+        }
+        if session_id:
+            entry["sessionId"] = session_id
+        agent_label = str(metadata.get("agent_label") or "")
+        if agent_label:
+            entry["agentLabel"] = agent_label
+        app.spawn_history_store.merge(workspace_path, [entry])
+        if term_id:
+            _note_dock_pty(term_id, workspace_path, pane_id, surface, session_id)
+    except Exception:  # noqa: BLE001 — the PTY is up; a lost record must not fail the create
+        log.exception("terminal.create: recording dock pane %s failed", pane_id)
+
+
 async def _terminal_create_impl(
     session: "Session",
     msg_id: str,
@@ -6810,7 +8381,8 @@ async def _terminal_create_impl(
     # These are server attestations, never renderer-provided metadata.
     for key in ("quota_transaction_id", "quota_original_pane_id", "credential_epoch",
                 "credential_store_verified", "credential_store_id", "credential_store_error",
-                "credential_launch_term_id", "guard_pane_token"):
+                "credential_launch_term_id", "guard_pane_token",
+                ACCOUNT_DIR_METADATA_KEY, "account_dir_login"):
         metadata.pop(key, None)
     agent_key = payload.get("agent_key") or ""
     # The window's per-vendor env settings, first in the chain on purpose: the
@@ -6981,6 +8553,47 @@ async def _terminal_create_impl(
                     )
                     return
                 metadata["live_login"] = True
+    # A claude account that signed in inside its own config dir runs there:
+    # Claude Code owns that login, refreshes it under the dir's own locks, and
+    # an account switch (which swaps only the live credential) never reaches
+    # it. ``account_dir_login`` is the sign-in that puts the login there.
+    account_dir_slot = ""
+    if agent_key == "claude" and not login_profile_id:
+        account_dir_login = bool(payload.get("account_dir_login"))
+        try:
+            account_dir_slot = await vault_to_thread(functools.partial(
+                _account_dir_for_spawn, agent_key, metadata.get("profile_id"),
+                login=account_dir_login,
+            ))
+        except Exception as err:  # noqa: BLE001 — the dir could not be prepared
+            if account_dir_login:
+                await session.send_json(make_error(
+                    msg_id, msg_type, "LOGIN_UNAVAILABLE", _profile_error(err),
+                    {"agent_key": agent_key, "profile_id": str(metadata.get("profile_id") or "")},
+                ))
+                return
+            app.log.warning("claude account dir unavailable; using the live login: %s", err)
+            account_dir_slot = ""
+        if account_dir_login and not account_dir_slot:
+            await session.send_json(make_error(
+                msg_id, msg_type, "BAD_REQUEST",
+                f"invalid account for a claude sign-in: {metadata.get('profile_id')!r}",
+            ))
+            return
+        if account_dir_slot:
+            dir_set, dir_remove = app.credential_vault.account_dir_spawn_env(account_dir_slot)
+            env.update(dir_set)
+            env_remove = list(env_remove or []) + dir_remove
+            metadata[ACCOUNT_DIR_METADATA_KEY] = account_dir_slot
+            metadata["profile_id"] = account_dir_slot
+            if account_dir_login:
+                is_login = True
+                metadata["account_dir_login"] = True
+        elif not metadata.get("profile_id") and _pane_default_profile_id(agent_key):
+            # The chosen account has no usable dir login: this pane runs on
+            # the live credential, so file it under that credential's owner.
+            active = app.cli_profiles_store.get_default_profile(agent_key)
+            metadata["profile_id"] = active["id"] if active else DEFAULT_SLOT_ID
     # True only when the rewrite below really turns the command into an auth
     # SUBCOMMAND. That, not `is_login` on its own, is what makes the spawn
     # wiring inapplicable further down — a subcommand takes none of the
@@ -6997,7 +8610,7 @@ async def _terminal_create_impl(
         login_spec = cli_vendor(agent_key)
         login_subcommand = bool(login_spec is not None and login_spec.login_command_args)
         payload["command"] = app._login_spawn_command(agent_key, payload["command"])
-    elif app._agent_signed_out(agent_key):
+    elif not account_dir_slot and app._agent_signed_out(agent_key):
         # Installed, but with no credentials to run on — the counterpart to
         # cli.missing, which only ever fires for a CLI that is not there at
         # all. Advisory: unlike cli.missing the spawn is perfectly valid and
@@ -7073,6 +8686,14 @@ async def _terminal_create_impl(
         guard_token = secrets.token_urlsafe(24)
         metadata["guard_pane_token"] = guard_token
         env[guard_hooks.PANE_TOKEN_ENV] = guard_token
+    # Settings → Resource limits. Empty unless the user turned a limit on, and
+    # an unreadable store reads as "none" — the spawn never depends on it.
+    from . import resource_limits
+
+    for key, value in resource_limits.spawn_env(
+        resource_limits.read_settings(app.ui_settings_store.get)
+    ).items():
+        env.setdefault(key, value)
     # Lines the pane prints at startup when this machine cannot wire it (see
     # wire_command): the only other trace is a backend log the user never sees.
     wiring_warnings: list[str] = []
@@ -7124,14 +8745,43 @@ async def _terminal_create_impl(
         payload["command"], push_channel = app.push_delivery.wire_spawn(
             agent_key, payload["command"], str(payload.get("pane_id") or ""), env
         )
+    # Claude's hooks, when the panes carry them instead of ~/.claude/settings.json:
+    # a file of Navide's, merged by Claude Code with the user's own settings —
+    # for a resume and an account-dir pane alike. Not for a login subcommand.
+    from . import convenience_wiring
+
+    if agent_key == "claude" and not login_subcommand and convenience_wiring.pane_carries_hooks("claude"):
+        from . import claude_hooks
+
+        payload["command"] = claude_hooks.wire_spawn(payload["command"])
     # Skills wiring mirrors ~/.codex/hooks.json into the per-pane CODEX_HOME,
     # and codex keys hook trust by that path — without this every spawn stops
     # at "Hooks need review". CODEX_HOME is final only after all wiring above.
     seeder = getattr(app.codex_home_manager, "seed_hook_trust", None)
     if agent_key == "codex" and not login_profile_id and env.get("CODEX_HOME") and callable(seeder):
-        seeded = await asyncio.to_thread(seeder, Path(env["CODEX_HOME"]))
-        if seeded:
-            app.log.info("codex hook trust seeded for %s (%d hooks)", env["CODEX_HOME"], seeded)
+        from . import convenience_wiring
+
+        if convenience_wiring.pane_carries_hooks("codex"):
+            # Phase 3: the trust rows ride on the command line instead of
+            # config.toml. After codex_session_hooks.wire, which leaves a
+            # command already holding any `-c hooks…` unwired — Navide's own
+            # SessionStart and Guard hooks would be lost.
+            override = await asyncio.to_thread(
+                app.codex_home_manager.hook_trust_override, Path(env["CODEX_HOME"])
+            )
+            if override and not login_subcommand:
+                command = payload["command"]
+                flag = " -c " + osplat.paths.quote_arg(override)
+                payload["command"] = (
+                    [*command[:-1], f"{command[-1]}{flag}"] if isinstance(command, list) and command
+                    else f"{command}{flag}"
+                )
+        else:
+            seeded = await asyncio.to_thread(
+                convenience_wiring.seed_hook_trust_gated, app.codex_home_manager, Path(env["CODEX_HOME"])
+            )
+            if seeded:
+                app.log.info("codex hook trust seeded for %s (%d hooks)", env["CODEX_HOME"], seeded)
     if transaction["cancelled"]:
         raise _TerminalCreateCancelled
     # The pane's previous PTY, when this create replaces it (restore/rebuild).
@@ -7296,7 +8946,10 @@ async def _terminal_create_impl(
                 # A login pane — isolated (login_profile_id, which does not
                 # reach this branch) or live (is_login alone) — exists to
                 # sign in; the token would make the CLI skip exactly that.
-                injection = None if is_login else await vault_to_thread(
+                # An account-dir pane already runs on its account's own
+                # login; a portable token would outrank it and switch the
+                # identity silently.
+                injection = None if is_login or account_dir_slot else await vault_to_thread(
                     functools.partial(
                         portable_credentials.spawn_env, agent_key,
                         home=Path.home(), cwd=Path(str(payload.get("cwd") or "")),
@@ -7345,6 +8998,7 @@ async def _terminal_create_impl(
             provenance = quota_failover.pane_auth_scope(
                 agent_key, launch_profile, env=env, env_remove=env_remove or (),
                 portable_slot_id=injection.slot_id if injection else None,
+                account_dir=bool(account_dir_slot),
             )
             metadata["launch_profile_id"] = provenance["profileId"]
             metadata["profile_scope"] = provenance["scope"]
@@ -7594,6 +9248,11 @@ async def _terminal_create_impl(
         raise _TerminalCreateCancelled
     if getattr(term, "closed", False):
         app._PTY_OWNERS.pop(term.id, None)
+        # A panel's restore launch that died on the spot would otherwise stay
+        # 'spawned' from its last run and be retried on every window open.
+        dock = _dock_target(metadata, str(payload.get("cwd") or ""))
+        if dock and isinstance(getattr(term, "exit_code", None), int) and term.exit_code > 0:
+            await asyncio.to_thread(_retire_dock_record, dock[0], str(payload["pane_id"]), dock[1])
         details = {
             "agent_key": agent_key,
             "binary_path": (startup_probe or {}).get("binary_path", ""),
@@ -7615,6 +9274,13 @@ async def _terminal_create_impl(
         from .usage_service import start_login_watch
 
         start_login_watch(agent_key, login_profile_id)
+    elif metadata.get("account_dir_login") and account_dir_slot:
+        # Same fast feedback for a sign-in into an account's own config dir:
+        # nothing is harvested (Claude Code keeps that login), the watch only
+        # reports the moment the dir holds it.
+        from .usage_service import start_account_dir_login_watch
+
+        start_account_dir_login_watch(account_dir_slot)
     response_payload = {
         "terminal_session_id": term.id,
         "pane_id": term.pane_id,
@@ -7630,6 +9296,7 @@ async def _terminal_create_impl(
         raise _TerminalCreateCancelled
     transaction["response_payload"] = response_payload
     transaction["committed"] = True
+    _record_dock_spawn(payload, metadata, agent_key, term.id)
 
 
 @handler("terminal.create.cancel")
@@ -8067,9 +9734,11 @@ async def terminal_kill(session: "Session", msg_id: str, msg_type: str, payload:
         )
         return
     pane_id_for_unreg = ""
+    dock: tuple[str, str] | None = None
     for sess in session.terminals._sessions.values():  # noqa: SLF001
         if sess.id == term_session_id:
             pane_id_for_unreg = sess.pane_id
+            dock = _dock_target(getattr(sess, "metadata", None) or {})
             break
     try:
         await session.terminals.kill(term_session_id, force=force)
@@ -8078,12 +9747,117 @@ async def terminal_kill(session: "Session", msg_id: str, msg_type: str, payload:
     finally:
         if app._PTY_OWNERS.get(term_session_id) is session:
             app._PTY_OWNERS.pop(term_session_id, None)
+    # A panel's CLI the user stopped is not one to bring back on the next
+    # window open. Only the panel's Stop flags its kill: the Host also kills
+    # panel PTYs (plugin recovery, a revoked version, a create cleanup), and
+    # those must leave the record to restore. The flag reaches no record but
+    # the killed session's own panel one (its metadata, not the payload).
+    if dock and pane_id_for_unreg and payload.get("retire_restore") is True:
+        _DOCK_PTYS.pop(term_session_id, None)
+        await asyncio.to_thread(_retire_dock_record, dock[0], pane_id_for_unreg, dock[1])
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
     # The process behind the pane is gone (idle reclaim comes through here
     # too): nothing can beat for it until a respawn, so close its intervals.
     if pane_id_for_unreg:
         for workspace_path in app.dev_time_store.pane_removed(pane_id_for_unreg):
             await app.broadcast(make_event("devtime.changed", {"workspace_path": workspace_path}))
+
+
+@handler("terminal.kill_surface")
+async def terminal_kill_surface(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """End the embedded AI panels one window held.
+
+    Sent when a Plan / Git / Editor window closes (not on app quit, whose
+    records stay 'spawned' to restore next launch), and when the main window
+    closes a workspace (its Pipeline Manager panel). `workspace_path` scopes it
+    to one workspace; a single-instance window that cannot say which workspace
+    its panel last ran in leaves it out and ends its surface everywhere. Each
+    matching PTY goes down, its restore record is retired the way
+    manual_pane.unspawn retires one, and its roster entry is dropped. Only
+    sessions whose terminal metadata names this panel surface are reached: a
+    window pane's create carries none, so nothing a window shows is ever
+    touched. Idempotent; replies with the pane ids it ended."""
+    from . import app
+
+    surface = str(payload.get("surface") or "")
+    ended: dict[str, str] = {}  # pane id -> workspace its panel ran in
+    # Panels whose kill raised: still running, so the caller is told which.
+    failed: list[dict[str, str]] = []
+    for term_session_id, pane_id, workspace_path in session.terminals.live_ids_for_surface(
+        surface, str(payload.get("workspace_path") or "")
+    ):
+        # Kill this session id, not every PTY under the pane id: only the
+        # session that names the surface is known to be a panel.
+        try:
+            await session.terminals.kill(term_session_id, force=True)
+        except Exception as exc:  # noqa: BLE001 — one panel's failed kill must not leave the rest running
+            log.exception("terminal.kill_surface: killing %s (%s) failed", term_session_id, pane_id)
+            failed.append({"pane_id": pane_id, "terminal_session_id": term_session_id,
+                           "error": str(exc) or type(exc).__name__})
+            continue
+        app._PTY_OWNERS.pop(term_session_id, None)
+        app.attribution.unregister_pane(pane_id)
+        ended.setdefault(pane_id, workspace_path)
+    for pane_id, workspace_path in ended.items():
+        portable_credentials.forget_launch(pane_id)
+        for ws in app.dev_time_store.pane_removed(pane_id):
+            await app.broadcast(make_event("devtime.changed", {"workspace_path": ws}))
+        entry = agent_messaging.get(pane_id)
+        if entry is not None and entry.is_dock and agent_messaging.unregister(pane_id):
+            app.forget_pane_activity(pane_id)
+            server_link.roster_changed()
+        if not workspace_path:
+            continue
+        try:
+            # Only a panel's own record: the store never lets a panel take over
+            # a window pane's, and ending the panel must not retire one either.
+            project = app.project_store.load_or_create(workspace_path)
+            if any(p.pane_id == pane_id and p.surface == surface for p in project.panes):
+                app.project_store.record_manual_pane_unspawn(workspace_path, pane_id=pane_id)
+        except Exception:  # noqa: BLE001 — the PTY is down; a lost record update must not fail the close
+            log.exception("terminal.kill_surface: retiring %s in %s failed", pane_id, workspace_path)
+    await session.send_json(
+        make_response(msg_id, msg_type, {"ok": True, "pane_ids": list(ended), "failed": failed})
+    )
+
+
+@handler("terminal.dock_record")
+async def terminal_dock_record(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """An embedded AI panel's restore record, for the panel to resume on its own
+    after an app quit: {agent, session_id} while the record is 'spawned', else
+    None. A read through the write-free peek — the Mini-IDE opens sub-folders,
+    which must not get a project written into them — and only ever a panel's
+    record, never a window pane's."""
+    from . import app
+
+    pane_id = str(payload.get("pane_id") or "")
+    project = app.project_store.peek(str(payload.get("workspace_path") or "")) if pane_id else None
+    record = next(
+        (
+            p for p in (project.panes if project else [])
+            if p.pane_id == pane_id
+            and p.spawn_status == "spawned"
+            and p.surface
+            and p.surface != "main"
+        ),
+        None,
+    )
+    await session.send_json(make_response(msg_id, msg_type, {
+        "record": {"agent": record.agent, "session_id": record.session_id} if record else None,
+    }))
+
+
+@handler("terminal.dock_retire")
+async def terminal_dock_retire(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Retire one panel's restore record instead of resuming it — the panel asks
+    when the plugin that provides its surface is gone. Same rule as a Stop: only
+    that pane's record under that panel surface, never a window pane's."""
+    pane_id = str(payload.get("pane_id") or "")
+    surface = str(payload.get("surface") or "")
+    workspace_path = str(payload.get("workspace_path") or "")
+    if pane_id and workspace_path and surface and surface != "main":
+        _retire_dock_record(workspace_path, pane_id, surface)
+    await session.send_json(make_response(msg_id, msg_type, {}))
 
 
 @handler("terminal.reattach")
@@ -8359,6 +10133,32 @@ async def project_set_pane_muted(session: "Session", msg_id: str, msg_type: str,
     if ws_raw and pane_id:
         app.project_store.set_pane_muted(ws_raw, pane_id=pane_id, is_muted=is_muted)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+
+
+@handler("project.set_pane_resume_state")
+async def project_set_pane_resume_state(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """What a pane was doing and the report it owes its parent, so a manual
+    restart can bring back the panes it interrupted. Each field is optional;
+    only the ones sent are written."""
+    from . import app
+
+    ws_raw = payload.get("workspace_path", "") or ""
+    pane_id = payload.get("pane_id", "") or ""
+    turn_state = payload.get("last_turn_state")
+    report_to = payload.get("report_to")
+    report_pending = payload.get("report_pending")
+    applied = False
+    if ws_raw and pane_id:
+        project = app.project_store.set_pane_resume_state(
+            ws_raw,
+            pane_id=pane_id,
+            last_turn_state=turn_state if isinstance(turn_state, str) else None,
+            report_to=report_to if isinstance(report_to, str) else None,
+            report_pending=report_pending if isinstance(report_pending, bool) else None,
+        )
+        # Not an error, but say so: a write that matched no record is lost.
+        applied = any(p.pane_id == pane_id for p in project.panes)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "applied": applied}))
 
 
 @handler("project.set_pane_collapsed")
@@ -9067,6 +10867,7 @@ def _mirror_pipeline_state(project: "Project") -> None:
             project.workspace_path,
             state=project.state,
             task=project.task_description,
+            keep=_live_pane_workspaces_for_recent(),
         )
         recent = app.recent_workspaces_store.list()
     except Exception:  # noqa: BLE001 — a badge must not fail a pipeline
@@ -9105,6 +10906,7 @@ async def pipeline_start(session: "Session", msg_id: str, msg_type: str, payload
         stage_blueprint=payload.get("stage_blueprint", []),
         backend_version=app.__version__,
         pipeline_id=payload.get("pipeline_id", "") or app.stages_store.get_active_pipeline_id(),
+        start_index=int(payload.get("start_index", 0) or 0),
     )
     from .guard.taint import pipeline_run_started
 
@@ -9119,6 +10921,7 @@ async def pipeline_start(session: "Session", msg_id: str, msg_type: str, payload
         run_id=run_dir or project.id,
         task=project.task_description,
         run_dir=run_dir,
+        pipeline_id=getattr(project, "pipeline_id", ""),
     )
     asyncio.create_task(
         app.broadcast(make_event("tokens.changed", app.tokens_store.snapshot(project.workspace_path)))
@@ -9217,7 +11020,14 @@ async def _sweep_pane_ptys(session: "Session", pane_id: str, *, force: bool = Tr
         # A slot with no pane record resolves to a blank id; sweeping on that
         # would match whatever the lookup returns for "no pane".
         return
-    for term_session_id in session.terminals.live_session_ids_for_pane(pane_id):
+    # A reattached PTY keeps the pane id it was created with; a restore since
+    # then renamed the pane, and only the alias table knows the old id.
+    term_session_ids: list[str] = []
+    for known_id in (pane_id, *agent_messaging.former_ids(pane_id)):
+        for term_session_id in session.terminals.live_session_ids_for_pane(known_id):
+            if term_session_id not in term_session_ids:
+                term_session_ids.append(term_session_id)
+    for term_session_id in term_session_ids:
         await session.terminals.kill(term_session_id, force=force)
         app._PTY_OWNERS.pop(term_session_id, None)
         app.attribution.unregister_pane(pane_id)
@@ -9274,7 +11084,7 @@ async def pipeline_complete(session: "Session", msg_id: str, msg_type: str, payl
 
     project = app.project_store.complete_pipeline(payload["workspace_path"])
     _mirror_pipeline_state(project)
-    app.tokens_store.end_run(project.workspace_path)
+    app.tokens_store.end_run(project.workspace_path, outcome="completed", node_states=project.node_states)
     asyncio.create_task(
         app.broadcast(make_event("tokens.changed", app.tokens_store.snapshot(project.workspace_path)))
     )
@@ -9287,17 +11097,50 @@ async def pipeline_complete(session: "Session", msg_id: str, msg_type: str, payl
 async def pipeline_abort(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
 
-    project = app.project_store.abort_pipeline(
-        payload["workspace_path"], reason=payload.get("reason", "user")
-    )
+    reason = payload.get("reason", "user")
+    project = app.project_store.abort_pipeline(payload["workspace_path"], reason=reason)
     _mirror_pipeline_state(project)
-    app.tokens_store.end_run(project.workspace_path)
+    app.tokens_store.end_run(
+        project.workspace_path,
+        # The engine aborts with reason "failed" when a run cannot go on (a
+        # reject loop out of budget); everything else is a stop.
+        outcome="failed" if reason == "failed" else "aborted",
+        node_states=project.node_states,
+    )
     asyncio.create_task(
         app.broadcast(make_event("tokens.changed", app.tokens_store.snapshot(project.workspace_path)))
     )
     await session.send_json(
         make_response(msg_id, msg_type, app._project_payload(project))
     )
+
+
+@handler("pipeline.node_states")
+async def pipeline_node_states(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The renderer engine reports per-graph-node run state; stored on the
+    project so MCP pipeline_status can read it, then broadcast for canvases in
+    every window. Contract: src/renderer/src/lib/pipelineGraph.ts."""
+    from . import app
+
+    nodes = payload.get("nodes", {})
+    gate = payload.get("gate")
+    outputs = payload.get("outputs")
+    if not isinstance(nodes, dict) or (gate is not None and not isinstance(gate, dict)) or (
+        outputs is not None and not isinstance(outputs, dict)
+    ):
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "nodes/gate/outputs must be objects"))
+        return
+    project = app.project_store.record_node_states(
+        payload["workspace_path"], nodes=nodes, gate=gate, outputs=outputs
+    )
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+    await app.broadcast(make_event("pipeline.node_states_changed", {
+        "workspace_path": project.workspace_path,
+        "pipeline_id": project.pipeline_id,
+        "state": project.state,
+        "nodes": project.node_states,
+        "gate": project.node_gate,
+    }))
 
 
 @handler("pipeline.fetch_docs")
@@ -9359,6 +11202,26 @@ async def manual_pane_spawn(session: "Session", msg_id: str, msg_type: str, payl
 
     manual_pin = _profile_pin_for_bookkeeping(
         payload.get("agent", ""), payload.get("pane_id"), payload.get("profile_id"))
+    # A rebuild re-keys the old record onto the new id; read the session the old
+    # record held before that overwrites it, so a scheduled job can follow the
+    # hop only when the rebuild resumed that very session.
+    previous_pane_id = str(payload.get("previous_pane_id") or "")
+    previous_session_id = ""
+    if previous_pane_id:
+        before = app.project_store.load_or_create(payload["workspace_path"])
+        previous = next((p for p in before.panes
+                         if p.origin != "pipeline" and p.pane_id == previous_pane_id), None)
+        previous_session_id = previous.session_id if previous is not None else ""
+    # Closed panes that held exactly the session this spawn resumes: the jobs
+    # one of them owned pass to this pane. Only a closed record counts, so an
+    # owner merely not registered yet (after a restart) keeps its jobs.
+    session_id = str(payload.get("session_id") or "")
+    closed_lineage: set[str] = set()
+    if session_id:
+        known = app.project_store.load_or_create(payload["workspace_path"])
+        closed_lineage = {p.pane_id for p in known.panes
+                          if p.origin != "pipeline" and p.spawn_status == "removed"
+                          and p.session_id == session_id}
     project = app.project_store.record_manual_pane_spawn(
         payload["workspace_path"],
         pane_id=payload["pane_id"],
@@ -9380,6 +11243,24 @@ async def manual_pane_spawn(session: "Session", msg_id: str, msg_type: str, payl
     await session.send_json(
         make_response(msg_id, msg_type, app._project_payload(project))
     )
+    if previous_session_id:
+        from . import scheduler
+
+        try:
+            await scheduler.get_service().rebind_after_rebuild(
+                previous_pane_id, str(payload["pane_id"]),
+                previous_session_id, str(payload.get("session_id") or ""),
+            )
+        except Exception:  # noqa: BLE001 — the spawn is recorded either way
+            log.exception("manual_pane.spawn: scheduler rebind failed")
+    if closed_lineage:
+        from . import scheduler
+
+        try:
+            await scheduler.get_service().inherit_owner(
+                closed_lineage, str(payload["pane_id"]), session_id)
+        except Exception:  # noqa: BLE001 — the spawn is recorded either way
+            log.exception("manual_pane.spawn: scheduler owner inheritance failed")
 
 
 @handler("manual_pane.unspawn")
@@ -9463,6 +11344,44 @@ async def manual_pane_release_pty(session: "Session", msg_id: str, msg_type: str
     """
     await _sweep_pane_ptys(session, payload["pane_id"], force=False)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+
+
+# ── Settings → Resource limits: servers panes left behind ──────────────────
+# Host window only: the list shows other processes' commands and folders, and
+# stop signals one. Both run only when the user asks (detached_servers).
+
+
+@handler("limits.detached.list")
+async def limits_detached_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import detached_servers, resource_limits
+
+    if not session.host_authenticated:
+        await session.send_json(make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated"))
+        return
+    enabled = resource_limits.track_detached(resource_limits.current())
+    items: list[dict[str, Any]] = []
+    if enabled:
+        try:
+            items = await asyncio.to_thread(detached_servers.find, session.terminals.live_pane_marks())
+        except Exception as err:  # noqa: BLE001 — a failed scan lists nothing
+            log.warning("leftover-server scan failed: %s", err)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "enabled": enabled, "items": items}))
+
+
+@handler("limits.detached.stop")
+async def limits_detached_stop(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import detached_servers
+
+    if not session.host_authenticated:
+        await session.send_json(make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated"))
+        return
+    result = await asyncio.to_thread(
+        detached_servers.stop,
+        int(payload["pid"]),
+        float(payload["started_at"]),
+        live=session.terminals.live_pane_marks(),
+    )
+    await session.send_json(make_response(msg_id, msg_type, result))
 
 
 @handler("manual_pane.session")
@@ -9843,6 +11762,11 @@ async def agent_msg_register(session: "Session", msg_id: str, msg_type: str, pay
         # that knows it (lineage is renderer state), and cli_whoami is the only
         # reader — a child asking who it owes its report to.
         spawned_by=str(payload.get("spawned_by") or ""),
+        # Only an embedded AI panel (AiCliDock) sends these; a window pane
+        # leaves them out and is registered exactly as before.
+        surface=str(payload.get("surface") or ""),
+        window_kind=str(payload.get("window_kind") or ""),
+        deliverable=bool(payload.get("deliverable", False)),
     )
     # The ids this same CLI process was known by before the window rebuilt its
     # pane around it (reload, detach, group reattach). They stay resolvable, so
@@ -9887,6 +11811,57 @@ async def agent_msg_unregister(session: "Session", msg_id: str, msg_type: str, p
         app.forget_pane_activity(pane_id)
         server_link.roster_changed()
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "removed": removed}))
+
+
+@handler("agent_msg.register_dock")
+async def agent_msg_register_dock(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """agent_msg.register for an embedded AI panel (AiCliDock), and the only
+    roster write a plugin window's broker can reach. It is the same register,
+    fenced so it can only ever create or refresh a panel: the surface must name
+    one, and a pane id a window pane already holds is refused rather than
+    renamed and turned into a panel under that window's feet."""
+    pane_id = str(payload.get("pane_id") or "")
+    surface = str(payload.get("surface") or "")
+    if not surface or surface == "main":
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "agent_msg.register_dock needs a panel surface")
+        )
+        return
+    existing = agent_messaging.get(pane_id) if pane_id else None
+    if existing is not None and not existing.is_dock:
+        await session.send_json(
+            make_error(msg_id, msg_type, "FORBIDDEN", "that pane id belongs to a window pane, not a panel")
+        )
+        return
+    # A panel another live window holds is that window's to rename or move;
+    # one whose window disconnected (no owner) may be reclaimed by its reload.
+    holder = agent_messaging.owner_of(pane_id) if pane_id else None
+    if holder is not None and holder is not session:
+        await session.send_json(
+            make_error(msg_id, msg_type, "FORBIDDEN", "that panel is held by another window")
+        )
+        return
+    # Only the fields a panel describes itself with. `former_pane_ids` would
+    # alias other pane ids to this entry — a window pane's CLI would then act
+    # as the panel and its push channel would move here — and `spawned_by`
+    # would claim a parent; neither is something a panel ever has.
+    allowed = (
+        "pane_id", "name", "workspace_path", "agent_key", "realized", "surface", "window_kind", "deliverable",
+    )
+    await agent_msg_register(session, msg_id, msg_type, {k: payload[k] for k in allowed if k in payload})
+
+
+@handler("agent_msg.unregister_dock")
+async def agent_msg_unregister_dock(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """agent_msg.unregister fenced the same way: it removes panels only."""
+    pane_id = str(payload.get("pane_id") or "")
+    existing = agent_messaging.get(pane_id) if pane_id else None
+    if existing is not None and not existing.is_dock:
+        await session.send_json(
+            make_error(msg_id, msg_type, "FORBIDDEN", "that pane id belongs to a window pane, not a panel")
+        )
+        return
+    await agent_msg_unregister(session, msg_id, msg_type, payload)
 
 
 @handler("agent_msg.set_busy")
@@ -10013,6 +11988,31 @@ async def ui_invoke_result(session: "Session", msg_id: str, msg_type: str, paylo
         result["warnings"] = payload["warnings"]
     delivered = plan_mcp.resolve_ui_invoke(request_id, result)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
+# Focus order for app.unicast_any. A counter rather than a clock reading:
+# Windows' monotonic clock ticks every ~15.6ms, so two focus changes in quick
+# succession would tie and the request could go to the window focused first.
+_UI_FOCUS_SEQ = itertools.count(1)
+
+
+#: A main window's page-load id (B2-c): what renderer code generates (a UUID).
+_WINDOW_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
+
+
+@handler("ui.invoke.ready")
+async def ui_invoke_ready(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """A main window announcing that it answers ui.invoke.request — sent on
+    every (re)connect, and again with focused true whenever it gains focus,
+    so app.unicast_any can hand a global UI action to a window that will
+    answer it, preferring the one the user touched last."""
+    session.ui_bus_ready = True
+    window_id = payload.get("window_id")
+    if isinstance(window_id, str) and _WINDOW_ID.fullmatch(window_id):
+        session.window_id = window_id
+    if payload.get("focused"):
+        session.ui_focused_at = next(_UI_FOCUS_SEQ)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
 @handler("agent_msg.list")
@@ -10751,6 +12751,169 @@ async def scheduler_runs(session: "Session", msg_id: str, msg_type: str, payload
     )
 
 
+# ── A workspace's self-evolution (evolve.*) ─────────────────────────────────
+# Thin wrappers over evolve_service. Every request names the workspace it is
+# about; settings and runs live in that workspace's own database.
+
+
+def _evolve_workspace(payload: dict) -> str | None:
+    workspace = payload.get("workspace")
+    return workspace if isinstance(workspace, str) and workspace.strip() else None
+
+
+@handler("evolve.get")
+async def evolve_get(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import evolve_service
+
+    workspace = _evolve_workspace(payload)
+    if workspace is None:
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "evolve.get needs a workspace"))
+        return
+    await session.send_json(
+        make_response(msg_id, msg_type, await evolve_service.get_service().get(workspace))
+    )
+
+
+@handler("evolve.set")
+async def evolve_set(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import evolve_service, scheduler
+
+    workspace = _evolve_workspace(payload)
+    settings = payload.get("settings")
+    if workspace is None or not isinstance(settings, dict):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "evolve.set needs a workspace and a settings object")
+        )
+        return
+    result = await evolve_service.get_service().set(workspace, settings)
+    await session.send_json(make_response(msg_id, msg_type, result))
+    if result.get("ok"):
+        await scheduler.broadcast_changed()
+
+
+@handler("evolve.run_now")
+async def evolve_run_now(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import evolve_service
+
+    workspace = _evolve_workspace(payload)
+    if workspace is None:
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "evolve.run_now needs a workspace"))
+        return
+    await session.send_json(
+        make_response(msg_id, msg_type, await evolve_service.get_service().run_now(workspace))
+    )
+
+
+@handler("evolve.badges")
+async def evolve_badges(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import evolve_service
+
+    workspaces = payload.get("workspaces")
+    if not isinstance(workspaces, list) or len(workspaces) > 200:
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "evolve.badges needs a list of at most 200 workspaces")
+        )
+        return
+    await session.send_json(
+        make_response(msg_id, msg_type, await evolve_service.get_service().badges(workspaces))
+    )
+
+
+# ── CLI extensions (cli_extensions.*) ──────────────────────────────────────
+# The read-only inventory behind Settings → CLI Extensions. Scanning reads
+# files and at most a declared listing command with a timeout, so a thread
+# keeps it off the loop.
+@handler("cli_extensions.list")
+async def cli_extensions_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import cli_extensions
+
+    inventory = await asyncio.to_thread(cli_extensions.scan)
+    from . import app
+
+    listing = await asyncio.to_thread(app.convenience_gate.listing)
+    inventory.items.extend(cli_extensions.navide_changes(listing["features"]))
+    await session.send_json(make_response(msg_id, msg_type, inventory.as_dict()))
+
+
+# ── Convenience features (convenience.*) ───────────────────────────────────
+# What Navide changes outside its own data; docs/en-US/convenience-features.md.
+
+
+def _convenience_source(session: "Session") -> str:
+    """Who moved a switch, for the audit log: a main window (it runs the UI
+    action bus, where the overview lives) or some other client holding the
+    backend token — a script, or an agent that read the token file. Pane
+    agents have no MCP tool for convenience.*, so this is how one would show.
+    ui.invoke.ready is the client's own word, so the window proof checked at
+    connect is what makes it "settings"."""
+    window = getattr(session, "navide_window", False) and getattr(session, "ui_bus_ready", False)
+    return "settings" if window else "ws-client"
+
+
+@handler("convenience.list")
+async def convenience_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app
+
+    listing = await asyncio.to_thread(app.convenience_gate.listing)
+    await session.send_json(make_response(msg_id, msg_type, listing))
+
+
+@handler("convenience.history")
+async def convenience_history(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app
+
+    feature_id = str(payload.get("feature") or "") or None
+    try:
+        limit = int(payload.get("limit") or 200)
+        entries = await asyncio.to_thread(app.convenience_gate.history, feature_id, limit)
+    except (KeyError, ValueError) as err:
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", str(err)))
+        return
+    await session.send_json(make_response(msg_id, msg_type, {"entries": entries}))
+
+
+@handler("convenience.set")
+async def convenience_set(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app, convenience_wiring
+    from .applog import backend_port_file
+    from .convenience import CleanupIncomplete
+
+    feature_id = str(payload.get("id") or "")
+    allowed = payload.get("allowed")
+    if not isinstance(allowed, bool):
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "allowed must be a boolean"))
+        return
+    try:
+        await asyncio.to_thread(
+            convenience_wiring.set_feature, feature_id, allowed,
+            port_file=str(backend_port_file()), source=_convenience_source(session),
+        )
+    except KeyError:
+        await session.send_json(make_error(msg_id, msg_type, "UNKNOWN_FEATURE", feature_id))
+        return
+    except CleanupIncomplete as err:
+        # The switch did not move: Navide's entry is still in those files and
+        # still works. The cleanup rows already announced which and why.
+        await session.send_json(make_error(msg_id, msg_type, "CLEANUP_INCOMPLETE", str(err)))
+        await app.broadcast(make_event("convenience.changed", {"feature": feature_id}))
+        return
+    except ValueError as err:
+        await session.send_json(make_error(msg_id, msg_type, "REQUIRED_FEATURE", str(err)))
+        return
+    feature = await asyncio.to_thread(app.convenience_gate.listing_feature, feature_id)
+    await session.send_json(make_response(msg_id, msg_type, {"feature": feature}))
+    await app.broadcast(make_event("convenience.changed", {"feature": feature_id}))
+
+
+@handler("convenience.upgrade_ack")
+async def convenience_upgrade_ack(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app
+
+    await asyncio.to_thread(app.convenience_gate.acknowledge_upgrade, source=_convenience_source(session))
+    await session.send_json(make_response(msg_id, msg_type, {}))
+    await app.broadcast(make_event("convenience.changed", {}))
+
+
 # ── Voice input (voice.*) ───────────────────────────────────────────────────
 # Handlers live in voice_handlers; the sidecar and model in stt_service. Both
 # stay inert until one of these messages arrives.
@@ -10772,8 +12935,21 @@ from .channels import ws_api as channels_ws_api  # noqa: E402
 
 handler(*channels_ws_api.MESSAGE_TYPES)(channels_ws_api.handle)
 
+# The Host's answer to a channel attachment's PDF print (channels/pdf.py).
+from .channels import pdf as channels_pdf  # noqa: E402
+
+handler(channels_pdf.RESULT_TYPE)(channels_pdf.handle_result)
+
 # ── Navide Guard (guard.*) ──
 # Renderer-only: ws request types, unreachable through MCP ui_invoke.
 from .guard import ws_api as guard_ws_api  # noqa: E402
 
 handler(*guard_ws_api.MESSAGE_TYPES)(guard_ws_api.handle)
+
+# ── Credentials & keys (credentials.*) ──
+# Read-only risk scan plus reminder state; logic in credentials_scan. No
+# handler here returns or accepts a secret value.
+from . import credentials_scan  # noqa: E402
+
+for _credentials_type, _credentials_fn in credentials_scan.MESSAGE_HANDLERS.items():
+    handler(_credentials_type)(_credentials_fn)

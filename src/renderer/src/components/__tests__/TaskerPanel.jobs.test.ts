@@ -241,6 +241,57 @@ describe('TaskerPanel — Navide jobs', () => {
     expect(lightOf(wrapper, 'ok')).toBe('ok')
   })
 
+  it('shows a job the backend disabled for a gone target in red, with why and rebind', async () => {
+    wire.jobs = [
+      job('stopped', {
+        enabled: false,
+        state: {
+          last_status: 'skipped', last_skip_reason: 'target_gone', consecutive_errors: 0,
+          consecutive_target_gone: 3, disabled_reason: 'target_gone',
+        },
+      }),
+    ]
+    wrapper = await mountSection()
+    const r = row(wrapper, 'stopped')
+    expect(r.attributes('data-light')).toBe('err')
+    expect(r.get('[data-test="target-gone"]').text()).toContain(t('scheduler.gone-disabled', { n: 3 }))
+    expect(r.find('[data-test="retarget"]').exists()).toBe(true)
+  })
+
+  it('drops the red once a rebuild rebound the job, and asks to switch a stopped one back on', async () => {
+    wire.jobs = [
+      job('stopped', {
+        enabled: false,
+        state: {
+          last_status: 'skipped', last_skip_reason: null, consecutive_errors: 0,
+          consecutive_target_gone: 0, disabled_reason: null, rebound_from: PANE_A,
+          rebound_needs_enable: true,
+        },
+      }),
+      // Rebound, switched back on, then stopped by hand: the ask was answered.
+      job('stopped-later', {
+        enabled: false,
+        state: { last_status: 'ok', consecutive_errors: 0, rebound_from: PANE_A, rebound_needs_enable: false },
+      }),
+      job('running', {
+        state: {
+          last_status: 'skipped', last_skip_reason: null, consecutive_errors: 0,
+          consecutive_target_gone: 0, disabled_reason: null, rebound_from: PANE_A,
+        },
+      }),
+    ]
+    wrapper = await mountSection()
+    const stopped = row(wrapper, 'stopped')
+    expect(stopped.attributes('data-light')).toBe('off')
+    expect(stopped.find('[data-test="target-gone"]').exists()).toBe(false)
+    expect(stopped.get('[data-test="rebound"]').text()).toContain(t('scheduler.rebound-reenable'))
+    expect(row(wrapper, 'stopped-later').find('[data-test="rebound"]').exists()).toBe(false)
+    const running = row(wrapper, 'running')
+    expect(running.attributes('data-light')).toBe('skip')
+    expect(running.find('[data-test="target-gone"]').exists()).toBe(false)
+    expect(running.find('[data-test="rebound"]').exists()).toBe(false)
+  })
+
   it('shows a gone target and opens the editor from "retarget"', async () => {
     wire.jobs = [
       job('gone', {
@@ -250,8 +301,11 @@ describe('TaskerPanel — Navide jobs', () => {
     wire.roster = [{ pane_id: PANE_B, name: '週報', workspace_path: WS, workspace_label: 'proj', agent_key: 'claude' }]
     wrapper = await mountSection()
     const r = row(wrapper, 'gone')
-    expect(r.attributes('data-light')).toBe('skip')
+    // Red, but not a failure: no failed ×N pill for a skip.
+    expect(r.attributes('data-light')).toBe('err')
+    expect(r.find('[data-test="fail-pill"]').exists()).toBe(false)
     expect(r.get('[data-test="target-gone"]').text()).toContain(t('scheduler.skip.target_gone'))
+    expect(r.get('[data-test="retarget"]').text()).toBe(t('scheduler.retarget'))
     expect(r.find('[data-test="skip-tag"]').exists()).toBe(false)
 
     await r.get('[data-test="retarget"]').trigger('click')
