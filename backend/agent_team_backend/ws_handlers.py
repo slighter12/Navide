@@ -16,6 +16,7 @@ import asyncio
 from contextlib import AsyncExitStack
 import json
 import logging
+import math
 import os
 import re
 import functools
@@ -209,6 +210,13 @@ async def host_register(session: "Session", msg_id: str, msg_type: str, payload:
     session.disabled_plugins = frozenset(features.get("disabled_plugins", []) if isinstance(features, dict) else [])
     app.note_host_disabled_plugins(session.disabled_plugins)
     await session.send_json(make_response(msg_id, msg_type, {"registered": True}))
+    # A Host that connects again (its session dropped, this backend did not)
+    # starts from idle: tell it the result helper's state when there is one.
+    from .mcp_server.plugin_agent_tools import _result_worker
+    from .plugins.agent_tools_contract import AGENT_TOOLS_RESULT_HELPER_EVENT
+
+    if _result_worker.state != "idle":
+        await session.send_json(make_event(AGENT_TOOLS_RESULT_HELPER_EVENT, _result_worker.snapshot()))
 
 
 @handler("window.prove")
@@ -283,6 +291,375 @@ async def agent_capability_result(
         return
     delivered = plan_mcp.resolve_agent_capability(request_id, response)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
+@handler("agent.capability.result_chunk")
+async def agent_capability_result_chunk(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """One piece of a Host agent tool result (agent-tools contract 4.4, R2)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    if not isinstance(payload, dict) or set(payload) != {"request_id", "seq", "data"} or not isinstance(
+        payload.get("request_id"), str
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "agent.capability.result_chunk is malformed")
+        )
+        return
+    accepted = plan_mcp.accept_agent_result_piece(payload["request_id"], payload["seq"], payload["data"])
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+@handler("agent.capability.progress")
+async def agent_capability_progress(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """The Host says a pending agent tool call is alive (contract 4.4, Timing)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"request_id", "phase"}
+        or not isinstance(payload.get("request_id"), str)
+        or payload.get("phase") not in ("arguments", "execution", "result")
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "agent.capability.progress is malformed")
+        )
+        return
+    accepted = plan_mcp.note_agent_capability_activity(payload["request_id"])
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+@handler("plugins.agentTools.sync")
+async def plugins_agent_tools_sync(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """The Host's full catalog of third-party agent tools (contract 4.1).
+
+    Only the authenticated Host session may send it. A snapshot replaces the
+    previous one; one from a new Host session starts again from its revision.
+    """
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import plugin_agent_tools
+
+    result = plugin_agent_tools.apply_sync(payload, plugin_agent_tools.session_key(session))
+    if not result["applied"] and result["error"] == "malformed snapshot":
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugins.agentTools.sync is malformed")
+        )
+        return
+    await session.send_json(make_response(msg_id, msg_type, result))
+
+
+@handler("marketplace.query.result")
+async def marketplace_query_result(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Return the Host's answer to a ``marketplace.query.request`` (plan B, B2-a)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    request_id = payload.get("request_id") if isinstance(payload, dict) else None
+    if not isinstance(request_id, str) or not request_id or not isinstance(payload.get("ok"), bool):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "marketplace.query.result is malformed")
+        )
+        return
+    response = {key: value for key, value in payload.items() if key != "request_id"}
+    delivered = plan_mcp.resolve_marketplace_query(request_id, response)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
+@handler("plugins.agent_action.result")
+async def plugins_agent_action_result(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Return the Host's answer to a ``plugins.agent_action.request`` (plan B, B2-c)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import server as plan_mcp
+
+    request_id = payload.get("request_id") if isinstance(payload, dict) else None
+    if not isinstance(request_id, str) or not request_id or not isinstance(payload.get("ok"), bool):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugins.agent_action.result is malformed")
+        )
+        return
+    response = {key: value for key, value in payload.items() if key != "request_id"}
+    delivered = plan_mcp.resolve_plugin_agent_action(request_id, response)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
+_ACTIVITY_ROW_REQUIRED = frozenset(("plugin_id", "plugin_version", "source", "address", "outcome"))
+_ACTIVITY_ROW_FIELDS = _ACTIVITY_ROW_REQUIRED | {"workspace", "denied_reason", "fs_path", "shell_command", "at", "count"}
+#: The Host records broker and shell-broker calls; agent tool calls are the
+#: backend's own rows (B1).
+_HOST_ACTIVITY_SOURCES = frozenset(("broker", "shell"))
+#: Calls into a plugin's own backend, counted by the Host per batch.
+_BACKEND_CALL_ROW_FIELDS = frozenset(("plugin_id", "plugin_version", "workspace", "source", "address", "outcome", "count"))
+
+
+def _backend_call_row(app: Any, row: dict) -> str | None:
+    """Record one counted backend-call row; the skip reason when it is not recorded.
+
+    Exact fields (``at`` optional: the minute the calls fell in, Unix ms), a
+    ``backend.`` address and a positive count.
+    """
+    from .plugins import agent_tools_contract as contract
+
+    if set(row) - {"at"} != _BACKEND_CALL_ROW_FIELDS:
+        return "malformed"
+    if not all(isinstance(row[key], str) for key in _BACKEND_CALL_ROW_FIELDS - {"count"}):
+        return "malformed"
+    if not row["address"].startswith(contract.PLUGIN_BACKEND_CALL_ADDRESS_PREFIX):
+        return "malformed"
+    at = row.get("at")
+    if "at" in row and (isinstance(at, bool) or not isinstance(at, int) or at < 0):
+        return "bad at"
+    recorded = app.plugin_audit_log.record_backend_calls(
+        plugin_id=row["plugin_id"], plugin_version=row["plugin_version"], workspace=row["workspace"],
+        address=row["address"], outcome=row["outcome"], count=row["count"], at_ms=at,
+    )
+    return None if recorded else "refused"
+
+
+@handler("plugin.activity.record")
+async def plugin_activity_record(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Store the Host's batch of broker and shell-broker calls (plan B, D-e).
+
+    Write-only: each row (calls the Host counted per key and minute, with
+    ``count``) is redacted and counted by ``record_activity``; a row
+    it refuses is skipped, and nothing here can fail the calls it records.
+    Rows with source ``backend`` (calls into a plugin's own backend, counted)
+    go to the per-minute counts instead. The ``backend.`` address prefix and
+    the source must agree: a backend row with another address, or another row
+    with a ``backend.`` address, is skipped.
+    """
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    rows = payload.get("rows") if isinstance(payload, dict) and set(payload) == {"rows"} else None
+    if not isinstance(rows, list):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugin.activity.record is malformed")
+        )
+        return
+    accepted = 0
+    # Skipped rows are counted by reason and logged, never their content (#373 F3).
+    skipped = {"malformed": 0, "bad at": 0, "refused": 0}
+    for row in rows:
+        if isinstance(row, dict) and row.get("source") == "backend":
+            reason = _backend_call_row(app, row)
+            if reason is None:
+                accepted += 1
+            else:
+                skipped[reason] += 1
+            continue
+        if (
+            not isinstance(row, dict)
+            or not _ACTIVITY_ROW_REQUIRED <= set(row) <= _ACTIVITY_ROW_FIELDS
+            or row.get("source") not in _HOST_ACTIVITY_SOURCES
+            or (isinstance(row.get("address"), str) and row["address"].startswith("backend."))
+        ):
+            skipped["malformed"] += 1
+            continue
+        # `at`: when the call happened on the Host (Unix ms); record_activity
+        # clamps it to now. Without it, the row is dated when it arrives.
+        at = row.get("at")
+        if "at" in row and (isinstance(at, bool) or not isinstance(at, int) or at < 0):
+            skipped["bad at"] += 1
+            continue
+        # `count`: calls the Host counted under this key in that minute (1 when absent).
+        count = row.get("count", 1)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            skipped["malformed"] += 1
+            continue
+        fields = {key: value for key, value in row.items() if key not in ("at", "count") and isinstance(value, str)}
+        if len(fields) != len(row) - ("at" in row) - ("count" in row):
+            skipped["malformed"] += 1
+            continue
+        if app.plugin_audit_log.record_activity(**fields, at_ms=at, count=count):
+            accepted += 1
+        else:
+            skipped["refused"] += 1
+    if accepted < len(rows):
+        reasons = ", ".join(f"{reason}: {n}" for reason, n in skipped.items() if n)
+        log.warning("plugin activity: %d of %d rows skipped (%s)", len(rows) - accepted, len(rows), reasons)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+_DECLARED_KINDS = frozenset(("system", "shell", "backendMethod", "agentTool"))
+
+
+def _declared_items(value: Any) -> list[dict[str, str]] | None:
+    """``declared`` of a report request: ``[{kind, key}]``, None when malformed."""
+    if not isinstance(value, list):
+        return None
+    items = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"kind", "key"}
+            or item["kind"] not in _DECLARED_KINDS
+            or not isinstance(item["key"], str)
+        ):
+            return None
+        items.append({"kind": item["kind"], "key": item["key"]})
+    return items
+
+
+_RESOURCE_DECISION_FIELDS = frozenset(
+    ("plugin_id", "plugin_version", "item", "usage", "threshold", "decision", "at")
+)
+_MAX_SAFE_INTEGER = 2**53 - 1
+
+
+def _resource_decision_row(row: Any) -> dict[str, Any] | None:
+    """A ``plugin.resource.decision`` row with exactly the contract's fields
+    and types (``parsePluginResourceDecisionRow``'s rules), or None."""
+    from .plugins import agent_tools_contract as contract
+
+    if not isinstance(row, dict) or set(row) != _RESOURCE_DECISION_FIELDS:
+        return None
+
+    def number(value: Any) -> bool:
+        return (
+            not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value) and value >= 0
+        )
+
+    at = row["at"]
+    if (
+        not isinstance(row["plugin_id"], str) or not row["plugin_id"]
+        or not isinstance(row["plugin_version"], str)
+        or row["item"] not in contract.PLUGIN_RESOURCE_ITEMS
+        or row["decision"] not in contract.PLUGIN_RESOURCE_DECISIONS
+        or not number(row["usage"]) or not number(row["threshold"])
+        or isinstance(at, bool) or not isinstance(at, int) or not 0 <= at <= _MAX_SAFE_INTEGER
+    ):
+        return None
+    return dict(row)
+
+
+@handler("plugin.resource.decision")
+async def plugin_resource_decision(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Store the Host's watchdog notices and the user's decisions (contract 5.2).
+
+    Write-only: rows are queued for the audit's batched flush. A row that is
+    not exactly the contract's shape is skipped and only counted in the log.
+    """
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    rows = payload.get("rows") if isinstance(payload, dict) and set(payload) == {"rows"} else None
+    if not isinstance(rows, list):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugin.resource.decision is malformed")
+        )
+        return
+    accepted = 0
+    for raw in rows:
+        row = _resource_decision_row(raw)
+        if row is not None and app.plugin_audit_log.record_resource_decision(**row):
+            accepted += 1
+    if accepted < len(rows):
+        log.warning("plugin resource decision: %d of %d rows skipped", len(rows) - accepted, len(rows))
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "accepted": accepted}))
+
+
+@handler("plugin.activity.forget")
+async def plugin_activity_forget(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """A plugin was removed: forget its first-seen rows (Host-authenticated)."""
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    plugin_id = payload.get("plugin_id") if isinstance(payload, dict) else None
+    if not isinstance(plugin_id, str) or not plugin_id or set(payload) != {"plugin_id"}:
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugin.activity.forget is malformed")
+        )
+        return
+    await asyncio.to_thread(app.plugin_audit_log.forget_plugin, plugin_id)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+
+
+@handler("plugins.activity.report")
+async def plugins_activity_report(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """One plugin's ``PluginActivityReport`` for the activity page (contract 5.1, D-f).
+
+    Host-authenticated: the main window asks the Host over IPC and the Host
+    forwards, adding the ``declared`` items from the installed manifest.
+    """
+    from . import app
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    plugin_id = payload.get("plugin_id") if isinstance(payload, dict) else None
+    declared = _declared_items(payload.get("declared", [])) if isinstance(payload, dict) else None
+    # When the Host installed this package (Unix ms), optional (#373 F1).
+    installed_at = payload.get("installedAt") if isinstance(payload, dict) else None
+    if installed_at is not None and (isinstance(installed_at, bool) or not isinstance(installed_at, int) or installed_at < 0):
+        declared = None
+    if (
+        not isinstance(plugin_id, str)
+        or not plugin_id
+        or not set(payload) <= {"plugin_id", "declared", "installedAt"}
+        or declared is None
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "plugins.activity.report is malformed")
+        )
+        return
+    report = await asyncio.to_thread(
+        app.plugin_audit_log.activity_report, plugin_id, declared=declared, installed_at=installed_at
+    )
+    await session.send_json(make_response(msg_id, msg_type, report))
 
 
 @handler("editor.rewrite")
@@ -3651,6 +4028,115 @@ async def skills_install_approval_decide(session: "Session", msg_id: str, msg_ty
     except SkillApprovalError as err:
         await session.send_json(make_error(msg_id, msg_type, err.code, str(err), {"approval_id": approval_id}))
         return
+    await session.send_json(make_response(msg_id, msg_type, {"approval": approval}))
+
+
+@handler("plugins.agent_request.decide")
+async def plugins_agent_request_decide(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The user's decision on an agent's plugin request (contract section 6).
+
+    Only the main window can mint the confirmation, bound to this approval_id
+    and to the decision, so an agent cannot approve its own request and a
+    reject confirmation cannot be spent as an approval; no other field grants
+    anything.
+    """
+    from .skills_approvals import SkillApprovalError, decide_plugin
+
+    approval_id = str(payload.get("approval_id") or "")
+    approve = payload.get("approve") is True
+    subject = f"{approval_id}:{'approve' if approve else 'reject'}"
+    if not await _confirmed(
+        session, msg_id, msg_type, {"confirm": payload.get("confirmation")}, subject=subject
+    ):
+        return
+    from . import app
+
+    try:
+        approval = await decide_plugin(
+            approval_id, approve, window_id=session.window_id if app.is_main_window(session) else "",
+        )
+    except SkillApprovalError as err:
+        await session.send_json(make_error(msg_id, msg_type, err.code, str(err), {"approval_id": approval_id}))
+        return
+    _audit_user_decision(approval, "decide-approve" if approve else "decide-reject")
+    await session.send_json(make_response(msg_id, msg_type, {"approval": approval}))
+
+
+def _audit_user_decision(approval: dict, action: str, error_code: str = "") -> None:
+    """A person's decision or result on a plugin request, in plugin_agent_actions (B2-c)."""
+    from . import app
+
+    target = approval.get("target") if isinstance(approval.get("target"), dict) else {}
+    app.plugin_audit_log.record_agent_action(
+        plugin_id=str(target.get("id") or ""), plugin_version=str(target.get("version") or ""),
+        action=action, caller_kind="user", approval_id=str(approval.get("approval_id") or ""),
+        outcome="allowed" if not error_code else "error", error_code=error_code,
+    )
+
+
+@handler("plugins.agent_requests.list")
+async def plugins_agent_requests_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The plugin requests still open (pending and applying), e.g. to recover after a window restart.
+
+    Main windows only: a record names the requester's pane and workspace.
+    ``applyingInLiveWindow`` lists the applying requests a connected main
+    window approved and is still carrying out; recovery leaves those alone.
+    """
+    from . import app
+    from .skills_approvals import registry
+
+    if not app.is_main_window(session):
+        await session.send_json(make_error(msg_id, msg_type, "FORBIDDEN", "only a Navide main window may list plugin requests"))
+        return
+    requests = registry.plugin_requests()
+    live = app.live_main_window_ids()
+    in_live_window = [
+        r["approval_id"] for r in requests
+        if r["status"] == "applying" and registry.applying_by(r["approval_id"]) in live
+    ]
+    await session.send_json(make_response(msg_id, msg_type, {"requests": requests, "applyingInLiveWindow": in_live_window}))
+
+
+@handler("plugins.agent_request.finish")
+async def plugins_agent_request_finish(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The window carried out an approved plugin request: applying -> completed | failed.
+
+    Only a window can mint the confirmation, bound to the approval_id and the
+    status (``<approval_id>:completed|failed``), so an agent cannot report a
+    change that never happened and a "failed" confirmation cannot report success.
+    """
+    from . import app
+    from .ipc import make_event
+    from .plugins import agent_tools_contract as contract
+    from .skills_approvals import SkillApprovalError, registry
+
+    approval_id = str(payload.get("approval_id") or "")
+    status = payload.get("status")
+    error = payload.get("error")
+    if status not in {"completed", "failed"} or (error is not None and not isinstance(error, str)):
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "status must be completed or failed"))
+        return
+    if not await _confirmed(
+        session, msg_id, msg_type, {"confirm": payload.get("confirmation")}, subject=f"{approval_id}:{status}"
+    ):
+        return
+    try:
+        approval = registry.finish_plugin(
+            approval_id, status, error=error if status == "failed" else None,
+            window_id=session.window_id if app.is_main_window(session) else "",
+        )
+    except SkillApprovalError as err:
+        await session.send_json(make_error(msg_id, msg_type, err.code, str(err), {"approval_id": approval_id}))
+        return
+    late = approval.get("finished_late") is True
+    _audit_user_decision(
+        approval, f"finish-late-{status}" if late else f"finish-{status}",
+        "" if status == "completed" else ("INTERRUPTED" if error == "interrupted" else "ACTION_FAILED"),
+    )
+    resolved = {"approval_id": approval_id, "status": approval["status"], "error": approval["error"]}
+    if late:
+        resolved.update(finished_late=True, settled=approval.get("settled"))
+    await app.broadcast(make_event(contract.PLUGIN_APPROVAL_RESOLVED_EVENT, resolved))
     await session.send_json(make_response(msg_id, msg_type, {"approval": approval}))
 
 
@@ -7136,6 +7622,21 @@ async def issues_public(session: "Session", msg_id: str, msg_type: str, payload:
 # - This is a local-only Electron app; the WebSocket server binds to
 #   localhost only, reducing (but not eliminating) external attack surface.
 _SHELL_RUN_TIMEOUT_S = 30
+# Each text field of a shell.run response carries at most this many characters
+# (unchanged). What was cut is disclosed with ``truncated`` and the full UTF-8
+# size (``stdoutBytes``; ``stderrBytes`` when stderr was cut too).
+_SHELL_RUN_OUTPUT_CHARS = 8000
+
+
+def _shell_run_truncation(stdout: str, stderr: str = "") -> dict:
+    """``truncated`` plus the full sizes of what shell.run cut at 8000 characters."""
+    fields: dict = {
+        "truncated": len(stdout) > _SHELL_RUN_OUTPUT_CHARS or len(stderr) > _SHELL_RUN_OUTPUT_CHARS,
+        "stdoutBytes": len(stdout.encode("utf-8", "replace")),
+    }
+    if len(stderr) > _SHELL_RUN_OUTPUT_CHARS:
+        fields["stderrBytes"] = len(stderr.encode("utf-8", "replace"))
+    return fields
 
 
 @handler("shell.run")
@@ -7181,6 +7682,7 @@ async def shell_run(session: "Session", msg_id: str, msg_type: str, payload: dic
             "stdout": stdout[:8000],
             "stderr": stderr[:8000],
             "exit_code": rc,
+            **_shell_run_truncation(stdout, stderr),
         }))
         return
     if not cmd:
@@ -7216,6 +7718,7 @@ async def shell_run(session: "Session", msg_id: str, msg_type: str, payload: dic
                     output = stdout.decode("utf-8", errors="replace")
                     await session.send_json(make_response(msg_id, msg_type, {
                         "ok": True, "output": output[:8000], "exit_code": proc.returncode,
+                        **_shell_run_truncation(output),
                     }))
                 except asyncio.TimeoutError:
                     from .ai_chat_cli_engine import _terminate_proc_tree
@@ -11731,6 +12234,10 @@ async def ui_invoke_result(session: "Session", msg_id: str, msg_type: str, paylo
 _UI_FOCUS_SEQ = itertools.count(1)
 
 
+#: A main window's page-load id (B2-c): what renderer code generates (a UUID).
+_WINDOW_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
+
+
 @handler("ui.invoke.ready")
 async def ui_invoke_ready(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     """A main window announcing that it answers ui.invoke.request — sent on
@@ -11738,6 +12245,9 @@ async def ui_invoke_ready(session: "Session", msg_id: str, msg_type: str, payloa
     so app.unicast_any can hand a global UI action to a window that will
     answer it, preferring the one the user touched last."""
     session.ui_bus_ready = True
+    window_id = payload.get("window_id")
+    if isinstance(window_id, str) and _WINDOW_ID.fullmatch(window_id):
+        session.window_id = window_id
     if payload.get("focused"):
         session.ui_focused_at = next(_UI_FOCUS_SEQ)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))

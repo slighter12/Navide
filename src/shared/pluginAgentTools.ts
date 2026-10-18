@@ -1,8 +1,8 @@
 /**
  * Step-0 contract for Navide plugin agent tools (plan B, B1 and B2).
  *
- * Types and pure functions only: nothing in the app imports this module yet,
- * and plugin-manifest-v2.schema.json still refuses `backend.agentTools`. The
+ * Types and pure functions only. Since B1-a the Host refuses a manifest whose
+ * `backend.agentTools` fails `validateAgentTools` (pluginManifestV2.ts). The
  * normative text is docs/en-US/plugin-agent-tools-contract.md; the Python
  * twin is backend/agent_team_backend/plugins/agent_tools_contract.py, and both
  * are held to docs/plugin-contracts/agent-tools-fixtures/ by their tests.
@@ -42,16 +42,22 @@ const PREFIX_PATTERN = /^[a-z][a-z0-9]{1,15}$/
 export const AGENT_TOOL_DEFAULT_TIMEOUT_MS = 30_000
 /** Same bound as the Host's backend calls (pluginBackendLimits.MAX_BACKEND_TIMEOUT_MS). */
 export const AGENT_TOOL_MAX_TIMEOUT_MS = 120_000
-/** DB9: the technical cap on one description, one canonical input schema and one result, in UTF-8 bytes. */
+/**
+ * DB9: the technical cap on one description and one canonical input schema, in UTF-8 bytes.
+ * Results and arguments have no cap (DB9 decision a): they travel in pieces (section 4.4) and their sizes are
+ * disclosed as `resultBytes` and `args_bytes`.
+ */
 export const AGENT_TOOL_STABILITY_CAP_BYTES = 1_048_576
 
 export const AGENT_TOOL_REQUIRED_FIELDS = ['name', 'method', 'risk', 'title', 'description', 'inputSchema'] as const
 const AGENT_TOOL_FIELDS: ReadonlySet<string> = new Set([...AGENT_TOOL_REQUIRED_FIELDS, 'timeoutMs'])
 
-/** Prefixes no plugin may derive. `navide_` is reserved on top of the design list (impersonation). */
+/** Prefixes no plugin may derive. `navide_` is reserved on top of the design list (impersonation), and so
+ *  are the prefixes the built-in packages derive (`git_`, `plans_`, `miniide_`). */
 export const RESERVED_TOOL_PREFIXES = [
-  'cli_', 'credentials_', 'evolve_', 'marketplace_', 'mcp_', 'memory_', 'navide_', 'pipeline_', 'plan_',
-  'plugins_', 'preview_', 'prompt_', 'role_', 'scheduler_', 'share_', 'skills_', 'stage_', 'ui_', 'workspace_',
+  'cli_', 'credentials_', 'evolve_', 'git_', 'marketplace_', 'mcp_', 'memory_', 'miniide_', 'navide_', 'pipeline_',
+  'plan_', 'plans_', 'plugins_', 'preview_', 'prompt_', 'role_', 'scheduler_', 'share_', 'skills_', 'stage_', 'ui_',
+  'workspace_',
 ] as const
 
 /** tools/list of the core navide MCP server on origin/main 72c4c2e33, pinned. */
@@ -61,10 +67,14 @@ export const CORE_TOOL_NAMES = [
   'cli_message_log', 'cli_open_agent', 'cli_pending_incoming', 'cli_permission_settings', 'cli_place_pane',
   'cli_read_incoming', 'cli_read_log', 'cli_reclaim_agent', 'cli_send', 'cli_send_and_wait', 'cli_token_stats',
   'cli_usage', 'cli_wait_idle', 'cli_whoami', 'credentials_findings', 'credentials_list', 'evolve_report',
-  'mcp_list', 'memory_list', 'pipeline_abort', 'pipeline_define', 'pipeline_gate', 'pipeline_graph',
+  'marketplace_detail', 'marketplace_request_install', 'marketplace_request_rollback',
+  'marketplace_request_status', 'marketplace_request_update', 'marketplace_search', 'mcp_list', 'memory_list',
+  'pipeline_abort', 'pipeline_define', 'pipeline_gate', 'pipeline_graph',
   'pipeline_list', 'pipeline_next', 'pipeline_reset', 'pipeline_restart', 'pipeline_restart_from',
   'pipeline_resume', 'pipeline_start', 'pipeline_status', 'plan_add_note', 'plan_add_todo', 'plan_create',
-  'plan_list', 'plan_read', 'plan_update_stage', 'plan_update_todo', 'preview_clear', 'preview_list',
+  'plan_list', 'plan_read', 'plan_update_stage', 'plan_update_todo', 'plugins_disable', 'plugins_enable',
+  'plugins_list_installed', 'plugins_request_remove',
+  'preview_clear', 'preview_list',
   'preview_record', 'preview_show', 'prompt_list', 'role_define', 'scheduler_list', 'scheduler_remove',
   'scheduler_run_now', 'scheduler_runs', 'scheduler_set_enabled', 'scheduler_upsert', 'share_create',
   'share_list', 'share_revoke', 'skills_inspect', 'skills_install', 'skills_install_status', 'skills_list',
@@ -125,9 +135,33 @@ export function validateAgentToolName(name: unknown, pluginId: unknown): AgentTo
 
 // ── text rules ──────────────────────────────────────────────────────────────
 
-// Cc (C0, DEL, C1) plus the two Unicode line/paragraph separators, and markup.
-// eslint-disable-next-line no-control-regex
-const FORBIDDEN_TEXT = /[\u0000-\u001f\u007f-\u009f\u2028\u2029<>]/
+/** The characters that reorder or hide text: bidi controls, zero-width and
+ *  other invisible format characters (soft hyphen, Mongolian vowel separator,
+ *  combining grapheme joiner), fillers that render as nothing (Hangul fillers,
+ *  the braille blank), variation selectors and tag characters (which
+ *  can smuggle ASCII an agent reads but a dialog does not show). One set for
+ *  the text rule and for display. */
+const INVISIBLE_CHARACTERS =
+  '\\u00ad\\u034f\\u061c\\u115f\\u1160\\u180e\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069\\u2800\\u3164' +
+  '\\ufe00-\\ufe0f\\ufeff\\uffa0\\u{e0000}-\\u{e007f}'
+// Cc (C0, DEL, C1), the two Unicode line/paragraph separators, markup, and the
+// invisible characters above.
+const FORBIDDEN_TEXT = new RegExp(`[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029<>${INVISIBLE_CHARACTERS}]`, 'u')
+const INVISIBLE_TEXT = new RegExp(`[${INVISIBLE_CHARACTERS}]`, 'gu')
+
+/** Text from a package shown to the user verbatim except that every invisible
+ *  character is spelled out (`\u{202e}`), so a schema key or enum value cannot
+ *  reorder or hide what a consent surface shows. Nothing is refused for it. */
+export function revealInvisibleText(text: string): string {
+  return text.replace(INVISIBLE_TEXT, (char) => `\\u{${char.codePointAt(0)!.toString(16)}}`)
+}
+
+/** `revealInvisibleText` for a value shown as is: a string is spelled out,
+ *  anything else (a missing field) is returned unchanged. */
+export function revealInvisibleValue<T>(value: T): T {
+  return (typeof value === 'string' ? revealInvisibleText(value) : value) as T
+}
+
 // Cc except tab and line feed.
 // eslint-disable-next-line no-control-regex
 const RESULT_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
@@ -171,6 +205,31 @@ function hasNonIntegerNumber(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasNonIntegerNumber)
   if (isPlainObject(value)) return Object.values(value).some(hasNonIntegerNumber)
   return false
+}
+
+/** Schema keywords whose values are data, not schema: never refused for their
+ *  text (the core neutralizes every schema string in tools/list instead). */
+const SCHEMA_DATA_KEYWORDS: ReadonlySet<string> = new Set(['const', 'default', 'enum', 'examples'])
+/** Keywords whose value maps names (property names, definition names) to
+ *  subschemas (draft-07 `dependencies` also to name lists): a name such as
+ *  `enum` there is a name, not a keyword. */
+const SCHEMA_MAP_KEYWORDS: ReadonlySet<string> = new Set([
+  'properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas', 'dependencies',
+])
+
+/** Every `description` / `title` string anywhere in a schema follows the text rules too:
+ *  agents read the whole schema in tools/list. */
+function hasInvalidSchemaText(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasInvalidSchemaText)
+  if (!isPlainObject(value)) return false
+  return Object.entries(value).some(([key, item]) =>
+    SCHEMA_DATA_KEYWORDS.has(key)
+      ? false
+      : SCHEMA_MAP_KEYWORDS.has(key) && isPlainObject(item)
+        ? Object.values(item).some(hasInvalidSchemaText)
+        : (key === 'description' || key === 'title') && typeof item === 'string'
+          ? !isValidAgentToolText(item)
+          : hasInvalidSchemaText(item))
 }
 
 function isValidTimeout(value: unknown): boolean {
@@ -220,6 +279,7 @@ export function validateAgentTools(manifest: { id?: unknown; backend?: unknown }
       const schema = tool.inputSchema
       if (!isPlainObject(schema) || schema.type !== 'object') fail('inputSchema', 'AGENT_TOOL_SCHEMA_INVALID')
       else if (hasNonIntegerNumber(schema)) fail('inputSchema', 'AGENT_TOOL_NON_INTEGER_NUMBER')
+      else if (hasInvalidSchemaText(schema)) fail('inputSchema', 'AGENT_TOOL_TEXT_INVALID')
       else if (utf8ByteLength(canonicalJson(schema)) > AGENT_TOOL_STABILITY_CAP_BYTES) {
         fail('inputSchema', 'AGENT_TOOL_TOO_LARGE')
       }
@@ -298,7 +358,9 @@ export type AgentToolCallErrorCode =
   | 'PLUGIN_TOOL_INVALID_ARGUMENTS'
   | 'PLUGIN_TOOL_TIMEOUT'
   | 'PLUGIN_TOOL_FAILED'
+  /** No longer produced: results have no size cap (DB9 decision a). Kept so older readers still type-check. */
   | 'PLUGIN_TOOL_RESULT_TOO_LARGE'
+  | 'PLUGIN_TOOL_CHUNKS_INVALID'
 
 /** `reason` of PLUGIN_TOOL_UNAVAILABLE, in Host check order. */
 export type AgentToolUnavailableReason =
@@ -315,6 +377,7 @@ export type AgentToolUnavailableReason =
 
 export interface AgentToolCallMeta {
   durationMs: number
+  /** UTF-8 bytes of the result's compact JSON text as the Host received it ({@link agentToolResultBytes}); 0 without a result. */
   resultBytes: number
   /** True when the target workspace differs from caller.workspace. */
   crossWorkspace: boolean
@@ -326,11 +389,214 @@ export type AgentToolCallResponse =
       ok: false
       error: string
       error_code: AgentToolCallErrorCode
-      reason?: AgentToolUnavailableReason
+      /** For PLUGIN_TOOL_UNAVAILABLE an unavailable reason; for PLUGIN_TOOL_CHUNKS_INVALID a join reason; for PLUGIN_TOOL_TIMEOUT which clock ran out. */
+      reason?: AgentToolUnavailableReason | AgentToolChunksInvalidReason | AgentToolTimeoutReason
       /** The plugin's own error code, for PLUGIN_TOOL_FAILED. */
       plugin_error?: string
       meta?: AgentToolCallMeta
     }
+
+// ── chunked transfer of results and arguments (section 4.4) ────────────────
+
+/**
+ * UTF-8 bytes of the `data` of one piece, in both directions. A transport
+ * unit, not a cap: a value of any size is sent as as many pieces as it needs.
+ * Even if every byte of a piece were escaped as `\u00XX` (6 bytes) the frame
+ * stays under 1 MiB, the frame size child readers use (Plans backend MAX_FRAME_BYTES).
+ */
+export const AGENT_TOOL_CHUNK_BYTES = 131_072
+/** Backend Wire notification, child → Host, one per result piece. */
+export const BACKEND_WIRE_RESULT_CHUNK_METHOD = 'notifications/navide/resultChunk'
+/**
+ * Key of the client capability the Host advertises in `navide/call` `_meta`
+ * clientCapabilities, and of the summary in the final success response `_meta`.
+ */
+export const BACKEND_WIRE_RESULT_CHUNKS_KEY = 'io.navide/resultChunks'
+/** Backend Wire notification, Host → child, one per argument piece. */
+export const BACKEND_WIRE_ARGUMENT_CHUNK_METHOD = 'notifications/navide/argumentChunk'
+/**
+ * Key of the capability a child advertises in its `navide/health` success
+ * `_meta`, and of the summary in a `navide/call` `_meta` sent without `arguments`.
+ */
+export const BACKEND_WIRE_ARGUMENT_CHUNKS_KEY = 'io.navide/argumentChunks'
+/** WebSocket request, Host → backend, one per result piece; answered like any request. */
+export const AGENT_CAPABILITY_RESULT_CHUNK_MESSAGE = 'agent.capability.result_chunk'
+/** WebSocket event, backend → Host, one per argument piece, sent before `agent.capability.request`. */
+export const AGENT_CAPABILITY_REQUEST_CHUNK_EVENT = 'agent.capability.request_chunk'
+/** backend → Host event: the state of the helper process that handles results in pieces (4.4, R2), sent on every change. */
+export const AGENT_TOOLS_RESULT_HELPER_EVENT = 'agent.tools.result_helper'
+
+/** The result helper's state, as the backend reports it and resource usage discloses it. */
+export interface AgentToolsResultHelperState {
+  state: 'idle' | 'ready' | 'unavailable'
+  lastError: string
+  /** When the state last changed (ms since the epoch). */
+  since: number
+}
+
+/** A backend report of the result helper's state, or null when it is not one. */
+export function parseAgentToolsResultHelperState(value: unknown): AgentToolsResultHelperState | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const { state, lastError, since } = value as Record<string, unknown>
+  if (state !== 'idle' && state !== 'ready' && state !== 'unavailable') return null
+  if (typeof lastError !== 'string' || typeof since !== 'number' || !Number.isFinite(since)) return null
+  return { state, lastError, since }
+}
+/** WebSocket request, Host → backend: the call is alive (keeps the backend's wait running). */
+export const AGENT_CAPABILITY_PROGRESS_MESSAGE = 'agent.capability.progress'
+/**
+ * Idle timer of a transfer of pieces, restarted by every piece. It detects a
+ * stalled peer; it is not a size limit (section 4.4, Timing).
+ */
+export const AGENT_TOOL_CHUNK_IDLE_MS = 30_000
+
+/** Payload of {@link AGENT_CAPABILITY_PROGRESS_MESSAGE}. */
+export interface AgentToolProgressMessage {
+  request_id: string
+  phase: 'arguments' | 'execution' | 'result'
+}
+
+/** `reason` of PLUGIN_TOOL_TIMEOUT: the plugin's own work, or a stalled transfer. */
+export type AgentToolTimeoutReason = 'execution' | 'transfer-idle'
+
+/** Backend Wire `params` of both chunk notifications; `requestId` is the `navide/call` id. */
+export interface BackendWireChunkParams {
+  requestId: string | number
+  seq: number
+  data: string
+}
+
+/** Payload of {@link AGENT_CAPABILITY_RESULT_CHUNK_MESSAGE} and {@link AGENT_CAPABILITY_REQUEST_CHUNK_EVENT}. */
+export interface AgentToolChunkMessage {
+  request_id: string
+  seq: number
+  data: string
+}
+
+/** Sent with the message that completes a transfer: how many pieces and the UTF-8 bytes of the joined text. */
+export interface AgentToolChunksSummary {
+  chunks: number
+  bytes: number
+}
+
+/** The final Host → backend response of a chunked result: `result` is replaced by `resultChunks`. */
+export interface AgentToolCallChunkedResponse {
+  ok: true
+  resultChunks: AgentToolChunksSummary
+  meta: AgentToolCallMeta
+}
+
+/** `json` is set by the caller when the joined text does not parse. */
+export type AgentToolChunksInvalidReason = 'summary' | 'seq' | 'count' | 'short' | 'bytes' | 'json'
+
+export type AgentToolPayloadReassembly =
+  | { ok: true; text: string }
+  | { ok: false; code: 'PLUGIN_TOOL_CHUNKS_INVALID'; reason: AgentToolChunksInvalidReason }
+
+/** The value of `meta.resultBytes`: UTF-8 bytes of the compact JSON text of a result (`null` when absent). */
+export function agentToolResultBytes(result: unknown): number {
+  return utf8ByteLength(JSON.stringify(result === undefined ? null : result))
+}
+
+/** Cuts `text` into pieces of at most `maxBytes` UTF-8 bytes, never inside a code point. Always at least one piece. */
+export function splitAgentToolPayloadText(text: string, maxBytes: number = AGENT_TOOL_CHUNK_BYTES): string[] {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 4) throw new RangeError('maxBytes must be an integer >= 4')
+  const pieces: string[] = []
+  // A run of ASCII is one byte per unit, so a piece that lies inside one is
+  // cut without visiting its characters; everywhere else each code point is
+  // measured. `nextWide` is the first non-ASCII unit at or after `start`.
+  const wide = /[^\x00-\x7f]/g
+  let nextWide = -1
+  let start = 0
+  while (text.length - start > 0) {
+    if (nextWide < start) {
+      wide.lastIndex = start
+      nextWide = wide.exec(text)?.index ?? text.length
+    }
+    if (nextWide - start >= maxBytes && text.length - start > maxBytes) {
+      pieces.push(text.slice(start, start + maxBytes))
+      start += maxBytes
+      continue
+    }
+    let bytes = 0
+    let i = start
+    while (i < text.length) {
+      const point = text.codePointAt(i) as number
+      const size = point < 0x80 ? 1 : point < 0x800 ? 2 : point > 0xffff ? 4 : 3
+      if (bytes + size > maxBytes) break
+      bytes += size
+      i += point > 0xffff ? 2 : 1
+    }
+    if (i === text.length) break
+    pieces.push(text.slice(start, i))
+    start = i
+  }
+  pieces.push(text.slice(start))
+  return pieces
+}
+
+/** What a receiver learns from one piece as it arrives (section 4.4). */
+export type AgentToolChunkArrival =
+  | { ok: true; short: boolean }
+  | { ok: false; code: 'PLUGIN_TOOL_CHUNKS_INVALID'; reason: 'seq' | 'short' }
+
+/**
+ * Checks one piece on arrival. Senders send pieces in `seq` order and only the
+ * last may be short (under `chunkBytes - 3` UTF-8 bytes), so any piece after a
+ * short one is `short`. A short piece does not restart the idle timer
+ * (`short: true`); a full one does. A format rule, not a limit.
+ */
+export function agentToolChunkArrival(
+  shortSeen: boolean,
+  data: unknown,
+  chunkBytes: number = AGENT_TOOL_CHUNK_BYTES,
+  /** The piece's `seq` and the one expected next (0, 1, 2, …): a repeat or a step back is `seq`. */
+  seq?: unknown,
+  expectedSeq?: number,
+  /** The UTF-8 length of `data`, when the receiver already has it (a piece kept as bytes). */
+  byteLength?: number,
+): AgentToolChunkArrival {
+  if (typeof data !== 'string') return { ok: false, code: 'PLUGIN_TOOL_CHUNKS_INVALID', reason: 'seq' }
+  if (expectedSeq !== undefined && seq !== expectedSeq) return { ok: false, code: 'PLUGIN_TOOL_CHUNKS_INVALID', reason: 'seq' }
+  if (shortSeen) return { ok: false, code: 'PLUGIN_TOOL_CHUNKS_INVALID', reason: 'short' }
+  return { ok: true, short: (byteLength ?? utf8ByteLength(data)) < chunkBytes - 3 }
+}
+
+function isCount(value: unknown, min: number): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= min
+}
+
+/**
+ * Joins the pieces received for one request (in any arrival order) and checks
+ * them against the summary. Every piece but the last must be full, at least
+ * `chunkBytes - 3` UTF-8 bytes (what {@link splitAgentToolPayloadText} always
+ * produces): a format rule, so a sender cannot drip a value to stretch the
+ * transfer. No size limit beyond memory.
+ */
+export function reassembleAgentToolPayloadText(
+  chunks: ReadonlyArray<{ seq: unknown; data: unknown }>,
+  summary: unknown,
+  chunkBytes: number = AGENT_TOOL_CHUNK_BYTES,
+): AgentToolPayloadReassembly {
+  const invalid = (reason: AgentToolChunksInvalidReason): AgentToolPayloadReassembly =>
+    ({ ok: false, code: 'PLUGIN_TOOL_CHUNKS_INVALID', reason })
+  const s = summary as Partial<AgentToolChunksSummary> | null
+  if (!s || typeof s !== 'object' || !isCount(s.chunks, 1) || !isCount(s.bytes, 0)) return invalid('summary')
+  // A piece that is not an object (null included) is a malformed piece, not a crash.
+  if (chunks.some((c) => c === null || typeof c !== 'object' || !isCount(c.seq, 0) || typeof c.data !== 'string')) {
+    return invalid('seq')
+  }
+  if (chunks.length !== s.chunks) return invalid('count')
+  const ordered: string[] = new Array(s.chunks)
+  for (const c of chunks as ReadonlyArray<{ seq: number; data: string }>) {
+    if (c.seq >= s.chunks || ordered[c.seq] !== undefined) return invalid('seq')
+    ordered[c.seq] = c.data
+  }
+  if (ordered.slice(0, -1).some((piece) => utf8ByteLength(piece) < chunkBytes - 3)) return invalid('short')
+  const text = ordered.join('')
+  if (utf8ByteLength(text) !== s.bytes) return invalid('bytes')
+  return { ok: true, text }
+}
 
 // ── backend → Host: marketplace.query (B2 read-only tools) ──────────────────
 
@@ -378,11 +644,20 @@ export type MarketplaceQueryResponse =
 export const MARKETPLACE_QUERY_REQUEST_EVENT = 'marketplace.query.request'
 export const MARKETPLACE_QUERY_RESULT_MESSAGE = 'marketplace.query.result'
 
+// ── Host → backend: plugin activity (D-e, section 5) ────────────────────────
+
+/** Host-authenticated: `{rows}`, one row per broker or shell-broker call, batched. */
+export const PLUGIN_ACTIVITY_RECORD_MESSAGE = 'plugin.activity.record'
+/** Host-authenticated: `{plugin_id, declared?}` → a `PluginActivityReport` (contract 5.1). */
+export const PLUGIN_ACTIVITY_REPORT_MESSAGE = 'plugins.activity.report'
+/** Host-authenticated: `{plugin_id}`, sent when a plugin is removed. */
+export const PLUGIN_ACTIVITY_FORGET_MESSAGE = 'plugin.activity.forget'
+
 // ── approval registry (B2) ──────────────────────────────────────────────────
 
-export type ApprovalKind = 'skill' | 'plugin-install' | 'plugin-update' | 'plugin-rollback' | 'plugin-remove'
+export type ApprovalKind = 'skill' | 'plugin-install' | 'plugin-update' | 'plugin-rollback' | 'plugin-remove' | 'plugin-enable'
 export const APPROVAL_KINDS: readonly ApprovalKind[] = [
-  'skill', 'plugin-install', 'plugin-update', 'plugin-rollback', 'plugin-remove',
+  'skill', 'plugin-install', 'plugin-update', 'plugin-rollback', 'plugin-remove', 'plugin-enable',
 ]
 
 export type PluginApprovalStatus = 'pending' | 'applying' | 'completed' | 'rejected' | 'failed' | 'expired'
@@ -398,6 +673,8 @@ export interface PluginApprovalRequest {
   target: { id: string; namespace: string; name: string; version: string | null; fromVersion: string | null }
   card: DisclosureCard | null
   diff: DisclosureDiff | null
+  /** plugin-enable: who disabled the package (`at` in Unix seconds, null when not recorded); null for every other kind. */
+  disabled: { by: 'user' | 'agent'; at: number | null; agent: PluginDisabledBy['agent'] } | null
   status: PluginApprovalStatus
   error: string | null
   created_at: number
@@ -408,9 +685,47 @@ export interface PluginApprovalRequest {
 export interface PluginApprovalDecision {
   approval_id: string
   approve: boolean
-  /** Trust confirmation minted by the main window for {@link PLUGIN_APPROVAL_DECIDE_ACTION}, subject approval_id. */
+  /** Trust confirmation minted by the main window for {@link PLUGIN_APPROVAL_DECIDE_ACTION}, subject `<approval_id>:approve` or `<approval_id>:reject`. */
   confirmation: string
 }
 
 export const PLUGIN_APPROVAL_DECIDE_ACTION = 'plugins.agent_request.decide'
+/** Window -> backend: end an approved request (`applying` -> completed | failed); confirmation subject approval_id. */
+export const PLUGIN_APPROVAL_FINISH_ACTION = 'plugins.agent_request.finish'
+/** Window -> backend: the plugin requests the registry holds (pending and applying). */
+export const PLUGIN_APPROVAL_LIST_MESSAGE = 'plugins.agent_requests.list'
+/** Backend -> windows: a plugin request was filed, or a pending one was asked for again. */
+export const PLUGIN_APPROVAL_REQUEST_EVENT = 'plugins.agent_request'
+/** Backend -> windows: a plugin request was decided, finished or expired. */
+export const PLUGIN_APPROVAL_RESOLVED_EVENT = 'plugins.agent_request_resolved'
+/** Backend -> main windows: a main window went away while carrying out these approved requests; settle them. `{approval_ids}`. */
+export const PLUGIN_APPROVAL_RECOVER_EVENT = 'plugins.agent_requests.recover'
+
+// ── backend -> Host: plugins.agent_action (B2-c disable / enable) ───────────
+
+export const PLUGIN_AGENT_ACTION_REQUEST_EVENT = 'plugins.agent_action.request'
+export const PLUGIN_AGENT_ACTION_RESULT_MESSAGE = 'plugins.agent_action.result'
+export type PluginAgentActionKind = 'disable' | 'enable'
+export type PluginAgentActionErrorCode =
+  | 'BAD_REQUEST' | 'NOT_INSTALLED' | 'BUILTIN_PLUGIN' | 'ACTION_FAILED' | 'HOST_UNAVAILABLE' | 'APPROVAL_REQUIRED'
+
+/** Who disabled an installed package (B2-c option B); `at` is Unix ms here, Unix seconds in an approval record. */
+export interface PluginDisabledBy {
+  by: 'user' | 'agent'
+  at: number | null
+  agent: { callerKind: 'pane' | 'external' | 'host'; paneId: string | null; paneName: string | null } | null
+}
+
+export interface PluginAgentActionRequest {
+  request_id: string
+  action: PluginAgentActionKind
+  plugin_id: string
+  requester: PluginApprovalRequest['requester']
+}
+
+export type PluginAgentActionAnswer =
+  | { ok: true; pluginId: string; pluginVersion: string; disabled: boolean; changed: boolean }
+  | { ok: false; error: string; error_code: Exclude<PluginAgentActionErrorCode, 'APPROVAL_REQUIRED'> }
+  /** enable of a package the user disabled (or with no recorded source): the backend files a plugin-enable request. */
+  | { ok: false; error: string; error_code: 'APPROVAL_REQUIRED'; pluginId: string; pluginVersion: string; disabled: PluginDisabledBy }
 export const PLUGIN_APPROVAL_TTL_MS = 15 * 60_000

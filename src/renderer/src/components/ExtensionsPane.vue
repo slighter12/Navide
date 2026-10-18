@@ -9,6 +9,7 @@
 // package bytes.
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { revealInvisibleValue as reveal } from '../../../shared/pluginAgentTools'
 import type {
   ManifestPermissionsSummary,
   PackageVersionGrantSummary,
@@ -18,6 +19,7 @@ import { usePluginUpdates } from '../composables/usePluginUpdates'
 import { askUninstall, ipcErrorMessage, removeWithAnswer, usePluginInstallFlow } from '../composables/usePluginInstallFlow'
 import { useNotify, vTruncate } from '@navide/plugin-ui/foundation'
 import PluginTrustDialog from './PluginTrustDialog.vue'
+import PluginActivityPanel from './PluginActivityPanel.vue'
 import PackUninstallDialog from './PackUninstallDialog.vue'
 import NativeBackendPanel from './NativeBackendPanel.vue'
 import MarketplaceIcon from './MarketplaceIcon.vue'
@@ -59,6 +61,16 @@ const updatesById = computed(
 )
 const updateFlow = usePluginInstallFlow()
 const notify = useNotify()
+// D-f: rows whose permissions section is open; the activity panel (and its
+// reads) exists only then.
+const emit = defineEmits<{ openDisclosureOverview: [] }>()
+const activityOpen = ref(new Set<string>())
+function onActivityToggle(id: string, event: Event): void {
+  const next = new Set(activityOpen.value)
+  if ((event.target as HTMLDetailsElement).open) next.add(id)
+  else next.delete(id)
+  activityOpen.value = next
+}
 
 /** The reserved first-party namespace: such a package can be disabled, not removed. */
 function isFirstPartyId(id: string): boolean {
@@ -273,10 +285,15 @@ async function uninstallPack(members: string[]): Promise<void> {
 // The user's "Disabled" switch. A disabled package keeps its files, grant and
 // stored data; the Host only stops loading its views and backend. The row says
 // so with a badge and an Enable button, never silently.
+// Which switch (a plugin id, or 'reset') the Host is still applying. A
+// built-in waits for a store check in progress and then drains (Plans can
+// take about half a minute), so the row says it is working.
+const switching = ref<string | null>(null)
 async function setDisabled(id: string, disabled: boolean): Promise<void> {
   const api = pluginsApi()
   if (!api?.setDisabled) return
   busy.value = true
+  switching.value = id
   error.value = ''
   try {
     await api.setDisabled(id, disabled)
@@ -286,6 +303,7 @@ async function setDisabled(id: string, disabled: boolean): Promise<void> {
     await reloadInventory()
   } finally {
     busy.value = false
+    switching.value = null
   }
 }
 
@@ -303,6 +321,7 @@ async function resetDisabledStore(): Promise<void> {
   const api = pluginsApi()
   if (!api?.resetDisabledStore) return
   busy.value = true
+  switching.value = 'reset'
   error.value = ''
   try {
     disabledStoreStatus.value = (await api.resetDisabledStore()).status
@@ -311,6 +330,7 @@ async function resetDisabledStore(): Promise<void> {
     error.value = pluginErrorMessage(err)
   } finally {
     busy.value = false
+    switching.value = null
   }
 }
 
@@ -358,6 +378,9 @@ watch(installed, () => void refreshPacks())
         <button class="ext-store-reset nv-btn nv-btn--primary nv-btn--sm" :disabled="busy" @click="resetDisabledStore()">
           {{ $t('settings.extensions.disabledStoreReset') }}
         </button>
+        <span v-if="switching === 'reset'" class="ext-switch-busy" role="status">
+          <span class="ext-switch-spinner" aria-hidden="true"></span>{{ $t('settings.extensions.builtinSwitchBusy') }}
+        </span>
       </div>
       <ul class="ext-list ext-bundled-list">
         <li
@@ -437,6 +460,9 @@ watch(installed, () => void refreshPacks())
             >
               {{ $t('settings.extensions.restartPlugin') }}
             </button>
+            <span v-if="switching === p.id" class="ext-switch-busy" role="status">
+              <span class="ext-switch-spinner" aria-hidden="true"></span>{{ $t('settings.extensions.builtinSwitchBusy') }}
+            </span>
           </div>
         </li>
       </ul>
@@ -457,13 +483,13 @@ watch(installed, () => void refreshPacks())
           <MarketplaceIcon v-bind="idParts(pack.id)" :label="pack.displayName || idParts(pack.id).name" :size="36" />
           <div class="ext-card-main">
             <div class="ext-card-title">
-              <span class="ext-id" v-truncate>{{ pack.displayName || pack.id }}</span>
+              <span class="ext-id" v-truncate>{{ reveal(pack.displayName || pack.id) }}</span>
               <span class="ext-requires">{{ $t('settings.extensions.marketplace.versionLabel', { version: pack.version }) }}</span>
               <span class="ext-badge ext-pack-badge">{{ $t('settings.extensions.pack.membersBadge', { count: pack.members.length }) }}</span>
             </div>
             <div class="ext-card-sub">
-              <span v-if="pack.displayName" class="ext-requires ext-pack-id">{{ pack.id }}</span>
-              <span class="ext-pack-includes">{{ $t('settings.extensions.pack.includes', { members: pack.members.join(' · ') }) }}</span>
+              <span v-if="pack.displayName" class="ext-requires ext-pack-id">{{ reveal(pack.id) }}</span>
+              <span class="ext-pack-includes">{{ $t('settings.extensions.pack.includes', { members: reveal(pack.members.join(' · ')) }) }}</span>
             </div>
           </div>
           <div class="ext-actions">
@@ -480,7 +506,7 @@ watch(installed, () => void refreshPacks())
           <MarketplaceIcon v-bind="idParts(p.id)" :label="idParts(p.id).name" :size="36" />
           <div class="ext-card-main">
             <div class="ext-card-title">
-              <span class="ext-id" v-truncate>{{ p.id }}</span>
+              <span class="ext-id" v-truncate>{{ reveal(p.id) }}</span>
               <span v-if="p.packageVersion" class="ext-requires">{{ $t('settings.extensions.marketplace.versionLabel', { version: p.packageVersion }) }}</span>
               <span v-if="p.pendingCandidateVersion" class="ext-badge ext-candidate">
                 {{ $t('settings.extensions.candidateReady', { version: p.pendingCandidateVersion }) }}
@@ -522,8 +548,12 @@ watch(installed, () => void refreshPacks())
             <p v-if="p.engineCompatible === false" class="ext-incompatible-reason">
               {{ $t('settings.extensions.incompatibleReason', { version: p.minNavideVersion ?? '' }) }}
             </p>
-            <details v-if="p.manifestPermissions || p.packageVersion" class="ext-permission-details">
-              <summary>{{ $t('settings.extensions.permissionDetails') }}</summary>
+            <details
+              v-if="p.manifestPermissions || p.packageVersion"
+              class="ext-permission-details"
+              @toggle="onActivityToggle(p.id, $event)"
+            >
+              <summary>{{ p.provenance === 'official-registry' ? $t('settings.extensions.permissionDetailsWithActivity') : $t('settings.extensions.permissionDetails') }}</summary>
               <span v-if="p.manifestPermissions" class="ext-manifest-permissions">
                 {{ $t('settings.extensionsPolicy.labeledValue', { label: $t('settings.extensionsPolicy.manifestPermissions'), value: formatManifestPermissions(p.manifestPermissions) }) }}
               </span>
@@ -537,6 +567,14 @@ watch(installed, () => void refreshPacks())
               >
                 {{ $t('settings.extensionsPolicy.labeledValue', { label: $t('settings.extensionsPolicy.packageVersionGrant'), value: formatPackageGrant(p.packageVersionGrant) }) }}
               </span>
+              <!-- Plan B D-f: the plugin's activity, mounted (and read) only
+                   while this section is open, so the page gains no element. -->
+              <template v-if="p.provenance === 'official-registry' && activityOpen.has(p.id)">
+                <PluginActivityPanel :plugin-id="p.id" />
+                <button type="button" class="ext-activity-overview-link nv-btn nv-btn--sm" @click="emit('openDisclosureOverview')">
+                  {{ $t('pluginActivity.openOverview') }}
+                </button>
+              </template>
             </details>
             <label v-if="p.getsPrereleases !== undefined" class="ext-prerelease-toggle">
               <input
@@ -559,6 +597,16 @@ watch(installed, () => void refreshPacks())
             >
               {{ $t('settings.extensions.marketplace.update') }}
             </button>
+            <!-- Plan B D2: from the Registry's listing, so labelled unverified;
+                 the update itself asks only when the package adds permissions. -->
+            <span
+              v-if="!p.pendingCandidateVersion && updatesById.get(p.id)?.permissionChange"
+              class="ext-badge ext-permission-change"
+              :class="`ext-permission-change--${updatesById.get(p.id)?.permissionChange}`"
+              :title="$t('pluginDisclosure.diff.badgeTitle')"
+            >
+              {{ $t(updatesById.get(p.id)?.permissionChange === 'more' ? 'pluginDisclosure.diff.badgeMore' : 'pluginDisclosure.diff.badgeSame') }}
+            </span>
             <button
               v-if="p.pendingCandidateVersion"
               class="ext-restart nv-btn nv-btn--primary nv-btn--sm"
@@ -897,6 +945,14 @@ watch(installed, () => void refreshPacks())
   color: var(--accent-fg);
   background: var(--accent-subtle);
 }
+.ext-badge.ext-permission-change--more {
+  color: var(--accent-fg);
+  background: var(--accent-subtle);
+}
+.ext-badge.ext-permission-change--same {
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+}
 .ext-badge.ext-incompatible {
   color: var(--danger-bright);
   background: var(--danger-subtle);
@@ -958,6 +1014,26 @@ watch(installed, () => void refreshPacks())
 }
 .ext-store-unreadable p {
   margin: 0 0 6px;
+}
+.ext-switch-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+}
+.ext-switch-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ext-switch-spin 0.8s linear infinite;
+}
+@keyframes ext-switch-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ext-switch-spinner { animation: none; }
 }
 .ext-disabled-note {
   margin: 0;
