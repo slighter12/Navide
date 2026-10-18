@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
+import type { ResourceViolation } from './pluginBackendResourceWatchdog'
 import { createHash, generateKeyPairSync, sign as edSign } from 'node:crypto'
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { isWindows, platformId, setPlatformId } from '../../shared/osplat'
 import { AI_CLI_PROFILES } from '../../shared/aiCliProfiles'
 import { backendEntryOnDisk } from './installedPlugins'
@@ -353,10 +354,12 @@ import {
   MAX_DIAGNOSTIC_LINE_CHARS,
   MAX_DIAGNOSTIC_LINES_PER_EMISSION,
   builtinPluginDisabledMessage,
+  parseAgentToolCallRequest,
   type PluginLaunchDescriptor,
   type PluginViewLaunchDescriptor,
 } from './frontendPluginManager'
 import { BACKEND_RESTART_BUDGET_SPENT_MESSAGE, PluginBackendHost } from './pluginBackendHost'
+import { splitAgentToolPayloadText, utf8ByteLength } from '../../shared/pluginAgentTools'
 import { setMainLedgerDataDir } from '../error-ledger'
 import { BackendPluginError, PluginBackendSupervisor } from './pluginBackendSupervisor'
 import { EditorSelectionGrants } from './editorSelectionGrants'
@@ -387,6 +390,9 @@ import type { JsonValue } from '../../../packages/plugin-contracts/src/index'
 import type { FilePickerInvocation } from '../filePicker'
 import { NativeBackendStore } from './pluginNativeBackendStore'
 import { ThirdPartyBackendController, thirdPartyBackendLaunchSpec } from './pluginThirdPartyBackends'
+import { readInstalledManifestV2, type ThirdPartyLaunchSpec } from './pluginThirdPartyBackends'
+import { PluginAgentToolsHost } from './pluginAgentToolsHost'
+import { HOST_DEFAULT_EXECUTION_POLICY, FAIL_CLOSED_EXECUTION_POLICY } from './executionPolicy'
 
 interface FakeWebContentsLike {
   id: number
@@ -538,6 +544,20 @@ function asHost(win: FakeBrowserWindow): BrowserWindow {
 function descriptor(id: string): PluginLaunchDescriptor {
   return { id, requires: [], devUrl: '', entryFile: `/plugins/${id}/index.html` }
 }
+
+// The agent-tool path takes a result as text (contract 4.4). Here that text is
+// spelled from whatever `call` returns (often a spy), as the supervisor spells
+// a value; the supervisor's own tests cover how it keeps text.
+beforeEach(() => {
+  vi.spyOn(PluginBackendHost.prototype, 'callForResultText').mockImplementation(
+    async function (this: PluginBackendHost, instanceId, name, args, options) {
+      const value = await this.call(instanceId, name, args, options)
+      const text = JSON.stringify(value === undefined ? null : value)
+      const pieces = splitAgentToolPayloadText(text)
+      return { bytes: utf8ByteLength(text), chunks: pieces.length, piece: (index: number) => pieces[index] }
+    },
+  )
+})
 
 describe('backend Host session registration', () => {
   it('re-registers on the new socket when the previous registration is pending', () => {
@@ -4204,6 +4224,71 @@ describe('devPlansPluginDescriptor', () => {
       })
       mgr.destroyInstance(handle.instanceId)
     } finally {
+      hostCall.mockRestore()
+      await mgr.closeBackendPlugins()
+    }
+  })
+
+  it('runs more renderer backend calls at once than the old 64-call cap', async () => {
+    const mgr = new FrontendPluginManager()
+    const packageVersion = '1.0.0'
+    const view: NonNullable<PluginLaunchDescriptor['views']>[number] = {
+      id: 'window',
+      contributionKey: `${PLANS_PLUGIN_ID}.window`,
+      kind: 'custom',
+      location: 'window',
+      title: 'Plans',
+      entryFile: '/plugins/navide.plans/index.html',
+    }
+    const packageDescriptor: PluginLaunchDescriptor = {
+      id: PLANS_PLUGIN_ID,
+      packageVersion,
+      packageDir: process.cwd(),
+      requires: [],
+      devUrl: '',
+      entryFile: view.entryFile,
+      views: [view],
+    }
+    mgr.registerDescriptor(packageDescriptor, { builtin: true })
+    mgr.registerBackendActivation({
+      pluginId: PLANS_PLUGIN_ID,
+      packageVersion,
+      packageDir: process.cwd(),
+      entryFile: '/plugins/navide.plans/backend',
+      protocolVersion: 1,
+      activation: 'startup',
+      approvedMethods: ['plans.resolve_root'],
+      approvedEvents: ['plans.changed'],
+    })
+    let release!: () => void
+    const released = new Promise<void>((resolve) => { release = resolve })
+    const hostCall = vi.spyOn(PluginBackendHost.prototype, 'call').mockImplementation(async () => {
+      await released
+      return { root: '/workspace' }
+    })
+    const host = new FakeBrowserWindow()
+    try {
+      const handle = await mgr.openView(packageDescriptor, view, {
+        hostWindow: asHost(host),
+        bounds: 'fill',
+        workspacePath: '/workspace',
+        query: '?workspace_path=%2Fworkspace',
+      })
+      const webContents = (host.children[0] as FakeViewLike).webContents
+      // User ruling L3: no concurrency cap; the 65th call used to get RESOURCE_LIMIT.
+      const responses = Array.from({ length: 100 }, (_, index) =>
+        ipcHandlers.get('plugin:backend:call')?.(
+          { sender: { id: webContents.id } },
+          { reqId: `concurrent-${index}`, name: 'plans.resolve_root', args: { workspace_path: '/workspace' } },
+        )
+      )
+      await vi.waitFor(() => expect(hostCall).toHaveBeenCalledTimes(100))
+      release()
+      const settled = await Promise.all(responses)
+      expect(settled.filter((response) => (response as { ok?: boolean }).ok !== true)).toEqual([])
+      mgr.destroyInstance(handle.instanceId)
+    } finally {
+      release()
       hostCall.mockRestore()
       await mgr.closeBackendPlugins()
     }
@@ -10508,6 +10593,39 @@ describe('first-party Git private bridge', () => {
     expect(socket.sent).toHaveLength(1)
   })
 
+  it('passes on the shell.run cut disclosure as the broker sent it, and nothing else changes', async () => {
+    const { mgr, view } = await openGitView()
+    mgr.setPublicCapabilityHandler((plan) => mgr.executePublicCapability(plan))
+    mgr.setBackendWsUrl('ws://public-shell-run-truncation-test')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const answer = async (reqId: string, payload: Record<string, unknown>) => {
+      const operation = publicCall(view, 'shell', 'run', { command: 'git log' }, reqId)
+      await vi.waitFor(() => expect(socket.sent.length).toBeGreaterThan(0))
+      const request = JSON.parse(socket.sent.at(-1)!) as { id: string; type: string }
+      expect(request.type).toBe('shell.run')
+      socket.sent.length = 0
+      socket.receive({ id: request.id, type: request.type, ok: true, payload, error: null, timestamp: '' })
+      return operation
+    }
+
+    await expect(answer('cut', {
+      ok: true, output: 'o'.repeat(8000), stdout: 'o'.repeat(8000), stderr: 'e'.repeat(8000), exit_code: 0,
+      truncated: true, stdoutBytes: 9000, stderrBytes: 12000,
+    })).resolves.toEqual({
+      reqId: 'cut', ok: true,
+      result: { exitCode: 0, stdout: 'o'.repeat(8000), stderr: 'e'.repeat(8000), truncated: true, stdoutBytes: 9000, stderrBytes: 12000 },
+    })
+    await expect(answer('whole', {
+      ok: true, output: 'abc\n', stdout: 'abc\n', stderr: '', exit_code: 0, truncated: false, stdoutBytes: 4,
+    })).resolves.toEqual({
+      reqId: 'whole', ok: true, result: { exitCode: 0, stdout: 'abc\n', stderr: '', truncated: false, stdoutBytes: 4 },
+    })
+    // A broker that sends no disclosure gives exactly the old result.
+    await expect(answer('old', { ok: true, output: 'abc\n', stdout: 'abc\n', stderr: '', exit_code: 0 }))
+      .resolves.toEqual({ reqId: 'old', ok: true, result: { exitCode: 0, stdout: 'abc\n', stderr: '' } })
+  })
+
   it('denies an agent public Git plan before opening a backend connection', async () => {
     const { mgr, view, instanceId } = await openGitView()
     const socketsBefore = wsMock.FakeNodeWebSocket.instances.length
@@ -15151,7 +15269,7 @@ describe('third-party workspace filesystem (real package bridge, port and grant 
       promptConsent: async () => true,
       promptWorkspaceWrite,
       filesystemPort: () => mgr.createWorkspaceFilesystemPort(),
-      watchResources: () => ({ dispose: () => undefined, sample: async () => null }),
+      watchResources: () => ({ dispose: () => undefined, sample: async () => null, terminate: async (item: ResourceViolation) => item, keepRunning: () => 0 }),
     })
     const host = new FakeBrowserWindow()
     try {
@@ -15289,7 +15407,7 @@ describe('third-party backend shell broker (real package bridge, port and grant 
       probe: { platform: 'darwin', sandboxExec: () => '/usr/bin/sandbox-exec', bubblewrap: () => null },
       promptConsent: async () => true,
       shellPort: () => mgr.createThirdPartyShellPort(),
-      watchResources: () => ({ dispose: () => undefined, sample: async () => null }),
+      watchResources: () => ({ dispose: () => undefined, sample: async () => null, terminate: async (item: ResourceViolation) => item, keepRunning: () => 0 }),
     })
     const host = new FakeBrowserWindow()
     try {
@@ -15343,6 +15461,10 @@ describe('third-party backend shell broker (real package bridge, port and grant 
       answer = { ok: true, stdout: '', stderr: 'fatal', exit_code: 128 }
       await expect(admission.bridgeDispatcher.dispatch(request('git rev-parse nope'), context(handle.instanceId)))
         .resolves.toEqual({ exitCode: 128, stdout: '', stderr: 'fatal' })
+      // The broker's cut disclosure reaches a native backend as sent.
+      answer = { ok: true, stdout: 'a'.repeat(8000), stderr: '', exit_code: 0, truncated: true, stdoutBytes: 8001 }
+      await expect(admission.bridgeDispatcher.dispatch(request('git log'), context(handle.instanceId)))
+        .resolves.toEqual({ exitCode: 0, stdout: 'a'.repeat(8000), stderr: '', truncated: true, stdoutBytes: 8001 })
 
       // Another instance, another root, or an agent initiator is refused.
       service.mockClear()
@@ -15363,6 +15485,121 @@ describe('third-party backend shell broker (real package bridge, port and grant 
       grant = null
       await expect(admission.bridgeDispatcher.dispatch(request('git status'), context(handle.instanceId)))
         .rejects.toMatchObject({ code: 'CAPABILITY_DENIED' })
+      expect(service).not.toHaveBeenCalled()
+      mgr.destroyInstance(handle.instanceId)
+    } finally {
+      bind.mockRestore()
+      service.mockRestore()
+      await mgr.closeBackendPlugins()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  // 0.2.25: an agent tool call gets no shell. dispatchShell admits an agent
+  // read tool's read-only VCS command and a write tool's command with the DB3
+  // answer, but the real port (thirdPartyShellGrantAllows) serves only a
+  // user-initiated call from a live view, so both are refused before the
+  // broker. Opening it would widen what agents can do: the user's decision,
+  // disclosed in the consent dialog.
+  it.skipIf(isWindows())('refuses shell.run to an agent tool call, read or write, at the real shell port', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'third-party-shell-agent-')))
+    const workspace = join(root, 'workspace')
+    const packageDir = join(root, 'package')
+    mkdirSync(workspace)
+    mkdirSync(join(packageDir, 'backend'), { recursive: true })
+    writeFileSync(join(packageDir, 'backend', 'acme-indexer'), 'binary', { mode: 0o700 })
+    writeFileSync(join(packageDir, 'manifest.json'), JSON.stringify({
+      schemaVersion: 2, apiVersion: '^1.0.0', id: 'acme.indexer', name: 'Indexer', version: '1.0.0', publisher: 'acme',
+      permissions: { shell: 'allowlist' },
+      marketplace: { description: 'Index files.', license: 'MIT' },
+      contributes: { views: [{ id: 'left', kind: 'custom', location: 'left', title: 'Indexer', entry: 'frontend/left/index.html' }] },
+      backend: { entry: 'backend/acme-indexer', protocolVersion: 1, activation: 'startup', methods: ['files.search'] },
+    }))
+    const spec = thirdPartyBackendLaunchSpec({
+      pluginId: 'acme.indexer', packageVersion: '1.0.0', packageDir, views: [],
+      backend: { entryFile: join(packageDir, 'backend', 'acme-indexer'), protocolVersion: 1, activation: 'startup' },
+    })!
+    const view: NonNullable<PluginLaunchDescriptor['views']>[number] = {
+      id: 'left', contributionKey: 'acme.indexer.left', kind: 'custom', location: 'left', title: 'Indexer',
+      entryFile: join(packageDir, 'frontend/left/index.html'),
+    }
+    const pluginDescriptor: PluginLaunchDescriptor = {
+      id: 'acme.indexer', packageVersion: '1.0.0', packageDir, requires: ['shell'],
+      capabilityPolicy: manifestV2CapabilityPolicy({ shell: 'allowlist' }),
+      devUrl: '', entryFile: view.entryFile, views: [view],
+    }
+    const mgr = new FrontendPluginManager()
+    const grant = { packageVersion: '1.0.0', system: [] as never[], shell: 'allowlist' as const, storage: true }
+    mgr.setCapabilityGrantResolver(() => grant)
+    mgr.registerDescriptor(pluginDescriptor, { builtin: true })
+    mgr.registerBackendActivation(spec)
+    const bind = vi.spyOn(PluginBackendHost.prototype, 'bindView').mockResolvedValue(undefined)
+    const service = vi.spyOn(
+      mgr as unknown as { sendPublicBackend: (type: string, payload: Record<string, unknown>, before?: () => boolean) => Promise<unknown> },
+      'sendPublicBackend',
+    ).mockImplementation(async (_type, _payload, before) => {
+      if (before && !before()) throw new Error('request denied before dispatch')
+      return { ok: true, stdout: 'main\n', stderr: '', exit_code: 0 }
+    })
+    const store = new NativeBackendStore(join(root, 'store'))
+    store.setEnabled(true)
+    // An admitted agent tool call, as FrontendPluginManager.agentToolCallFor reports it.
+    let call: { pluginId: string; risk: 'read' | 'write'; workspaceRoot: string } | undefined
+    const controller = new ThirdPartyBackendController({
+      store,
+      dataRoot: join(root, 'data'),
+      probe: { platform: 'darwin', sandboxExec: () => '/usr/bin/sandbox-exec', bubblewrap: () => null },
+      promptConsent: async () => true,
+      shellPort: () => mgr.createThirdPartyShellPort(),
+      agentToolCall: (id) => (id === 'agent-call' ? call : undefined),
+      watchResources: () => ({ dispose: () => undefined, sample: async () => null, terminate: async (item: ResourceViolation) => item, keepRunning: () => 0 }),
+    })
+    const host = new FakeBrowserWindow()
+    try {
+      const handle = await mgr.openView(pluginDescriptor, view, {
+        hostWindow: asHost(host),
+        bounds: 'fill',
+        workspacePath: workspace,
+        capabilityContext: {
+          publisherEligible: false,
+          userGrant: grant,
+          runtimeBinding: {
+            pluginId: 'acme.indexer', packageVersion: '1.0.0',
+            workspaceId: mgr.workspaceIdForPath(workspace), instanceId: null, audience: view.contributionKey,
+          },
+        } as HostCapabilityContext,
+      })
+      const admission = await controller.admit(spec, workspace)
+      const context = (initiator: PlansBridgeContext['runtime']['initiator']): PlansBridgeContext => ({
+        runtime: {
+          pluginId: 'acme.indexer', packageVersion: '1.0.0', workspaceId: mgr.workspaceIdForPath(workspace),
+          instanceId: handle.instanceId, contributionKey: view.contributionKey, hostWindowId: 'w', initiator,
+        },
+        workspacePath: workspace,
+        authorizedPlanRoot: workspace,
+        requestId: 'bridge:1',
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      })
+      const run = (command: string, initiator: PlansBridgeContext['runtime']['initiator']) => admission.bridgeDispatcher.dispatch({
+        id: 'bridge:1', origin: { kind: 'call' as const, requestId: 'r' }, port: 'shell' as const, operation: 'run', arguments: { command },
+      }, context(initiator))
+      const agent = { kind: 'agent', source: 'mcp', id: 'agent-call' } as never
+
+      // Everything a call needs is in place: the user's own call runs.
+      await expect(run('git status', { kind: 'user', id: 'u' })).resolves.toEqual({ exitCode: 0, stdout: 'main\n', stderr: '' })
+      service.mockClear()
+
+      // A read tool, read-only VCS command: past dispatchShell, refused by the port.
+      call = { pluginId: 'acme.indexer', risk: 'read', workspaceRoot: workspace }
+      await expect(run('git status', agent)).rejects.toMatchObject({ code: 'CAPABILITY_DENIED', message: 'Shell capability is denied.' })
+      // A write tool with the user's DB3 answer: the same.
+      call = { pluginId: 'acme.indexer', risk: 'write', workspaceRoot: workspace }
+      store.setAgentToolWrite('acme.indexer', '1.0.0', store.record('acme.indexer').consent!.grantedAt, workspace)
+      for (const command of ['git status', 'git commit -m x']) {
+        await expect(run(command, agent)).rejects.toMatchObject({ code: 'CAPABILITY_DENIED', message: 'Shell capability is denied.' })
+      }
+      // Nothing reached the shell broker.
       expect(service).not.toHaveBeenCalled()
       mgr.destroyInstance(handle.instanceId)
     } finally {
@@ -15660,6 +15897,168 @@ describe('agent capability requests the Host cannot serve', () => {
   })
 })
 
+// B2-a: the backend's read-only Marketplace MCP tools ask the Host over its
+// authenticated session; only the registered session's client is answered.
+describe('marketplace.query requests from the backend', () => {
+  type SentMessage = { id: string; type: string; payload: Record<string, unknown> }
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+  }
+
+  function connectHost(id: string, registered: boolean): {
+    mgr: FrontendPluginManager
+    socket: InstanceType<typeof wsMock.FakeNodeWebSocket>
+  } {
+    const mgr = new FrontendPluginManager()
+    mgr.open(
+      asHost(new FakeBrowserWindow()),
+      { id, requires: ['terminal'], devUrl: '', entryFile: `/plugins/${id}/index.html` },
+      { x: 0, y: 0, width: 10, height: 10 },
+    )
+    mgr.setBackendHostToken('host-token')
+    mgr.setBackendWsUrl(`ws://${id}`)
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    if (registered) {
+      const registration = (socket.sent.map((raw) => JSON.parse(raw) as SentMessage))
+        .find((message) => message.type === 'host.register')!
+      socket.receive({ id: registration.id, type: 'host.register', ok: true, payload: { registered: true }, error: null, timestamp: '' })
+    }
+    return { mgr, socket }
+  }
+
+  const resultsOf = (socket: InstanceType<typeof wsMock.FakeNodeWebSocket>): SentMessage[] =>
+    socket.sent.map((raw) => JSON.parse(raw) as SentMessage).filter((m) => m.type === 'marketplace.query.result')
+
+  it('answers from the installed handler on the registered session', async () => {
+    const { mgr, socket } = connectHost('acme.mq-ok', true)
+    const handler = vi.fn(async () => ({ ok: true as const, result: { kind: 'installed' as const, items: [] } }))
+    mgr.setMarketplaceQueryHandler(handler)
+    await flush()
+
+    socket.receive({ type: 'marketplace.query.request', payload: { request_id: 'mq:1', query: { kind: 'installed' } } })
+    await flush()
+
+    expect(handler).toHaveBeenCalledWith({ kind: 'installed' })
+    expect(resultsOf(socket).map((m) => m.payload)).toEqual([
+      { request_id: 'mq:1', ok: true, result: { kind: 'installed', items: [] } },
+    ])
+  })
+
+  it('answers HOST_UNAVAILABLE without asking the handler when the session is not registered', async () => {
+    const { mgr, socket } = connectHost('acme.mq-unregistered', false)
+    const handler = vi.fn()
+    mgr.setMarketplaceQueryHandler(handler)
+    await flush()
+
+    socket.receive({ type: 'marketplace.query.request', payload: { request_id: 'mq:2', query: { kind: 'installed' } } })
+    await flush()
+
+    expect(handler).not.toHaveBeenCalled()
+    expect(resultsOf(socket).map((m) => m.payload)).toEqual([
+      expect.objectContaining({ request_id: 'mq:2', ok: false, error_code: 'HOST_UNAVAILABLE' }),
+    ])
+  })
+
+  it('refuses extra fields as BAD_REQUEST and reports a throwing handler as HOST_UNAVAILABLE', async () => {
+    const { mgr, socket } = connectHost('acme.mq-bad', true)
+    mgr.setMarketplaceQueryHandler(async () => { throw new Error('boom') })
+    await flush()
+
+    socket.receive({ type: 'marketplace.query.request', payload: { request_id: 'mq:3', query: {}, initiator: 'x' } })
+    socket.receive({ type: 'marketplace.query.request', payload: { request_id: 'mq:4', query: { kind: 'installed' } } })
+    await flush()
+
+    expect(resultsOf(socket).map((m) => m.payload)).toEqual([
+      expect.objectContaining({ request_id: 'mq:3', ok: false, error_code: 'BAD_REQUEST' }),
+      { request_id: 'mq:4', ok: false, error: 'boom', error_code: 'HOST_UNAVAILABLE' },
+    ])
+  })
+})
+
+// B2-c: an agent's plugins_disable / plugins_enable reaches the Host over its
+// authenticated session; only the registered session's client is answered.
+describe('plugins.agent_action requests from the backend', () => {
+  type SentMessage = { id: string; type: string; payload: Record<string, unknown> }
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+  }
+
+  function connectHost(id: string, registered: boolean): {
+    mgr: FrontendPluginManager
+    socket: InstanceType<typeof wsMock.FakeNodeWebSocket>
+  } {
+    const mgr = new FrontendPluginManager()
+    mgr.open(
+      asHost(new FakeBrowserWindow()),
+      { id, requires: ['terminal'], devUrl: '', entryFile: `/plugins/${id}/index.html` },
+      { x: 0, y: 0, width: 10, height: 10 },
+    )
+    mgr.setBackendHostToken('host-token')
+    mgr.setBackendWsUrl(`ws://${id}`)
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    if (registered) {
+      const registration = (socket.sent.map((raw) => JSON.parse(raw) as SentMessage))
+        .find((message) => message.type === 'host.register')!
+      socket.receive({ id: registration.id, type: 'host.register', ok: true, payload: { registered: true }, error: null, timestamp: '' })
+    }
+    return { mgr, socket }
+  }
+
+  const resultsOf = (socket: InstanceType<typeof wsMock.FakeNodeWebSocket>): SentMessage[] =>
+    socket.sent.map((raw) => JSON.parse(raw) as SentMessage).filter((m) => m.type === 'plugins.agent_action.result')
+  const request = {
+    request_id: 'pa:1', action: 'disable', plugin_id: 'nerdtechnic.devmap',
+    requester: { paneId: 'p-41', paneName: 'dev', workspace: '/w', callerKind: 'pane' },
+  }
+
+  it('answers from the installed handler on the registered session', async () => {
+    const { mgr, socket } = connectHost('acme.pa-ok', true)
+    const handler = vi.fn(async () => ({ ok: true as const, pluginId: 'nerdtechnic.devmap', pluginVersion: '0.2.0', disabled: true, changed: true }))
+    mgr.setPluginAgentActionHandler(handler)
+    await flush()
+
+    socket.receive({ type: 'plugins.agent_action.request', payload: request })
+    await flush()
+
+    expect(handler).toHaveBeenCalledWith(request)
+    expect(resultsOf(socket).map((m) => m.payload)).toEqual([
+      { request_id: 'pa:1', ok: true, pluginId: 'nerdtechnic.devmap', pluginVersion: '0.2.0', disabled: true, changed: true },
+    ])
+  })
+
+  it('answers HOST_UNAVAILABLE without asking the handler when the session is not registered', async () => {
+    const { mgr, socket } = connectHost('acme.pa-unregistered', false)
+    const handler = vi.fn()
+    mgr.setPluginAgentActionHandler(handler)
+    await flush()
+
+    socket.receive({ type: 'plugins.agent_action.request', payload: { ...request, request_id: 'pa:2' } })
+    await flush()
+
+    expect(handler).not.toHaveBeenCalled()
+    expect(resultsOf(socket).map((m) => m.payload)).toEqual([
+      expect.objectContaining({ request_id: 'pa:2', ok: false, error_code: 'HOST_UNAVAILABLE' }),
+    ])
+  })
+
+  it('reports a throwing handler as ACTION_FAILED', async () => {
+    const { mgr, socket } = connectHost('acme.pa-throw', true)
+    mgr.setPluginAgentActionHandler(async () => { throw new Error('busy') })
+    await flush()
+
+    socket.receive({ type: 'plugins.agent_action.request', payload: { ...request, request_id: 'pa:3' } })
+    await flush()
+
+    expect(resultsOf(socket).map((m) => m.payload)).toEqual([
+      { request_id: 'pa:3', ok: false, error: 'busy', error_code: 'ACTION_FAILED' },
+    ])
+  })
+})
+
 describe('installed package inventory scope disclosure', () => {
   it('keeps declared filesystem scopes in the listed inventory as a copy', () => {
     const mgr = new FrontendPluginManager()
@@ -15808,6 +16207,805 @@ describe('FrontendPluginManager — ending a closed window\'s AI panels', () => 
   })
 })
 
+describe('agent tool call request shape (shared fixture with the core proxy)', () => {
+  const fixture = JSON.parse(readFileSync(
+    join(process.cwd(), 'docs/plugin-contracts/agent-tools-fixtures/agent-tool-call-requests.json'), 'utf8',
+  )) as {
+    valid: Array<{ name: string; request: Record<string, unknown>; hostVerifiedTo: string }>
+    invalid: Array<{ name: string; request: Record<string, unknown> }>
+  }
+  it.each(fixture.valid.map((entry) => [entry.name, entry] as const))('accepts %s', (_name, entry) => {
+    const parsed = parseAgentToolCallRequest(entry.request)
+    expect(parsed).not.toBeNull()
+    const caller = entry.request.caller as { kind: string; paneId: string | null }
+    expect(parsed!.caller).toEqual({
+      kind: caller.kind, paneId: caller.paneId, workspace: (entry.request.caller as { workspace: string | null }).workspace,
+    })
+    // The Host never keeps the sent label; it derives its own from the kind.
+    expect(parsed!.caller).not.toHaveProperty('verifiedTo')
+    expect(parsed!.caller.kind === 'pane' ? 'pane' : 'caller-kind').toBe(entry.hostVerifiedTo)
+  })
+  it.each(fixture.invalid.map((entry) => [entry.name, entry] as const))('refuses %s', (_name, entry) => {
+    expect(parseAgentToolCallRequest(entry.request)).toBeNull()
+  })
+})
+
+// Plan B1-b: the generalized Host route for third-party agent tools.
+describe('third-party agent tool calls (contract 4.2)', () => {
+  type SentMessage = { id: string; type: string; payload: Record<string, unknown> }
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+  }
+  const settle = async (): Promise<void> => {
+    await flush()
+    await new Promise((done) => setTimeout(done, 0))
+    await flush()
+  }
+
+  interface Fixture {
+    mgr: FrontendPluginManager
+    socket: InstanceType<typeof wsMock.FakeNodeWebSocket>
+    root: string
+    workspace: string
+    spec: () => ThirdPartyLaunchSpec
+    switches: { enabled: boolean; externalCallers: boolean }
+    disabled: Set<string>
+    consented: { value: boolean }
+    confirmWrite: ReturnType<typeof vi.fn>
+    gate: PluginAgentToolsHost
+    bind: MockInstance<PluginBackendHost['bindAgentToolWorkspace']>
+    call: MockInstance<PluginBackendHost['call']>
+    policy: { value: ExecutionPolicySnapshot }
+    grant: { value: { packageVersion: string; system: Array<'fs'>; storage: boolean } | null }
+    openWorkspaces: Set<string>
+    cleanup: () => Promise<void>
+  }
+
+  function sentOf(socket: InstanceType<typeof wsMock.FakeNodeWebSocket>): SentMessage[] {
+    return socket.sent.map((raw) => JSON.parse(raw) as SentMessage)
+  }
+
+  async function fixture(options: { enabled?: boolean; register?: boolean } = {}): Promise<Fixture> {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'agent-tools-')))
+    const workspace = join(root, 'workspace')
+    const packageDir = join(root, 'package')
+    mkdirSync(workspace)
+    mkdirSync(join(packageDir, 'backend'), { recursive: true })
+    writeFileSync(join(packageDir, 'backend', 'devmap'), 'binary', { mode: 0o700 })
+    writeFileSync(join(packageDir, 'manifest.json'), JSON.stringify({
+      schemaVersion: 2, apiVersion: '^1.0.0', id: 'nerdtechnic.devmap', name: 'Dev map', version: '0.2.0', publisher: 'nerdtechnic',
+      permissions: { system: ['fs'] },
+      marketplace: { description: 'Dev map.', license: 'MIT' },
+      backend: { entry: 'backend/devmap', protocolVersion: 1, activation: 'startup', methods: ['devmap.read', 'devmap.setStatus'] },
+    }))
+    const parsed = readInstalledManifestV2(packageDir)
+    const agentTools = [
+      { name: 'devmap_read', method: 'devmap.read', risk: 'read', title: 'Read dev map', description: 'Read the dev map.', inputSchema: { type: 'object', properties: {} } },
+      { name: 'devmap_set_status', method: 'devmap.setStatus', risk: 'write', title: 'Set block status', description: 'Set a block status.', inputSchema: { type: 'object', required: ['block_id'], properties: { block_id: { type: 'string' } } } },
+    ]
+    const registered = thirdPartyBackendLaunchSpec(
+      { pluginId: 'nerdtechnic.devmap', packageVersion: '0.2.0', packageDir, views: [], backend: { entryFile: join(packageDir, 'backend', 'devmap'), protocolVersion: 1, activation: 'startup' } },
+      { ...parsed, backend: { ...parsed.backend!, agentTools } as never },
+    )!
+    const mgr = new FrontendPluginManager()
+    const grant: Fixture['grant'] = { value: { packageVersion: '0.2.0', system: ['fs'], storage: true } }
+    mgr.setCapabilityGrantResolver(() => grant.value)
+    const policy: Fixture['policy'] = { value: { policy: HOST_DEFAULT_EXECUTION_POLICY, revision: 1, state: 'default' } }
+    mgr.setExecutionPolicyResolver(() => policy.value)
+    mgr.registerDescriptor({
+      id: 'nerdtechnic.devmap', packageVersion: '0.2.0', packageDir, requires: ['fs'],
+      capabilityPolicy: manifestV2CapabilityPolicy({ system: ['fs'] }), devUrl: '', entryFile: join(packageDir, 'index.html'), views: [],
+    }, { builtin: true })
+    mgr.registerBackendActivation(registered)
+    const spec = () => mgr.getBackendActivation('nerdtechnic.devmap', '0.2.0') as ThirdPartyLaunchSpec
+    const switches = { enabled: options.enabled ?? true, externalCallers: false }
+    const disabled = new Set<string>()
+    const consented = { value: true }
+    const confirmWrite = vi.fn(async () => true)
+    const gate = new PluginAgentToolsHost({
+      switches: () => ({ ...switches }),
+      setSwitches: (change) => Object.assign(switches, change),
+      listPackages: () => (spec() ? [spec()] : []),
+      isDisabled: (pluginId) => disabled.has(pluginId),
+      hasConsent: async () => consented.value,
+      agentToolSince: () => '2026-10-01T00:00:00.000Z',
+      setAgentMethods: (pluginId, version, methods) => mgr.setThirdPartyAgentMethods(pluginId, version, methods),
+      confirmWrite,
+      send: (payload) => mgr.sendAgentToolsSync(payload),
+    })
+    mgr.setAgentToolsHost(gate)
+    const openWorkspaces = new Set([workspace])
+    mgr.setAgentToolWorkspaceResolver((candidate) => openWorkspaces.has(candidate))
+    const bind = vi.spyOn(PluginBackendHost.prototype, 'bindAgentToolWorkspace').mockResolvedValue('headless-1')
+    const isBound = vi.spyOn(PluginBackendHost.prototype, 'isBound').mockReturnValue(true)
+    const call = vi.spyOn(PluginBackendHost.prototype, 'call').mockResolvedValue({ status: 'done' } as never)
+    // A running view is what opens the backend connection.
+    mgr.open(
+      asHost(new FakeBrowserWindow()),
+      { id: 'acme.agent-tools-anchor', requires: ['terminal'], devUrl: '', entryFile: '/plugins/acme.agent-tools-anchor/index.html' },
+      { x: 0, y: 0, width: 10, height: 10 },
+    )
+    mgr.setBackendHostToken('host-token')
+    mgr.setBackendWsUrl(`ws://agent-tools-${Math.random()}`)
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    if (options.register !== false) {
+      const registration = sentOf(socket).find((message) => message.type === 'host.register')!
+      socket.receive({ id: registration.id, type: 'host.register', ok: true, payload: { registered: true }, error: null, timestamp: '' })
+      await settle()
+    }
+    return {
+      mgr, socket, root, workspace, spec, switches, disabled, consented, confirmWrite, gate, bind, call, policy, grant, openWorkspaces,
+      cleanup: async () => {
+        bind.mockRestore()
+        isBound.mockRestore()
+        call.mockRestore()
+        await mgr.closeBackendPlugins()
+        rmSync(root, { recursive: true, force: true })
+      },
+    }
+  }
+
+  function toolRequest(f: Fixture, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      request_id: 'mcp:1',
+      operation: 'agentTool',
+      target: { plugin_id: 'nerdtechnic.devmap', workspace_path: f.workspace },
+      tool: { name: 'devmap_set_status', plugin_version: '0.2.0', sync_revision: 1 },
+      caller: { kind: 'pane', paneId: 'p-41', workspace: f.workspace },
+      payload: { arguments: { block_id: 'b1', status: 'done' } },
+      ...overrides,
+    }
+  }
+
+  async function ask(f: Fixture, request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const before = sentOf(f.socket).filter((message) => message.type === 'agent.capability.result').length
+    f.socket.receive({ type: 'agent.capability.request', payload: request })
+    for (let i = 0; i < 20; i++) {
+      await settle()
+      const results = sentOf(f.socket).filter((message) => message.type === 'agent.capability.result')
+      if (results.length > before) {
+        expect(results.at(-1)!.payload.request_id).toBe(request.request_id)
+        return results.at(-1)!.payload.response as Record<string, unknown>
+      }
+    }
+    throw new Error('no agent.capability.result')
+  }
+
+  describe('chunked transfer with the core (contract 4.4, A2 and R2)', () => {
+    const big = (bytes: number): { rows: string } => ({ rows: 'abc中文😀'.repeat(Math.ceil(bytes / 13)) })
+    const sha = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
+    const pieces = (text: string): string[] => {
+      const out: string[] = []
+      let current = ''
+      let bytes = 0
+      for (const char of text) {
+        const size = Buffer.byteLength(char, 'utf8')
+        if (bytes + size > 131_072) { out.push(current); current = ''; bytes = 0 }
+        current += char
+        bytes += size
+      }
+      out.push(current)
+      return out
+    }
+    /** Answers every request message of `type` the Host sends, as the core would. */
+    async function answer(f: Fixture, type: string, accepted: (seq: number) => boolean, until: () => boolean): Promise<number> {
+      let answered = 0
+      for (let i = 0; i < 2_000 && !until(); i++) {
+        await settle()
+        for (const message of sentOf(f.socket).filter((m) => m.type === type).slice(answered)) {
+          f.socket.receive({ id: message.id, type, ok: true, payload: { ok: true, accepted: accepted(answered) }, error: null, timestamp: '' })
+          answered += 1
+        }
+      }
+      return answered
+    }
+
+    it("discloses the backend's result helper state in resource usage and tells the windows of each change", async () => {
+      const f = await fixture()
+      try {
+        const heard: unknown[] = []
+        f.mgr.onResultHelperState = (state) => heard.push(state)
+        expect(f.mgr.backendResourceUsage().backend).toMatchObject({ resultHelper: { state: 'idle', lastError: '' } })
+        const unavailable = { state: 'unavailable', lastError: 'it exited before it was ready', since: 1_700_000_000_000 }
+        f.socket.receive({ type: 'agent.tools.result_helper', payload: unavailable })
+        await settle()
+        expect(f.mgr.backendResourceUsage().backend).toEqual({ resultHelper: unavailable })
+        expect(heard).toEqual([unavailable])
+        // A malformed report changes nothing.
+        f.socket.receive({ type: 'agent.tools.result_helper', payload: { state: 'broken', lastError: 1, since: 'x' } })
+        await settle()
+        expect(heard).toHaveLength(1)
+        expect(f.mgr.backendResourceUsage().backend?.resultHelper.state).toBe('unavailable')
+        // A new backend session (the backend restarted) starts from idle, not the old state.
+        const before = wsMock.FakeNodeWebSocket.instances.length
+        f.socket.close()
+        await vi.waitFor(() => expect(wsMock.FakeNodeWebSocket.instances.length).toBeGreaterThan(before), { timeout: 10_000 })
+        wsMock.FakeNodeWebSocket.instances.at(-1)!.open()
+        await vi.waitFor(() => expect(f.mgr.backendResourceUsage().backend?.resultHelper.state).toBe('idle'))
+        expect(heard.at(-1)).toMatchObject({ state: 'idle' })
+      } finally {
+        await f.cleanup()
+      }
+    })
+
+    it('joins argument pieces sent before the request and calls the plugin with the whole arguments', async () => {
+      const f = await fixture()
+      try {
+        const args = { block_id: 'b1', status: 'done', ...big(1_048_576) }
+        const text = JSON.stringify(args)
+        const parts = pieces(text)
+        parts.forEach((data, seq) => f.socket.receive({ type: 'agent.capability.request_chunk', payload: { request_id: 'mcp:big', seq, data } }))
+        const response = await ask(f, toolRequest(f, {
+          request_id: 'mcp:big',
+          payload: { argumentChunks: { chunks: parts.length, bytes: Buffer.byteLength(text, 'utf8') } },
+        }))
+        expect(response).toMatchObject({ ok: true })
+        expect(f.call).toHaveBeenCalledTimes(1)
+        expect(sha(JSON.stringify(f.call.mock.calls[0][2]))).toBe(sha(text))
+      } finally {
+        await f.cleanup()
+      }
+    })
+
+    it('refuses a request whose argument pieces came out of order, without calling the plugin', async () => {
+      const f = await fixture()
+      try {
+        f.socket.receive({ type: 'agent.capability.request_chunk', payload: { request_id: 'mcp:bad', seq: 0, data: 'x'.repeat(131_072) } })
+        f.socket.receive({ type: 'agent.capability.request_chunk', payload: { request_id: 'mcp:bad', seq: 2, data: '"' } })
+        await expect(ask(f, toolRequest(f, { request_id: 'mcp:bad', payload: { argumentChunks: { chunks: 2, bytes: 131_073 } } })))
+          .resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_CHUNKS_INVALID', reason: 'seq' })
+        expect(f.call).not.toHaveBeenCalled()
+      } finally {
+        await f.cleanup()
+      }
+    })
+
+    it('sends a large result as pieces, each awaited, then the summary in place of the result', async () => {
+      const f = await fixture()
+      try {
+        const result = big(2 * 1_048_576)
+        f.call.mockImplementation(async (_instance, _method, _args, options) => {
+          options?.onTransferProgress?.('execution')
+          return result as never
+        })
+        f.socket.receive({ type: 'agent.capability.request', payload: toolRequest(f, { request_id: 'mcp:r2' }) })
+        const sentPieces = await answer(f, 'agent.capability.result_chunk', () => true,
+          () => sentOf(f.socket).some((m) => m.type === 'agent.capability.result'))
+        const final = sentOf(f.socket).filter((m) => m.type === 'agent.capability.result').at(-1)!
+        const text = JSON.stringify(result)
+        const sent = sentOf(f.socket).filter((m) => m.type === 'agent.capability.result_chunk')
+        expect(sentPieces).toBe(pieces(text).length)
+        expect(sha(sent.map((m) => m.payload.data as string).join(''))).toBe(sha(text))
+        expect(sent.map((m) => m.payload.seq)).toEqual(sent.map((_, i) => i))
+        const response = final.payload.response as Record<string, unknown>
+        expect(response.result).toBeUndefined()
+        expect(response.resultChunks).toEqual({ chunks: sent.length, bytes: Buffer.byteLength(text, 'utf8') })
+        expect((response.meta as { resultBytes: number }).resultBytes).toBe(Buffer.byteLength(text, 'utf8'))
+        // The Host told the core the call was alive when it started it.
+        expect(sentOf(f.socket).some((m) => m.type === 'agent.capability.progress' && m.payload.phase === 'execution')).toBe(true)
+      } finally {
+        await f.cleanup()
+      }
+    })
+
+    it('stops sending pieces once the core no longer waits for the request', async () => {
+      const f = await fixture()
+      try {
+        f.call.mockResolvedValue(big(2 * 1_048_576) as never)
+        f.socket.receive({ type: 'agent.capability.request', payload: toolRequest(f, { request_id: 'mcp:gone' }) })
+        await answer(f, 'agent.capability.result_chunk', (seq) => seq < 2, () => false)
+        expect(sentOf(f.socket).filter((m) => m.type === 'agent.capability.result_chunk')).toHaveLength(3)
+        expect(sentOf(f.socket).some((m) => m.type === 'agent.capability.result')).toBe(false)
+      } finally {
+        await f.cleanup()
+      }
+    }, 30_000)
+  })
+
+  it('golden: with the master switch off nothing is pushed, agentMethods stay empty, and calls are refused', async () => {
+    const f = await fixture({ enabled: false })
+    try {
+      expect(sentOf(f.socket).some((message) => message.type === 'plugins.agentTools.sync')).toBe(false)
+      expect(f.spec().agentMethods).toEqual([])
+      expect(PluginBackendHost.prototype.agentToolMethodsFor.call(
+        (f.mgr as unknown as { pluginBackendHost: PluginBackendHost }).pluginBackendHost, 'nerdtechnic.devmap', '0.2.0',
+      )).toEqual([])
+      await expect(ask(f, toolRequest(f))).resolves.toEqual({
+        ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'master-switch-off', error: expect.any(String),
+      })
+      expect(f.bind).not.toHaveBeenCalled()
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('pushes the catalog when the Host session registers and serves a consented tool with the pane identity', async () => {
+    const f = await fixture()
+    try {
+      const sync = sentOf(f.socket).filter((message) => message.type === 'plugins.agentTools.sync')
+      expect(sync).toHaveLength(1)
+      expect(sync[0].payload).toMatchObject({ revision: 1, enabled: true, externalCallers: false })
+      expect((sync[0].payload.tools as Array<{ name: string; state: string }>).map((entry) => [entry.name, entry.state]))
+        .toEqual([['devmap_read', 'available'], ['devmap_set_status', 'available']])
+      // Views and the registered activation stay closed to agents; only the
+      // agent-tool bindings get the served methods.
+      expect(f.spec().agentMethods).toEqual([])
+      expect((f.mgr as unknown as { pluginBackendHost: PluginBackendHost }).pluginBackendHost
+        .agentToolMethodsFor('nerdtechnic.devmap', '0.2.0')).toEqual(['devmap.read', 'devmap.setStatus'])
+
+      const response = await ask(f, toolRequest(f))
+      expect(response).toEqual({
+        ok: true, result: { status: 'done' }, meta: { durationMs: expect.any(Number), resultBytes: 17, crossWorkspace: false },
+      })
+      expect(f.confirmWrite).toHaveBeenCalledWith(expect.objectContaining({ pluginId: 'nerdtechnic.devmap' }), expect.objectContaining({ name: 'devmap_set_status' }), f.workspace)
+      expect(f.bind).toHaveBeenCalledWith(
+        expect.objectContaining({ pluginId: 'nerdtechnic.devmap', packageVersion: '0.2.0', initiator: { kind: 'user', id: 'host-user' } }),
+        expect.any(String),
+        f.workspace,
+      )
+      const [instanceId, method, args, callOptions] = f.call.mock.calls[0] as unknown as [string, string, unknown, { initiator: unknown; timeoutMs: number }]
+      expect([instanceId, method, args]).toEqual(['headless-1', 'devmap.setStatus', { block_id: 'b1', status: 'done' }])
+      // What is left of the tool's deadline, counted from receipt.
+      expect(callOptions.timeoutMs).toBeLessThanOrEqual(30_000)
+      expect(callOptions.timeoutMs).toBeGreaterThan(25_000)
+      expect(callOptions.initiator).toEqual({
+        kind: 'agent', source: 'mcp', id: expect.any(String),
+        caller: { kind: 'pane', paneId: 'p-41', workspace: f.workspace, verifiedTo: 'pane' },
+      })
+      // One headless binding per package version and workspace.
+      await ask(f, toolRequest(f, { request_id: 'mcp:2', tool: { name: 'devmap_read', plugin_version: '0.2.0', sync_revision: 1 }, payload: { arguments: {} } }))
+      expect(f.bind).toHaveBeenCalledTimes(1)
+      expect(f.confirmWrite).toHaveBeenCalledTimes(1)
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('targets only open Navide workspaces: never home, a filesystem root or any other directory', async () => {
+    const f = await fixture()
+    try {
+      const other = join(f.root, 'other')
+      mkdirSync(other)
+      for (const target of [homedir(), '/', other]) {
+        await expect(ask(f, toolRequest(f, { target: { plugin_id: 'nerdtechnic.devmap', workspace_path: target } })))
+          .resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED' })
+      }
+      // Even when a window has the home folder or the root open.
+      f.openWorkspaces.add(realpathSync(homedir()))
+      f.openWorkspaces.add('/')
+      for (const target of [homedir(), '/']) {
+        await expect(ask(f, toolRequest(f, { target: { plugin_id: 'nerdtechnic.devmap', workspace_path: target } })))
+          .resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED' })
+      }
+      // An open workspace the package has no fs Grant for.
+      f.openWorkspaces.add(other)
+      f.grant.value = { packageVersion: '0.2.0', system: [] as never, storage: true }
+      await expect(ask(f, toolRequest(f, { target: { plugin_id: 'nerdtechnic.devmap', workspace_path: other } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED' })
+      expect(f.bind).not.toHaveBeenCalled()
+      // Granted: another open workspace than the caller's is served and flagged.
+      f.grant.value = { packageVersion: '0.2.0', system: ['fs'], storage: true }
+      const cross = await ask(f, toolRequest(f, { target: { plugin_id: 'nerdtechnic.devmap', workspace_path: other } }))
+      expect(cross).toMatchObject({ ok: true, meta: { crossWorkspace: true } })
+      expect(f.bind).toHaveBeenLastCalledWith(expect.anything(), expect.any(String), other)
+      const same = await ask(f, toolRequest(f, { request_id: 'mcp:same' }))
+      expect(same).toMatchObject({ ok: true, meta: { crossWorkspace: false } })
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('refuses an external caller whose workspace_path names no open workspace, with a clear error', async () => {
+    const f = await fixture()
+    try {
+      await f.gate.setSwitches({ externalCallers: true })
+      const closed = join(f.root, 'closed')
+      mkdirSync(closed)
+      await expect(ask(f, toolRequest(f, {
+        caller: { kind: 'external', paneId: null, workspace: null },
+        target: { plugin_id: 'nerdtechnic.devmap', workspace_path: closed },
+      }))).resolves.toEqual({
+        ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED',
+        error: 'An external or Host caller must name an open Navide workspace in workspace_path.',
+      })
+      expect(f.bind).not.toHaveBeenCalled()
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('gates external and host callers behind DB4', async () => {
+    const f = await fixture()
+    try {
+      const external = { kind: 'external', paneId: null, workspace: null }
+      await expect(ask(f, toolRequest(f, { request_id: 'mcp:ext', caller: external })))
+        .resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'external-callers-off' })
+      await expect(ask(f, toolRequest(f, { request_id: 'mcp:host', caller: { kind: 'host', paneId: null, workspace: null } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'external-callers-off' })
+      await f.gate.setSwitches({ externalCallers: true })
+      await expect(ask(f, toolRequest(f, { request_id: 'mcp:ext2', caller: external }))).resolves.toMatchObject({ ok: true })
+      const last = f.call.mock.calls.at(-1) as unknown as [string, string, unknown, { initiator: { caller: unknown } }]
+      expect(last[3].initiator.caller).toEqual({ kind: 'external', paneId: null, workspace: null, verifiedTo: 'caller-kind' })
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('refuses agent calls into a third-party view by instance id (only agent tools reach third-party code)', async () => {
+    const f = await fixture()
+    try {
+      const instanceId = f.mgr.open(
+        asHost(new FakeBrowserWindow()),
+        { id: 'nerdtechnic.devmap', requires: ['terminal'], devUrl: '', entryFile: '/plugins/nerdtechnic.devmap/index.html' },
+        { x: 0, y: 0, width: 10, height: 10 },
+      )!
+      await expect(f.mgr.executeAgentBackendCall(instanceId, { reqId: 'r-1', name: 'devmap.read', args: {} }))
+        .resolves.toMatchObject({ ok: false, error: { code: 'CAPABILITY_DENIED' } })
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('refuses before binding: malformed, unknown tool, no grant, declined first write, policy, missing argument', async () => {
+    const f = await fixture()
+    try {
+      await expect(ask(f, toolRequest(f, { caller: { kind: 'pane', paneId: 'p', workspace: f.workspace, extra: 1 } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'BAD_REQUEST' })
+      await expect(ask(f, toolRequest(f, { caller: { kind: 'external', paneId: 'spoofed', workspace: null } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'BAD_REQUEST' })
+      await expect(ask(f, toolRequest(f, { tool: { name: 'devmap_nuke', plugin_version: '0.2.0', sync_revision: 1 } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'tool-not-consented' })
+      await expect(ask(f, toolRequest(f, { payload: { arguments: {} } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_INVALID_ARGUMENTS' })
+      await expect(ask(f, toolRequest(f, { target: { plugin_id: 'nerdtechnic.devmap', workspace_path: join(f.root, 'missing') } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED' })
+      f.grant.value = null
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED' })
+      f.grant.value = { packageVersion: '0.2.0', system: ['fs'], storage: true }
+      f.confirmWrite.mockResolvedValueOnce(false)
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_WRITE_DECLINED' })
+      f.policy.value = { policy: FAIL_CLOSED_EXECUTION_POLICY, revision: 2, state: 'corrupt' }
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'EXECUTION_POLICY_DENIED' })
+      f.consented.value = false
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'consent-required' })
+      expect(f.bind).not.toHaveBeenCalled()
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('race: a disable while the first-write dialog is open wins over the earlier checks', async () => {
+    const f = await fixture()
+    try {
+      f.confirmWrite.mockImplementationOnce(async () => {
+        f.disabled.add('nerdtechnic.devmap')
+        return true
+      })
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({
+        ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'plugin-disabled',
+      })
+      expect(f.bind).not.toHaveBeenCalled()
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('race: a quarantine while the headless backend binds stops the call before dispatch', async () => {
+    const f = await fixture()
+    try {
+      f.bind.mockImplementationOnce(async () => {
+        f.gate.mark('nerdtechnic.devmap', 'quarantined')
+        return 'headless-1'
+      })
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({
+        ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'plugin-quarantined',
+      })
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('race: a removal while the call runs answers plugin-stopping, and the closed tool stays closed', async () => {
+    const f = await fixture()
+    try {
+      f.call.mockImplementationOnce(async () => {
+        // revokePackageVersion drains the child under the call.
+        throw new BackendPluginError('PLUGIN_STOPPING')
+      })
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({
+        ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'plugin-stopping',
+      })
+      // The switch turned off afterwards: the methods close and a cached CLI
+      // catalog cannot reach the tool any more.
+      await f.gate.setSwitches({ enabled: false })
+      expect((f.mgr as unknown as { pluginBackendHost: PluginBackendHost }).pluginBackendHost
+        .agentToolMethodsFor('nerdtechnic.devmap', '0.2.0')).toEqual([])
+      const sync = sentOf(f.socket).filter((message) => message.type === 'plugins.agentTools.sync')
+      expect(sync.at(-1)!.payload).toMatchObject({ enabled: false, tools: [] })
+      await expect(ask(f, toolRequest(f, { request_id: 'mcp:after' }))).resolves.toMatchObject({
+        ok: false, error_code: 'PLUGIN_TOOL_UNAVAILABLE', reason: 'master-switch-off',
+      })
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('maps backend failures to the contract codes', async () => {
+    const f = await fixture()
+    try {
+      f.call.mockRejectedValueOnce(new BackendPluginError('TIMEOUT'))
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_TIMEOUT' })
+      f.call.mockRejectedValueOnce(new BackendPluginError('PLUGIN_ERROR', 'boom', { pluginCode: 'DEVMAP_LOCKED' }))
+      await expect(ask(f, toolRequest(f, { request_id: 'mcp:2' }))).resolves.toMatchObject({
+        ok: false, error_code: 'PLUGIN_TOOL_FAILED', plugin_error: 'DEVMAP_LOCKED',
+      })
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('returns a result over 1 MiB whole, with its size (DB9: no result cap)', async () => {
+    const f = await fixture()
+    try {
+      const big = 'x'.repeat(1_048_577)
+      f.call.mockResolvedValueOnce(big as never)
+      // Contract 4.4, R2: a result longer than one piece reaches the core in
+      // pieces (each answered here as the core would), then its summary.
+      f.socket.receive({ type: 'agent.capability.request', payload: toolRequest(f, { request_id: 'mcp:big' }) })
+      let answered = 0
+      for (let i = 0; i < 500 && !sentOf(f.socket).some((m) => m.type === 'agent.capability.result'); i++) {
+        await settle()
+        for (const piece of sentOf(f.socket).filter((m) => m.type === 'agent.capability.result_chunk').slice(answered)) {
+          f.socket.receive({ id: piece.id, type: piece.type, ok: true, payload: { ok: true, accepted: true }, error: null, timestamp: '' })
+          answered += 1
+        }
+      }
+      const pieces = sentOf(f.socket).filter((m) => m.type === 'agent.capability.result_chunk')
+      const answer = sentOf(f.socket).find((m) => m.type === 'agent.capability.result')!.payload.response as {
+        ok: boolean; resultChunks: { chunks: number; bytes: number }; meta: { resultBytes: number }
+      }
+      expect(answer.ok).toBe(true)
+      expect(JSON.parse(pieces.map((m) => m.payload.data as string).join(''))).toBe(big)
+      expect(answer.resultChunks).toEqual({ chunks: pieces.length, bytes: 1_048_579 })
+      expect(answer.meta.resultBytes).toBe(1_048_579)
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('lets only an in-flight agent-tool call on its headless binding reach the workspace filesystem', async () => {
+    const f = await fixture()
+    try {
+      const internals = f.mgr as unknown as {
+        thirdPartyFilesystemGrantAllows: (payload: Record<string, unknown>, context: PlansBridgeContext) => boolean
+      }
+      const context = (instanceId: string, initiator: unknown): PlansBridgeContext => ({
+        runtime: {
+          pluginId: 'nerdtechnic.devmap', packageVersion: '0.2.0', workspaceId: f.mgr.workspaceIdForPath(f.workspace),
+          instanceId, contributionKey: 'nerdtechnic.devmap.agent-tools', hostWindowId: null, initiator: initiator as never,
+        },
+        workspacePath: f.workspace,
+        authorizedPlanRoot: f.workspace,
+        requestId: 'bridge:1',
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      } as PlansBridgeContext)
+      const payload = { rel_path: 'a.txt', workspace_path: f.workspace }
+      const seen: Record<string, boolean> = {}
+      f.call.mockImplementationOnce((async (_id: string, _method: string, _args: unknown, options: { initiator: { id: string } }) => {
+        const agent = options.initiator
+        const allows = () => internals.thirdPartyFilesystemGrantAllows(payload, context('headless-1', agent))
+        seen.inCall = allows()
+        seen.otherInstance = internals.thirdPartyFilesystemGrantAllows(payload, context('other-instance', agent))
+        seen.otherRoot = internals.thirdPartyFilesystemGrantAllows({ ...payload, workspace_path: f.root }, context('headless-1', agent))
+        seen.otherInitiator = internals.thirdPartyFilesystemGrantAllows(payload, context('headless-1', { kind: 'agent', source: 'mcp', id: 'forged' }))
+        f.grant.value = null
+        seen.noGrant = allows()
+        f.grant.value = { packageVersion: '0.2.0', system: ['fs'], storage: true }
+        f.openWorkspaces.delete(f.workspace)
+        seen.workspaceClosed = allows()
+        f.openWorkspaces.add(f.workspace)
+        f.disabled.add('nerdtechnic.devmap')
+        seen.disabled = allows()
+        f.disabled.clear()
+        f.gate.mark('nerdtechnic.devmap', 'revoked')
+        seen.revoked = allows()
+        f.gate.clearMark('nerdtechnic.devmap')
+        f.switches.enabled = false
+        seen.switchOff = allows()
+        f.switches.enabled = true
+        seen.restored = allows()
+        return { status: 'done' }
+      }) as never)
+      await ask(f, toolRequest(f))
+      expect(seen).toEqual({
+        inCall: true, otherInstance: false, otherRoot: false, otherInitiator: false, noGrant: false,
+        workspaceClosed: false, disabled: false, revoked: false, switchOff: false, restored: true,
+      })
+      // After the call no agent request reaches the filesystem.
+      expect(internals.thirdPartyFilesystemGrantAllows(payload, context('headless-1', { kind: 'agent', source: 'mcp', id: 'a' }))).toBe(false)
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('external callers lose filesystem access when DB4 is turned off mid-call', async () => {
+    const f = await fixture()
+    try {
+      await f.gate.setSwitches({ externalCallers: true })
+      const internals = f.mgr as unknown as {
+        thirdPartyFilesystemGrantAllows: (payload: Record<string, unknown>, context: PlansBridgeContext) => boolean
+      }
+      let before = false
+      let after = true
+      f.call.mockImplementationOnce((async (_id: string, _method: string, _args: unknown, options: { initiator: unknown }) => {
+        const context = {
+          runtime: {
+            pluginId: 'nerdtechnic.devmap', packageVersion: '0.2.0', workspaceId: f.mgr.workspaceIdForPath(f.workspace),
+            instanceId: 'headless-1', contributionKey: 'k', hostWindowId: null, initiator: options.initiator as never,
+          },
+          workspacePath: f.workspace, authorizedPlanRoot: f.workspace, requestId: 'b',
+          signal: new AbortController().signal, emit: () => undefined,
+        } as PlansBridgeContext
+        const payload = { rel_path: 'a.txt', workspace_path: f.workspace }
+        before = internals.thirdPartyFilesystemGrantAllows(payload, context)
+        f.switches.externalCallers = false
+        after = internals.thirdPartyFilesystemGrantAllows(payload, context)
+        return null
+      }) as never)
+      await ask(f, toolRequest(f, { caller: { kind: 'external', paneId: null, workspace: null } }))
+      expect([before, after]).toEqual([true, false])
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('does not dispatch once the deadline passed during the first-write dialog, so a retry writes once', async () => {
+    const f = await fixture()
+    const realNow = Date.now
+    try {
+      f.confirmWrite.mockImplementationOnce(async () => {
+        const later = realNow() + 31_000
+        vi.spyOn(Date, 'now').mockImplementation(() => later)
+        return true
+      })
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_TIMEOUT' })
+      expect(f.bind).not.toHaveBeenCalled()
+      expect(f.call).not.toHaveBeenCalled()
+      vi.mocked(Date.now).mockRestore()
+      await expect(ask(f, toolRequest(f, { request_id: 'mcp:retry' }))).resolves.toMatchObject({ ok: true })
+      expect(f.call).toHaveBeenCalledTimes(1)
+    } finally {
+      Date.now = realNow
+      await f.cleanup()
+    }
+  })
+
+  it('does not dispatch when the bind finishes after the deadline', async () => {
+    const f = await fixture()
+    const realNow = Date.now
+    try {
+      f.bind.mockImplementationOnce(async () => {
+        const later = realNow() + 31_000
+        vi.spyOn(Date, 'now').mockImplementation(() => later)
+        return 'headless-1'
+      })
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'PLUGIN_TOOL_TIMEOUT' })
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      Date.now = realNow
+      await f.cleanup()
+    }
+  })
+
+  it('re-checks the workspace and Grant after the dialog and after the bind', async () => {
+    const f = await fixture()
+    try {
+      f.confirmWrite.mockImplementationOnce(async () => {
+        f.openWorkspaces.delete(f.workspace)
+        return true
+      })
+      await expect(ask(f, toolRequest(f))).resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED' })
+      expect(f.bind).not.toHaveBeenCalled()
+      f.openWorkspaces.add(f.workspace)
+      f.bind.mockImplementationOnce(async () => {
+        f.grant.value = null
+        return 'headless-1'
+      })
+      await expect(ask(f, toolRequest(f, { request_id: 'mcp:2' }))).resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_NOT_AUTHORIZED' })
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('asks the DB3 question for a read tool that shares a write method', async () => {
+    const f = await fixture()
+    try {
+      const shared = f.spec()
+      ;(shared.thirdParty as unknown as { agentTools: unknown[] }).agentTools = [
+        ...(shared.thirdParty.agentTools ?? []),
+        { name: 'devmap_peek', method: 'devmap.setStatus', risk: 'read', title: 'Peek', description: 'Peek.', timeoutMs: 30_000, inputSchema: { type: 'object', properties: {} } },
+      ]
+      f.confirmWrite.mockResolvedValueOnce(false)
+      await expect(ask(f, toolRequest(f, { tool: { name: 'devmap_peek', plugin_version: '0.2.0', sync_revision: 1 }, payload: { arguments: {} } })))
+        .resolves.toMatchObject({ ok: false, error_code: 'WORKSPACE_WRITE_DECLINED' })
+      expect(f.confirmWrite).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: 'devmap_peek' }), f.workspace)
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it('evaluates the execution policy for a package that declares no system namespace', () => {
+    const mgr = new FrontendPluginManager()
+    mgr.setExecutionPolicyResolver(() => ({
+      policy: { ...HOST_DEFAULT_EXECUTION_POLICY, mode: 'allowlist', system: [], shell: [] }, revision: 1, state: 'user',
+    }))
+    const internals = mgr as unknown as {
+      agentToolPolicyAllows: (root: string, initiator: unknown, spec: unknown) => boolean
+    }
+    const spec = { thirdParty: { name: 'x', system: [] } }
+    expect(internals.agentToolPolicyAllows('/w', { kind: 'agent', source: 'mcp', id: 'a' }, spec)).toBe(false)
+    mgr.setExecutionPolicyResolver(() => ({ policy: HOST_DEFAULT_EXECUTION_POLICY, revision: 1, state: 'default' }))
+    expect(internals.agentToolPolicyAllows('/w', { kind: 'agent', source: 'mcp', id: 'a' }, spec)).toBe(true)
+  })
+
+  it('never forwards an internal error message to the agent', async () => {
+    const f = await fixture()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      f.confirmWrite.mockRejectedValueOnce(new Error('EACCES: /Users/me/Library/Application Support/Navide/native-backends.json'))
+      const response = await ask(f, toolRequest(f))
+      expect(response).toEqual({ ok: false, error_code: 'PLUGIN_TOOL_FAILED', error: 'The Navide plugin tool failed.' })
+    } finally {
+      warn.mockRestore()
+      await f.cleanup()
+    }
+  })
+
+  it('stops and forgets its headless bindings when the tools are no longer served', async () => {
+    const f = await fixture()
+    const unbind = vi.spyOn(PluginBackendHost.prototype, 'unbindView').mockResolvedValue(undefined)
+    try {
+      await ask(f, toolRequest(f))
+      await f.gate.setSwitches({ enabled: false })
+      expect(unbind).toHaveBeenCalledWith('headless-1', 'plugin-stopping')
+      expect((f.mgr as unknown as { headlessAgentToolRoots: Map<string, string> }).headlessAgentToolRoots.size).toBe(0)
+    } finally {
+      unbind.mockRestore()
+      await f.cleanup()
+    }
+  })
+
+  it('keeps the Plans workspace route on its own path', async () => {
+    const f = await fixture()
+    const plansRoute = vi.spyOn(f.mgr, 'executeAgentBackendCallForWorkspace')
+    try {
+      f.socket.receive({
+        type: 'agent.capability.request',
+        payload: {
+          request_id: 'plans-1',
+          operation: 'backend',
+          target: { plugin_id: 'navide.plans', workspace_path: f.workspace },
+          payload: { reqId: 'r', name: 'plans.list', args: {} },
+        },
+      })
+      await settle()
+      expect(plansRoute).toHaveBeenCalledWith('navide.plans', f.workspace, { reqId: 'r', name: 'plans.list', args: {} })
+      expect(f.call).not.toHaveBeenCalled()
+    } finally {
+      plansRoute.mockRestore()
+      await f.cleanup()
+    }
+  })
+})
+
 describe('the Disabled switch for the built-in Plans, Git and Mini-IDE', () => {
   type SentMessage = { id: string; type: string; payload: Record<string, unknown> }
   const flush = async (): Promise<void> => {
@@ -15849,6 +17047,36 @@ describe('the Disabled switch for the built-in Plans, Git and Mini-IDE', () => {
     expect(enabled.payload.features).toEqual({ plans_backend_v2: false })
     const disabled = registrationOf(new Set(['navide.plans', 'acme.not-builtin']))
     expect(disabled.payload.features).toEqual({ plans_backend_v2: false, disabled_plugins: ['navide.plans'] })
+  })
+
+  it('re-registers the Host with the new disabled set as soon as a built-in is drained', async () => {
+    let disabled = false
+    const mgr = new FrontendPluginManager()
+    mgr.setDisabledPluginResolver((pluginId) => disabled && pluginId === PLANS_PLUGIN_ID)
+    mgr.open(
+      asHost(new FakeBrowserWindow()),
+      { ...descriptor('acme.builtin-disable-reregister'), requires: ['terminal'] },
+      { x: 0, y: 0, width: 10, height: 10 },
+    )
+    mgr.setBackendHostToken('host-token')
+    mgr.setBackendWsUrl('ws://builtin-disable-reregister')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const registrations = () => socket.sent
+      .map((raw) => JSON.parse(raw) as SentMessage)
+      .filter((message) => message.type === 'host.register')
+    const first = registrations()[0]
+    socket.receive({ id: first.id, type: 'host.register', ok: true, payload: { registered: true }, error: null, timestamp: '' })
+    await flush()
+    expect(registrations()).toHaveLength(1)
+
+    // The store turned unreadable (or the user disabled Plans): drain it.
+    disabled = true
+    await mgr.suspendBuiltinPlugin(PLANS_PLUGIN_ID)
+    await flush()
+    const all = registrations()
+    expect(all).toHaveLength(2)
+    expect(all[1].payload.features).toEqual({ plans_backend_v2: false, disabled_plugins: [PLANS_PLUGIN_ID] })
   })
 
   it('refuses an agent Plans call with the contract code and no recovery disposition', async () => {
@@ -15977,5 +17205,241 @@ describe('the Disabled switch for the built-in Plans, Git and Mini-IDE', () => {
     plansDisabled = false
     mgr.resumeBuiltinPlugin(PLANS_PLUGIN_ID)
     expect(register).toHaveBeenCalledWith(backend)
+  })
+})
+
+describe('plugin activity (D-e)', () => {
+  type SentMessage = { id: string; type: string; payload: Record<string, unknown> }
+
+  function connect(id: string): {
+    mgr: FrontendPluginManager
+    socket: InstanceType<typeof wsMock.FakeNodeWebSocket>
+    call: (ns: string, method: string, args: Record<string, unknown>) => Promise<unknown>
+  } {
+    const mgr = new FrontendPluginManager()
+    const host = new FakeBrowserWindow()
+    mgr.open(
+      asHost(host),
+      { id, requires: ['terminal'], devUrl: '', entryFile: `/plugins/${id}/index.html` },
+      { x: 0, y: 0, width: 10, height: 10 },
+    )
+    mgr.setBackendHostToken('host-token')
+    mgr.setBackendWsUrl(`ws://${id}`)
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const registration = socket.sent.map((raw) => JSON.parse(raw) as SentMessage)
+      .find((message) => message.type === 'host.register')!
+    socket.receive({ id: registration.id, type: 'host.register', ok: true, payload: { registered: true }, error: null, timestamp: '' })
+    const view = host.children[0] as FakeViewLike
+    const call = async (ns: string, method: string, args: Record<string, unknown>): Promise<unknown> =>
+      ipcHandlers.get('plugin:cap:call')!({ sender: { id: view.webContents.id } }, { reqId: 'r1', ns, method, args })
+    return { mgr, socket, call }
+  }
+
+  const activityOf = (socket: InstanceType<typeof wsMock.FakeNodeWebSocket>): SentMessage[] =>
+    socket.sent.map((raw) => JSON.parse(raw) as SentMessage).filter((m) => m.type === 'plugin.activity.record')
+
+  afterEach(() => { vi.useRealTimers() })
+
+  it('records a third-party plugin call refused as undeclared, in one batch over the Host session', async () => {
+    vi.useFakeTimers()
+    const { socket, call } = connect('acme.activity')
+    await expect(call('fs', 'readFile', { path: '/Users/me/project/a.py' })).resolves.toMatchObject({
+      ok: false, error: { code: 'CAP_DENIED' },
+    })
+    await expect(call('net', 'fetch', { url: 'https://example.test' })).resolves.toMatchObject({ ok: false })
+    expect(activityOf(socket)).toEqual([])
+    await vi.advanceTimersByTimeAsync(1000)
+    const [batch, ...more] = activityOf(socket)
+    expect(more).toEqual([])
+    expect(batch.payload.rows).toEqual([
+      {
+        plugin_id: 'acme.activity', plugin_version: '', workspace: '', source: 'broker',
+        // A refused call's path is the plugin's text: never sent (final review part 2, H1).
+        address: 'fs.readFile', outcome: 'denied', denied_reason: 'undeclared', fs_path: '<denied>',
+        at: expect.any(Number), count: 1,
+      },
+      {
+        plugin_id: 'acme.activity', plugin_version: '', workspace: '', source: 'broker',
+        // No capability the broker routes: one fixed address.
+        address: '<unknown>', outcome: 'denied', denied_reason: 'undeclared',
+        at: expect.any(Number), count: 1,
+      },
+    ])
+  })
+
+  // Review of #397: a planner that throws dispatched nothing, so the write's
+  // path is not kept (the plugin wrote it and nothing ran).
+  it('records a call whose planning threw as not dispatched', async () => {
+    vi.useFakeTimers()
+    const { mgr, socket, call } = connect('acme.activity-planner-throws')
+    const running = (mgr as unknown as { running: Map<string, { capabilityPolicy: unknown }> }).running
+    for (const plugin of running.values()) {
+      plugin.capabilityPolicy = new Proxy({}, { get: () => { throw new Error('planner broke') } })
+    }
+    for (let i = 0; i < 50; i++) {
+      await expect(call('fs', 'writeFile', { path: `/Users/me/project/${i}.py`, content: 'x' })).resolves.toMatchObject({
+        ok: false, error: { code: 'INVALID_ARGUMENT' },
+      })
+    }
+    await vi.advanceTimersByTimeAsync(1000)
+    const [batch] = activityOf(socket)
+    expect(batch.payload.rows).toEqual([expect.objectContaining({
+      address: 'fs.writeFile', outcome: 'error', fs_path: '<failed>', count: 50,
+    })])
+  })
+
+  it('answers the plugin the same as before when the backend never takes the batch', async () => {
+    vi.useFakeTimers()
+    const { socket, call } = connect('acme.activity-unanswered')
+    const first = await call('fs', 'readFile', { path: 'a.py' })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(activityOf(socket)).toHaveLength(1)  // sent, never answered
+    await expect(call('fs', 'readFile', { path: 'a.py' })).resolves.toEqual(first)
+  })
+
+  it('does not record the bundled navide.* plugins', async () => {
+    vi.useFakeTimers()
+    const { socket, call } = connect('navide.activity-builtin')
+    await call('fs', 'readFile', { path: 'a.py' })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(activityOf(socket)).toEqual([])
+  })
+  // Every settled backend call reaches the recorder through PluginBackendHost's
+  // onCallSettled (pluginBackendHost.test.ts covers that it fires on every path).
+  function settleBackendCalls(
+    mgr: FrontendPluginManager,
+    calls: Array<{ pluginId: string; method: string; outcome: string; declared?: boolean }>,
+  ): void {
+    const host = (mgr as unknown as { pluginBackendHost: { onCallSettled: (call: unknown) => void } }).pluginBackendHost
+    for (const call of calls) host.onCallSettled({ packageVersion: '1.0.0', workspacePath: '/w', declared: true, ...call })
+  }
+
+  it('counts a third-party plugin\'s backend calls per method and outcome, in one batch', async () => {
+    vi.useFakeTimers()
+    const { mgr, socket } = connect('acme.backend-activity')
+    settleBackendCalls(mgr, [
+      ...Array.from({ length: 500 }, () => ({ pluginId: 'acme.backend-activity', method: 'devmap.block.import', outcome: 'allowed' })),
+      { pluginId: 'acme.backend-activity', method: 'devmap.fail', outcome: 'error' },
+      { pluginId: 'acme.backend-activity', method: 'devmap.slow', outcome: 'cancelled' },
+    ])
+    expect(activityOf(socket)).toEqual([])  // never on the call path: batched
+    await vi.advanceTimersByTimeAsync(1000)
+    const [batch, ...more] = activityOf(socket)
+    expect(more).toEqual([])
+    const base = { plugin_id: 'acme.backend-activity', plugin_version: '1.0.0', workspace: '/w', source: 'backend', at: expect.any(Number) }
+    expect(batch.payload.rows).toEqual([
+      { ...base, address: 'backend.devmap.block.import', outcome: 'allowed', count: 500 },
+      { ...base, address: 'backend.devmap.fail', outcome: 'error', count: 1 },
+      { ...base, address: 'backend.devmap.slow', outcome: 'cancelled', count: 1 },
+    ])
+  })
+
+  it('does not record the bundled navide.* plugins calling their backend', async () => {
+    vi.useFakeTimers()
+    const { mgr, socket } = connect('acme.backend-builtin-check')
+    settleBackendCalls(mgr, [{ pluginId: 'navide.plans', method: 'plans.list', outcome: 'allowed' }])
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(activityOf(socket)).toEqual([])
+    // Their calls are not even observed: no wrapper cost on the call path.
+    const host = (mgr as unknown as { pluginBackendHost: { observesCallsOf: (id: string) => boolean } }).pluginBackendHost
+    expect(host.observesCallsOf('navide.plans')).toBe(false)
+    expect(host.observesCallsOf('acme.backend-builtin-check')).toBe(true)
+  })
+
+  // Review of #374 (H2): undeclared names are the caller's free text, so they
+  // are never keys; the number of keys follows the declared methods only.
+  it('counts every call of an undeclared method under one address, whatever the name', async () => {
+    vi.useFakeTimers()
+    const { mgr, socket } = connect('acme.backend-undeclared')
+    settleBackendCalls(mgr, Array.from({ length: 1000 }, (_, i) => ({
+      pluginId: 'acme.backend-undeclared', method: `made.up.${i}.${'x'.repeat(i % 50)}`, outcome: 'error', declared: false,
+    })))
+    await vi.advanceTimersByTimeAsync(1000)
+    const [batch] = activityOf(socket)
+    expect(batch.payload.rows).toEqual([{
+      plugin_id: 'acme.backend-undeclared', plugin_version: '1.0.0', workspace: '/w', source: 'backend',
+      at: expect.any(Number), address: 'backend.<undeclared>', outcome: 'error', count: 1000,
+    }])
+  })
+})
+
+describe('plugin activity forget (D-e L4)', () => {
+  type SentMessage = { id: string; type: string; payload: Record<string, unknown> }
+
+  it('sends plugin.activity.forget over the registered Host session, and nothing without one', async () => {
+    const mgr = new FrontendPluginManager()
+    mgr.open(
+      asHost(new FakeBrowserWindow()),
+      { id: 'acme.activity-forget', requires: ['terminal'], devUrl: '', entryFile: '/plugins/acme.activity-forget/index.html' },
+      { x: 0, y: 0, width: 10, height: 10 },
+    )
+    mgr.setBackendHostToken('host-token')
+    mgr.setBackendWsUrl('ws://activity-forget')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const sent = (): SentMessage[] => socket.sent.map((raw) => JSON.parse(raw) as SentMessage)
+    mgr.forgetPluginActivity('acme.gone')
+    await Promise.resolve()
+    expect(sent().filter((m) => m.type === 'plugin.activity.forget')).toEqual([])  // not registered yet
+    const registration = sent().find((m) => m.type === 'host.register')!
+    socket.receive({ id: registration.id, type: 'host.register', ok: true, payload: { registered: true }, error: null, timestamp: '' })
+    await vi.waitFor(() => {
+      mgr.forgetPluginActivity('acme.gone')  // a no-op until the session is registered
+      expect(sent().filter((m) => m.type === 'plugin.activity.forget').length).toBeGreaterThan(0)
+    })
+    expect(sent().find((m) => m.type === 'plugin.activity.forget')!.payload).toEqual({ plugin_id: 'acme.gone' })
+  })
+})
+
+// Plan B watchdog option C (contract 5.2): decision rows go to the backend
+// over the registered Host session; a failure only warns.
+describe('plugin.resource.decision rows to the backend', () => {
+  type SentMessage = { id: string; type: string; payload: Record<string, unknown> }
+  const row = {
+    plugin_id: 'acme.indexer', plugin_version: '1.0.0', item: 'memory' as const,
+    usage: 600, threshold: 512, decision: 'notified' as const, at: 1,
+  }
+
+  function connect(id: string, registered: boolean) {
+    const mgr = new FrontendPluginManager()
+    mgr.open(
+      asHost(new FakeBrowserWindow()),
+      { id, requires: ['terminal'], devUrl: '', entryFile: `/plugins/${id}/index.html` },
+      { x: 0, y: 0, width: 10, height: 10 },
+    )
+    mgr.setBackendHostToken('host-token')
+    mgr.setBackendWsUrl(`ws://${id}`)
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    if (registered) {
+      const registration = (socket.sent.map((raw) => JSON.parse(raw) as SentMessage))
+        .find((message) => message.type === 'host.register')!
+      socket.receive({ id: registration.id, type: 'host.register', ok: true, payload: { registered: true }, error: null, timestamp: '' })
+    }
+    return { mgr, socket }
+  }
+  const sentRows = (socket: InstanceType<typeof wsMock.FakeNodeWebSocket>) =>
+    socket.sent.map((raw) => JSON.parse(raw) as SentMessage).filter((m) => m.type === 'plugin.resource.decision')
+
+  it('sends the row on the registered session', async () => {
+    const { mgr, socket } = connect('acme.rd-ok', true)
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    mgr.recordResourceDecision(row)
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(sentRows(socket).map((m) => m.payload)).toEqual([{ rows: [row] }])
+  })
+
+  it('without a registered session it only warns and never throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const { mgr, socket } = connect('acme.rd-none', false)
+      expect(() => mgr.recordResourceDecision(row)).not.toThrow()
+      for (let i = 0; i < 10; i++) await Promise.resolve()
+      expect(sentRows(socket)).toEqual([])
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

@@ -37,7 +37,7 @@ import {
   registerPluginIpc,
   resolveConfiguredMarketplace,
 } from './plugins/pluginIpc'
-import { refreshTrustThenUpdates } from './plugins/pluginUpdateReminder'
+import { publishRescanNotices, refreshTrustThenUpdates } from './plugins/pluginUpdateReminder'
 import { readRegistryTrustSnapshot } from './plugins/pluginInstalledTrust'
 import { contributionIcon } from './plugins/pluginContributionIcon'
 import { broadcastQuitStage } from './quit-progress'
@@ -53,6 +53,7 @@ import { registerExecutionPolicyIpc } from './plugins/executionPolicyIpc'
 import { FAIL_CLOSED_EXECUTION_POLICY, type ExecutionPolicySnapshot } from './plugins/executionPolicy'
 import { PluginFactoryOptOutStore } from './plugins/pluginFactoryOptOutStore'
 import { BuiltinRemovedEarlierStore, migrateBuiltinRemovalsToDisabled, PluginDisabledStore } from './plugins/pluginDisabledStore'
+import { createBuiltinSwitchReconciler } from './plugins/builtinSwitchReconciler'
 import { BUILTIN_PLUGIN_NAMES, builtinPluginDisabledMessage } from './plugins/frontendPluginManager'
 import { builtinPluginDisabledDialog } from './builtinPluginStrings'
 import { loadPluginDir, type PluginActivationCatalogEntry } from './plugins/installedPlugins'
@@ -99,8 +100,7 @@ import {
 } from './plugins/pluginBackendActivationCatalog'
 import { registerStorageIpc } from './storage-ipc'
 import { lockPageZoom } from './web-contents-zoom'
-import { createUiZoomStore, type UiZoomStore } from './ui-zoom-store'
-import { clampUiScale, UI_SCALE_SETTING_KEY } from '../shared/uiScale'
+import { createUiZoomStore, initialUiScaleFrom, type UiZoomStore } from './ui-zoom-store'
 import { installContextMenu, registerTerminalContextMenu } from './context-menu'
 import { inAppUpdateSupported, initUpdater } from './updater'
 import { withDeadline } from './deadline'
@@ -162,6 +162,7 @@ import { errorMain, infoMain, logMain, warnMain } from './main-log'
 import { watchRendererCrashes } from './renderer-crash-reload'
 import { recordMainFault, setMainLedgerDataDir } from './error-ledger'
 import { createPlansBackendStoppedRelay } from './plansBackendStoppedRelay'
+import { createPluginAgentActionRelay } from './pluginAgentActionRelay'
 import { isAppWindowSender, UNTRUSTED_SENDER } from './ipcSender'
 import { drawnFrameWhereNeeded, installWindowControls } from './window-controls'
 import { openInExternalTerminal } from './external-terminal'
@@ -182,14 +183,19 @@ import { applyLinuxSpeechDispatcher } from './linuxSpeech'
 import type { EditorNativeHost } from './plugins/editorNativeCapability'
 import { NativeBackendStore } from './plugins/pluginNativeBackendStore'
 import { registerNativeBackendIpc } from './plugins/pluginNativeBackendIpc'
+import { PluginAgentToolsHost } from './plugins/pluginAgentToolsHost'
+import { canonicalExistingDirectory } from './plugins/workspacePathPolicy'
 import { pluginDeveloperModeEnabled } from './plugins/pluginDeveloperMode'
 import {
   isThirdPartyLaunchSpec,
   nativeBackendConsentText,
   thirdPartyBackendLaunchSpec,
+  type ThirdPartyLaunchSpec,
   ThirdPartyBackendController,
+  type AgentToolWritePrompt,
   type NativeBackendConsentPrompt,
   type NativeBackendWritePrompt,
+  stdoutPendingOf,
 } from './plugins/pluginThirdPartyBackends'
 
 protocol.registerSchemesAsPrivileged([
@@ -385,6 +391,16 @@ const mainWindowWorkspaces = new Map<BrowserWindow, string>()
 const detachedGroups = new Map<string, BrowserWindow>()          // groupId → child window
 const detachedGroupWorkspace = new Map<string, string>()         // groupId → workspace_path
 const detachedWindowIds = new Set<number>()                      // child window ids
+
+// The core backend's agent tool result helper (agent-tools contract 4.4, R2):
+// resource usage shows its state; every change goes to the main windows, where
+// the first `unavailable` raises a notice.
+frontendPluginManager.onResultHelperState = (state) => {
+  for (const hostWindow of mainWindows) {
+    if (hostWindow.isDestroyed() || detachedWindowIds.has(hostWindow.id)) continue
+    hostWindow.webContents.send('plugins:resultHelperState', state)
+  }
+}
 // Navide windows main created that are not main windows (Plans, Token
 // Monitor): they get the full backend:info, but never a window proof.
 const navideAuxWindows = new Set<BrowserWindow>()
@@ -729,6 +745,7 @@ async function createWindow(
   setTimeout(showOnce, 4000)
   // A Plans notice that found no loaded main window is handed to this one.
   win.webContents.on('did-finish-load', () => plansBackendStoppedRelay.flush(win))
+  win.webContents.on('did-finish-load', () => pluginAgentActionRelay.flush(win))
   win.on('focus', () => { mainWindow = win })
   win.on('closed', () => {
     mainWindows.delete(win)
@@ -995,6 +1012,8 @@ function verifyCurrentInstalledBackendTrust(
 function scheduleDeniedBackendRuntimeQuarantine(
   activation: Pick<BackendPluginLaunchSpec, 'pluginId' | 'packageVersion' | 'packageDir'>,
 ): void {
+  agentToolsHost?.mark(activation.pluginId, 'revoked')
+  void agentToolsHost?.refresh().catch(() => undefined)
   void frontendPluginManager
     .revokePackageVersion(activation.pluginId, activation.packageVersion)
     .catch((drainError: unknown) => {
@@ -1182,6 +1201,9 @@ frontendPluginManager.setBackendSpawnTrustVerifier((activation) => {
 // permission set, behind a global switch that is off by default.
 const nativeBackendRoot = join(app.getPath('userData'), 'plugin-native-backends')
 const nativeBackendStore = new NativeBackendStore(nativeBackendRoot)
+// Plan B1-b: the third-party agent-tool catalog. Created once the installed
+// activation catalog exists (below); until then nothing can change it.
+let agentToolsHost: PluginAgentToolsHost | null = null
 const thirdPartyBackends = new ThirdPartyBackendController({
   store: nativeBackendStore,
   dataRoot: join(nativeBackendRoot, 'data'),
@@ -1190,10 +1212,27 @@ const thirdPartyBackends = new ThirdPartyBackendController({
   stopBackends: (pluginId) => frontendPluginManager.stopThirdPartyBackends(pluginId),
   promptConsent: promptNativeBackendConsent,
   promptWorkspaceWrite: promptNativeBackendWorkspaceWrite,
+  onConsentGranted: () => {
+    void agentToolsHost?.refresh().catch(() => undefined)
+  },
+  promptAgentToolWrite: promptAgentToolWorkspaceWrite,
+  agentToolCall: (initiatorId) => frontendPluginManager.agentToolCallFor(initiatorId),
+  // Watchdog option C (contract 5.2): rows for the backend's audit, and a
+  // nudge so every main window reads the unanswered notices again.
+  recordResourceDecision: (row) => frontendPluginManager.recordResourceDecision(row),
+  // Review M2 on #375: stdout waiting for a newline is noticed like the rest.
+  stdoutPendingBytes: (pluginId, instanceId) =>
+    stdoutPendingOf(frontendPluginManager.backendResourceUsage(), pluginId, instanceId),
+  onResourceNoticesChanged: () => {
+    for (const hostWindow of mainWindows) {
+      if (hostWindow.isDestroyed()) continue
+      hostWindow.webContents.send('plugins:nativeBackends:resourceNoticesChanged')
+    }
+  },
 })
-frontendPluginManager.setThirdPartyBackendAdmitter((activation, workspacePath) =>
+frontendPluginManager.setThirdPartyBackendAdmitter((activation, workspacePath, instanceId) =>
   isThirdPartyLaunchSpec(activation)
-    ? thirdPartyBackends.admit(activation, workspacePath)
+    ? thirdPartyBackends.admit(activation, workspacePath, { instanceId })
     : Promise.reject(new BackendPluginError('BACKEND_UNAVAILABLE', 'not a third-party backend')),
 )
 
@@ -1217,13 +1256,14 @@ function nativeBackendDialogParent(): BrowserWindow | null {
 }
 
 async function promptNativeBackendConsent(prompt: NativeBackendConsentPrompt): Promise<boolean> {
-  const { message, detail } = nativeBackendConsentText(prompt)
+  // Plan B D-g: in the user's language, with the methods it serves.
+  const { title, message, detail, buttons } = nativeBackendConsentText(prompt, currentUiLocale())
   const options: Electron.MessageBoxOptions = {
     type: 'warning',
-    title: 'Native code',
+    title,
     message,
     detail,
-    buttons: ['Not now', 'Allow'],
+    buttons,
     defaultId: 0,
     cancelId: 0,
     noLink: true,
@@ -1239,6 +1279,24 @@ async function promptNativeBackendWorkspaceWrite(prompt: NativeBackendWritePromp
     title: 'Allow file changes',
     message: `Allow ${prompt.name} to change files in this workspace?`,
     detail: `${prompt.workspacePath}\n\nYou can revoke this in Settings → Extensions.`,
+    buttons: ['Don\'t allow', 'Allow'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  }
+  const parent = nativeBackendDialogParent()
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+  return result.response === 1
+}
+
+// DB3: an agent asked for a write-risk tool. Its own question, naming the
+// agent and the tool, separate from the view's "allow file changes".
+async function promptAgentToolWorkspaceWrite(prompt: AgentToolWritePrompt): Promise<boolean> {
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning',
+    title: 'Agent wants to change files',
+    message: `An agent asked to use "${prompt.tool.title}" (${prompt.tool.name}) of ${prompt.name} ${prompt.packageVersion}, which changes files. Allow agents to do this in this workspace?`,
+    detail: `${prompt.workspacePath}\n\nThe agent, not you, started this. You are asked again after an update or a new permission.`,
     buttons: ['Don\'t allow', 'Allow'],
     defaultId: 0,
     cancelId: 0,
@@ -1450,6 +1508,9 @@ const plansBackendStoppedRelay = createPlansBackendStoppedRelay({
   find: (workspacePath) => findMainWindowForWorkspace(workspacePath),
   fallback: () => mainWindow,
 })
+// An agent disabled or enabled a Navide plugin (B2-c): the main window names
+// the caller and offers the undo; held until one has loaded.
+const pluginAgentActionRelay = createPluginAgentActionRelay({ window: () => mainWindow })
 frontendPluginManager.setPlansBackendStoppedHandler(({ workspacePath }) => {
   // A headless (agent) Plans child failed too often to be restarted. Nothing
   // on screen shows it, so the workspace's window tells the user how to bring
@@ -1587,6 +1648,15 @@ const applyPluginActivationChange = ({
     (entry) => entry.pluginId !== pluginId
   )
   if (activation) approvedInstalledPluginActivations.push(activation)
+  // Removed, disabled or quarantined: its DB3 answers do not carry over.
+  if (!activation) {
+    try {
+      nativeBackendStore.forgetAgentToolWrites(pluginId)
+    } catch (error) {
+      console.warn(`[main] agent write grants for ${pluginId} could not be cleared: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  void agentToolsHost?.refresh().catch(() => undefined)
   for (const win of mainWindows) {
     if (!win.isDestroyed() && !detachedWindowIds.has(win.id)) {
       win.webContents.send('plugins:contributionsChanged')
@@ -1648,16 +1718,55 @@ ipcMain.handle('git:retryV2', (event) => {
   return retryGitV2AfterRecovery()
 })
 
+const registeredThirdPartySpecs = (): ThirdPartyLaunchSpec[] =>
+  approvedInstalledPluginActivations.flatMap((activation) => {
+    if (!activation.backend || activation.pluginId === 'navide.plans') return []
+    const spec = frontendPluginManager.getBackendActivation(activation.pluginId, activation.packageVersion)
+    return spec && isThirdPartyLaunchSpec(spec) ? [spec] : []
+  })
+agentToolsHost = new PluginAgentToolsHost({
+  switches: () => nativeBackendStore.agentToolSwitches(),
+  setSwitches: (change) => nativeBackendStore.setAgentToolSwitches(change),
+  listPackages: registeredThirdPartySpecs,
+  // Native backends turned off globally or for the package count as disabled.
+  isDisabled: (pluginId) =>
+    !nativeBackendStore.isEnabled() ||
+    frontendPluginManager.isPluginDisabled(pluginId) ||
+    nativeBackendStore.record(pluginId).disabled === true,
+  hasConsent: (spec) => thirdPartyBackends.hasAgentToolsConsent(spec),
+  // DB1 collision order, per name (B1-a): when a consented version first
+  // declared this name, else when the package first declared tools.
+  agentToolSince: (pluginId, name) => {
+    const record = nativeBackendStore.record(pluginId)
+    return record.agentToolNamesSince?.[name] ?? record.agentToolsSince ?? null
+  },
+  setAgentMethods: (pluginId, packageVersion, methods) =>
+    frontendPluginManager.setThirdPartyAgentMethods(pluginId, packageVersion, methods),
+  confirmWrite: (spec, tool, workspaceRoot) =>
+    thirdPartyBackends.confirmAgentToolWrite(spec, workspaceRoot, tool),
+  send: (payload) => frontendPluginManager.sendAgentToolsSync(payload),
+})
+frontendPluginManager.setAgentToolsHost(agentToolsHost)
+// An agent tool may target only a workspace open in a Navide window.
+frontendPluginManager.setAgentToolWorkspaceResolver((root) => {
+  const open = [
+    ...[...mainWindowWorkspaces].filter(([win]) => !win.isDestroyed()).map(([, path]) => path),
+    ...[...adoptedWorkspaces].filter(([win]) => !win.isDestroyed()).flatMap(([, paths]) => paths),
+  ]
+  return open.some((path) => canonicalExistingDirectory(path) === root)
+})
+const agentToolsControls = agentToolsHost
 registerNativeBackendIpc(
   (channel, listener) => ipcMain.handle(channel, listener),
   (event) => isTrustedPluginManagementSender(event, mainWindows),
   thirdPartyBackends,
-  () => approvedInstalledPluginActivations.flatMap((activation) => {
-    if (!activation.backend || activation.pluginId === 'navide.plans') return []
-    const spec = frontendPluginManager.getBackendActivation(activation.pluginId, activation.packageVersion)
-    return spec && isThirdPartyLaunchSpec(spec) ? [spec] : []
-  }),
+  registeredThirdPartySpecs,
   () => nativeBackendStore.isEnabled(),
+  {
+    switches: () => agentToolsControls.switches(),
+    setSwitches: (change) => agentToolsControls.setSwitches(change),
+    refresh: () => agentToolsControls.refresh(),
+  },
 )
 
 const pluginTrustRefresh = registerPluginIpc(
@@ -1669,6 +1778,7 @@ const pluginTrustRefresh = registerPluginIpc(
   {
     resolveContributionIcon: contributionIcon,
     onActivationChange: applyPluginActivationChange,
+    onPluginAgentAction: (notice) => pluginAgentActionRelay.notify(notice),
     preflightCandidateFrontend,
     preflightCandidateBackend,
     nativeBackendDataRoot: join(nativeBackendRoot, 'data'),
@@ -1696,6 +1806,8 @@ const pluginTrustRefresh = registerPluginIpc(
         return error instanceof Error ? error.message : String(error)
       }
     },
+    backendCallConcurrency: () => frontendPluginManager.backendCallConcurrency(),
+    backendResourceUsage: () => frontendPluginManager.backendResourceUsage(),
     listFactoryPackages: () => {
       const descriptor = frontendPluginManager.getDescriptor('navide.git')
       const factoryActive = frontendPluginManager
@@ -1842,7 +1954,9 @@ const pluginTrustRefresh = registerPluginIpc(
       if (pluginId === 'navide.git') pluginFactoryOptOuts.remove(pluginId)
       if (pluginId === MINI_IDE_PLUGIN_ID) pluginFactoryOptOuts.remove(pluginId)
     },
-    onBuiltinSwitchReset: () => {
+    onBuiltinSwitchReset: (resumed) => {
+      for (const pluginId of resumed) completeBuiltinEnable(pluginId)
+      builtinSwitchReconciler.sync()
       for (const hostWindow of mainWindows) {
         if (!hostWindow.isDestroyed() && !detachedWindowIds.has(hostWindow.id)) {
           hostWindow.webContents.send('plugins:contributionsChanged')
@@ -1850,32 +1964,55 @@ const pluginTrustRefresh = registerPluginIpc(
       }
     },
     setBuiltinDisabled: async (pluginId, disabled) => {
-      if (disabled) {
-        for (const [key, hostWindow] of contributionWindows) {
-          if (key.startsWith(`${pluginId}.`) && !hostWindow.isDestroyed()) hostWindow.close()
-        }
-        if (pluginId === 'navide.plans') {
-          for (const hostWindow of BrowserWindow.getAllWindows()) {
-            if (!hostWindow.isDestroyed() && planWindows.hasWindow(hostWindow)) hostWindow.close()
-          }
-        }
-        await frontendPluginManager.suspendBuiltinPlugin(pluginId)
-      } else {
-        frontendPluginManager.resumeBuiltinPlugin(pluginId)
-        // Enabled once, it starts from the empty storage the old removal left.
-        builtinRemovedEarlier.remove(pluginId)
-        if (pluginId === 'navide.git' && gitRecoveryForced && !legacyGitRegisteredForForcedRecovery) {
-          registerForcedLegacyGit()
-        }
-      }
-      for (const hostWindow of mainWindows) {
-        if (!hostWindow.isDestroyed() && !detachedWindowIds.has(hostWindow.id)) {
-          hostWindow.webContents.send('plugins:contributionsChanged')
-        }
-      }
+      await applyBuiltinSwitch(pluginId, disabled)
+      // Enabled once, it starts from the empty storage the old removal left.
+      if (!disabled) builtinRemovedEarlier.remove(pluginId)
+      builtinSwitchReconciler.sync()
     },
+    holdBuiltinSwitch: (task) => builtinSwitchReconciler.hold(task),
   }
 )
+/** The Host side of a built-in's Disabled switch: drain and close it, or bring
+ *  it back. Used by the Extensions switch and by a store change the switch did
+ *  not make (see builtinSwitchReconciler). */
+async function applyBuiltinSwitch(pluginId: string, disabled: boolean): Promise<void> {
+  if (disabled) {
+    for (const [key, hostWindow] of contributionWindows) {
+      if (key.startsWith(`${pluginId}.`) && !hostWindow.isDestroyed()) hostWindow.close()
+    }
+    if (pluginId === 'navide.plans') {
+      for (const hostWindow of BrowserWindow.getAllWindows()) {
+        if (!hostWindow.isDestroyed() && planWindows.hasWindow(hostWindow)) hostWindow.close()
+      }
+    }
+    await frontendPluginManager.suspendBuiltinPlugin(pluginId)
+  } else {
+    frontendPluginManager.resumeBuiltinPlugin(pluginId)
+    completeBuiltinEnable(pluginId)
+  }
+  for (const hostWindow of mainWindows) {
+    if (!hostWindow.isDestroyed() && !detachedWindowIds.has(hostWindow.id)) {
+      hostWindow.webContents.send('plugins:contributionsChanged')
+    }
+  }
+}
+/** What enabling a built-in needs after `resumeBuiltinPlugin`, shared by the
+ *  Enable switch and the reset of an unreadable store: a forced legacy Git
+ *  recovery session registers the legacy Git it would have at startup. */
+function completeBuiltinEnable(pluginId: string): void {
+  if (pluginId === 'navide.git' && gitRecoveryForced && !legacyGitRegisteredForForcedRecovery) {
+    registerForcedLegacyGit()
+  }
+}
+// A store that turns unreadable while the app runs fails closed for the
+// built-ins; apply that at once (drain the views, re-register the Host so the
+// backend refuses Plans work) instead of at the next registration.
+const builtinSwitchReconciler = createBuiltinSwitchReconciler({
+  list: () => frontendPluginManager.listDisabledBuiltinPlugins(),
+  apply: applyBuiltinSwitch,
+  warn: (message) => warnMain(`[main] ${message}`),
+})
+setInterval(() => { void builtinSwitchReconciler.check() }, 15_000).unref()
 registerExecutionPolicyIpc(
   executionPolicySourceStore,
   (event) => isTrustedPluginManagementSender(event, mainWindows),
@@ -1917,6 +2054,8 @@ async function refreshInstalledPluginTrust(): Promise<void> {
         ),
         ...refreshed.activationCatalog,
       ]
+      // Re-verified by the trust refresh: an earlier quarantine or revocation ends.
+      for (const pluginId of restoredIds) agentToolsHost?.clearMark(pluginId)
     }
     const quarantined = new Set(
       decisions
@@ -1929,11 +2068,13 @@ async function refreshInstalledPluginTrust(): Promise<void> {
       )
       for (const decision of decisions) {
         if (decision.action === 'quarantine') {
+          agentToolsHost?.mark(decision.pluginId, 'quarantined')
           console.warn(
             `[main] installed plugin quarantined after trust refresh: ${decision.pluginId}: ${decision.reason ?? 'trust verification failed'}`
           )
         }
       }
+      void agentToolsHost?.refresh().catch(() => undefined)
     }
   } catch (error) {
     // The refresh controller re-evaluates cached trust before surfacing a
@@ -1962,6 +2103,20 @@ const refreshInstalledPluginTrustAndUpdates = (): void => {
         if (hostWindow.isDestroyed() || detachedWindowIds.has(hostWindow.id)) continue
         hostWindow.webContents.send('plugins:updatesChanged', updates)
       }
+      // D-f: rescans that found new items, from the same check; notice only.
+      publishRescanNotices({
+        take: () => pluginTrustRefresh.takeRescanNotices(),
+        restore: (notices) => pluginTrustRefresh.restoreRescanNotices(notices),
+        send: (notices) => {
+          let received = 0
+          for (const hostWindow of mainWindows) {
+            if (hostWindow.isDestroyed() || detachedWindowIds.has(hostWindow.id)) continue
+            hostWindow.webContents.send('plugins:rescanNotices', notices)
+            received += 1
+          }
+          return received
+        },
+      })
     },
     warn: (message) => console.warn(message),
   })
@@ -2471,9 +2626,7 @@ function currentUiLocale(): SupportedLocale {
 let uiZoomStoreRef: UiZoomStore | null = null
 function uiZoomStore(): UiZoomStore {
   if (!uiZoomStoreRef) {
-    uiZoomStoreRef = createUiZoomStore(
-      clampUiScale(uiSetting<number>(readUiSettings(), UI_SCALE_SETTING_KEY))
-    )
+    uiZoomStoreRef = createUiZoomStore(initialUiScaleFrom(readUiSettings()))
   }
   return uiZoomStoreRef
 }
@@ -4796,6 +4949,12 @@ const TRUST_CONFIRM_ACTIONS = new Set([
   'p2p.trust.rebuild',
   // Writes an agent-requested skill into the shared library.
   'skills.install_approval.decide',
+  // Decides an agent's request to install, update, roll back or remove a
+  // Navide plugin; the subject is the approval_id.
+  'plugins.agent_request.decide',
+  // Reports that the window carried out an approved request (B2-c); the
+  // subject is the approval_id, so an agent cannot report a change itself.
+  'plugins.agent_request.finish',
   // Loosening terminal command protection (switching a category off, adding
   // an allow prefix, removing a block pattern) — the backend demands a token
   // only for those, so tightening needs no prompt.

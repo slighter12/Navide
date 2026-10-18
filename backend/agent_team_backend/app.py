@@ -212,6 +212,12 @@ stages_store = StagesStore(db=database)
 tokens_store = TokensStore(db=database)
 # Which account each pane was pinned to, and when — global like the pane ids.
 pane_account_history = PaneAccountHistory(db=database)
+# Navide plugin audit (plan B, B1-d): agent tool calls and plugin activity,
+# write-only. Creating the tables is the only work done here; writing and
+# pruning run in the background task started at startup.
+from .plugins.audit_log import PluginAuditLog  # noqa: E402
+
+plugin_audit_log = PluginAuditLog(db=database)
 # Quota cycles per account: the usage poller files samples here; an open
 # cycle's token side is summed from the store's per-account slices.
 quota_ledger = QuotaLedger(db=database, totals_provider=tokens_store.account_window_totals)
@@ -430,6 +436,56 @@ async def unicast_any(event: dict[str, Any]) -> bool:
     return False
 
 
+def is_main_window(session: "Session") -> bool:
+    """A proven Navide window that runs the UI action bus: a main window."""
+    return bool(getattr(session, "navide_window", False) and getattr(session, "ui_bus_ready", False))
+
+
+async def broadcast_main_windows(event: dict[str, Any]) -> None:
+    """Send *event* to every connected main window only (not plugin, editor
+    or other WS clients): for records naming a requester's pane and workspace."""
+    for session in list(_SESSIONS):
+        if session.dead or not is_main_window(session):
+            continue
+        try:
+            await session.send_json(event)
+        except Exception as err:  # noqa: BLE001
+            log.warning("main-window broadcast send failed: %s", err)
+            _SESSIONS.discard(session)
+
+
+async def nudge_plugin_request_recovery(session: "Session") -> None:
+    """A main window went away (review-370 R1): if it was carrying out approved
+    plugin requests, ask the main windows still open to settle them, instead of
+    leaving them ``applying`` until another window opens. Each window waits a
+    short grace before settling, so a window that is only reconnecting claims
+    its request back first (R2). Never raises."""
+    window_id = getattr(session, "window_id", "")
+    if not window_id or not is_main_window(session):
+        return
+    try:
+        from .ipc import make_event
+        from .plugins import agent_tools_contract as contract
+        from .skills_approvals import registry
+
+        held = [
+            r["approval_id"] for r in registry.plugin_requests()
+            if r["status"] == "applying" and registry.applying_by(r["approval_id"]) == window_id
+        ]
+        if held:
+            await broadcast_main_windows(make_event(contract.PLUGIN_APPROVAL_RECOVER_EVENT, {"approval_ids": held}))
+    except Exception as err:  # noqa: BLE001 - a closing socket must not fail on this
+        log.warning("plugin request recovery nudge failed: %s", err)
+
+
+def live_main_window_ids() -> set[str]:
+    """The page-load ids (``ui.invoke.ready`` window_id) of the main windows connected now."""
+    return {
+        s.window_id for s in list(_SESSIONS)
+        if not s.dead and is_main_window(s) and getattr(s, "window_id", "")
+    }
+
+
 async def unicast_host(event: dict[str, Any]) -> bool:
     """Send one internal agent request to the authenticated Electron Host."""
     for session in list(_SESSIONS):
@@ -593,6 +649,9 @@ class Session:
         # most recently focused first.
         self.ui_bus_ready = False
         self.ui_focused_at = 0.0
+        # A main window's page-load id (`ui.invoke.ready` window_id): stays the
+        # same across reconnects, changes when the window reloads (B2-c).
+        self.window_id = ""
         # Set by `window.prove` answering this connection's challenge (see
         # navide_window_proof_matches): a Navide window, as opposed to any
         # other client holding the token. ui_bus_ready is self-declared.
@@ -820,7 +879,10 @@ async def _broadcast_plans_changed(ws_path: str) -> None:
     file directly). Record stage-transition snapshots first so subscribers
     refreshing on the event see up-to-date history, then notify."""
     try:
-        await asyncio.to_thread(plan_history.snapshot_plans, ws_path)
+        # Snapshots are plan-document writes (`.history/`); none while the user
+        # has Plans disabled. The change is still announced.
+        if not plans_plugin_disabled():
+            await asyncio.to_thread(plan_history.snapshot_plans, ws_path)
     except Exception as err:  # noqa: BLE001
         log.warning("plan snapshot scan failed for %s: %s", ws_path, err)
     await broadcast(make_event("plans.changed", {"workspace_path": ws_path}))
@@ -1072,6 +1134,7 @@ _OWNERLESS_SINCE: dict[str, float] = {}
 _ownerless_sweeper_task: "asyncio.Task[None] | None" = None
 _mem_probe_task: "asyncio.Task[None] | None" = None
 _dev_time_sweeper_task: "asyncio.Task[None] | None" = None
+_plugin_audit_task: "asyncio.Task[None] | None" = None
 
 
 async def _sweep_ownerless_ptys_once(now: float | None = None) -> list[str]:
@@ -2301,6 +2364,10 @@ async def _start_log_watcher() -> None:
         lambda ws: broadcast(make_event("devtime.changed", {"workspace_path": ws}))
     ))
 
+    # Navide plugin audit: flush queued rows every second, prune hourly.
+    global _plugin_audit_task
+    _plugin_audit_task = asyncio.create_task(plugin_audit_log.run())
+
     # Navide's in-process scheduler (timed messages to CLI panes). Built off
     # the loop: its first use runs the schema migration.
     from . import scheduler
@@ -2458,6 +2525,10 @@ async def _stop_log_watcher() -> None:
             _mem_probe_task.cancel()
         if _dev_time_sweeper_task is not None:
             _dev_time_sweeper_task.cancel()
+        if _plugin_audit_task is not None:
+            # Cancelling runs its final flush; wait for it so queued rows land.
+            _plugin_audit_task.cancel()
+            await asyncio.gather(_plugin_audit_task, return_exceptions=True)
         from . import scheduler
 
         await scheduler.shutdown()
@@ -3199,6 +3270,7 @@ async def ws(websocket: WebSocket) -> None:
         # Peer is gone: silence any in-flight sends before cancelling tasks.
         session.dead = True
         _SESSIONS.discard(session)
+        await nudge_plugin_request_recovery(session)
         await _kill_onboarding_runs(session)
         # Release PTY ownership so their output is dropped until reattached.
         orphaned = [tid for tid, owner in _PTY_OWNERS.items() if owner is session]

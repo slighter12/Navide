@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { ipcErrorMessage } from '../composables/usePluginInstallFlow'
 import { usePluginInventory } from '../composables/usePluginInventory'
 import MarketplaceIcon from './MarketplaceIcon.vue'
+import PluginAgentToolsList from './PluginAgentToolsList.vue'
 
 const { t } = useI18n()
 const overview = ref<NativeBackendOverview | null>(null)
@@ -78,6 +79,32 @@ watch(installed, refresh)
       />
       {{ $t('settings.extensions.nativeBackends.enable') }}
     </label>
+    <template v-if="overview.agentTools && api()?.setAgentTools">
+      <label class="native-backends-switch">
+        <input
+          type="checkbox"
+          class="nv-check"
+          data-agent-tools-switch="enabled"
+          :checked="overview.agentTools.enabled"
+          :disabled="busy"
+          @change="run(() => api()!.setAgentTools!({ enabled: ($event.target as HTMLInputElement).checked }))"
+        />
+        {{ $t('settings.extensions.nativeBackends.agentTools.enable') }}
+      </label>
+      <p class="native-backends-description">{{ $t('settings.extensions.nativeBackends.agentTools.description') }}</p>
+      <label class="native-backends-switch">
+        <input
+          type="checkbox"
+          class="nv-check"
+          data-agent-tools-switch="externalCallers"
+          :checked="overview.agentTools.externalCallers"
+          :disabled="busy || !overview.agentTools.enabled"
+          @change="run(() => api()!.setAgentTools!({ externalCallers: ($event.target as HTMLInputElement).checked }))"
+        />
+        {{ $t('settings.extensions.nativeBackends.agentTools.externalCallers') }}
+      </label>
+      <p class="native-backends-description">{{ $t('settings.extensions.nativeBackends.agentTools.externalCallersDisclosure') }}</p>
+    </template>
     <p v-if="overview.plugins.length === 0" class="native-backends-empty">
       {{ $t('settings.extensions.nativeBackends.empty') }}
     </p>
@@ -147,6 +174,7 @@ watch(installed, refresh)
               {{ $t('settings.extensions.nativeBackends.revoke') }}
             </button>
           </span>
+          <PluginAgentToolsList v-if="row.agentTools?.length" :tools="row.agentTools" />
         </div>
       </li>
     </ul>

@@ -174,7 +174,11 @@ describe.skipIf(!REGISTRY_AVAILABLE)('real Registry → App install pipeline', (
     ].join('\n')
     execFileSync(REGISTRY_PYTHON, ['-c', code, JSON.stringify(commands)], {
       cwd: REGISTRY_DIR,
-      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', NAVIDE_PLUGIN_CONFIG_DIR: join(work, 'cli-config') },
+      // The CLI opens a Registry data dir too; its own, not .registry-data in the checkout.
+      env: {
+        ...process.env, PYTHONDONTWRITEBYTECODE: '1',
+        NAVIDE_PLUGIN_CONFIG_DIR: join(work, 'cli-config'), REGISTRY_DATA_DIR: join(work, 'cli-data'),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   }
@@ -417,7 +421,7 @@ describe.skipIf(!REGISTRY_AVAILABLE)('real Registry → App install pipeline', (
   it('(4) update to 0.1.1 is detected; its new shell permission needs new consent before it runs', async () => {
     await publish('0.1.1')
     await expect(main.controller.checkUpdates()).resolves.toEqual([
-      { id: ID, namespace: PUBLISHER, name: NAME, installedVersion: '0.1.0', latestVersion: '0.1.1' },
+      { id: ID, namespace: PUBLISHER, name: NAME, installedVersion: '0.1.0', latestVersion: '0.1.1', permissionChange: 'more' },
     ])
     const prepared = await main.call('plugins:prepareInstall', { namespace: PUBLISHER, name: NAME, version: '0.1.1' })
     expect(prepared).toMatchObject({ version: '0.1.1', requiresPublisherTrust: false, requiresRiskConfirmation: true })

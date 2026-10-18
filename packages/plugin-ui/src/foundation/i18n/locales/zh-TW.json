@@ -830,6 +830,10 @@
       "loop-stalled-notify-body": "Agent 連續多輪重複相同回覆、沒有推進（可能正在等待其他工作） — Loop 已停止，以免繼續消耗額度",
       "loop-capped-notify-title": "Loop 已停止 — 達續跑次數上限",
       "loop-capped-notify-body": "Loop 已送出上限次數的續跑提示，Agent 仍未回報任務完成 — 若工作方向正確請手動重新啟動",
+      "loop-inject-failed-notify-title": "Loop 已停止 — 無法送出續跑提示",
+      "loop-inject-failed-notify-body": "續跑提示連續 3 次沒有送進 Agent（輸入框沒有接受） — Loop 已停止，請檢查該 pane 後再重新啟動",
+      "loop-interrupted-notify-title": "Loop 已停止 — 已中斷",
+      "loop-interrupted-notify-body": "你中斷了 Agent，所以 Loop 已停止、不會再送續跑提示 — 要繼續時請重新啟動",
       "login-expired-badge": "⚠ 登入過期",
       "exit-fault-badge": "⚠ 已結束（代碼 {code}）",
       "exit-fault-tooltip": "CLI 以結束代碼 {code} 結束，可能是當掉了；這個代碼也記錄在錯誤帳本裡。",
@@ -1523,6 +1527,10 @@
           "title": "Navide 市集",
           "summary": "搜尋 Navide 外掛登錄庫並安裝 Navide 外掛，含發佈者信任與能力確認。"
         },
+        "disclosureOverview": {
+          "title": "揭露總覽",
+          "summary": "所有已安裝 Navide 外掛的揭露、風險、最近活動和異常"
+        },
         "help-mcp": {
           "title": "MCP 說明",
           "summary": "MCP 的兩個方向：Navide 提供給 CLI agent 的工具，以及 Navide 用來讀文件的外部 server。"
@@ -1697,10 +1705,28 @@
     },
     "extensions": {
       "devUnpacked": "未簽章的本機資料夾，僅限開發者模式",
+      "agentTools": {
+        "heading": "agent 可呼叫的工具（{count} 個）",
+        "read": "Navide 外掛宣告為唯讀",
+        "write": "Navide 外掛宣告為寫入",
+        "timeout": "{seconds} 秒逾時",
+        "dataFlow": "這些工具回傳的內容會交給 agent，agent 可能再把它傳到別處。",
+        "collision": "agent 無法使用：較早允許的 {heldBy} 已經用了這個名稱。",
+        "method": "呼叫 {method}",
+        "inputSchema": "輸入結構（agent 送出的內容）",
+        "sharedWith": "{others} 也宣告了這個名稱，那邊的工具不會上線。",
+        "total": "共 {count} 個工具，文字與輸入結構合計 {size}。"
+      },
       "nativeBackends": {
         "title": "原生後端",
         "description": "部分 Navide 外掛內含原生程式。Navide 會把它放在沙盒裡執行，它本身沒有網路：只能讀取你一起開啟的工作區，也只能在你允許的地方修改檔案。但同時會執行 git、gh、glab 指令的 Navide 外掛（下方標示為高風險）可以透過這些指令連到網路主機、送出工作區資料，也可以不經上述允許就讀取與修改工作區檔案。在你打開下方開關之前，不會執行任何原生程式。",
         "enable": "允許第三方 Navide 外掛執行原生後端",
+        "agentTools": {
+          "enable": "允許 agent 呼叫第三方 Navide 外掛的工具",
+          "description": "預設關閉。開啟後，你允許過的第三方 Navide 外掛所宣告的工具，pane 裡的 agent 就能呼叫；會修改檔案的工具在每個工作區第一次使用時會先問你。關閉時，Navide 的行為就像沒有任何 Navide 外掛提供工具。",
+          "externalCallers": "外部 MCP 客戶端也能呼叫",
+          "externalCallersDisclosure": "外部程式只共用一組 token，稽核紀錄分不出是哪個程式，只能記成「外部客戶端」。Host 憑證也比照處理。"
+        },
         "empty": "目前沒有安裝任何含原生後端的 Navide 外掛。",
         "allow": "允許",
         "disable": "停用",
@@ -1713,7 +1739,8 @@
           "memory": "記憶體",
           "cpu": "CPU",
           "processes": "行程數",
-          "disk": "磁碟"
+          "disk": "磁碟",
+          "stdoutPending": "尚未換行的輸出"
         },
         "shellRisk": "高風險：會執行 git、gh、glab",
         "shellRiskDetail": "可以透過 git、gh、glab 連到網路主機並送出工作區資料，也可以不經「修改檔案」的允許就讀取與修改工作區檔案。停用或撤銷權限時已經開始的指令會繼續執行到結束（最多約 30 秒）。",
@@ -1746,6 +1773,7 @@
       "disabledStoreRestored": "已從備份恢復：Navide 外掛的停用設定檔已損壞，已用備份重建。",
       "disabledStoreUnreadable": "Navide 外掛的停用設定檔與其備份都無法讀取。為了安全，Plans、Git 與 Mini-IDE 暫時視為已停用。損壞的檔案會保留。按「重設」會讓所有開關回到啟用。",
       "disabledStoreReset": "重設",
+      "builtinSwitchBusy": "正在套用…Navide 會先讓進行中的工作完成，Plans 可能需要約半分鐘。",
       "disabledBadge": "已停用",
       "disabledNote": "已停用：它的畫面與後端不會執行，檔案、權限與儲存的資料都會保留。",
       "rollback": {
@@ -1771,6 +1799,7 @@
       "sensitive": "敏感權限",
       "empty": "尚未安裝任何 Navide 外掛。",
       "permissionDetails": "權限與授予",
+      "permissionDetailsWithActivity": "權限、授予與活動",
       "plansRiskNote": "此 Navide 外掛有自己的後端程式，以您的使用者權限執行，沒有沙盒。它處理目前專案的計畫文件：從往上找到的 Git 儲存庫根目錄起（含其下的巢狀儲存庫），任何深度的 .agent-team、.claude、.cursor 與 docs 底下的 plans／reports 類資料夾、根目錄的 .plans，以及這些資料夾的 .history（只讀）。讀取與寫入計畫文件都由此 Navide 外掛的後端直接進行；刪除與改名仍經由 Navide 進行。",
       "searchPlaceholder": "搜尋 Navide 外掛",
       "search": "搜尋",
@@ -2248,6 +2277,7 @@
       "analyzer": "分析器",
       "extensions": "Navide 外掛",
       "marketplace": "Navide 市集",
+      "disclosureOverview": "揭露總覽",
       "executionPolicy": "執行政策",
       "statusBadges": "狀態徽章",
       "voice": "語音輸入",
@@ -2415,6 +2445,10 @@
             "marketplace": {
               "what": "搜尋 Navide 外掛登錄庫並從中安裝",
               "more": "本頁第 4 章"
+            },
+            "disclosureOverview": {
+              "what": "所有從 Navide 市集安裝的 Navide 外掛：揭露卡、風險等級、最近活動和異常，集中在同一頁。",
+              "more": "只是紀錄，這裡的內容不會改變 Navide 外掛能做的事。每個 Navide 外掛完整的活動，也可以在「Navide 外掛」頁該 Navide 外掛的那一列打開。"
             },
             "shortcuts": {
               "what": "快捷鍵改綁、匯入匯出",
@@ -9174,6 +9208,41 @@
     "signin-hint": "這會開一個 pane 幫你跑登入。多數 CLI 接著會開啟瀏覽器，在那裡完成後回來即可。",
     "dont-ask": "不要再詢問 {label}"
   },
+  "plugin-request": {
+    "kicker": "Navide 外掛請求",
+    "title": {
+      "install": "要安裝 Navide 外掛 {plugin} {version} 嗎？",
+      "update": "要把 Navide 外掛 {plugin} 從 {from} 更新到 {version} 嗎？",
+      "rollback": "要把 Navide 外掛 {plugin} 從 {from} 回退到 {version} 嗎？",
+      "remove": "要移除 Navide 外掛 {plugin} 嗎？",
+      "enable": "要重新啟用 Navide 外掛 {plugin} 嗎？"
+    },
+    "desc": "有 agent 要求這項變更。你在這裡核准之前，什麼都不會改變；agent 無法代你核准。",
+    "queue": "{count} 筆待處理",
+    "requester": "請求者",
+    "workspace": "工作區",
+    "expires": "到期時間",
+    "caller-unknown": "不明的呼叫端",
+    "disabled-by": "停用者",
+    "disabled-by-user": "你",
+    "disabled-at": "停用時間",
+    "not-recorded": "未記錄",
+    "reason": "理由（由 agent 撰寫）",
+    "diff": "和已安裝版本相比的變化",
+    "card": "這個版本宣告的內容（來自 Navide Marketplace，尚未驗證）",
+    "no-card": "Navide Marketplace 沒有這個版本的揭露資料。套件本身會在下載時、安裝任何東西之前驗證。",
+    "expired": "這個請求已經過期。",
+    "approve": "核准",
+    "reject": "拒絕",
+    "applying": "套用中…",
+    "dismiss": "關閉",
+    "completed": "已完成：{plugin}",
+    "completed-late": "{plugin}：已完成。這個視窗重新連線期間，另一個視窗已把這筆請求標成中斷；紀錄已改成實際結果。",
+    "finished-late": "這個視窗重新連線期間，另一個視窗已把這筆請求標成中斷；紀錄已改成這裡的結果。",
+    "failed": "沒有完成：{error}",
+    "not-appliable": "這個版本的 Navide 還不能執行這種請求；你可以拒絕它。",
+    "unavailable": "這個視窗無法執行 Navide 外掛的操作。"
+  },
   "skill-approval": {
     "kicker": "技能安裝請求",
     "title": "安裝技能「{name}」？",
@@ -9854,6 +9923,13 @@
     "memory": "記憶體",
     "machine-share": "佔全機 {percent}",
     "machine-share-unknown": "佔比未知",
+    "result-helper": "Navide 外掛結果處理程序",
+    "result-helper-idle": "未啟動",
+    "result-helper-ready": "執行中",
+    "result-helper-unavailable": "無法使用",
+    "result-helper-detail-idle": "收到第一個大型 Navide 外掛結果時才啟動",
+    "result-helper-detail-ready": "在 backend 之外處理大型 Navide 外掛結果",
+    "result-helper-detail-unavailable": "{error}。在它能啟動之前，超過 1 MiB 的結果會被拒絕",
     "busiest": "最忙的 CLI",
     "open-window": "開啟資源控管",
     "reclaim-action": "立即回收 {count} 個",
@@ -10299,7 +10375,7 @@
     "unavailable": "目前的後端還沒有 Navide Guard，更新後請重新啟動 Navide。",
     "enabled": {
       "title": "Navide Guard",
-      "desc": "依動作的危險程度與要求來源判斷每個 CLI 動作，危險的先擋下或要求確認。判斷是固定規則的程式碼，不經過 AI。即使關閉，從聊天頻道核准高風險動作仍會被拒絕。"
+      "desc": "依動作的危險程度與要求來源判斷每個 CLI 動作，危險的先擋下或要求確認。判斷是固定規則的程式碼，不經過 AI。即使關閉，從聊天頻道核准高風險動作仍會被拒絕。終端機指令防護，以及 agent 透過 MCP 回答提示時的檢查，也不受這個開關影響。"
     },
     "counts": {
       "critical": "嚴重 {n}",
@@ -10334,7 +10410,8 @@
       "local": "本機",
       "relay": "聊天室",
       "remote": "遠端",
-      "agent": "其他 agent"
+      "agent": "其他 agent",
+      "plugin": "Navide 外掛工具"
     },
     "vendors": {
       "title": "Guard 能擋哪些 CLI",
@@ -10492,6 +10569,7 @@
       "text-missing": "訊息紀錄裡已沒有這段內文",
       "text-none": "沒有記錄到訊息內文",
       "explain": "它的「高」與「嚴重」動作需要你在這台電腦上確認。確認過它收到的內容後再清除標記。",
+      "explain-off": "Navide Guard 已關閉：目前不會要求確認。標記會保留，重新開啟 Guard 後再次生效。",
       "clear": "清除",
       "no-hook-warning": "這個 CLI 無法被 Guard 阻擋，從聊天室下指令請謹慎"
     },
@@ -10986,5 +11064,319 @@
     "unpin-body": "改為跟隨會用目前的登入重開 pane，並接續對話。可以等它們跑完再改，或這次先跳過。閒置的 pane 會立即改。",
     "pin-default-refused": "內建的 Default 帳號沒有自己的資料夾，無法固定。請先切換到其他帳號。",
     "pin-needs-dir-login": "要把這個 pane 固定在 {account}，需要先在它的帳號資料夾登入一次。已開啟登入視窗。"
+  },
+  "pluginActivity": {
+    "title": "活動",
+    "resources": {
+      "heading": "資源用量（即時）",
+      "row": "{item}：{usage}／門檻 {threshold}",
+      "over": "超過門檻",
+      "waiting": "等你選擇",
+      "kept": "已選擇繼續執行；超過 {level} 才會再通知",
+      "item": {
+        "memory": "記憶體",
+        "cpu": "CPU",
+        "processes": "程序數",
+        "disk": "資料夾大小",
+        "stdoutPending": "尚未換行的輸出"
+      }
+    },
+    "source": {
+      "broker": "Navide 功能",
+      "shell": "shell 指令",
+      "agentTool": "agent 工具"
+    },
+    "kind": {
+      "system": "權限",
+      "shell": "Shell",
+      "backendMethod": "原生 backend 方法",
+      "agentTool": "agent 工具"
+    },
+    "reason": {
+      "undeclared": "沒有宣告"
+    },
+    "tab": "活動",
+    "openOverview": "在揭露總覽查看",
+    "loading": "正在讀取活動紀錄…",
+    "notSupported": "這個版本的 Navide 還不能讀取活動紀錄",
+    "unavailable": "目前無法取得活動紀錄：{error}",
+    "window": "最近 7 天的紀錄，存在這台電腦。",
+    "totals": "{calls} 次呼叫、{denied} 次被拒、{errors} 次錯誤",
+    "unknownSize": "未知",
+    "marker": {
+      "denied": "（呼叫被拒，不記錄路徑或指令）",
+      "failed": "（呼叫失敗，不記錄路徑或指令）",
+      "missing": "（路徑不存在或無法使用，不記錄路徑）",
+      "unknown": "（Navide 沒有這項功能）"
+    },
+    "empty": "沒有紀錄。",
+    "live": {
+      "heading": "目前（即時）",
+      "inFlight": "執行中的呼叫：{current} 個（Navide 啟動以來最多同時 {peak} 個）",
+      "historicalPeak": "紀錄中最多同時執行：{count} 個（最近 7 天）",
+      "boundViews": "已綁定 backend 的 view 數：{count}（不是執行中的程序數）",
+      "queue": "等待送給 backend：請求 {requestFrames} 筆（{requestBytes}）、事件 {eventFrames} 筆（{eventBytes}）",
+      "queueGrowing": "這個 Navide 外掛的 backend 沒有在讀取，Navide 的記憶體會持續增加。",
+      "dropped": "已丟棄的事件通知：{count} 則"
+    },
+    "undeclared": {
+      "heading": "用了但沒宣告（被 Navide 拒絕）",
+      "item": "{address}（{source}）在 {workspace}：{count} 次，最近一次 {date}",
+      "reasons": "原因：{reasons}"
+    },
+    "unused": {
+      "heading": "宣告了但 30 天內沒用到",
+      "never": "從未使用",
+      "last": "最後一次使用：{date}"
+    },
+    "anomalies": {
+      "heading": "異常（只標示，不攔截）"
+    },
+    "anomaly": {
+      "volumeSpike": "{date}：呼叫 {count} 次，超過 7 天平均（{baseline}）的 10 倍",
+      "writeToolNewWorkspace": "寫入類工具 {tool} 第一次用在 {workspace}（{date}）",
+      "undeclaredDenied": "{workspace} 有 {count} 次沒宣告的使用被拒絕（最近一次 {date}）"
+    },
+    "tools": {
+      "heading": "被哪個 agent 呼叫了哪些工具",
+      "row": "{date} {caller} → {tool}（{risk}）：{outcome}，{duration} ms，參數 {args}，結果 {result}",
+      "ok": "成功",
+      "failed": "失敗（{code}）",
+      "crossWorkspace": "跨工作區：{from} → {to}",
+      "totalSize": "參數共 {args}、結果共 {result}；另有 {unknown} 筆大小未知，沒有算進去"
+    },
+    "caller": {
+      "pane": "pane「{name}」",
+      "external": "外部用戶端",
+      "host": "Navide"
+    },
+    "risk": {
+      "read": "唯讀",
+      "write": "寫入"
+    },
+    "outcome": {
+      "allowed": "允許",
+      "denied": "被拒",
+      "error": "錯誤"
+    },
+    "files": {
+      "heading": "讀寫過的檔案",
+      "item": "{path} · {address} · {count} 次 · {outcome} · {date}"
+    },
+    "commands": {
+      "heading": "執行過的指令",
+      "item": "{command} · {count} 次 · {outcome} · {date}"
+    },
+    "trend": {
+      "heading": "每日呼叫量"
+    },
+    "agentActions": {
+      "heading": "agent 對這個 Navide 外掛做的變更",
+      "item": "{date} {caller}：{action}（{version}）",
+      "notRecorded": "這個版本的 Navide 還沒有記錄這項資料。"
+    },
+    "overview": {
+      "title": "揭露總覽",
+      "intro": "所有從 Navide 市集安裝的 Navide 外掛：宣告了什麼、風險等級、最近活動和異常，集中在這一頁。只是紀錄，這裡的內容不會改變 Navide 外掛能做的事。",
+      "empty": "沒有安裝任何來自 Navide 市集的 Navide 外掛。",
+      "installedScan": "安裝時驗證過的掃描",
+      "noScanRecord": "安裝時沒有記錄掃描。",
+      "activity": "最近活動",
+      "undeclaredCount": "{count} 次沒宣告的使用被拒絕",
+      "anomalyCount": "{count} 項異常"
+    }
+  },
+  "backendResource": {
+    "title": "Navide 外掛的 backend 用量超過門檻",
+    "body": "{name}（{id} {version}）：{item}目前是 {usage}，超過門檻 {threshold}。",
+    "keepsRunning": "在你選擇之前，它會繼續執行。",
+    "again": "選「繼續執行」後，要超過「門檻與當時用量兩者中較大者」的兩倍，Navide 才會再通知你。這只決定什麼時候通知，不會限制任何事。",
+    "stop": "停止",
+    "continue": "繼續執行",
+    "cores": "{count} 核",
+    "item": {
+      "memory": "記憶體",
+      "cpu": "CPU",
+      "processes": "程序數",
+      "disk": "資料夾大小",
+      "stdoutPending": "尚未換行的輸出量"
+    }
+  },
+  "pluginDisclosure": {
+    "diff": {
+      "heading": "這次更新的權限變化",
+      "versions": "目前安裝 {from} → 更新到 {to}；以下只列出不同的地方。",
+      "risk": "風險等級：{from} → {to}",
+      "none": "沒有新增或移除任何權限。",
+      "added": "新增",
+      "removed": "已移除",
+      "unchanged": "沒有變動（{count} 項）",
+      "fullCard": "完整揭露卡",
+      "badgeMore": "權限變多",
+      "badgeSame": "權限沒變",
+      "badgeTitle": "依 Navide Registry 提供的資料，尚未驗證；更新前 Navide 會用下載的套件重新比對。",
+      "item": {
+        "system": "權限：{key}",
+        "shell": "shell 模式：{key}",
+        "shellExecutable": "可執行：{key}",
+        "fsScopeRoot": "檔案範圍：{key}",
+        "fsScopeRead": "可讀取：{key}",
+        "fsScopeWrite": "可寫入：{key}",
+        "nativeBackend": "附帶原生程式",
+        "backendMethod": "原生程式的方法：{key}",
+        "backendEvent": "原生程式的事件：{key}",
+        "network": "可以透過指令連到遠端",
+        "agentTool": "agent 工具：{key}"
+      }
+    },
+    "title": "揭露卡",
+    "riskLabel": "風險等級：{level}",
+    "variesByPlatform": "（依平台不同，顯示最高者）",
+    "rescanNotice": "Navide Registry 重新掃描 {name} {version}，發現 {count} 個新項目（尚未驗證）。詳見「設定 → Navide 外掛 → 揭露總覽」。",
+    "resultHelperUnavailable": "Navide 無法啟動傳遞大型 Navide 外掛結果的處理程序（{error}）。在它能啟動之前，超過 1 MiB 的結果會被拒絕；Navide 約一分鐘後會再試。詳見「資源控管」。",
+    "risk": {
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "highest": "最高"
+    },
+    "undeclaredHeading": "掃描到但未宣告",
+    "undeclaredIntro": "程式碼做了這個 Navide 外掛沒有宣告的事。Navide 執行時會拒絕這些呼叫，但宣告和程式碼不一致。",
+    "undeclared": {
+      "shell": "會執行 {key}，但沒有宣告 shell 權限",
+      "shellDynamic": "有執行時才組出來的指令，但沒有宣告 shell 權限",
+      "shellExecutable": "會執行 {key}，但宣告的 shell 範圍只有 git、gh、glab",
+      "system": "會使用 {key}，但沒有宣告這項權限",
+      "fsScopeWrite": "會寫入 {key}，不在宣告的寫入範圍內",
+      "fsScopeRead": "會讀取 {key}，不在宣告的讀取範圍內"
+    },
+    "notSeenHeading": "宣告了，靜態掃描未發現",
+    "notSeen": {
+      "shell": "shell（{key}）",
+      "system": "{key}"
+    },
+    "scanHeading": "上架時系統掃描的結果",
+    "declaredHeading": "這個 Navide 外掛宣告的權限",
+    "registryHeading": "Navide Registry 的紀錄（未簽章）",
+    "provenance": {
+      "unverified": "以下由 Navide Registry 提供，尚未驗證；安裝前 Navide 會驗證簽章，並和套件內容比對。",
+      "verified": "已驗證：揭露內容和下載的套件一致，掃描報告的 Navide Registry 簽章正確。",
+      "verifiedNoScan": "已驗證：揭露內容和下載的套件一致。這個版本沒有系統掃描。"
+    },
+    "noDisclosure": "這個版本上架時尚未提供揭露資料。",
+    "signedByRegistry": "掃描由 Navide Registry 執行並簽章。",
+    "scannedByRegistry": "掃描由 Navide Registry 執行。",
+    "limitsWithoutScan": "這個版本沒有系統掃描，以上只有這個 Navide 外掛自己的宣告。",
+    "summary": {
+      "nativeBackend": "附帶原生程式（在沙盒裡執行）",
+      "files": {
+        "read": "讀取你專案裡的檔案",
+        "readWrite": "讀寫你專案裡的檔案"
+      },
+      "shell": {
+        "allowlist": "執行指令：{executables}",
+        "full": "執行任何指令"
+      },
+      "networkViaShell": "可以透過這些指令連到遠端",
+      "aiCli": "操作 AI CLI 工作階段",
+      "ui": "顯示自己的畫面",
+      "agentTools": "提供 agent 可呼叫的工具（唯讀 {read} 個、寫入 {write} 個）",
+      "network": "可以連網",
+      "noPermissions": "沒有宣告任何權限"
+    },
+    "scan": {
+      "shell": {
+        "remoteWrite": "這個 Navide 外掛會執行 {commands}，可能把專案資料送到遠端。",
+        "other": "這個 Navide 外掛會執行 {commands}，可以把資料送到任何地方。",
+        "unknownSubcommand": "這個 Navide 外掛會執行 {commands}；這個子指令不在 Navide 的對照表裡，請當成可能連到遠端。",
+        "remoteRead": "這個 Navide 外掛會執行 {commands}，會用你的登入身分連到遠端讀取資料。",
+        "localWrite": "這個 Navide 外掛會執行 {commands}，會改變你本機儲存庫的內容。",
+        "local": "這個 Navide 外掛會執行 {commands}，讀取本機儲存庫的狀態。",
+        "dynamic": "有 {count} 處指令是在執行時才組出來的，靜態掃描無法完全判斷會執行什麼。"
+      },
+      "files": {
+        "write": "這個 Navide 外掛會寫入 {paths}（另有 {dynamic} 處路徑在執行時才決定）。",
+        "read": "這個 Navide 外掛會讀取 {paths}。"
+      },
+      "network": {
+        "hosts": "程式碼裡出現這些網址：{hosts}。Navide 外掛頁框與原生程式都不能直接連網，這些網址可能用來開啟瀏覽器，或交給 git、gh 等指令。"
+      },
+      "code": {
+        "eval": {
+          "frontend": "畫面程式碼會在執行時產生並執行程式碼（{count} 處）；Navide 外掛頁框的安全政策會擋下這類呼叫。",
+          "backend": "原生程式裡有在執行時產生並執行程式碼的跡象（{count} 處）。"
+        },
+        "obfuscated": "程式碼有混淆跡象（{signals}），掃描結果可能不完整。"
+      },
+      "native": {
+        "summary": "原生程式 {path}（{format}，{arch}）連結了：{libraries}。",
+        "unscannable": "原生程式 {path} {reason}，裡面的程式碼這次無法掃描。"
+      },
+      "coverage": {
+        "base": "上架時由 Navide Registry 掃描（掃描器 {scannerVersion}，{scannedAt}，掃了 {filesScanned}／{filesTotal} 個檔案）。靜態掃描看不到執行時才決定的行為，以上不代表完整清單。",
+        "incomplete": "掃描不完整：{reasons}。"
+      },
+      "notFound": {
+        "shell": "靜態掃描未發現執行指令。",
+        "network": "靜態掃描未發現網址。",
+        "files": "靜態掃描未發現檔案讀寫路徑。",
+        "dynamicCode": "靜態掃描未發現執行時產生程式碼。"
+      },
+      "noScan": "這個版本上架時尚未有系統掃描，以下只有這個 Navide 外掛自己的宣告。"
+    },
+    "incompleteReason": {
+      "timedOut": "超過掃描時間",
+      "truncated": "內容超過掃描上限",
+      "obfuscated": "程式碼有混淆",
+      "packed": "原生程式經過壓縮殼處理",
+      "embeddedRuntime": "原生程式內嵌執行環境",
+      "scannerError": "掃描器在部分內容上失敗",
+      "tooComplex": "部分內容結構過於複雜，無法掃描"
+    },
+    "unscannableReason": {
+      "packed": "經過壓縮殼（{detail}）處理",
+      "embeddedRuntime": "內嵌 {detail} 執行環境"
+    },
+    "registry": {
+      "domainVerified": "Navide Registry 紀錄：發佈者擁有網域 {domain}（{date} 確認）",
+      "domainNotVerified": "發佈者網域未驗證",
+      "signedClaim": "Navide Registry 紀錄：這個版本已簽章（金鑰 {keyId}）",
+      "unsigned": "Navide Registry 紀錄：這個版本沒有簽章",
+      "reviewApproved": "已通過人工審核（{date}）",
+      "review": {
+        "not-required": "自動發佈，未經人工審核",
+        "pending": "等待人工審核",
+        "rejected": "人工審核未通過",
+        "approved": "已通過人工審核"
+      },
+      "nativeInspected": "原生程式已由審核者檢查",
+      "nativeNotInspected": "原生程式未經人工檢查",
+      "secret": {
+        "clean": "機密掃描：未發現",
+        "not-run": "機密掃描：未執行",
+        "findings": "機密掃描：有發現"
+      },
+      "secretFindings": "機密掃描：{count} 筆疑似機密，審核者已確認",
+      "similar": "名稱和其他 Navide 外掛相近"
+    }
+  },
+  "plugin-agent": {
+    "notice": {
+      "disabled": "{caller}停用了 Navide 外掛 {plugin}",
+      "enabled": "{caller}啟用了 Navide 外掛 {plugin}",
+      "version": "版本 {version}。檔案、授權和資料都保留。",
+      "undo-failed": "無法還原：{error}",
+      "undo-stale": "沒有還原：這個 Navide 外掛之後已經被改過。"
+    },
+    "caller": {
+      "pane": "Agent pane「{pane}」",
+      "pane-unknown": "某個 agent pane",
+      "external": "外部 MCP 用戶端",
+      "host": "Navide Host"
+    },
+    "button": {
+      "enable": "重新啟用",
+      "disable": "再次停用"
+    }
   }
 }
