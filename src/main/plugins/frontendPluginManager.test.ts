@@ -267,7 +267,7 @@ vi.mock('electron', () => {
     },
     BrowserWindow,
     ipcMain,
-    app: {},
+    app: { setPath: vi.fn() },
     __mock: { ipcHandlers, ipcListeners, views, windows, frameTokens },
   }
 })
@@ -796,8 +796,8 @@ describe('registered receiver frame lifecycle', () => {
     workspacePath: string
   }
 
-  async function setupReceiver(withDetailPair = false, withEditorTargets = false, workspacePath = '/workspace', withCloseGuard = false): Promise<ReceiverSetup> {
-    const mgr = new FrontendPluginManager()
+  async function setupReceiver(withDetailPair = false, withEditorTargets = false, workspacePath = '/workspace', withCloseGuard = false, Manager = FrontendPluginManager): Promise<ReceiverSetup> {
+    const mgr = new Manager()
     const host = new FakeBrowserWindow()
     const hostContents = host.webContents as FakeHostContents & { id: number; mainFrame: object }
     hostContents.id = 7000
@@ -931,7 +931,7 @@ describe('registered receiver frame lifecycle', () => {
     return { port: ports[0] as never, frame }
   }
 
-  async function prepareEditorSource(workspacePath = '/workspace', withCloseGuard = false): Promise<{
+  async function prepareEditorSource(workspacePath = '/workspace', withCloseGuard = false, Manager = FrontendPluginManager): Promise<{
     fixture: ReceiverSetup
     sourceItemId: string
     sourcePort: Awaited<ReturnType<typeof admitItem>>['port']
@@ -940,7 +940,7 @@ describe('registered receiver frame lifecycle', () => {
     sourceMessages: unknown[]
     detailItemId: string
   }> {
-    const pending = await startEditorSourceWithoutWaitingForDetailResponse(workspacePath, withCloseGuard)
+    const pending = await startEditorSourceWithoutWaitingForDetailResponse(workspacePath, withCloseGuard, Manager)
     const offer = pending.fixture.receiver.webContents.sent
       .filter((message) => message.channel === 'plugin:receiver:offer')
       .map((message) => (message.args[0] as { offer?: { offerId?: string; location?: string } }).offer)
@@ -1039,7 +1039,7 @@ describe('registered receiver frame lifecycle', () => {
     return { itemId: mounted.itemId, port: admitted.port, messages }
   }
 
-  async function startEditorSourceWithoutWaitingForDetailResponse(workspacePath = '/workspace', withCloseGuard = false): Promise<{
+  async function startEditorSourceWithoutWaitingForDetailResponse(workspacePath = '/workspace', withCloseGuard = false, Manager = FrontendPluginManager): Promise<{
     fixture: ReceiverSetup
     sourceItemId: string
     sourcePort: Awaited<ReturnType<typeof admitItem>>['port']
@@ -1047,7 +1047,7 @@ describe('registered receiver frame lifecycle', () => {
     providerPort: Awaited<ReturnType<typeof admitItem>>['port']
     detailRequestId: string
   }> {
-    const fixture = await setupReceiver(true, true, workspacePath, withCloseGuard)
+    const fixture = await setupReceiver(true, true, workspacePath, withCloseGuard, Manager)
     const source = await mountOffer(fixture)
     const sourceReady = await admitItem(fixture, source.itemId)
     const providerMessages: unknown[] = []
@@ -1120,6 +1120,161 @@ describe('registered receiver frame lifecycle', () => {
       (message as { payload?: { requestId?: string } }).payload?.requestId === requestId,
     ) as { payload: { response: unknown } } | undefined)?.payload.response
   }
+
+  it('keeps evaluation receipts passive, redacted and scoped to the admitted current port', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ni4-observer-')))
+    const workspace = join(root, 'A')
+    mkdirSync(workspace)
+    writeFileSync(join(root, 'desktop-host-evaluation.json'), JSON.stringify({ schemaVersion: 1, runId: '0123456789abcdef' }), { mode: 0o600 })
+    vi.stubGlobal('__NAVIDE_DESKTOP_HOST_EVALUATION__', true)
+    vi.stubEnv('NAVIDE_DESKTOP_HOST_EVALUATION_ROOT', root)
+    vi.resetModules()
+    try {
+      const { FrontendPluginManager: Manager } = await import('./frontendPluginManager')
+      const fixture = await setupReceiver(false, false, workspace, false, Manager)
+      // Electron's native window id was not needed by the older lifecycle fixture.
+      Object.assign(fixture.host, { id: 1 })
+      const item = await mountOffer(fixture)
+      const admitted = await admitItem(fixture, item.itemId)
+      const messages: unknown[] = []
+      admitted.port.on('message', (event) => messages.push(event.data))
+      const request = { kind: 'invoke', channel: 'plugin:cap:call', requestId: 'sensitive-request-id',
+        payload: { reqId: 'sensitive-request-id', ns: 'shell', method: 'run', args: { command: 'sensitive-command' } } }
+      admitted.port.postMessage(request)
+      await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({
+        channel: 'plugin:response', payload: expect.objectContaining({ response: expect.objectContaining({
+          ok: false, error: expect.objectContaining({ code: 'CAPABILITY_DENIED' }),
+        }) }),
+      })))
+      const file = join(root, 'logs', 'observer.jsonl')
+      const text = readFileSync(file, 'utf8')
+      const receipts = text.trim().split('\n').map((line) => JSON.parse(line))
+      expect(receipts.map((receipt) => receipt.phase)).toEqual(['admission', 'request', 'response'])
+      expect(receipts[2]).toMatchObject({ operation: 'shell.run', errorCode: 'CAPABILITY_DENIED', ok: false })
+      expect(text).not.toContain('sensitive-request-id')
+      expect(text).not.toContain('sensitive-command')
+      expect(text).not.toContain('document-')
+      const bindingId = (fixture.mgr as unknown as { receiverItems: Map<string, { bindingId: string }> }).receiverItems.get(item.itemId)!.bindingId
+      expect(fixture.mgr.closePluginFrame(bindingId)).toBe(true)
+      const closed = readFileSync(file, 'utf8')
+      expect(JSON.parse(closed.trim().split('\n').at(-1)!)).toMatchObject({ phase: 'revocation' })
+      admitted.port.postMessage(request)
+      await Promise.resolve()
+      expect(readFileSync(file, 'utf8')).toBe(closed)
+    } finally {
+      vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.resetModules()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('records the revocation receipt when a native close destroyed the host window first', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ni4-observer-')))
+    const workspace = join(root, 'A')
+    mkdirSync(workspace)
+    writeFileSync(join(root, 'desktop-host-evaluation.json'), JSON.stringify({ schemaVersion: 1, runId: '0123456789abcdef' }), { mode: 0o600 })
+    vi.stubGlobal('__NAVIDE_DESKTOP_HOST_EVALUATION__', true)
+    vi.stubEnv('NAVIDE_DESKTOP_HOST_EVALUATION_ROOT', root)
+    vi.resetModules()
+    try {
+      const { FrontendPluginManager: Manager } = await import('./frontendPluginManager')
+      const fixture = await setupReceiver(false, false, workspace, false, Manager)
+      Object.assign(fixture.host, { id: 1 })
+      const host = fixture.host
+      const item = await mountOffer(fixture)
+      await admitItem(fixture, item.itemId)
+      const file = join(root, 'logs', 'observer.jsonl')
+      const phases = (): string[] => readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line).phase)
+      expect(phases()).toEqual(['admission'])
+      const bindingId = (fixture.mgr as unknown as { receiverItems: Map<string, { bindingId: string }> }).receiverItems.get(item.itemId)!.bindingId
+      // A native close destroys the host window before the revocation runs.
+      host.destroyed = true
+      expect(fixture.mgr.closePluginFrame(bindingId)).toBe(true)
+      const receipts = readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+      expect(receipts.map((receipt) => receipt.phase)).toEqual(['admission', 'revocation'])
+      expect(receipts[1]).toMatchObject({ phase: 'revocation', windowId: 1 })
+      expect((fixture.mgr as unknown as { evaluationHostWindowIds: Map<string, number> }).evaluationHostWindowIds.size).toBe(0)
+    } finally {
+      vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.resetModules()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('records which path decided a close preparation as enum-only rows (receiver busy, begin busy, provider refused, accepted)', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ni4-observer-')))
+    const workspace = join(root, 'A')
+    mkdirSync(workspace)
+    writeFileSync(join(root, 'desktop-host-evaluation.json'), JSON.stringify({ schemaVersion: 1, runId: '0123456789abcdef' }), { mode: 0o600 })
+    vi.stubGlobal('__NAVIDE_DESKTOP_HOST_EVALUATION__', true)
+    vi.stubEnv('NAVIDE_DESKTOP_HOST_EVALUATION_ROOT', root)
+    vi.resetModules()
+    try {
+      const { FrontendPluginManager: Manager } = await import('./frontendPluginManager')
+      const prepared = await prepareEditorSource(workspace, true, Manager)
+      const fixture = prepared.fixture
+      const item = { itemId: prepared.detailItemId }
+      const admitted = { port: prepared.sourcePort }
+      const providerMessages = prepared.sourceMessages
+      const closeTransaction = ipcHandlers.get('plugin:receiver:request-close-transaction')
+      const resolveReceiver = ipcHandlers.get('plugin:receiver:resolve-close')
+      const receiverPayloads = (): Array<{ closeId: string }> => fixture.receiver.webContents.sent
+        .filter((message) => message.channel === 'plugin:receiver:close-request')
+        .map((message) => message.args[0] as { closeId: string })
+      const providerRequests = (): Array<{ payload: { closeId: string; itemId: string } }> => providerMessages.filter((message) =>
+        (message as { channel?: string } | null)?.channel === 'plugin:view:close-request') as Array<{ payload: { closeId: string; itemId: string } }>
+      const decisions = (): Array<{ outcome: string; reason: string }> => readFileSync(join(root, 'logs', 'observer.jsonl'), 'utf8').trim().split('\n')
+        .map((line) => JSON.parse(line)).filter((row) => row.phase === 'close-decision').map((row) => ({ outcome: row.outcome, reason: row.reason }))
+      const keys = (): string[] => readFileSync(join(root, 'logs', 'observer.jsonl'), 'utf8').trim().split('\n')
+        .map((line) => JSON.parse(line)).filter((row) => row.phase === 'close-decision').flatMap((row) => Object.keys(row))
+      // 1. the receiver answers busy
+      const first = closeTransaction?.(fixture.receiverEvent, { receiverId: fixture.receiverId, itemIds: [item.itemId] }) as Promise<unknown>
+      await vi.waitFor(() => expect(receiverPayloads()).toHaveLength(1))
+      // 2. a second request while the first holds the item and receiver locks: begin-busy-lock
+      await expect(closeTransaction?.(fixture.receiverEvent, { receiverId: fixture.receiverId, itemIds: [item.itemId] })).resolves.toEqual({ closed: false, reason: 'busy' })
+      resolveReceiver?.(fixture.receiverEvent, { receiverId: fixture.receiverId, closeId: receiverPayloads()[0]!.closeId, decision: { accepted: false, reason: 'busy' } })
+      await expect(first).resolves.toEqual({ closed: false, reason: 'busy' })
+      expect(decisions()).toEqual([
+        { outcome: 'begin-busy-lock', reason: 'receiver-item-batch' },
+        { outcome: 'receiver-busy', reason: 'receiver-item-batch' },
+      ])
+      // 3. the receiver accepts, the provider refuses
+      const second = closeTransaction?.(fixture.receiverEvent, { receiverId: fixture.receiverId, itemIds: [item.itemId] }) as Promise<unknown>
+      await vi.waitFor(() => expect(receiverPayloads()).toHaveLength(2))
+      resolveReceiver?.(fixture.receiverEvent, { receiverId: fixture.receiverId, closeId: receiverPayloads()[1]!.closeId, decision: { accepted: true, reason: 'accepted' } })
+      await vi.waitFor(() => expect(providerRequests()).toHaveLength(1))
+      const refusedRequest = providerRequests()[0]!
+      admitted.port.postMessage({
+        kind: 'invoke', channel: 'plugin:cap:call', requestId: 'observed-provider-refuse',
+        payload: { reqId: 'observed-provider-refuse', ns: 'ui', method: 'resolveDetailClose', args: {
+          closeId: refusedRequest.payload.closeId, itemId: refusedRequest.payload.itemId, decision: { accepted: false, reason: 'refused' },
+        } },
+      })
+      await expect(second).resolves.toEqual({ closed: false, reason: 'refused' })
+      // 4. everything accepts
+      const third = closeTransaction?.(fixture.receiverEvent, { receiverId: fixture.receiverId, itemIds: [item.itemId] }) as Promise<unknown>
+      await vi.waitFor(() => expect(receiverPayloads()).toHaveLength(3))
+      resolveReceiver?.(fixture.receiverEvent, { receiverId: fixture.receiverId, closeId: receiverPayloads()[2]!.closeId, decision: { accepted: true, reason: 'accepted' } })
+      await vi.waitFor(() => expect(providerRequests()).toHaveLength(2))
+      const acceptedRequest = providerRequests()[1]!
+      admitted.port.postMessage({
+        kind: 'invoke', channel: 'plugin:cap:call', requestId: 'observed-provider-accept',
+        payload: { reqId: 'observed-provider-accept', ns: 'ui', method: 'resolveDetailClose', args: {
+          closeId: acceptedRequest.payload.closeId, itemId: acceptedRequest.payload.itemId, decision: { accepted: true, reason: 'accepted' },
+        } },
+      })
+      await expect(third).resolves.toEqual({ closed: true })
+      expect(decisions()).toEqual([
+        { outcome: 'begin-busy-lock', reason: 'receiver-item-batch' },
+        { outcome: 'receiver-busy', reason: 'receiver-item-batch' },
+        { outcome: 'provider-refused', reason: 'receiver-item-batch' },
+        { outcome: 'accepted', reason: 'receiver-item-batch' },
+      ])
+      // enum-only: nothing but the phase, the outcome, the reason and the sequence is ever written
+      expect([...new Set(keys())].sort()).toEqual(['outcome', 'phase', 'reason', 'sequence'])
+    } finally {
+      vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.resetModules()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 
   it('admits the legitimate receiver child after details-first navigation and posts one authenticated port', async () => {
     const fixture = await setupReceiver()

@@ -7,6 +7,7 @@
 // in-process, and routes everything else to the backend plugin host over the
 // shared WebSocket transport below.
 
+import { desktopHostEvaluation } from '../evaluation/desktopHostEvaluation'
 import { BrowserWindow, WebContentsView, ipcMain, webFrameMain, type WebContents, type WebFrameMain } from 'electron'
 import { warnMain } from '../main-log'
 import { validateSupportedLocale } from '../hostLocale'
@@ -1510,6 +1511,9 @@ export class FrontendPluginManager {
   private readonly pluginFrameBindings = new PluginFrameBindingRegistry()
   private readonly pluginFrameAssets = new PluginFrameAssetProtocol()
   private readonly pendingPluginFrames = new Map<string, PendingPluginFrame>()
+  /** Evaluation-only: the host window id per frame binding, read while the window is alive. A native close destroys the host window (and its frame)
+   *  before the revocation runs, so the id is cached rather than read from a destroyed window. Empty unless the desktop-host evaluation is enabled. */
+  private readonly evaluationHostWindowIds = new Map<string, number>()
   /** Receiver instance → opaque frame bindings owned by its current document. */
   private readonly receiverFrameBindings = new Map<string, Set<string>>()
   private readonly receiverRegistrations = new Map<string, ReceiverRegistration>()
@@ -2627,6 +2631,22 @@ export class FrontendPluginManager {
     return plugin
   }
 
+  private observeEvaluationFrame(
+    binding: PluginFrameBinding,
+    phase: Parameters<typeof desktopHostEvaluation.observeFrame>[2],
+    channel = '', payload?: unknown, requestId?: string, response?: unknown,
+  ): void {
+    if (!desktopHostEvaluation.enabled) return
+    try {
+      if (!this.activePluginFrame(binding)) return
+      const pending = this.pendingPluginFrames.get(binding.id)
+      if (pending && !pending.hostWindow.isDestroyed()) {
+        this.evaluationHostWindowIds.set(binding.id, pending.hostWindow.id)
+        desktopHostEvaluation.observeFrame(binding, pending.hostWindow.id, phase, channel, payload, requestId, response)
+      }
+    } catch { /* A racing teardown cannot make observation affect delivery. */ }
+  }
+
   /** Why a recorded pair is no longer usable, or '' when it is current. Kept
    *  beside {@link currentDetailPair} so a refused detail open can name the
    *  condition that failed instead of answering a bare `receiver-unavailable`. */
@@ -2978,12 +2998,24 @@ export class FrontendPluginManager {
     )
   }
 
+  /** Evaluation-only, enum-only: records which path decided a close preparation. A no-op unless the evaluation build is active. */
+  private observeCloseDecisionOf(
+    transactionId: string,
+    outcome: 'receiver-busy' | 'receiver-refused' | 'provider-busy' | 'provider-refused' | 'timeout' | 'unavailable' | 'accepted',
+  ): void {
+    if (!desktopHostEvaluation.enabled) return
+    const transaction = this.detailCloseTransactions.get(transactionId)
+    if (transaction) desktopHostEvaluation.observeCloseDecision(outcome, transaction.reason)
+  }
+
   private failDetailCloseTransaction(
     transactionId: string,
     reason: Exclude<DetailCloseResult, { closed: true }>['reason'],
   ): void {
     const transaction = this.detailCloseTransactions.get(transactionId)
     if (!transaction || (transaction.phase !== 'preparing' && transaction.phase !== 'prepared')) return
+    // A refusal answered by the receiver or the provider was recorded by its resolver with the source; only the remaining reasons are recorded here.
+    if (reason === 'timeout' || reason === 'unavailable') this.observeCloseDecisionOf(transactionId, reason)
     transaction.phase = 'settled'
     this.detailCloseTransactions.delete(transactionId)
     const receiverClose = [...this.pendingReceiverCloses.values()].find((route) => route.transactionId === transactionId)
@@ -3061,6 +3093,7 @@ export class FrontendPluginManager {
    *  window only after all of them accepted. */
   private finishDetailClosePreparation(transaction: DetailCloseTransaction): void {
     if (transaction.phase !== 'preparing') return
+    this.observeCloseDecisionOf(transaction.id, 'accepted')
     if (!transaction.holdCommit) {
       this.commitDetailCloseTransaction(transaction.id)
       return
@@ -3099,9 +3132,11 @@ export class FrontendPluginManager {
     if (!requiresReceiverGuard && itemIds.length === 0) return { ok: false, result: { closed: true } }
     if (itemIds.some((itemId) => this.detailCloseLocks.has(itemId)) ||
       (requiresReceiverGuard && this.receiverCloseLocks.has(receiverId))) {
+      if (desktopHostEvaluation.enabled) desktopHostEvaluation.observeCloseDecision('begin-busy-lock', reason)
       return { ok: false, result: { closed: false, reason: 'busy' } }
     }
     if ([...this.pendingDetailTargets.values()].some((pending) => itemIds.includes(pending.itemId))) {
+      if (desktopHostEvaluation.enabled) desktopHostEvaluation.observeCloseDecision('begin-busy-pending-target', reason)
       return { ok: false, result: { closed: false, reason: 'busy' } }
     }
     const items = itemIds.map((itemId) => this.receiverItems.get(itemId))
@@ -3212,6 +3247,7 @@ export class FrontendPluginManager {
     }
     if (!acceptedDecision) {
       if (refusalReason === undefined) return buildError(reqId, 'CAPABILITY_DENIED', 'detail close is not current')
+      this.observeCloseDecisionOf(close.transactionId, refusalReason === 'busy' ? 'provider-busy' : 'provider-refused')
       this.failDetailCloseTransaction(close.transactionId, refusalReason)
       return buildSuccess(reqId, null)
     }
@@ -3250,6 +3286,7 @@ export class FrontendPluginManager {
     }
     if (!acceptedDecision) {
       if (refusalReason === undefined) throw new Error('receiver close acknowledgement is unavailable')
+      this.observeCloseDecisionOf(close.transactionId, refusalReason === 'busy' ? 'receiver-busy' : 'receiver-refused')
       this.failDetailCloseTransaction(close.transactionId, refusalReason)
       return
     }
@@ -3596,6 +3633,13 @@ export class FrontendPluginManager {
     const respond = (response: CapabilityResponse): void => {
       if (requestId && this.activePluginFrame(binding)) {
         this.pluginFrameBindings.post(plugin.instanceId, 'plugin:response', { requestId, response })
+        this.observeEvaluationFrame(binding, 'response', typeof channel === 'string' ? channel : '', payload, requestId, response)
+        if (desktopHostEvaluation.enabled && channel === IPC_BACKEND_CALL && response.ok &&
+          typeof payload === 'object' && payload !== null && (payload as Record<string, unknown>).name === 'plans.list') {
+          const pending = this.pendingPluginFrames.get(binding.id)
+          if (pending?.frame) void desktopHostEvaluation.snapshotPlans(binding, pending.hostWindow.id, pending.frame,
+            () => this.activePluginFrame(binding) ? this.pluginFrameBindings.activeForInstance(binding.instanceId) : null, requestId)
+        }
       }
     }
     if (kind === 'cast') {
@@ -3610,6 +3654,7 @@ export class FrontendPluginManager {
       return
     }
     if (kind !== 'invoke' || !requestId || typeof channel !== 'string') return
+    this.observeEvaluationFrame(binding, 'request', channel, payload, requestId)
     const invoke = async (): Promise<CapabilityResponse> => {
       if (channel === IPC_CALL) return this.capabilityCallHandler?.(plugin, payload) ?? buildError(requestId, 'BACKEND_UNAVAILABLE', 'capability broker is not connected')
       if (channel === IPC_HOST_CALL) return this.handleHostCall(0, payload, null, plugin)
@@ -9464,7 +9509,9 @@ export class FrontendPluginManager {
     if (record.carrier === 'frame') {
       const binding = this.pluginFrameBindings.activeForInstance(record.instanceId)
       if (!binding || this.activePluginFrame(binding) !== record) return false
-      return this.pluginFrameBindings.post(record.instanceId, channel, payload)
+      const delivered = this.pluginFrameBindings.post(record.instanceId, channel, payload)
+      if (delivered) this.observeEvaluationFrame(binding, 'event', channel, payload)
+      return delivered
     }
     if (record.view.webContents.isDestroyed()) return false
     record.view.webContents.send(channel, payload)
@@ -10481,6 +10528,7 @@ export class FrontendPluginManager {
         documentGeneration: admission.binding.documentGeneration,
         nonce: documentNonce,
       }, [admission.port])
+      this.observeEvaluationFrame(admission.binding, 'admission')
       const plugin = this.activePluginFrame(admission.binding)
       if (plugin) {
         for (const target of plugin.pendingTargets.splice(0)) {
@@ -10539,7 +10587,14 @@ export class FrontendPluginManager {
       // receiver is told to settle its pending port work before revocation.
       this.sendToPlugin(plugin, 'plugin:frame:revoked', null)
     }
+    const observedBinding = desktopHostEvaluation.enabled ? this.pluginFrameBindings.activeForInstance(instanceId) : null
+    const observedWindowId = observedBinding ? this.evaluationHostWindowIds.get(observedBinding.id) : undefined
     this.pluginFrameBindings.revokeInstance(instanceId)
+    if (observedBinding) {
+      // The id was cached while the window was alive, so a native close (window and frame already destroyed) still records the revocation.
+      if (observedWindowId !== undefined) desktopHostEvaluation.observeFrame(observedBinding, observedWindowId, 'revocation')
+      this.evaluationHostWindowIds.delete(observedBinding.id)
+    }
     for (const [bindingId, pending] of this.pendingPluginFrames) {
       if (pending.instanceId !== instanceId) continue
       pending.detachNavigation?.()

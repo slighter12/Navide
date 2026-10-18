@@ -1,6 +1,6 @@
 import { defineConfig } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
-import { resolve, join } from 'node:path'
+import { resolve, join, isAbsolute } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -26,8 +26,21 @@ const APP_BUILD = buildTag()
 const DEV_TOKEN = randomBytes(32).toString('hex')
 writeFileSync(join(tmpdir(), 'agent-team-dev-token'), DEV_TOKEN)
 
+// Explicit build-time opt-in only. Normal output contains a literal false.
+const desktopHostEvaluation = process.env['NAVIDE_DESKTOP_HOST_EVALUATION'] === '1'
+const evaluationRoot = process.env['NAVIDE_DESKTOP_HOST_EVALUATION_ROOT']
+if (desktopHostEvaluation && (!evaluationRoot || !isAbsolute(evaluationRoot))) {
+  throw new Error('desktop Host evaluation requires an absolute OWN root')
+}
+const evaluationViteOptions = desktopHostEvaluation
+  ? { envDir: join(evaluationRoot!, 'env'), clearScreen: false }
+  : {}
+
 export default defineConfig({
+  ...evaluationViteOptions,
   main: {
+    ...evaluationViteOptions,
+    define: { __NAVIDE_DESKTOP_HOST_EVALUATION__: JSON.stringify(desktopHostEvaluation) },
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'src/main/index.ts'),
@@ -41,6 +54,7 @@ export default defineConfig({
     }
   },
   preload: {
+    ...evaluationViteOptions,
     build: {
       rollupOptions: {
         input: {
@@ -57,6 +71,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    ...evaluationViteOptions,
     root: resolve(__dirname, 'src/renderer'),
     resolve: {
       alias: {

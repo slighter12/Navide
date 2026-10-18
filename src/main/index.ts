@@ -1,3 +1,4 @@
+import { desktopHostEvaluation } from './evaluation/desktopHostEvaluation'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerMonitor, protocol, safeStorage, session, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron'
 import { createGuestAttachHooks, type MutableWebPreferences } from './plugins/pluginGuestAttach'
 import { guardLastWindowClose } from './last-window-close'
@@ -200,7 +201,7 @@ const plansDevProfile =
   /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(requestedPlansDevProfile)
     ? requestedPlansDevProfile
     : null
-if (!app.isPackaged) {
+if (!app.isPackaged && !desktopHostEvaluation.enabled) {
   app.setPath('userData',
     `${app.getPath('userData')}${plansDevProfile ? `-dev-plans-${plansDevProfile}` : '-dev'}`,
   )
@@ -600,6 +601,7 @@ async function createWindow(
     mainWindowWorkspaces.set(win, params.workspace_path)
     windowRegistry.setWorkspace(winId, params.workspace_path)
   }
+  desktopHostEvaluation.registerMain(win, () => mainWindowWorkspaces.get(win) ?? null)
   win.on('moved', () => { if (!win.isDestroyed()) windowRegistry.setBounds(winId, win.getBounds()) })
   win.on('resized', () => { if (!win.isDestroyed()) windowRegistry.setBounds(winId, win.getBounds()) })
   // backgroundThrottling is off for the terminals, which also pins the
@@ -5565,6 +5567,7 @@ app.on('before-quit', async (e) => {
   // backend is committed. A refusal aborts the quit with every window alive.
   if (!quittingWindowsPrepared) {
     if (quittingWindowsPreparation) {
+      desktopHostEvaluation.observeQuitPrepare('reentrant-pending')
       e.preventDefault()
       return
     }
@@ -5575,11 +5578,13 @@ app.on('before-quit', async (e) => {
         quittingWindowsPreparation = null
       })
       const prepared = await quittingWindowsPreparation
+      desktopHostEvaluation.observeQuitPrepare(prepared)
       if (!prepared) return
       quittingWindowsPrepared = true
       app.quit()
       return
     }
+    desktopHostEvaluation.observeQuitPrepare('not-required')
     quittingWindowsPrepared = true
   }
   // Non-dialog path (disabled, or re-entrant after quitConfirmed).
