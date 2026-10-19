@@ -1904,6 +1904,52 @@
         },
         "prereleaseAvailable": "有預覽版 {version}"
       },
+      "developerMode": {
+        "errors": {
+          "holdsId": "{id} 目前由開發者資料夾載入；請先在開發者模式移除那個資料夾。",
+          "anotherFolder": "{id} 已經從另一個開發者資料夾載入；請先移除那個資料夾。",
+          "idInstalled": "{id} 已經安裝；請先移除，再用同一個 id 載入開發者資料夾。",
+          "modeOff": "請先開啟開發者模式。",
+          "v2Only": "開發者模式只能載入 Manifest v2 的資料夾。",
+          "reservedId": "開發者資料夾不能使用保留的 id {id}。",
+          "changed": "{id} 的權限或後端已經變更，請重新選擇資料夾。",
+          "takenDown": "{id} 已被 Navide 下架，無法從資料夾載入。（{detail}）"
+        },
+        "title": "開發者模式",
+        "switch": "開啟開發者模式",
+        "hint": "開啟後可以從你選的資料夾載入 Navide 外掛來開發與測試，也會套用自架 Registry 的設定（AGENT_TEAM_MARKETPLACE_URL）。只有在這個設定頁可以切換，每次變更都會記錄。",
+        "banner": "開發者模式已開啟，從資料夾載入的 Navide 外掛沒有經過審核。",
+        "reminder": "開發者模式已開啟：從資料夾載入的 Navide 外掛沒有經過審核。不用時請到「設定 → Navide 外掛」關閉。",
+        "reminderClose": "知道了",
+        "confirmTitle": "開啟開發者模式？",
+        "confirmBody": "開發者模式會讓你從資料夾載入未經 Navide 審核的 Navide 外掛，資料夾內容隨時可能被改掉。只在你自己開發或測試時開啟。",
+        "confirmOn": "開啟",
+        "loadFolder": "從資料夾載入…",
+        "reload": "重新載入",
+        "removeFolder": "移除",
+        "needsConsent": "權限或後端已變更，需要重新同意",
+        "folderWarning": "這個 Navide 外掛直接從你選的資料夾載入，沒有經過 Navide 審核，也沒有簽章。資料夾內容隨時可能變動，Navide 不做內容比對：只有權限或後端宣告改變時才會再問你。",
+        "folderLabel": "資料夾",
+        "selfHostedQuarantine": "{id} {version} 來自自架 Registry，目前沒有載入。請開啟開發者模式，或改從 Navide 市集安裝。"
+      },
+      "localInstall": {
+        "button": "從檔案安裝 .vsix…",
+        "backToMarketplace": "換回 Navide 市集版本",
+        "warning": "這個 Navide 外掛來自你選的本機檔案，沒有經過 Navide 審核，也沒有簽章：無法確認作者，檔案也可能被改過。只安裝你信任的人給你的檔案。",
+        "signatureLabel": "簽章",
+        "signature": "無：無法確認作者，檔案可能被改過",
+        "digestLabel": "檔案 SHA-256",
+        "acknowledge": "我了解這個 Navide 外掛沒有經過 Navide 審核，並確定要執行它的程式碼。",
+        "replaceTitle": "取代已安裝的 Navide 外掛",
+        "replaceMarketplace": "要把 {id}（Navide 市集版本 {version}）換成本機檔案版本嗎？換了之後不會自動更新。",
+        "replaceLocal": "要把 {id} 的本機檔案版本 {version} 換成這個檔案嗎？",
+        "replaceWithMarketplace": "要把 {id} 的本機檔案版本換成 Navide 市集版本 {version} 嗎？",
+        "replaceResets": "取代之後，原本給的權限、原生後端同意、允許改檔的工作區和 agent 工具授權都會清掉，需要重新同意；也不能用「回復」換回被取代的版本。",
+        "replaceDataSetAside": "新版本會從空的資料夾開始，原本的資料會保留在一旁，不會被新版本讀到。",
+        "reattachData": "接回這個來源之前保留在一旁的資料（預設不接回）",
+        "takedownUnknown": "目前無法確認這個 Navide 外掛是否已被 Navide 下架：沒有取得 Navide 的下架清單。",
+        "confirmReplace": "取代"
+      },
       "trust": {
         "publisherRiskUnsigned": "{publisher} 的套件 {id} 沒有 Registry 簽章。信任這個發佈者後，Navide 會執行它的程式碼。",
         "sensitiveHeading": "敏感權限",
@@ -2206,11 +2252,12 @@
       "resume-behavior-never": "一律開新對話",
       "resume-behavior-ask": "每次詢問",
       "restore-scope": "恢復範圍",
-      "restore-scope-hint": "選擇「總是恢復」時，可自動開啟單一 CLI、目前的 Grid 頁面、目前分頁，或全部 CLI（一次兩個依序啟動）。",
+      "restore-scope-hint": "選擇「總是恢復」時，可自動開啟單一 CLI、目前的 Grid 頁面、目前分頁、全部 CLI，或「自動」：只恢復上次關閉 Navide 時仍在執行的 CLI（全部 CLI 與自動都一次兩個依序啟動）。",
       "restore-scope-single": "單一 CLI",
       "restore-scope-page": "目前 Grid 頁面",
       "restore-scope-tab": "目前分頁",
       "restore-scope-all": "全部 CLI",
+      "restore-scope-auto": "自動",
       "resume-concurrency": "同時恢復上限",
       "resume-concurrency-hint": "開啟工作區或還原版面時，最多可同時恢復幾個 CLI pane，其餘依序排隊。若一次恢復太多 pane 導致「terminal.create timeout」錯誤，就把這個值調小（1–10）。",
       "resume-concurrency-label": "同時恢復數上限"
@@ -2439,16 +2486,12 @@
               "more": "本頁第 3 章"
             },
             "extensions": {
-              "what": "Navide 外掛執行時套用的執行政策，以及隨附與已安裝的 Navide 外掛",
+              "what": "Navide 外掛執行時套用的執行政策，以及隨附與已安裝的 Navide 外掛；頁面最下方是揭露總覽，列出所有從 Navide 市集安裝的 Navide 外掛（只是紀錄，不會改變 Navide 外掛能做的事）",
               "more": "本頁第 4 章"
             },
             "marketplace": {
               "what": "搜尋 Navide 外掛登錄庫並從中安裝",
               "more": "本頁第 4 章"
-            },
-            "disclosureOverview": {
-              "what": "所有從 Navide 市集安裝的 Navide 外掛：揭露卡、風險等級、最近活動和異常，集中在同一頁。",
-              "more": "只是紀錄，這裡的內容不會改變 Navide 外掛能做的事。每個 Navide 外掛完整的活動，也可以在「Navide 外掛」頁該 Navide 外掛的那一列打開。"
             },
             "shortcuts": {
               "what": "快捷鍵改綁、匯入匯出",
@@ -2499,7 +2542,7 @@
               "fallback": "Always"
             },
             "resumeScope": {
-              "desc": "接續範圍：單一 CLI／目前 Grid 頁面／目前分頁／全部 CLI。",
+              "desc": "接續範圍：單一 CLI／目前 Grid 頁面／目前分頁／全部 CLI／自動（只接續上次關閉 Navide 時仍在執行的 CLI）。",
               "fallback": "單一 CLI"
             },
             "resumeAfterRestart": {
@@ -8540,6 +8583,7 @@
     "statusbar-note": "狀態列上的資訊窗會一起消失"
   },
   "error": {
+    "pipeline-start-refused": "流程沒有啟動：{reason}",
     "workspace-create-exists": "該位置已有名為「{name}」的項目，請換個名稱。",
     "workspace-create-denied": "沒有權限在 {path} 建立資料夾。",
     "workspace-create-failed": "無法在 {path} 建立工作區資料夾。",
@@ -11203,6 +11247,20 @@
     }
   },
   "pluginDisclosure": {
+    "source": {
+      "heading": "來源與審核",
+      "marketplace": "已審核",
+      "prerelease": "預覽版（已審核）",
+      "testplace": "測試版，沒有人工審核，{date} 到期",
+      "testplaceNoExpiry": "測試版，沒有人工審核，到期日不明",
+      "local-signed": "本機檔案，發佈者已簽章，這個版本未經 Navide 審核",
+      "local-unsigned": "本機檔案，未經 Navide 審核，未簽章",
+      "developer-unpacked": "開發者資料夾，內容隨時可能變動",
+      "factory-bundled": "Navide 內建",
+      "notScanned": "未掃描（只有從 Navide 市集安裝的 Navide 外掛會經過 Navide 掃描）",
+      "publisher": "發佈者：{publisher}",
+      "selfDeclared": "自稱：{publisher}"
+    },
     "diff": {
       "heading": "這次更新的權限變化",
       "versions": "目前安裝 {from} → 更新到 {to}；以下只列出不同的地方。",
@@ -11259,6 +11317,7 @@
     "declaredHeading": "這個 Navide 外掛宣告的權限",
     "registryHeading": "Navide Registry 的紀錄（未簽章）",
     "provenance": {
+      "local": "以下由 Navide 從套件自己的 manifest 讀出；沒有 Navide Registry 簽章，也沒有經過 Navide 掃描。",
       "unverified": "以下由 Navide Registry 提供，尚未驗證；安裝前 Navide 會驗證簽章，並和套件內容比對。",
       "verified": "已驗證：揭露內容和下載的套件一致，掃描報告的 Navide Registry 簽章正確。",
       "verifiedNoScan": "已驗證：揭露內容和下載的套件一致。這個版本沒有系統掃描。"

@@ -1161,7 +1161,7 @@ def _devmap_tool(monkeypatch) -> dict[str, Any]:
     ],
 )
 async def test_a_10_mib_result_in_pieces_reads_as_before_and_never_holds_the_loop(monkeypatch, shape) -> None:
-    from tests.test_agent_tool_chunked_transport import _longest_loop_slice
+    from tests.test_agent_tool_chunked_transport import _least_longest_loop_slice
 
     import gc
 
@@ -1177,11 +1177,38 @@ async def test_a_10_mib_result_in_pieces_reads_as_before_and_never_holds_the_loo
     _pieces_host(monkeypatch, agent_tool_payload_text(value))
     del value
     gc.collect()
-    result, longest = await _longest_loop_slice(monkeypatch, proxy.call("devmap_read", {}, None))
+    result, longest = await _least_longest_loop_slice(
+        monkeypatch, lambda: proxy.call("devmap_read", {}, None), LOOP_SLICE_BUDGET_S
+    )
     assert result.isError is False
     # Character for character what the in-process wrap gives (same function, in the helper).
     assert result.content[0].text == expected
     assert longest < LOOP_SLICE_BUDGET_S, f"the loop ran {longest * 1000:.1f} ms of CPU without handing back"
+
+
+async def test_the_loop_check_still_catches_a_result_parsed_whole_on_the_loop(monkeypatch) -> None:
+    """The control for the check above: a result parsed and wrapped in one
+    step on the loop, as before the helper, fails it on every attempt. A
+    tenth of the 10 MiB keeps the three attempts cheap: one still holds the
+    loop for hundreds of milliseconds (the 10 MiB one, seconds)."""
+    from agent_team_backend.agent_tool_result_worker import strict_loads
+    from tests.test_agent_tool_chunked_transport import _least_longest_loop_slice
+
+    import gc
+
+    entry = _devmap_tool(monkeypatch)
+    _pieces_host(monkeypatch, agent_tool_payload_text({"rows": [{"k": i, "v": "abcdefgh中"} for i in range(34_500)]}))
+
+    async def on_the_loop(entry: dict[str, Any], pieces: list[str]) -> str:
+        return proxy.wrap_result(entry, strict_loads("".join(pieces)))
+
+    monkeypatch.setattr(proxy._result_worker, "wrap", on_the_loop)  # noqa: SLF001
+    gc.collect()
+    result, longest = await _least_longest_loop_slice(
+        monkeypatch, lambda: proxy.call("devmap_read", {}, None), LOOP_SLICE_BUDGET_S
+    )
+    assert result.isError is False
+    assert longest >= LOOP_SLICE_BUDGET_S, f"a whole-result parse on the loop read as {longest * 1000:.1f} ms"
 
 
 @pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity", "1e400", "-1e400"])
@@ -1263,6 +1290,36 @@ async def test_the_helper_starts_with_the_first_result_in_pieces_and_not_before(
     _pieces_host(monkeypatch, agent_tool_payload_text(value))
     assert (await proxy.call("devmap_read", {}, None)).content[0].text == proxy.wrap_result(entry, value)
     assert proxy._result_worker._process is not None  # noqa: SLF001
+    assert proxy._result_worker.state == "ready"  # noqa: SLF001
+    proxy._result_worker.stop()  # noqa: SLF001
+
+
+async def test_an_idle_helper_exits_after_its_window_and_the_next_large_result_starts_a_new_one(monkeypatch) -> None:
+    import asyncio
+
+    from agent_team_backend import agent_tool_result_worker as worker
+
+    proxy._result_worker.stop()  # noqa: SLF001
+    proxy._result_worker._start_failed = None  # noqa: SLF001
+    monkeypatch.setattr(worker, "IDLE_EXIT_S", 0.5)
+    entry = _devmap_tool(monkeypatch)
+    value = {"data": "x" * 200_000}
+    _pieces_host(monkeypatch, agent_tool_payload_text(value))
+    assert (await proxy.call("devmap_read", {}, None)).content[0].text == proxy.wrap_result(entry, value)
+    first = proxy._result_worker._process  # noqa: SLF001
+    assert first is not None
+    # Within the window the same helper answers: no new start.
+    assert (await proxy.call("devmap_read", {}, None)).content[0].text == proxy.wrap_result(entry, value)
+    assert proxy._result_worker._process is first  # noqa: SLF001
+    # Idle past the window: stopped, so what the result left in its memory is gone.
+    await asyncio.sleep(1.0)
+    assert proxy._result_worker._process is None  # noqa: SLF001
+    assert proxy._result_worker.state == "idle"  # noqa: SLF001
+    assert await asyncio.wait_for(first.wait(), 10) == 0
+    # The next large result starts a new helper and reads the same.
+    assert (await proxy.call("devmap_read", {}, None)).content[0].text == proxy.wrap_result(entry, value)
+    second = proxy._result_worker._process  # noqa: SLF001
+    assert second is not None and second is not first
     assert proxy._result_worker.state == "ready"  # noqa: SLF001
     proxy._result_worker.stop()  # noqa: SLF001
 

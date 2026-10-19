@@ -280,7 +280,7 @@ protocol.
 | Stage | Python backend | Host-visible contract |
 |---|---|---|
 | Source development | Authors may use `.py` files, a virtual environment, and any Python build/test layout. | None. Source layout is not an installed interface. |
-| Local testing | There is no `navide-plugin dev` command, and Developer Mode refuses packages with a backend. Build the executable and run it with `navide-plugin dev-backend <directory>`, which uses the Host's sandbox profile but answers every Host bridge request with `CAPABILITY_DENIED`. | None. A backend first runs inside Navide after it is installed from a Registry. |
+| Local testing | Turn on Developer Mode (Settings → Navide Plugins) and **Load from folder…**: the view opens with its declared grant and the backend runs in the same sandbox, after the same native backend consent, as an installed one. `navide-plugin dev-backend <directory>` still runs the executable alone, with every Host bridge request answered `CAPABILITY_DENIED`. | A developer folder's consent is bound to the folder and its manifest `permissions` and `backend`; editing files never asks again, changing either declaration does. |
 | `navide-plugin package` | Python, its required modules, and the plugin code are bundled into a target-specific executable by an author-selected tool such as PyInstaller or Nuitka. | `backend.entry` names the resulting executable inside the archive. |
 | Install and runtime target | No Python installation, `pip`, virtual environment, source checkout, or author build tool may be required on the user's machine. | The Electron main process supervises the executable over Backend Wire v1 without a shell. The first-party Plans backend runs directly; a third-party backend runs only under the conditions in [Third-party backends](#third-party-backends-sandbox-consent-and-publishing). |
 
@@ -1997,8 +1997,9 @@ runs only inside the OS sandbox described in
   and future backend spawn. A newly revoked running frontend plugin is stopped
   and quarantined; the Electron backend supervisor re-verifies the current
   root-signed trust decision immediately before every child spawn.
-- Developer Mode exists only in development builds; packaged builds ignore
-  its environment variables. It accepts one explicitly selected local unpacked
+- The environment-variable Developer Mode exists only in development builds;
+  packaged builds ignore its environment variables (the Settings switch below
+  is a separate path). It accepts one explicitly selected local unpacked
   Manifest v1 or Manifest v2 frontend directory only when
   `AGENT_TEAM_PLUGIN_DEV=1` and `AGENT_TEAM_PLUGIN_DEV_PATH` names that exact
   directory. Manifest v1 is a
@@ -2013,10 +2014,142 @@ runs only inside the OS sandbox described in
   view only when a grant for that exact package id and version exists, so a
   Developer Mode v2 view is refused ("package-version capability grant is
   missing") unless a Registry install of the same id and version already left
-  one behind. To run a v2 package in the app, install it from a Registry; a
-  local Registry works (see
+  one behind. To run a v2 package in the app, install it from a file (next
+  item) or from a Registry; a local Registry works (see
   [Publishing to the Navide Marketplace](marketplace-publishing.md)).
   Manifest v1 packages need no grant.
+- **Developer Mode** (Settings → Navide Plugins → Developer Mode, off by
+  default) is a main-process setting the main window's settings page alone can
+  change; every change is written to the plugin activity log as a Host event
+  (`source: "host"`, `plugin_id: "host"`, `developerMode.on` / `.off`), which
+  no plugin row can claim. A packaged build ignores `AGENT_TEAM_PLUGIN_DEV` and
+  `AGENT_TEAM_PLUGIN_DEV_PATH` either way; with the switch on, **Load from
+  folder…** opens the Host's own folder dialog. A folder loads a Manifest v2
+  package (not `navide.`, not an id something else installed holds or
+  another consented folder claims, and never one the root-signed takedown list
+  names by id, id namespace or publisher, checked on every load, reload and
+  start; with no list available the dialog says the check could not be done;
+  nothing installs an id a developer folder holds until the folder is removed,
+  and removing its plugin forgets the folder) with a
+  grant for its declared permissions and, when it declares one, its backend
+  through the unchanged sandbox, master switch and native backend consent.
+  Consent is bound to the folder and the digest of the manifest's
+  `permissions` and `backend`: **Reload** after a file edit asks nothing, a
+  change to either declaration unloads the package and asks again, and so does
+  the next start. Content is not compared, since a developer folder changes all
+  the time; the dialog and a banner say so, and every launch reminds the user
+  while the switch is on. Anything that can write the folder can change the
+  code that runs; the sandbox bounds what it can do. Turning the switch off
+  unloads every developer folder. A developer folder's id is only what its
+  manifest claims, so its backend data is treated as local: the first load of
+  an id sets aside data an earlier package of it kept, removing the folder
+  keeps its data recorded as local, and no later install of the id (another
+  folder, a file or the Marketplace) takes it over. Kept data is reused only by
+  a Registry-verified id (Marketplace or pre-release).
+- **Install from a file** (Settings → Navide Plugins → **Install from .vsix
+  file…**) works in packaged builds too, without Developer Mode. The main
+  process opens its own file dialog over the main window and reads the picked
+  file once; every later step uses those bytes, never the path again. Plugin
+  frames, agents (MCP) and environment variables cannot start or name a file
+  install. The package passes the same ZIP checks as a Registry package (50 MB
+  per entry, 200 MB per archive, no symlinks or special files, no unsafe
+  paths), the Manifest v2 schema, the backend executable rules and the engine
+  check; Manifest v1, extension packs and the `navide.` namespace are refused,
+  and so is a publisher or package id on the root-signed takedown list (even an
+  expired one). The Host fetches the current list from the Registry first;
+  when that fails and no list is stored, the dialog says the takedown check
+  could not be done (the next load still applies a list once one arrives). It has no Registry signature and no Navide review or scan, so
+  the user always consents in a dialog that shows a fixed warning, the
+  self-declared publisher and "not scanned", starts on Cancel and enables its
+  consent button only after an explicit acknowledgement. The package is staged
+  like a Registry candidate and its grant takes effect on **Restart Plugin**;
+  a native backend still asks for its own consent and runs in the same
+  sandbox. A file install never updates automatically. Installing a file over
+  an installed package of the same id (or a Marketplace version over a file
+  install) asks first, and the replacement keeps none of the replaced
+  package's permissions: its capability grant and rollback grant, its native
+  backend consent, every workspace its backend may change files in, its agent
+  tool write approvals and agent tool name priority. The new package cannot
+  read the replaced one's view storage either. When the source changes, the
+  native backend's private data folder and the package's view storage (every
+  version, so a package of the same version on another target never shares
+  it) are moved aside (`<name>@set-aside-<source>-<time>` beside them; never
+  deleted, never overwritten) so the new package starts empty; the question
+  says so, and going back to the Marketplace offers to take that data back,
+  off by default (a local file's data is never offered back: its id is only
+  what the file claims). A failed move stops the replacement with nothing
+  changed; if moving it back fails too, whatever is left in place is set aside
+  and the native backend consent is cleared. Removing the package removes what
+  was set aside with its storage, and with its backend data when the user
+  chooses to delete that. An update within one source keeps both as before.
+  Backend data a removal keeps records its source beside the folder
+  (`<id>@kept-source.json`, owner-only, outside the backend's sandbox): a
+  later install of the same id and source takes it over as before, one of the
+  other source finds it set aside instead. Data a local file kept is never
+  handed on, not even to another local file claiming the same id, and one
+  local file replacing another hands over none either; only a Registry-verified
+  id takes kept data over. Deleting or forging the record takes write access to
+  the user's data folder, the same exposure as the local trust record. Data kept by a release without the
+  record counts as Marketplace data, the only kind that could run a
+  third-party backend before file installs existed.
+  The package's own name is shown in the native backend consent with every
+  line break and invisible character spelled out, below the source line. The takedown check covers id and publisher only: a package
+  renamed to a new id is not caught, because the trust metadata carries no
+  blocked-digest list. Files extracted from a `.vsix` carry no quarantine
+  attribute, the same as a Registry install.
+- A package installed from a local file or folder is trusted through a local
+  trust record, not the Registry root: the record holds the package id and
+  version, the SHA-256 of every file in the installed copy, an overall content
+  digest, and the time the user consented. Every load re-hashes the installed
+  copy, never the file or folder the user picked, and refuses any added,
+  removed, changed, or symlinked file. The Registry authority rule does not
+  apply, so local and Marketplace installs never quarantine each other. The
+  `navide.` namespace is refused, and the root-signed takedown list
+  (`blockedPublishers`, `blockedPackages`) disables a matching local package
+  by its manifest id and publisher; without root-signed metadata the takedown
+  check is reported as not done. The local trust record is weaker than a
+  Registry receipt. A receipt cannot be forged without a Registry signing key,
+  but the local record is an unsigned file in the user's data folder: any
+  unsandboxed process running as the same user, an agent CLI included, can
+  write a record that matches altered content. What the record protects
+  against is the installed copy being changed after the user consented; it
+  does not protect against other processes of the same user. A plugin's own
+  backend (inside its sandbox) and plugin frames cannot write it. It is
+  evidence of consent, not a verification by Navide.
+  Navide Guard grades an agent's write to these stores as critical (rule
+  `plugin-store-write`, which can be lowered to high but not switched off):
+  writing, deleting, moving, linking or changing the mode of the plugin
+  install root (`plugins/` in Navide's data folder, Developer Mode folders and
+  grants included), the local trust records (`plugin-local-trust/`), the
+  native backend consent store, and the kept-source markers and set-aside
+  folders beside backend data. A plugin's own backend data is not covered, and
+  reading any of these stays as before. This has limits. Guard only sees tool
+  calls from CLIs that run Navide's hooks. Shell commands are recognised only
+  in the forms Guard parses: redirection (`>`, `>>`, `>|`, `&>`), `tee`, the
+  destination of `cp`/`install`/`rsync`/`scp`/`ditto`, `mv`, `ln`, `chmod`,
+  `chown`, `touch`, `truncate`, `sed -i`, `xattr -w/-d/-c`, `mkdir`, `rmdir`,
+  `unlink`, `rm`, `find -delete`, `dd of=`, the output file of `curl`/`wget`
+  and the destination of `git clone`, with bare file names resolved against
+  the working directory. Not recognised: a computed path (`"$DIR"`,
+  `$(…)`), an interpreter's inline code (`python -c`, `perl -pi`), archive
+  extractors (`tar -C`, `unzip -d`), `xargs`, PowerShell cmdlets such as
+  `Set-Content`, and a write through a symlink created earlier that points
+  into the data folder (paths are compared as written, not resolved). With
+  Guard off, agent tool calls are only audited, never blocked; approvals
+  sent from a chat relay and text typed into a plain terminal pane are still
+  refused for these writes, as for every critical action. The chat relay
+  screens a relayed shell command fully but a relayed file-tool prompt only
+  for credential paths, so a relayed `Write` into the store is not refused
+  there (the existing relay model). It reduces accidental or induced agent
+  writes; it does not stop other processes of the same user and does not
+  replace a signed consent mechanism.
+  Navide's own installs, updates, removals and rollbacks write these files
+  from the main process directly and never pass through Guard.
+  The installed-package `source` field (`marketplace`, `prerelease`,
+  `testplace`, `local-signed`, `local-unsigned`, `developer-unpacked`,
+  `factory-bundled`) is reported beside the legacy `provenance` field, which
+  keeps its original three values because older Navide releases refuse any
+  other.
 
 The package archive signature covers the manifest, frontend, backend, assets,
 and their digests. Each OS/architecture artifact is signed independently.

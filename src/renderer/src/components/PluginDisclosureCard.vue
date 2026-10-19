@@ -28,6 +28,8 @@ import {
 import { disclosureClauses, disclosureList } from '../lib/disclosureText'
 import { revealInvisibleText } from '../../../shared/pluginAgentTools'
 import PluginDisclosureSummary from './PluginDisclosureSummary.vue'
+import PluginSourceBadge from './PluginSourceBadge.vue'
+import type { PluginSource } from '../../../shared/pluginSource'
 
 const props = defineProps<{
   disclosure: ManifestDisclosure | null | undefined
@@ -35,6 +37,13 @@ const props = defineProps<{
   registry?: RegistryDisclosureFacts | null
   /** True only for a prepareInstall result (signature and digests checked). */
   verified?: boolean
+  /** Card K3: a package picked from a file. Its disclosure is the Host's
+   *  reading of the package's own manifest; no Registry stands behind it. */
+  localSource?: boolean
+  /** K2: adds the fixed "Source and review" row; absent renders as before. */
+  source?: PluginSource
+  publisher?: string
+  expiresAt?: string | null
 }>()
 const { t, te, locale } = useI18n()
 
@@ -85,7 +94,9 @@ const clauses = computed(() => (props.disclosure ? disclosureClauses(t, locale.v
 /** F1 on #360: "verified" names only what prepareInstall checked; without a
  *  scan report there is no scan signature to speak of. */
 const provenance = computed(() =>
-  !props.verified
+  props.localSource
+    ? 'pluginDisclosure.provenance.local'
+    : !props.verified
     ? 'pluginDisclosure.provenance.unverified'
     : scan.value
       ? 'pluginDisclosure.provenance.verified'
@@ -140,6 +151,7 @@ const facts = computed(() => {
 
 <template>
   <section class="nv-disclosure" :aria-label="$t('pluginDisclosure.title')">
+    <PluginSourceBadge v-if="source" row :source="source" :publisher="publisher" :expires-at="expiresAt" />
     <p v-if="!disclosure" class="nv-disclosure-none">{{ $t('pluginDisclosure.noDisclosure') }}</p>
     <template v-else>
       <p class="nv-disclosure-provenance" :class="verified ? 'nv-disclosure-provenance--verified' : 'nv-disclosure-provenance--unverified'">
