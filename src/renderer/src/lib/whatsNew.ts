@@ -111,6 +111,118 @@ export const WHATS_NEW_CHROME = {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: '0.2.27',
+    title: {
+      'zh-TW': 'Navide 瀏覽器：agent 在自己的 Space 上網，你的分頁不會被搶走',
+      'en-US': 'Navide Browser: Agents Browse in Their Own Spaces, Yours Stay Yours',
+      'ja-JP': 'Navide ブラウザー：agent は自分の Space でブラウズし、あなたのタブは奪われません',
+    },
+    highlights: [
+      {
+        'zh-TW': 'Navide 瀏覽器：在 Navide 裡開真正的網頁，從 Navide 市集安裝（不隨 App 內建）。每個 agent pane 在自己的背景 Space 工作，你的 Space 有釘選標記，agent 預設碰不到；總覽卡片顯示縮圖和狀態（執行中、需要你處理、完成）。',
+        'en-US': 'Navide Browser opens real web pages inside Navide. Install it from the Navide Marketplace; it does not ship with the App. Each agent pane works in its own background Space; your own Spaces are pinned and off limits to agents unless you let them in. The overview shows every Space with a thumbnail and its state (Running, Need your action, Done).',
+        'ja-JP': 'Navide ブラウザーで Navide の中に本物の Web ページを開けます。Navide マーケットプレイスからインストールします（App には同梱されません）。agent の pane はそれぞれ自分のバックグラウンド Space で作業し、あなたの Space はピン留めされ、許可しない限り agent は使えません。一覧では各 Space のサムネイルと状態（実行中・対応が必要・完了）が表示されます。',
+      },
+      {
+        'zh-TW': '人機交接：agent 需要你登入、過驗證碼或付款時會把 Space 交給你；你也可以隨時按「接手」。交還前 agent 的操作一律被擋下。',
+        'en-US': 'Hand-offs: an agent hands you its Space when it needs you to sign in, solve a captcha or pay, and you can take over any time; its commands are refused until you hand the Space back.',
+        'ja-JP': '受け渡し：ログインや CAPTCHA、支払いが必要になると agent が Space をあなたに渡します。いつでも操作を引き継ぐこともでき、戻すまで agent の操作はすべて拒否されます。',
+      },
+      {
+        'zh-TW': '所有 Space 共用同一份登入資料，保存在這台電腦上；可在 Navide 瀏覽器的設定裡一鍵清除。',
+        'en-US': 'All Spaces share one set of sign-ins kept on this computer; clear them from the Navide Browser settings.',
+        'ja-JP': 'すべての Space は同じログイン情報を共有し、このコンピューターに保存されます。Navide ブラウザーの設定から消去できます。',
+      },
+      {
+        'zh-TW': '從 .vsix 檔案安裝的 Navide 外掛，每次啟動和每次更新信任清單時都會再檢查一次。Navide 因安全問題下架的會被停用，只能移除；因其他原因被封鎖的會問你一次要繼續使用、停用或移除；開發者撤回的只會標示。「設定 → Navide 外掛」會一直標示它被封鎖的原因。',
+        'en-US': 'A Navide plugin installed from a .vsix file is checked again at every start and every trust refresh. One Navide took down for a security reason is disabled and can only be removed; one blocked for another reason asks you once whether to keep using, disable or remove it; one its developer withdrew is only labelled. Settings → Navide Plugins keeps showing why it is blocked.',
+        'ja-JP': '.vsix ファイルからインストールした Navide プラグインは、起動するたびと信頼リストを更新するたびに再確認されます。Navide がセキュリティ上の理由で取り下げたものは無効になり、削除だけができます。ほかの理由でブロックされたものは、使い続けるか、無効にするか、削除するかを一度だけ尋ねます。開発者が取り下げたものは表示だけです。「設定 → Navide プラグイン」には、ブロックされた理由が表示され続けます。',
+      },
+      {
+        'zh-TW': '行為改變：從檔案安裝的 Navide 外掛現在會記下安裝檔的 digest。降回 0.2.26 時，記有 digest 或開發者簽章的本機安裝會被隔離，不會載入；回到 0.2.27 或之後的版本就會恢復。',
+        'en-US': 'Behaviour change: a Navide plugin installed from a file now records the digest of its file. If you go back to 0.2.26, local installs that carry a digest or a developer signature are quarantined and not loaded; they come back on 0.2.27 or later.',
+        'ja-JP': '動作の変更：ファイルからインストールした Navide プラグインは、インストール元ファイルのダイジェストを記録するようになりました。0.2.26 に戻すと、ダイジェストや開発者の署名が記録されたローカルインストールは隔離され、読み込まれません。0.2.27 以降に戻すと元に戻ります。',
+      },
+    ],
+  },
+  {
+    version: '0.2.26',
+    title: {
+      'zh-TW': '從聊天室喚醒 pane、只接回上次開著的 pane、從檔案或資料夾安裝 Navide 外掛（清楚標示來源）',
+      'en-US': 'Wake a Pane From Its Chat, Resume Only What Was Running, and Install Navide Plugins From a File or Folder — With Their Source Shown',
+      'ja-JP': 'チャットから pane を起動、前回動いていた pane だけを再開、ファイルやフォルダーから Navide プラグインをインストール（提供元を明示）',
+    },
+    features: [
+      {
+        icon: '▶️',
+        name: { 'zh-TW': '從聊天室喚醒', 'en-US': 'Wake from chat', 'ja-JP': 'チャットから起動' },
+        tagline: {
+          'zh-TW': 'pane 不在線上時，按「▶️ 喚醒」把它接回原本的對話；離線時傳的訊息會依序送進去。',
+          'en-US': 'When a pane is offline, press ▶️ 喚醒 to bring it back on its own conversation; what you sent meanwhile goes in, in order.',
+          'ja-JP': 'pane がオフラインのとき「▶️ 喚醒」を押すと元の会話に戻り、その間に送ったメッセージが順番に届きます。',
+        },
+        where: { 'zh-TW': '聊天室 → pane 離線時的回覆', 'en-US': 'Chat → the offline reply', 'ja-JP': 'チャット → オフライン時の返信' },
+      },
+      {
+        icon: '🔁',
+        name: { 'zh-TW': '接續範圍「自動」', 'en-US': 'Resume scope Auto', 'ja-JP': '再開する範囲「自動」' },
+        tagline: {
+          'zh-TW': '只接回上次關閉 Navide 時還在執行的 pane。',
+          'en-US': 'Bring back only the panes still running when Navide last closed.',
+          'ja-JP': '前回 Navide を閉じたときに動いていた pane だけを再開します。',
+        },
+        where: { 'zh-TW': '設定 → 一般 → 恢復範圍', 'en-US': 'Settings → General → Resume scope', 'ja-JP': '設定 → 一般 → 再開する範囲' },
+      },
+      {
+        icon: '📦',
+        name: { 'zh-TW': '從檔案或資料夾安裝', 'en-US': 'Install from a file or folder', 'ja-JP': 'ファイルやフォルダーからインストール' },
+        tagline: {
+          'zh-TW': '從 .vsix 檔案安裝 Navide 外掛，或在開發者模式從資料夾載入；兩者都未經 Navide 審核，畫面會標明。',
+          'en-US': 'Install a Navide plugin from a .vsix file, or load one from a folder in Developer Mode; neither is reviewed by Navide, and it says so.',
+          'ja-JP': '.vsix ファイルから Navide プラグインをインストール、または開発者モードでフォルダーから読み込めます。どちらも Navide の審査を受けておらず、画面に明示されます。',
+        },
+        where: { 'zh-TW': '設定 → Navide 外掛', 'en-US': 'Settings → Navide Plugins', 'ja-JP': '設定 → Navide プラグイン' },
+      },
+    ],
+    highlights: [
+      {
+        'zh-TW': '喚醒：pane 不在線上時，聊天室可以按「▶️ 喚醒」接回原本的對話；離線期間的訊息最多暫存 20 則、30 分鐘，喚醒後依序送進去。絕不會開新對話。',
+        'en-US': 'Wake: a chat can wake an offline pane back onto its own conversation; up to 20 messages from the last 30 minutes are kept and sent in order. It never starts a new conversation.',
+        'ja-JP': '起動：pane がオフラインのとき、チャットから「▶️ 喚醒」で元の会話に戻せます。オフラインの間のメッセージは最大 20 件・30 分まで保留され、起動後に順番に送られます。新しい会話は決して始めません。',
+      },
+      {
+        'zh-TW': '接續範圍「自動」：只接回上次關閉 Navide 時還在執行的 pane。',
+        'en-US': 'Resume scope Auto brings back only the panes still running when Navide last closed.',
+        'ja-JP': '再開する範囲「自動」：前回 Navide を閉じたときにまだ動いていた pane だけを再開します。',
+      },
+      {
+        'zh-TW': '從 .vsix 檔案安裝、開發者模式從資料夾載入；兩者都未經 Navide 審核，對話框會標明，必須勾選了解風險才能同意。自架 Registry 只在開發者模式開著時使用。',
+        'en-US': 'Install a Navide plugin from a .vsix file, or load one from a folder in Developer Mode; neither is reviewed by Navide, the dialog says so, and you must acknowledge the risk. A self-hosted Registry is used only in Developer Mode.',
+        'ja-JP': '.vsix ファイルからのインストールと、開発者モードでのフォルダーからの読み込み。どちらも Navide の審査を受けておらず、ダイアログに明示され、リスクを理解したことを確認しないと同意できません。自前の Registry は開発者モードがオンのときだけ使われます。',
+      },
+      {
+        'zh-TW': '來源標記：每個 Navide 外掛都標示來源與審核狀態；本機或測試套件在 Navide 自己的介面上也有標記。揭露卡也會寫明 Navide 外掛的畫面可以連網。',
+        'en-US': 'Every Navide plugin shows its source and review; local and test packages are also marked in Navide’s own chrome. The disclosure card also says that a Navide plugin’s views can reach the network.',
+        'ja-JP': '提供元の表示：すべての Navide プラグインに提供元と審査の状態が表示され、ローカルやテスト用のパッケージは Navide 自身の画面にも印が付きます。開示カードには、Navide プラグインのビューがネットワークに接続できることも記載されます。',
+      },
+      {
+        'zh-TW': '行為改變：送出後無法確認 CLI 有收到的訊息，會標成「未確認」，不再當成已送達；排程把它記成錯誤。',
+        'en-US': 'Behaviour change: a message Navide cannot confirm the CLI took is reported as unconfirmed, not delivered; a scheduled run records it as an error.',
+        'ja-JP': '動作の変更：CLI が受け取ったことを確認できないメッセージは「未確認」と表示され、送信済みとして扱われなくなりました。スケジュール実行ではエラーとして記録されます。',
+      },
+      {
+        'zh-TW': '揭露總覽移到 設定 → Navide 外掛 頁面最下方。',
+        'en-US': 'The Disclosure overview moved to the bottom of Settings → Navide Plugins.',
+        'ja-JP': '開示の一覧は「設定 → Navide プラグイン」ページの一番下に移りました。',
+      },
+      {
+        'zh-TW': '修正：大結果處理完後 helper 不再一直佔用約 339 MiB；pipeline 中止後可以重新開始；Linux 正式版的 `LD_LIBRARY_PATH` 不再傳給子程序。',
+        'en-US': 'Fixed: the result helper no longer holds ~339 MiB when idle; a pipeline can start again after an abort; the Linux build’s `LD_LIBRARY_PATH` no longer leaks into spawned processes.',
+        'ja-JP': '修正：大きな結果の処理後、helper が約 339 MiB を使い続けなくなりました。中断した pipeline を再び開始できます。Linux 製品版の `LD_LIBRARY_PATH` が子プロセスに渡らなくなりました。',
+      },
+    ],
+  },
+  {
     version: '0.2.25',
     major: true,
     title: {

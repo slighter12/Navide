@@ -18,9 +18,11 @@ import {
   useReadbackAnnouncer,
 } from './composables/useVoiceReadback'
 import { requestMarketplaceDetail } from './marketplaceDeepLink'
-import type { DeepLinkExtensionTarget } from '../../shared/deepLink'
+import { isPublishDeepLink, parseDeepLink, type DeepLinkExtensionTarget, type DeepLinkPublishTarget } from '../../shared/deepLink'
+import { installMarketplaceFormListeners, restorePendingForms, showMarketplaceForm } from './composables/useMarketplaceForms'
 import { buildWorkspaceGroups } from './lib/workspaceGroups'
 import { workspaceAliasKey } from './lib/workspaceAlias'
+import { createStageWidthCap, type CappablePane } from './lib/stageWidthCap'
 import { buildPaneLineage, effectiveParents, withDescendants } from './lib/paneLineage'
 import { resolveLineageDrop, resolveRootDrop, type LineageDropDecision } from './lib/lineageDrop'
 import { ancestorTrail } from './lib/paneListView'
@@ -205,6 +207,7 @@ import { paneExitFault, type PaneExitFault } from './lib/paneExitFault'
 import { paneStuckSince } from './lib/paneStuck'
 import { resetUiScale, stepUiScaleBy } from './lib/uiScale'
 import { injectStandaloneTask, type StandaloneTaskInjectionDeps } from './lib/standalonePaneTask'
+import { acceptStartupTrust } from './lib/startupTrust'
 import { quickClassify } from './lib/quick-classify'
 import type { DirLister } from '@navide/plugin-shell'
 import {
@@ -338,9 +341,12 @@ import { QUOTA_READING_VETO, detectUsageLimit, isDismissedUsageLimit, quotaExhau
 import {
   awaitingClearsOnMiss,
   hasAwaitingPattern,
+  holdOutlivedBox,
+  isToolResultHook,
   matchAwaitingInput,
   notificationEndsAwaiting,
   notificationMeansAwaiting,
+  permissionHoldActionFor,
   questionActionFor,
 } from './lib/cliAwaitingInput'
 import {
@@ -355,12 +361,13 @@ import { useUiActionBus } from './composables/useUiActionBus'
 import {
   pluginAgentNoticeTitle,
   pluginAgentUndoApplies,
+  pluginAgentDowngradeStep,
   releaseAnnouncementId,
   useAnnouncements,
   type SchedulerDisabledNotice,
 } from './composables/useAnnouncements'
 import { usePluginAgentRequests } from './composables/usePluginAgentRequests'
-import { PLUGIN_APPROVAL_RECOVER_EVENT } from '../../shared/pluginAgentTools'
+import { PLUGIN_APPROVAL_RECOVER_EVENT, revealInvisibleText } from '../../shared/pluginAgentTools'
 import type {
   ConvenienceAnnouncementAction,
   EvolveAnnouncementAction,
@@ -381,6 +388,8 @@ import {
   type RestartOutcome,
 } from './composables/useQuotaFailover'
 import { accountLabel } from './lib/accountLabel'
+import { createSignInConfirm, runAgentSignIn, SIGN_IN_PANE_INPUT_REFUSAL } from './lib/agentSignIn'
+import { runAgentAccountSwitch, type AgentAccountSwitchConfirmRequest } from './lib/agentAccountSwitch'
 import {
   DEFAULT_SLOT_ID,
   FOLLOW_SWITCH_AGENT,
@@ -403,7 +412,18 @@ import {
   createAccountFollowStore,
   followingPaneRows,
   isAccountFixed,
+  restoreSpawnPin,
+  type AccountDirsGate,
 } from './lib/accountFollowPanes'
+import {
+  chainsDirLogin,
+  dirLoginLanded,
+  dirLoginReminderTargets,
+  loadDirLoginReminded,
+  saveDirLoginReminded,
+  skippedDirLogins,
+  type PendingLogin,
+} from './lib/accountDirLoginChain'
 import type { FollowDialogRow } from './components/AccountFollowSwitchDialog.vue'
 import { plaintextTokenStoreMessage, tLogin } from './composables/useCliProfiles'
 import { useStatusBarPopover } from './composables/useStatusBarPopover'
@@ -440,6 +460,8 @@ const CliHealthGuide = defineAsyncComponent(() => import('./components/CliHealth
 const CliInstallDialog = defineAsyncComponent(() => import('./components/CliInstallDialog.vue'))
 const SkillInstallApprovalDialog = defineAsyncComponent(() => import('./components/SkillInstallApprovalDialog.vue'))
 const PluginAgentRequestDialog = defineAsyncComponent(() => import('./components/PluginAgentRequestDialog.vue'))
+const AgentSignInConfirmDialog = defineAsyncComponent(() => import('./components/AgentSignInConfirmDialog.vue'))
+const AgentAccountSwitchConfirmDialog = defineAsyncComponent(() => import('./components/AgentAccountSwitchConfirmDialog.vue'))
 const DebugModal = defineAsyncComponent(() => import('./components/DebugModal.vue'))
 const RestoreScopeModal = defineAsyncComponent(() => import('./components/RestoreScopeModal.vue'))
 const AccountFollowSwitchDialog = defineAsyncComponent(() => import('./components/AccountFollowSwitchDialog.vue'))
@@ -566,11 +588,13 @@ onMounted(() => {
   // process (cli:get-pane-buffer); answer from this window's paneRefs.
   window.agentTeam?.onCliPaneBufferRequest?.((paneId) => {
     const ref = paneRefs[paneId]
+    const pane = panes.value.find((p) => p.id === paneId)
     return buildCliPaneBufferReply(
-      panes.value.find((p) => p.id === paneId),
+      pane,
       ref
         ? {
-            buffer: readPaneShareText(ref, CLI_CHIP_LINE_CAP)
+            // A sign-in pane's screen holds its authorization URL or code.
+            buffer: pane?.isLogin ? '' : readPaneShareText(ref, CLI_CHIP_LINE_CAP)
           }
         : null
     )
@@ -940,6 +964,10 @@ watch(() => backend.status.value, (status) => {
   void pluginAgentRequests.recover().catch((error: unknown) => {
     console.warn('[plugins] could not settle interrupted agent plugin requests', error)
   })
+  // An agent's form draft filed before this window connected opens its form.
+  void restorePendingForms(backend).then((shown) => {
+    if (shown) openSettingsAt('marketplace')
+  }).catch(() => {})
 }, { immediate: true })
 // And when a main window went away while carrying out approved requests
 // (review-370 R1): the backend names them, and recover() settles whatever is
@@ -1135,6 +1163,8 @@ const pluginContributionsByLocation = computed(() => {
     left: [],
     main: [],
     window: [],
+    // Mounted only by the receiver that owns it; the main window never renders it.
+    detail: [],
   }
   for (const contribution of pluginContributions.value) {
     grouped[contribution.location].push(contribution)
@@ -1142,7 +1172,7 @@ const pluginContributionsByLocation = computed(() => {
   return grouped
 })
 
-function pluginContributionsAt(location: Exclude<PluginRegionLocation, 'left' | 'window'>): PluginRegionContribution[] {
+function pluginContributionsAt(location: Exclude<PluginRegionLocation, 'left' | 'window' | 'detail'>): PluginRegionContribution[] {
   return pluginContributionsByLocation.value[location]
 }
 
@@ -1507,13 +1537,24 @@ function refitAllTerminals(): void {
   }))
 }
 
+// The layout-mode cols cap and its lift on a window widen (lib/stageWidthCap.ts).
+// paneRefs holds null for a pane Vue has unmounted, hence the nullable type.
+const stageWidthCap = createStageWidthCap(
+  () => Object.values(paneRefs) as unknown as Array<CappablePane | null | undefined>,
+  () => window.innerWidth
+)
+
 // Window-level resize safety net. Per-pane ResizeObservers can miss the macOS
 // fullscreen / maximize transition (the renderer is occluded mid-animation, so
 // the observer callback is coalesced away), leaving panes at a stale width with
 // empty space on the right. A debounced window 'resize' listener guarantees a
 // refit on any OS-window size change regardless of the observers.
 let _winResizeTimer: number | null = null
+
 function onWindowResize(): void {
+  // Widening the window lifts the layout-mode cap. That includes moving the
+  // window to a larger monitor, but only when the window itself grows there.
+  stageWidthCap.onWindowResize()
   if (_winResizeTimer !== null) clearTimeout(_winResizeTimer)
   _winResizeTimer = window.setTimeout(() => { _winResizeTimer = null; refitAllTerminals() }, 150)
 }
@@ -1731,6 +1772,10 @@ interface ActivePane {
    *  downstream stages point agents at prior outputs via file path instead of
    *  inlining the whole terminal buffer into the kickoff. */
   outputLogFile?: string
+  /** A CLI sign-in pane (spawned with isLogin / loginProfileId). What it prints
+   *  — an authorization URL, a pasted code — is never handed to another pane,
+   *  a chat or the editor's AI Chat, and it writes no log file. */
+  isLogin?: boolean
   /** CLI session id used to resume this pane on restart. Known immediately for
    *  Claude (the --session-id we pinned); filled in later for Codex/Antigravity once
    *  their CLI-generated id is detected from the session file. */
@@ -3929,11 +3974,17 @@ onMounted(() => {
     isPaneIdle: (paneId: string) => deliveryHoldKey(paneId) === null,
     idleHoldKey: deliveryHoldKey,
     refuseDelivery: (paneId, envelope) => {
-      if (panes.value.find((p) => p.id === paneId)?.agentKey !== TERMINAL_AGENT_KEY) return null
+      const target = panes.value.find((p) => p.id === paneId)
+      // Only the user types into a CLI sign-in pane: whatever addressed it (an
+      // agent, a chat, another device, a scheduled job) could otherwise finish
+      // the sign-in on an account it controls.
+      if (target?.isLogin) return rawReason(SIGN_IN_PANE_INPUT_REFUSAL)
+      if (target?.agentKey !== TERMINAL_AGENT_KEY) return null
       const refusal = paneMultilineRefusal(paneId, envelope)
       return refusal ? rawReason(refusal) : null
     },
-    pushTarget: pushTargetForMessaging,
+    // A push skips refuseDelivery, so a sign-in pane is never offered one.
+    pushTarget: (paneId) => (panes.value.find((p) => p.id === paneId)?.isLogin ? null : pushTargetForMessaging(paneId)),
     pushDeliver: pushDeliverAgentMessage,
     routeRemote: routeRemoteMessage,
     reportDelivery: (msgKey, ok, reason) => {
@@ -4065,7 +4116,21 @@ function pollAwaitingPanes(): void {
     // A badge must never take messaging down with it.
     try {
       const screen = ref.readScreenTail(AWAITING_SCREEN_LINES) as unknown as string
-      if (matchAwaitingInput(pane.agentKey, screen)) ref.markNeedsInput?.()
+      const boxOnScreen = matchAwaitingInput(pane.agentKey, screen)
+      // The safety net under a held permission wait (see holdOutlivedBox): the
+      // box is no longer on screen, so nothing is left to hold for.
+      const held = ref.awaitingHeld?.() as { since: number } | undefined
+      if (held && held.since > 0 && holdOutlivedBox({
+        heldMs: Date.now() - held.since,
+        turnInFlight: isTurnInFlight(
+          paneLastActiveAt.get(pane.id) ?? 0,
+          paneTurnCompleteAt.get(pane.id) ?? 0,
+          Date.now(),
+          { inferEndFromSilence: VENDORS_WITHOUT_TURN_END.has(pane.agentKey) },
+        ),
+        boxOnScreen,
+      })) ref.releaseNeedsInputHold?.()
+      if (boxOnScreen) ref.markNeedsInput?.()
       else if (awaitingClearsOnMiss(pane.agentKey)) ref.clearNeedsInput?.()
     } catch {
       /* leave this pane's badge as-is and carry on with the rest */
@@ -4844,6 +4909,8 @@ async function injectPaneContext(sourcePaneId: string, targetPaneId: string): Pr
   // paste either.
   if (!sourcePane.realized || !panes.value.find((p) => p.id === targetPaneId)?.realized || !targetSessionId) return
   if (await tryMentionOnDrop(targetPaneId, () => sourcePane.messagingName ?? null)) return
+  // A sign-in pane's screen holds its authorization URL or code: never shared.
+  if (sourcePane.isLogin) return
 
   const text = buildPaneContextPaste({
     paneId: sourcePane.id,
@@ -6419,7 +6486,45 @@ async function waitForActivityThenSettle(
   return 'timeout'
 }
 
+// Panes whose vendor declares `startupTrust` (grok): one watcher per spawn
+// answers the prompt with the vendor's own key, and every other startup path
+// waits on it rather than pressing Enter on its own — two answerers could put
+// the second key into the composer, ahead of a kickoff typed next (#402).
+const startupTrustWatches = new Map<string, Promise<boolean>>()
+
+function paneAcceptsStartupTrust(paneId: string): boolean {
+  const agentKey = panes.value.find((p) => p.id === paneId)?.agentKey
+  return !!agentSpecs.find((s) => s.agentKey === agentKey)?.startupTrust
+}
+
+function watchStartupTrust(paneId: string, agentKey: string, folder: string): void {
+  const watch = acceptStartupTrust(agentKey, {
+    readScreen: () => {
+      try {
+        return (paneRefs[paneId]?.readScreenTail?.(AWAITING_SCREEN_LINES) as unknown as string) ?? ''
+      } catch {
+        return ''
+      }
+    },
+    outputBytes: () => paneCleanBytes(paneId),
+    alive: () => paneAlive(paneId),
+    send: async (keys) => {
+      const sid = paneRefs[paneId]?.sessionId
+      if (!sid) return
+      await backend.send('terminal.input', { terminal_session_id: sid as string, data: keys })
+      pipelineLog(`✓ accepted startup trust prompt (pane ${paneId.slice(0, 8)})`)
+    },
+    sleep,
+    now: Date.now,
+    timeoutMs: DISMISS_TIMEOUT_MS,
+    quietMs: NO_DIALOG_QUIET_MS,
+    folder,
+  }).finally(() => startupTrustWatches.delete(paneId))
+  startupTrustWatches.set(paneId, watch)
+}
+
 async function dismissStartupDialog(paneId: string, timeoutMs = DISMISS_TIMEOUT_MS): Promise<boolean> {
+  if (paneAcceptsStartupTrust(paneId)) return (await startupTrustWatches.get(paneId)) ?? false
   const deadline = Date.now() + timeoutMs
   let lastSize = -1
   let stableSince = Date.now()
@@ -6712,7 +6817,7 @@ function scheduleInjection(pane: ActivePane): void {
       await sleep(MIN_INJECTION_LEAD_MS - lead)
       if (!paneAlive(pane.id)) return
     }
-    if (!dismissed) {
+    if (!dismissed && !paneAcceptsStartupTrust(pane.id)) {
       const lateBuf = ((paneRefs[pane.id]?.cleanBuffer as unknown as string) ?? '')
       if (TRUST_DIALOG_PATTERNS.some((re) => re.test(lateBuf))) {
         pipelineLog(`${tag} late startup dialog detected — dismissing`)
@@ -6789,6 +6894,7 @@ function scheduleInjection(pane: ActivePane): void {
       // Use bracketed-paste so newlines in the context header (prior-stage
       // documents) are preserved — without it they become Enter keypresses
       // and fragment the prompt into multiple partial submissions.
+      let held = false
       const kickoffResult = await runPipelineKickoff({
         inject: async () => {
           const evidence: { echo?: EchoEvidence | null; submit?: SubmitEvidence | null } = {}
@@ -6797,7 +6903,10 @@ function scheduleInjection(pane: ActivePane): void {
         },
         sleep,
         paneAlive: () => paneAlive(pane.id),
-        onHeld: () => pipelineLog(`${tag} ✕ kickoff reached the input box but never submitted — not resending`),
+        onHeld: () => {
+          held = true
+          pipelineLog(`${tag} ✕ kickoff reached the input box but never submitted — not resending`)
+        },
         onRetry: (attempt) => pipelineLog(`${tag} ✕ kickoff injection failed (attempt ${attempt}/${MAX_KICKOFF_ATTEMPTS}) — retrying in 3s`),
       })
       if (kickoffResult.cancelled) return
@@ -6805,8 +6914,24 @@ function scheduleInjection(pane: ActivePane): void {
       pane.kickoffStatus = ok2 ? 'sent' : 'failed'
       setPrepStatus(pane, ok2 ? 'ready' : 'failed')
       syncViews()
+      const stageIndexForPane = pane.origin === 'pipeline'
+        ? stagesApi.stages.value.findIndex((s) => s.id === pane.stageId)
+        : -1
       if (!ok2) {
-        pipelineLog(`${tag} ✕ kickoff injection failed after ${MAX_KICKOFF_ATTEMPTS} attempts — arming watcher anyway`)
+        pipelineLog(`${tag} ✕ kickoff injection failed after ${MAX_KICKOFF_ATTEMPTS} attempts`)
+        // A pipeline slot without its task cannot finish its stage (#448).
+        if (stageIndexForPane >= 0) {
+          if (held) heldKickoffPanes.add(pane.id)
+          await failRunOnKickoff(
+            stageIndexForPane,
+            pane.slotLabel ?? '',
+            held
+              ? 'kickoff is waiting in the input box: leave it and resume submits it, or clear it'
+              : `kickoff never reached the agent after ${MAX_KICKOFF_ATTEMPTS} attempts`,
+            held,
+          )
+          return
+        }
       } else {
         pipelineLog(`${tag} ✓ kickoff sent`)
       }
@@ -6814,15 +6939,12 @@ function scheduleInjection(pane: ActivePane): void {
       // 5. Arm watcher. For question-interactive stages (P01) capture scanFrom
       //    after kickoff confirmation; for other stages pass undefined so the
       //    watcher uses markBufferPosition() and agentGenerating handles pacing.
-      if (pane.origin === 'pipeline') {
-        const stageIndex = stagesApi.stages.value.findIndex((s) => s.id === pane.stageId)
-        if (stageIndex >= 0) {
-          const stageAllowsQ = stagesApi.stages.value[stageIndex]?.allowQuestions ?? false
-          const kickoffScanFrom2 = stageAllowsQ
-            ? (paneRefs[pane.id]?.markBufferPosition as () => number | undefined)?.()
-            : undefined
-          startStageWatcher(stageIndex, pane.id, kickoffScanFrom2)
-        }
+      if (stageIndexForPane >= 0) {
+        const stageAllowsQ = stagesApi.stages.value[stageIndexForPane]?.allowQuestions ?? false
+        const kickoffScanFrom2 = stageAllowsQ
+          ? (paneRefs[pane.id]?.markBufferPosition as () => number | undefined)?.()
+          : undefined
+        startStageWatcher(stageIndexForPane, pane.id, kickoffScanFrom2)
       }
     }
   })()
@@ -7058,8 +7180,8 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
     : undefined
   // Codex keeps a marker fallback during rollout. Antigravity can't pin an id
   // at launch (`agy --conversation` only resumes existing ids), so the marker
-  // is its ONLY session-binding path. Grok likewise can't pin an id (`grok -s`
-  // only resumes existing ids) — marker-based binding via ~/.grok/grok.db.
+  // is its ONLY session-binding path. (Grok left this camp: `--session-id`
+  // names a NEW session, so it pins at launch like Claude — see agents/grok.ts.)
   // Kimi likewise can't pin an id (`kimi --session` only resumes existing ids);
   // its session id is captured from the wire.jsonl containing the marker.
   // OpenCode likewise can't pin an id (`opencode --session` only resumes
@@ -7124,6 +7246,7 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
     effort: launchedModel.effort || undefined,
     spawnedBy: opts.spawnedBy,
     formerPaneIds: opts.formerPaneIds?.length ? [...opts.formerPaneIds] : undefined,
+    isLogin: opts.isLogin || opts.loginProfileId ? true : undefined,
   }
   // Scheme A (plan claude_f1bf4b): a claude pane that runs on the live login
   // follows account switches; one its pin puts in an account dir is fixed.
@@ -7224,7 +7347,9 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
     // each run is self-contained; manual panes land under a flat manual/
     // folder grouped by date so they're still recoverable.
     const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    const outputLogFile = opts.workspacePath
+    // A sign-in pane writes none: its output is an authorization URL or code,
+    // and a file in the workspace is readable by every agent working there.
+    const outputLogFile = opts.workspacePath && !pane.isLogin
       ? opts.origin === 'pipeline'
         ? pipeline.runDir
           ? `${opts.workspacePath}/.agent-team/${pipeline.runDir}/stage-${opts.stageId}-${id.slice(0, 8)}.log`
@@ -7261,6 +7386,7 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
         slot_label: opts.slotLabel ?? '',         // stable by_pane key survives frontend restarts
         profile_id: opts.profileId ?? '',        // CLI account pin (restore) → per-pane isolated home
         run_group_id: pane.runGroupId ?? '',     // sidebar run group → by_group token bucket
+        login_pane: pane.isLogin,                // sign-in pane → backend keeps its output from other panes
       },
       outputLogFile,
       // Stable reattach key: the pinned CLI session id is identical on first
@@ -7306,6 +7432,9 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
     startPaneHealthWatcher(id)
 
     if ((ref.status as unknown as string) === 'running') {
+      // Fresh or resumed, with a task or without: a resumed pane gets no other
+      // startup handling at all, and sat on the prompt with every message held.
+      if (spec.startupTrust) watchStartupTrust(id, spec.agentKey, opts.workspacePath ?? '')
       if (pane.origin !== 'pipeline' && !pane.roleKey && !pane.kickoffPrompt) {
         pane.injectionStatus = 'skipped'
         setPrepStatus(pane, 'ready')
@@ -7432,16 +7561,18 @@ async function onManualSpawn(payload: SpawnPayload, quota?: { transactionId: str
 // Login panes pending browser authorization, keyed by profile id. Only THIS
 // window (the one that spawned the pane) holds an entry, so exactly one
 // window closes the pane and toasts when the harvest broadcast arrives.
-const pendingLoginPanes = new Map<string, { paneId: string; agentKey: string }>()
+// `step` tells a vault-slot sign-in from the own-folder one that follows it
+// for a Claude account (lib/accountDirLoginChain.ts).
+const pendingLoginPanes = new Map<string, PendingLogin>()
 
 async function onCliLoginSpawn(
   agentKey: string,
   loginProfileId?: string,
   opts?: { accountDirProfileId?: string },
-): Promise<void> {
+): Promise<boolean> {
   if (!currentWorkspace.value) {
     notifyRestore.toast(i18n.global.t('settings.accounts.cli.login-no-workspace'), { type: 'error' })
-    return
+    return false
   }
   // A sign-in inside the account's own config dir runs as that account's pane
   // (its pin), not in a login home: Claude Code keeps the login there.
@@ -7464,14 +7595,17 @@ async function onCliLoginSpawn(
       { type: 'error' }
     )
     if (paneId) void onKill(paneId)
-    return
+    return false
   }
   showSettings.value = false
   const pendingProfileId = dirProfileId ?? loginProfileId
-  if (pendingProfileId) pendingLoginPanes.set(pendingProfileId, { paneId, agentKey })
+  if (pendingProfileId) {
+    pendingLoginPanes.set(pendingProfileId, { paneId, agentKey, step: dirProfileId ? 'dir' : 'slot' })
+  }
   // The user must see the pane that is waiting for the browser authorization.
   noteViewJump('account login spawn', { paneId })
   onFocusPane(paneId)
+  return true
 }
 
 // Plan window "execute" dispatch: inject the plan-execution prompt into an
@@ -7506,6 +7640,7 @@ async function dispatchPlanToPane(relPath: string, agentKey: string): Promise<Pl
       workspacePath: p.workspacePath,
       status: (paneRefs[p.id]?.displayStatus as string | undefined) ?? 'starting',
       sessionId: (paneRefs[p.id]?.sessionId as string | undefined) ?? undefined,
+      isLogin: p.isLogin,
     })),
     agentKey,
     currentWorkspace.value
@@ -8104,7 +8239,6 @@ type RebuildFailure =
   | 'locked' // another rebuild of this pane/session is in flight
   | 'probe-failed' // stale-create rollback or resumability probe failed
   | 'not-resumable' // session definitively not resumable
-  | 'missing-session' // session file absent on disk
   | 'spawn-failed' // replacement pane spawn failed
 
 async function rebuildPaneViaResume(
@@ -8131,6 +8265,12 @@ async function rebuildPaneViaResume(
     /** Resume on this CLI account instead of the pane's own — "continue on
      *  this account" for a claude account with its own config dir. */
     profileId?: string
+    /** Reopen fresh instead of resuming when the pane has no transcript yet:
+     *  claude pins `--session-id` at spawn but writes the jsonl only on the
+     *  first prompt, so a pane nobody typed in fails the resume preflight
+     *  ("Session not found on disk"). For single-pane account moves (fixing,
+     *  unfixing, "continue on this account"), where nothing can be lost. */
+    freshWhenNoTranscript?: boolean
   }
 ): Promise<RebuildFailure | undefined> {
   const pane = panes.value.find((p) => p.id === paneId)
@@ -8176,7 +8316,7 @@ async function rebuildPaneViaResume(
   }
   // Lock synchronously, before any await: a concurrent call (double-click, or
   // overlap with the rebuild-all batch) would otherwise pass the has() check
-  // during canResumeSession/has_session and double kill/spawn the same pane.
+  // during canResumeSession and double kill/spawn the same pane.
   // The session id is locked alongside the pane id because spawnPane swaps the
   // replacement pane in (new pane id, same session) before the backend spawn
   // resolves — a second click landing on the replacement must be blocked too.
@@ -8211,7 +8351,11 @@ async function rebuildPaneViaResume(
     // them: false = the session is definitively absent, null = the probe
     // itself failed (the session may well exist — the user should retry).
     const resumable = await canResumeSession(pane.agentKey, ws, sessionId)
-    if (resumable !== true) {
+    // Reopen fresh only on a definitive "absent" for a pane that never wrote a
+    // transcript. The flag alone is not enough: it lags a first turn that is
+    // still running, whose jsonl may already exist.
+    const fresh = resumable === false && !!opts?.freshWhenNoTranscript && !pane.sessionOnDisk
+    if (resumable !== true && !fresh) {
       pipelineLog(`⚠ rebuild ${pane.agentLabel}: session ${sessionId} not resumable`)
       if (!opts?.suppressBusyToast) {
         notifyRestore.toast(
@@ -8225,28 +8369,15 @@ async function rebuildPaneViaResume(
     }
     const spec = agentSpecs.find((s) => s.agentKey === pane.agentKey)
     const skipFlag = skipFlagFor(pane.agentKey, spec)
-    const resumeCmd = buildResumeCommand(pane.agentKey, sessionId, skipFlag, '', {
+    const resumeCmd = fresh ? '' : buildResumeCommand(pane.agentKey, sessionId, skipFlag, '', {
       model: pane.model ?? '',
       effort: pane.effort ?? '',
     })
-    if (!resumeCmd) {
+    if (!fresh && !resumeCmd) {
       if (!opts?.suppressBusyToast) {
         notifyRestore.toast(i18n.global.t('pane.terminal.rebuild-no-session'), { type: 'error' })
       }
       return 'no-session'
-    }
-
-    // Safety: Ensure the requested session actually exists on disk.
-    const hasSession = await backend.send('terminals.has_session', {
-      workspace_path: ws,
-      session_id: sessionId,
-    })
-    if (!hasSession) {
-      pipelineLog(`⚠ rebuild session ${sessionId.slice(0, 8)} not found`)
-      if (!opts?.suppressBusyToast) {
-        notifyRestore.toast(i18n.global.t('pane.terminal.rebuild-not-resumable'), { type: 'error' })
-      }
-      return 'missing-session'
     }
     // Snapshot identity before onKill removes the pane from the list.
     const snap = {
@@ -8309,12 +8440,12 @@ async function rebuildPaneViaResume(
       origin: snap.origin,
       spawnedBy: snap.spawnedBy,
       runGroupId: snap.runGroupId || undefined,
-      isResume: true,
-      skipRoleInjection: true,
-      restoreMode: 'fresh',
+      isResume: !fresh,
+      skipRoleInjection: !fresh,
+      restoreMode: fresh ? undefined : 'fresh',
       sessionHomeId: snap.sessionHomeId,
       profileId: explicitPin ?? accountSpawnPin(snap.profileId, snap.following, followDirSignedIn),
-      resumeSessionId: sessionId,
+      resumeSessionId: fresh ? undefined : sessionId,
       model: snap.model,
       effort: snap.effort,
       replacePaneId: paneId, // Atomic swap to prevent layout shift
@@ -8336,6 +8467,8 @@ async function rebuildPaneViaResume(
         if (opts?.offerContinue) revived.resumeContinueAvailable = true
       }
       opts?.onReplaced?.(newId)
+      // A fresh reopen pinned a NEW session; the records must follow it.
+      const recordSessionId = fresh ? (revived?.pinnedSessionId ?? '') : sessionId
       if (snap.origin !== 'pipeline') {
         await sendQuiet<ProjectPayload>('manual_pane.spawn', {
           workspace_path: snap.workspacePath,
@@ -8344,7 +8477,7 @@ async function rebuildPaneViaResume(
           agent: snap.agentKey,
           role: snap.roleKey || '',
           command: resumeCmd,
-          session_id: sessionId,
+          session_id: recordSessionId,
           session_home_id: snap.sessionHomeId || '',
           run_group_id: snap.runGroupId || '',
           output_log_file: panes.value.find((p) => p.id === newId)?.outputLogFile ?? '',
@@ -8364,7 +8497,7 @@ async function rebuildPaneViaResume(
           pane_id: newId,
           agent: snap.agentKey,
           role: snap.roleKey,
-          session_id: sessionId,
+          session_id: recordSessionId,
           session_home_id: snap.sessionHomeId || '',
           run_group_id: snap.runGroupId || '',
         })
@@ -8437,6 +8570,9 @@ async function confirmBatchRebuild(count: number): Promise<boolean> {
 // live credential or any other pane.
 provide(cliAccountDirActionsKey, {
   continueWith: async (paneId, profileId) => {
+    // A sign-in pane has no conversation to carry over: reopening it would
+    // drop the sign-in for an ordinary pane (review 0.2.26 R2 LOW-9).
+    if (panes.value.find((p) => p.id === paneId)?.isLogin) return
     const label = accountLabel(cliProfilesApi, 'claude', profileId, i18n.global.t)
     const ok = await notifyRestore.confirm(
       i18n.global.t('usage.continue-with-confirm-body', { account: label }),
@@ -8447,7 +8583,7 @@ provide(cliAccountDirActionsKey, {
       }
     )
     if (!ok) return
-    await rebuildPaneViaResume(paneId, { profileId, forceWhenRunning: true })
+    await rebuildPaneViaResume(paneId, { profileId, forceWhenRunning: true, freshWhenNoTranscript: true })
   },
   signIn: (agentKey, profileId) => {
     void onCliLoginSpawn(agentKey, undefined, { accountDirProfileId: profileId })
@@ -8597,6 +8733,15 @@ function followPaneInput(p: ActivePane): FollowPaneInput {
 
 function followDirSignedIn(profileId: string): boolean {
   return cliProfilesApi.accountDirFor(FOLLOW_SWITCH_AGENT, profileId)?.signedIn === true
+}
+
+/** The account dirs as a restore sees them (see restoreSpawnPin). */
+function restorePinGate(paneId: string): AccountDirsGate {
+  return {
+    loaded: () => cliProfilesApi.loaded.value,
+    load: () => cliProfilesApi.ensureLoaded(),
+    disclose: (pin) => pipelineLog(`⚠ claude: account list not loaded; restoring ${paneId} with its saved account ${pin}`),
+  }
 }
 
 function followAccountLabel(profileId: string): string {
@@ -8773,9 +8918,11 @@ function paneAccountFixed(p: ActivePane): boolean {
 async function toggleAccountPin(paneId: string): Promise<void> {
   const pane = panes.value.find((p) => p.id === paneId)
   if (!pane || pane.agentKey !== FOLLOW_SWITCH_AGENT) return
+  // Not a sign-in pane: it would reopen as an ordinary one (LOW-9, as above).
+  if (pane.isLogin) return
   if (paneAccountFixed(pane)) {
     accountFollow.add(paneId)
-    if (await rebuildPaneViaResume(paneId)) accountFollow.remove(paneId)
+    if (await rebuildPaneViaResume(paneId, { freshWhenNoTranscript: true })) accountFollow.remove(paneId)
     return
   }
   const live = cliProfilesApi.defaultProfileId(FOLLOW_SWITCH_AGENT)
@@ -8789,7 +8936,7 @@ async function toggleAccountPin(paneId: string): Promise<void> {
     return
   }
   accountFollow.remove(paneId)
-  if (await rebuildPaneViaResume(paneId, { profileId: live })) accountFollow.add(paneId)
+  if (await rebuildPaneViaResume(paneId, { profileId: live, freshWhenNoTranscript: true })) accountFollow.add(paneId)
 }
 
 /** "Make all follow" from the badge: reopen every fixed pane on the live
@@ -9351,7 +9498,7 @@ watch(currentWorkspace, (workspacePath) => {
 // alone is not enough: asking for the tab you are already on leaves the prop
 // unchanged, so the modal's watcher never fires and the request is dropped.
 const settingsTabRequest = ref(0)
-const settingsInitialTab = ref<'general' | 'cross-device' | 'mcp' | 'analyzer' | 'updates' | 'appearance' | 'accounts' | 'keybindings' | 'prompts' | 'channels' | 'voice' | 'marketplace' | 'cliExtensions' | 'notifications'>('general')
+const settingsInitialTab = ref<'general' | 'cross-device' | 'mcp' | 'analyzer' | 'updates' | 'appearance' | 'accounts' | 'keybindings' | 'prompts' | 'channels' | 'voice' | 'marketplace' | 'cliExtensions' | 'notifications' | 'extensions'>('general')
 // Needed to retarget an already-open modal: initialTab is only honoured on mount
 // and by its own watcher, so re-issuing the same tab is a no-op without this.
 const settingsModalRef = ref<{
@@ -9370,15 +9517,34 @@ function openMarketplaceDetail(target: DeepLinkExtensionTarget): void {
   requestMarketplaceDetail(target)
   openSettingsAt('marketplace')
 }
+// navide://publish (navide-plugin publish --via-navide): open the publish form
+// with that package. Only opens the form; the user reviews and presses Submit.
+function openPublishFromLink(target: DeepLinkPublishTarget): void {
+  showMarketplaceForm({
+    form: 'publish', origin: 'link', requester: null, request: null,
+    prefill: { path: target.path, ...(target.target ? { target: target.target } : {}) },
+  })
+  openSettingsAt('marketplace')
+}
 let stopDeepLinks: (() => void) | null = null
+let stopPublishLinks: (() => void) | null = null
 onMounted(() => {
   const api = window.agentTeam?.deepLink
   if (!api) return
   stopDeepLinks = api.onOpenExtension(openMarketplaceDetail)
+  stopPublishLinks = api.onOpenPublish?.(openPublishFromLink) ?? null
   // Links that arrived before this window could show them (cold start).
-  void api.ready().then((queued) => queued.forEach(openMarketplaceDetail))
+  void api.ready().then((queued) =>
+    queued.forEach((target) => (isPublishDeepLink(target) ? openPublishFromLink(target) : openMarketplaceDetail(target))))
 })
-onUnmounted(() => stopDeepLinks?.())
+onUnmounted(() => {
+  stopDeepLinks?.()
+  stopPublishLinks?.()
+})
+// An agent's *_open / *_fill for a Navide Marketplace developer form (W3) shows
+// it in Settings > Navide Marketplace > Developer; nothing is sent until Submit.
+const stopMarketplaceForms = installMarketplaceFormListeners(backend, () => openSettingsAt('marketplace'))
+onUnmounted(stopMarketplaceForms)
 // Workspaces the Resource Manager's storage scan walks: the open one first, then the recents that
 // still exist on disk.
 const knownWorkspacePaths = computed<string[]>(() => {
@@ -10045,6 +10211,35 @@ registerCommand('ui.settings.open', (args) => {
   }
 })
 registerCommand('ui.settings.close', () => { showSettings.value = false })
+// W1: the *_open agent tools (marketplace_open, plugins_install_file_open,
+// plugins_developer_mode_open). Each only shows a page; installing, choosing
+// a file and the Developer Mode switch stay the user's own presses.
+registerCommand('ui.plugins.openMarketplace', (args) => {
+  const id = (args as { id?: unknown } | undefined)?.id
+  if (id === undefined || id === null || id === '') {
+    openSettingsAt('marketplace')
+    return { opened: 'marketplace' }
+  }
+  const link = parseDeepLink(`navide://extension/${String(id)}`)
+  if (!link.ok) throw new Error(`not a Navide plugin id: ${link.reason}`)
+  openMarketplaceDetail(link.target)
+  return { opened: 'marketplace-detail' }
+})
+function openExtensionsSection(section: string): void {
+  settingsInitialTab.value = 'extensions'
+  showSettings.value = true
+  void nextTick(() => {
+    void settingsModalRef.value?.setSection('extensions', section)
+  })
+}
+registerCommand('ui.plugins.openInstallFromFile', () => {
+  openExtensionsSection('extensions-install-from-file')
+  return { opened: 'install-from-file' }
+})
+registerCommand('ui.plugins.openDeveloperMode', () => {
+  openExtensionsSection('extensions-developer-mode')
+  return { opened: 'developer-mode' }
+})
 // The permission-bypass toggle. NOT pipeline state and not workspace state:
 // skipFlagFor() reads it on every spawn / resume / restore path this window
 // has, whichever project they belong to — hence a ui.settings.* name and no
@@ -10381,12 +10576,14 @@ registerCommand('ui.pane.getStatus', (args) => {
       ? {
           displayStatus: ref.displayStatus as string | undefined,
           awaitingKind: ref.awaitingKind as string | null | undefined,
-          buffer: readPaneShareText(ref, CLI_CHIP_LINE_CAP),
+          // A sign-in pane's screen holds its authorization URL or code: this
+          // reply reaches cli_get_status, ui_invoke and the chat relay.
+          buffer: pane.isLogin ? '' : readPaneShareText(ref, CLI_CHIP_LINE_CAP),
         }
       : null,
   )
   // What the pane is waiting on, for the chat-channel permission relay.
-  const screen = ref?.displayStatus === 'awaiting' ? (ref.readScreenTail?.(AWAITING_SCREEN_LINES) as string | undefined) ?? '' : ''
+  const screen = !pane.isLogin && ref?.displayStatus === 'awaiting' ? (ref.readScreenTail?.(AWAITING_SCREEN_LINES) as string | undefined) ?? '' : ''
   if (!screen.trim()) return reply
   const options = parseMenuOptions(screen)
   return { ...reply, awaitingPrompt: awaitingPromptText(screen), ...(options.length ? { awaitingOptions: options } : {}) }
@@ -10401,6 +10598,7 @@ registerCommand('ui.pane.sendKeys', async (args) => {
   if (!pane) throw new Error(`ui.pane.sendKeys: pane "${a.paneId}" not found`)
   const ref = paneRefs[a.paneId]
   if (!pane.realized || !ref?.sessionId || !a.answer) return { ok: false, sent: false, error: 'pane is not ready' }
+  if (pane.isLogin) return { ok: false, sent: false, error: SIGN_IN_PANE_INPUT_REFUSAL, error_code: 'login-pane-input-refused' }
   const resolved = resolveAnswerKeys({
     agentKey: pane.agentKey,
     displayStatus: ref.displayStatus as string | undefined,
@@ -10413,6 +10611,9 @@ registerCommand('ui.pane.sendKeys', async (args) => {
     return { ok: false, sent: false, error: resolved.error, ...(resolved.errorCode ? { error_code: resolved.errorCode } : {}) }
   }
   const resp = await backend.send('terminal.input', { terminal_session_id: ref.sessionId as string, data: resolved.keys })
+  // This write goes straight to the PTY, not through the terminal's onData, so
+  // tell the pane its held permission box was just answered.
+  if (resp.ok) ref.noteAnswerKeys?.(resolved.keys)
   return resp.ok ? { ok: true, sent: true } : { ok: false, sent: false, error: resp.error?.message ?? 'terminal.input failed' }
 })
 // Diagnostics recorded by uiDiagnostics (e.g. injectText resends) — lets an
@@ -10768,7 +10969,86 @@ useUiActionBus({
   buildSnapshot: buildUiActionSnapshot,
   ownsWorkspace: isLocalWorkspace,
   connectionStatus: backend.status,
+  accountActions: { signIn: agentSignIn, switch: agentAccountSwitch },
 })
+
+// MCP cli_account_sign_in (ui.accounts.signIn — on the bus, never in the
+// command registry): opens a sign-in Settings → Accounts already offers, for
+// the accounts lib/agentSignIn lets an agent start one for, and tells the user
+// which agent asked and why. The sign-in is the CLI's own; the user finishes
+// it in the browser. Nothing here switches an account or reads a credential.
+// Nothing opens until the user says yes in AgentSignInConfirmDialog (review
+// #433 LOW-3); the user's own sign-in from Settings never comes through here.
+const agentSignInConfirm = createSignInConfirm()
+async function agentSignIn(args: Record<string, unknown>, callerPaneId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const agentKey = String(args.agentKey ?? '')
+  const profileId = String(args.profileId ?? '')
+  const outcome = await runAgentSignIn(args, callerPaneId, {
+    accounts: cliProfilesApi,
+    currentWorkspace: () => currentWorkspace.value,
+    callerPane: (id) => {
+      const pane = panes.value.find((p) => p.id === id)
+      return pane ? { workspacePath: pane.workspacePath, name: pane.messagingName || pane.customName || id } : undefined
+    },
+    accountLabel: (key, id) => accountLabel(cliProfilesApi, key, id, i18n.global.t),
+    confirm: agentSignInConfirm.ask,
+    spawn: async (plan) => {
+      const before = pendingLoginPanes.get(plan.profileId)?.paneId
+      if (plan.kind === 'folder') await onCliLoginSpawn('claude', undefined, { accountDirProfileId: plan.profileId })
+      else await onCliLoginSpawn(plan.agentKey, plan.profileId)
+      const loginPaneId = pendingLoginPanes.get(plan.profileId)?.paneId
+      return loginPaneId && loginPaneId !== before ? loginPaneId : undefined
+    },
+    now: () => Date.now(),
+  }, signal)
+  if (outcome.status !== 'started') return outcome
+  const caller = panes.value.find((p) => p.id === callerPaneId)
+  notifyRestore.toast(
+    i18n.global.t('settings.accounts.cli.agent-login-started', {
+      // Agent-written text: invisible characters shown, as in the dialog.
+      agent: revealInvisibleText(caller?.messagingName || caller?.customName || callerPaneId),
+      account: accountLabel(cliProfilesApi, agentKey, profileId, i18n.global.t),
+      reason: revealInvisibleText(String(args.reason ?? '')),
+    }),
+    { type: 'info' },
+  )
+  return outcome
+}
+
+// MCP cli_account_switch (ui.accounts.switch — on the bus, never in the
+// command registry; plan mcp_614482 P3): nothing switches until the user says
+// yes in AgentAccountSwitchConfirmDialog. The switch itself is the window's
+// own cliAccountSwitch, called with the vendor and the account only — no
+// force, no option — so its own restart and live-drift questions still go to
+// the user. The follow-switch offer is the user's own flow and is not made here.
+const agentAccountSwitchConfirm = createSignInConfirm<AgentAccountSwitchConfirmRequest>()
+async function agentAccountSwitch(args: Record<string, unknown>, callerPaneId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const outcome = await runAgentAccountSwitch(args, callerPaneId, {
+    accounts: cliProfilesApi,
+    callerPane: (id) => {
+      const pane = panes.value.find((p) => p.id === id)
+      return pane ? { workspacePath: pane.workspacePath, name: pane.messagingName || pane.customName || id } : undefined
+    },
+    accountLabel: (key, id) => accountLabel(cliProfilesApi, key, id, i18n.global.t),
+    confirm: agentAccountSwitchConfirm.ask,
+    switchAccount: (agentKey, profileId) => cliAccountSwitch(agentKey, profileId),
+    now: () => Date.now(),
+  }, signal)
+  if (outcome.status !== 'switched' && outcome.status !== 'switched-signed-out') return outcome
+  const caller = panes.value.find((p) => p.id === callerPaneId)
+  notifyRestore.toast(
+    i18n.global.t('settings.accounts.cli.agent-switch-done', {
+      // Agent-written text: invisible characters shown, as in the dialog.
+      agent: revealInvisibleText(caller?.messagingName || caller?.customName || callerPaneId),
+      vendor: String(args.agentKey ?? ''),
+      from: String(outcome.from ?? ''),
+      to: String(outcome.to ?? ''),
+      reason: revealInvisibleText(String(args.reason ?? '')),
+    }),
+    { type: 'info' },
+  )
+  return outcome
+}
 
 // Single source of truth for the 'modalOpen' keybinding context. Hoisted so
 // the watches below can share it; only ever CALLED after setup completes, so
@@ -12121,12 +12401,14 @@ async function restoreWorkspacePanes(payload: ProjectPayload, workspacePath: str
         ? stripDeadOpencodeAutoFlag(saved.agent, saved.command) : ''
       const fallbackCommand = savedFallbackCommand
       const commandOverride = resumeCmd || fallbackCommand || ''
+      const restorePin = await restoreSpawnPin(saved.profile_id, accountFollow.has(saved.pane_id), followDirSignedIn, restorePinGate(saved.pane_id))
+      if (isStale?.() || !isLocalWorkspace(workspacePath)) return
       const restored = await spawnRestoredPane({
         saved,
         workspacePath,
         runGroupId: runGroupId || undefined,
         sessionHomeId,
-        profileId: accountSpawnPin(saved.profile_id, accountFollow.has(saved.pane_id), followDirSignedIn),
+        profileId: restorePin,
         commandOverride,
         fallbackCommand,
         isResume,
@@ -12646,6 +12928,8 @@ async function performRealizeRestoredPane(
       : ''
     const fallbackCommand = isResume ? savedFallbackCommand : stripPinnedSessionId(savedFallbackCommand)
     const commandOverride = resumeCmd || fallbackCommand || ''
+    const restorePin = await restoreSpawnPin(saved.profile_id, accountFollow.has(saved.pane_id), followDirSignedIn, restorePinGate(saved.pane_id))
+    if (!deferredPaneStillCurrent(paneId, deferred)) return 'superseded'
     const wasMinimized = minimizedPanes.value.has(paneId)
     const wasMuted = isPaneMuted(paneId)
     const restored = await spawnRestoredPane({
@@ -12654,7 +12938,7 @@ async function performRealizeRestoredPane(
       runGroupId: placeholder.runGroupId || undefined,
       spawnedBy: placeholder.spawnedBy,
       sessionHomeId: placeholder.sessionHomeId,
-      profileId: accountSpawnPin(saved.profile_id, accountFollow.has(saved.pane_id), followDirSignedIn),
+      profileId: restorePin,
       commandOverride,
       fallbackCommand,
       isResume,
@@ -13518,6 +13802,7 @@ async function activateStage(index: number): Promise<void> {
         index, slot.label) +
       sessionMarkerLine(pane.sessionMarker)
     pipelineLog(`${tag} ➜ injecting kickoff (${kickoff.length} chars)`)
+    let held = false
     const kickoffResult = await runPipelineKickoff({
       inject: async () => {
         const evidence: { echo?: EchoEvidence | null; submit?: SubmitEvidence | null } = {}
@@ -13526,14 +13811,32 @@ async function activateStage(index: number): Promise<void> {
       },
       sleep,
       paneAlive: () => paneAlive(pane.id),
-      onHeld: () => pipelineLog(`${tag} ✕ kickoff reached the input box but never submitted — not resending`),
+      onHeld: () => {
+        held = true
+        pipelineLog(`${tag} ✕ kickoff reached the input box but never submitted — not resending`)
+      },
       onRetry: (attempt) => pipelineLog(`${tag} ✕ kickoff injection failed (attempt ${attempt}/${MAX_KICKOFF_ATTEMPTS}) — retrying in 3s`),
+      // A resume after a held kickoff: submit the copy still in the box.
+      heldCopy: heldKickoffCopy(pane.id, kickoff),
     })
     if (kickoffResult.cancelled) {
       releaseStageSlot(index, pane.id, `slot "${slot.label}" pane gone before its watcher armed`)
       return
     }
     const ok = kickoffResult.sent
+    const failure = held
+      ? 'kickoff is waiting in the input box: leave it and resume submits it, or clear it'
+      : `kickoff never reached the agent after ${MAX_KICKOFF_ATTEMPTS} attempts`
+    // Another slot failed the run (or the user stopped it) while this kickoff
+    // was in flight: record nothing and arm nothing for a run that is over.
+    const runMovedOn = (): boolean => pipeline.state !== 'running' || pipeline.stageIndex !== index
+    if (runMovedOn()) {
+      if (!ok) {
+        if (held) heldKickoffPanes.add(pane.id)
+        void failRunOnKickoff(index, slot.label, failure, held)
+      }
+      return
+    }
     // Wire the Manager router HERE — the first statement after the kickoff
     // injection resolves, ahead of the render sync and the two backend round
     // trips below. The floor must be taken after the kickoff (its echo carries
@@ -13548,9 +13851,8 @@ async function activateStage(index: number): Promise<void> {
     // the floor. When ok is false the echo was never observed and may still be
     // in flight (this app has a known late paste-ack), and a floor taken now
     // would sit below it — putting the protocol's sentinels back above the
-    // floor, which is the failure the floor exists to prevent. That case takes
-    // the deferred arm after the round trips below, which is the position this
-    // used to have for every slot.
+    // floor, which is the failure the floor exists to prevent. That case ends
+    // the run below instead (#448), so no floor is taken for it.
     if (managerSlot) {
       const router = ensureStageRouter(index)
       if (slot === managerSlot) router.managerPaneId = pane.id
@@ -13566,11 +13868,8 @@ async function activateStage(index: number): Promise<void> {
       slot_label: slot.label,
       kickoff_status: ok ? 'sent' : 'failed',
     })
-    if (!ok) {
-      pipelineLog(`${tag} ✕ kickoff injection failed after ${MAX_KICKOFF_ATTEMPTS} attempts — arming watcher anyway`)
-    } else {
-      pipelineLog(`${tag} ✓ kickoff sent`)
-    }
+    if (ok) pipelineLog(`${tag} ✓ kickoff sent`)
+    else pipelineLog(`${tag} ✕ kickoff injection failed after ${MAX_KICKOFF_ATTEMPTS} attempts`)
 
     // For question-interactive stages (P01): capture scanFrom AFTER kickoff is
     // confirmed so the watcher only scans content produced after the kickoff.
@@ -13582,6 +13881,16 @@ async function activateStage(index: number): Promise<void> {
 
     // Notify backend: mark this stage running (and previous completed).
     // Same role as pipeline.stage_spawn in the old spawnPipelineStage flow.
+    // A failed kickoff sends it too, before failing the run: it is the only
+    // call that marks the previous stage completed, and without it a resume
+    // re-ran that stage instead of this one (#448).
+    if (runMovedOn()) {
+      if (!ok) {
+        if (held) heldKickoffPanes.add(pane.id)
+        void failRunOnKickoff(index, slot.label, failure, held)
+      }
+      return
+    }
     const stageResp = await sendQuiet<ProjectPayload>('pipeline.stage_spawn', {
       workspace_path: pipeline.workspacePath,
       stage_index: index,
@@ -13591,16 +13900,20 @@ async function activateStage(index: number): Promise<void> {
     })
     applyProjectPaths(stageResp ?? undefined)
 
-    // Deferred floor for an unverified kickoff — see the note above the router
-    // wiring. The round trips just awaited are the settle time a late echo
-    // needs to land below it.
-    if (managerSlot && !ok) {
-      const router = ensureStageRouter(index)
-      armRouterCursors(router, pane.id)
+    if (!ok) {
+      // A slot without its task cannot finish the stage, and a watcher armed
+      // over it kept the run `running` with nothing to show for it (#448).
+      if (held) heldKickoffPanes.add(pane.id)
+      await failRunOnKickoff(index, slot.label, failure, held)
+      return
     }
-
+    if (runMovedOn()) return
     startStageWatcher(index, pane.id, kickoffScanFrom)
   }))
+
+  // A run failed by one of this stage's kickoffs is over: no router poll, and
+  // no CLIs spawned for a next stage it will never reach.
+  if (pipeline.state !== 'running' || pipeline.stageIndex !== index) return
 
   if (managerSlot) {
     startRouterPoll(index)
@@ -13983,6 +14296,72 @@ async function onPipelineAbort(): Promise<void> {
   applyProjectPaths(resp ?? undefined)
   // Refresh existingProject so the Resume banner appears immediately in the
   // same session without requiring the user to switch workspaces and back.
+  if (pipeline.workspacePath) await onWorkspaceCheck(pipeline.workspacePath)
+}
+
+/** Panes whose last pipeline kickoff was held in their input box, unsent
+ *  (#448). A resume must not paste the same kickoff on top of that copy. */
+const heldKickoffPanes = new Set<string>()
+
+/** For a pane in heldKickoffPanes (the flag is consumed): read whether the
+ *  box still holds this kickoff, and submit it with Enter — the same framed-box
+ *  check the spawn kickoff trusts. undefined for every other pane. */
+function heldKickoffCopy(paneId: string, text: string): { holds: () => boolean; submit: () => Promise<boolean> } | undefined {
+  if (!heldKickoffPanes.delete(paneId)) return undefined
+  const tail = normalizeForMatch(text).slice(-TAIL_MATCH_LEN)
+  const screenTail = (): string => {
+    const read = paneRefs[paneId]?.readScreenTail as ((n: number) => string) | undefined
+    return read ? read(SUBMIT_SCREEN_LINES) : ''
+  }
+  return {
+    holds: () => composerHoldsPayload(screenTail(), tail),
+    submit: () => submitHeldCopy({
+      held: () => framedComposerHolds(screenTail(), tail),
+      pressEnter: async () => {
+        const sid = paneRefs[paneId]?.sessionId
+        if (!sid || !paneAlive(paneId)) return false
+        try {
+          await backend.send('terminal.input', { terminal_session_id: sid, data: '\r' })
+          return true
+        } catch {
+          return false
+        }
+      },
+      sleep,
+      now: Date.now,
+      confirmMs: SUBMIT_CONFIRM_MS,
+    }),
+  }
+}
+
+/** A slot's kickoff never reached its agent: fail its node with the reason and
+ *  end the run as failed, instead of leaving it `running` around a pane that
+ *  never got its task (#448). Like an abort, the panes stay alive for a
+ *  resume. The first failing slot ends the run; later ones only fail their
+ *  own node. */
+async function failRunOnKickoff(stageIndex: number, slotLabel: string, reason: string, held = false): Promise<void> {
+  // A kickoff that finishes late, after the user stopped this run and another
+  // one moved to a different stage, must not fail that one.
+  if (pipeline.state === 'running' && pipeline.stageIndex !== stageIndex) return
+  pipelineDag.slotFailed(stageIndex, slotLabel, reason)
+  if (pipeline.state !== 'running') return
+  const stageLabel = stagesApi.stages.value[stageIndex]?.id ?? String(stageIndex + 1)
+  pipelineLog(`Stage ${stageLabel}/${slotLabel} ✕ ${reason} — pipeline failed`)
+  tearDownPipelineOrchestration()
+  await pipelineDag.end('failed', `run stopped: slot "${slotLabel}" failed (${reason})`)
+  const resp = await sendQuiet<ProjectPayload>('pipeline.abort', {
+    workspace_path: pipeline.workspacePath,
+    reason: 'failed'
+  })
+  applyProjectPaths(resp ?? undefined)
+  // A held kickoff is left for resume to submit: one sent by hand would be
+  // pasted again by the resume.
+  notifyRestore.toast(
+    held
+      ? i18n.global.t('error.pipeline-kickoff-held', { stage: stageLabel, slot: slotLabel })
+      : i18n.global.t('error.pipeline-kickoff-failed', { stage: stageLabel, slot: slotLabel, reason }),
+    { type: 'error' },
+  )
   if (pipeline.workspacePath) await onWorkspaceCheck(pipeline.workspacePath)
 }
 
@@ -14405,7 +14784,7 @@ const sessionGhostHealGate = createGhostHealGate(async (paneId, pinnedSessionId)
 // is working; turn_complete = its turn ended. We timestamp both per pane; the
 // completion logic reads these instead of guessing from the TUI buffer.
 backend.on('agent.activity', (raw) => {
-  const ev = raw as { event_type?: string; pane_id?: string; vendor?: string; session_id?: string; detail?: string; text?: string; timestamp?: string; notification_type?: string; superseded?: boolean; pending_subagents?: number }
+  const ev = raw as { event_type?: string; pane_id?: string; vendor?: string; session_id?: string; detail?: string; text?: string; timestamp?: string; notification_type?: string; tool_key?: string; superseded?: boolean; pending_subagents?: number }
   if (!ev?.pane_id) return
   // QUESTION badge: "the agent asked you something and is waiting". Decided in
   // one place for both event types because both carry a half of it — the turn
@@ -14543,8 +14922,10 @@ backend.on('agent.activity', (raw) => {
   } else if (ev.event_type === 'agent_active') {
     // idle_prompt fires about a minute after EVERY finished turn: the pane is
     // waiting, not working. Stamping the clocks with it made isTurnInFlight
-    // read a finished pane as mid-turn and hold its queued messages.
-    if (ev.notification_type !== 'idle_prompt') {
+    // read a finished pane as mid-turn and hold its queued messages. A tool
+    // result (async hook) can land after Stop for the same effect, and only
+    // releases a permission hold below.
+    if (ev.notification_type !== 'idle_prompt' && !isToolResultHook(ev.detail)) {
       // First activity after the last turn end = this turn's start. The quota
       // failover's settle needs it: a turn that began under the old account and
       // finished under the new one is the old account's work.
@@ -14587,8 +14968,9 @@ backend.on('agent.activity', (raw) => {
         requestLlmPaneName(ev.pane_id, ev.text)
       }
     }
-    // A new turn re-arms 'done' notifications for this pane.
-    sysNotify.markActive(ev.pane_id)
+    // A new turn re-arms 'done' notifications for this pane. A late tool result
+    // is not one: it would clear the Dock badge the finished turn raised.
+    if (!isToolResultHook(ev.detail)) sysNotify.markActive(ev.pane_id)
     // Claude's Notification hook (user attention requested) arrives as
     // agent_active with detail 'hook:notification'. It is also the only signal
     // that separates "parked on the user" from "done": the prompt paints once
@@ -14605,7 +14987,10 @@ backend.on('agent.activity', (raw) => {
       // once per turn on top of the existing done notification. Builds that
       // send no type at all keep the old always-notify behaviour rather than
       // silently losing a signal the user may already rely on.
-      if (awaiting || !ev.notification_type) notifyAttention(ev.pane_id)
+      // One permission box reports through this hook AND PermissionRequest, in
+      // either order: chime only for whichever lands first.
+      const alreadyWaiting = awaiting && paneRefs[ev.pane_id]?.permissionWaitLive?.() === true
+      if ((awaiting && !alreadyWaiting) || !ev.notification_type) notifyAttention(ev.pane_id)
       if (awaiting) {
         paneRefs[ev.pane_id]?.markNeedsInput?.()
       } else if (notificationEndsAwaiting(ev.notification_type)) {
@@ -14614,6 +14999,19 @@ backend.on('agent.activity', (raw) => {
         // stays excluded from messaging and dispatch — indefinitely.
         paneRefs[ev.pane_id]?.clearNeedsInput?.()
       }
+    }
+    // Claude's PermissionRequest hook opens a hold on AWAITING that the box's own
+    // repaints cannot settle away; see permissionHoldActionFor for what ends it.
+    const holdAction = permissionHoldActionFor(
+      ev,
+      paneRefs[ev.pane_id]?.awaitingHeld?.() ?? { since: 0, key: '' },
+    )
+    if (holdAction === 'hold') {
+      // The Notification hook may have reported this same box first.
+      if (paneRefs[ev.pane_id]?.permissionWaitLive?.() !== true) notifyAttention(ev.pane_id)
+      paneRefs[ev.pane_id]?.holdNeedsInput?.(ev.tool_key ?? '')
+    } else if (holdAction === 'release') {
+      paneRefs[ev.pane_id]?.releaseNeedsInputHold?.()
     }
     // Clear the restore-mode badge once the user interacts with the pane.
     const histEntry = spawnHistory.value.find((e) => e.paneId === ev.pane_id)
@@ -14974,6 +15372,21 @@ async function onPluginAgentUndo(action: PluginAgentAnnouncementAction): Promise
   try {
     // Only what the agent did: if the user changed it since, leave it be.
     const installed = (await window.agentTeam?.plugins?.listInstalled?.()) ?? []
+    if (action.kind === 'plugin-agent-downgrade') {
+      // O1: back to the version an agent's update replaced.
+      const step = pluginAgentDowngradeStep(action, installed)
+      if (step === null) {
+        notifyRestore.toast(i18n.global.t('plugin-agent.notice.undo-stale'), { type: 'info' })
+        return
+      }
+      if (step === 'discard') await window.agentTeam?.plugins?.discardCandidate?.(action.pluginId)
+      else await window.agentTeam?.plugins?.rollback?.(action.pluginId)
+      notifyRestore.toast(
+        i18n.global.t('plugin-agent.notice.downgraded', { plugin: action.pluginId, version: action.fromVersion }),
+        { type: 'info' },
+      )
+      return
+    }
     if (!pluginAgentUndoApplies(action, installed)) {
       notifyRestore.toast(i18n.global.t('plugin-agent.notice.undo-stale'), { type: 'info' })
       return
@@ -15215,6 +15628,7 @@ backend.on('cli_profiles.changed', (raw) => {
     forced?: boolean
     harvestedProfileIds?: string[]
     identities?: Record<string, Record<string, { email?: string | null }>>
+    accountDirs?: Record<string, Record<string, { signedIn?: boolean }>>
     defaults?: Record<string, string | null>
     hotSwitchedPanes?: HotSwitchedPane[]
   }
@@ -15245,12 +15659,31 @@ backend.on('cli_profiles.changed', (raw) => {
     return
   }
   if (ev?.reason !== 'login-harvest') return
+  // The broadcast carries the own-folder state it was sent with; the
+  // composable's copy may not have taken it yet.
+  const dirSignedIn = (id: string): boolean =>
+    (ev.accountDirs?.[FOLLOW_SWITCH_AGENT]?.[id]?.signedIn ?? followDirSignedIn(id)) === true
   for (const profileId of ev.harvestedProfileIds ?? []) {
     const pending = pendingLoginPanes.get(profileId)
     if (!pending) continue
+    // The own-folder pane stays open until its folder reads signed in.
+    if (pending.step === 'dir' && !dirLoginLanded(pending, profileId, dirSignedIn)) continue
     pendingLoginPanes.delete(profileId)
     if (panes.value.some((p) => p.id === pending.paneId)) void onKill(pending.paneId)
     const email = ev.identities?.[pending.agentKey]?.[profileId]?.email || ''
+    if (chainsDirLogin(pending, profileId, dirSignedIn, cliProfilesApi.defaultProfileId(pending.agentKey))) {
+      void startDirLoginStep(pending.agentKey, profileId, email)
+      continue
+    }
+    if (pending.step === 'dir') {
+      notifyRestore.toast(
+        email
+          ? i18n.global.t('settings.accounts.cli.login-step2-done', { email })
+          : i18n.global.t('settings.accounts.cli.login-step2-done-no-email'),
+        { type: 'success' }
+      )
+      continue
+    }
     notifyRestore.toast(
       email
         ? i18n.global.t('settings.accounts.cli.login-complete', { email })
@@ -15259,6 +15692,74 @@ backend.on('cli_profiles.changed', (raw) => {
     )
   }
 })
+
+// Step two of a Claude Settings sign-in: the same own-folder login pane the
+// account badge opens. Only once it is open is the user told to authorize
+// once more and the one-time reminder spent; a pane that does not open says
+// so and leaves the reminder for later.
+const dirLoginStarting = new Set<string>()
+async function startDirLoginStep(agentKey: string, profileId: string, email: string): Promise<void> {
+  dirLoginStarting.add(profileId)
+  try {
+    if (!(await onCliLoginSpawn(agentKey, undefined, { accountDirProfileId: profileId }))) {
+      notifyRestore.toast(
+        email
+          ? i18n.global.t('settings.accounts.cli.login-step2-failed', { email })
+          : i18n.global.t('settings.accounts.cli.login-step2-failed-no-email'),
+        { type: 'error', duration: 15000 }
+      )
+      return
+    }
+  } finally {
+    dirLoginStarting.delete(profileId)
+  }
+  const reminded = loadDirLoginReminded()
+  reminded.add(profileId)
+  saveDirLoginReminded(reminded)
+  notifyRestore.toast(
+    email
+      ? i18n.global.t('settings.accounts.cli.login-step2', { email })
+      : i18n.global.t('settings.accounts.cli.login-step2-no-email'),
+    { type: 'info', duration: 20000 }
+  )
+}
+
+// An own-folder login pane closed before its folder signed in: the account
+// keeps running on the shared login, so only say how to finish later.
+function noteSkippedDirLogins(livePaneIds: ReadonlySet<string>): void {
+  for (const profileId of skippedDirLogins(pendingLoginPanes, livePaneIds)) {
+    pendingLoginPanes.delete(profileId)
+    const email = cliProfilesApi.identityFor(FOLLOW_SWITCH_AGENT, profileId)?.email || ''
+    notifyRestore.toast(
+      email
+        ? i18n.global.t('settings.accounts.cli.login-step2-skipped', { email })
+        : i18n.global.t('settings.accounts.cli.login-step2-skipped-no-email'),
+      { type: 'info', duration: 15000 }
+    )
+  }
+}
+watch(() => panes.value.map((p) => p.id), (ids) => noteSkippedDirLogins(new Set(ids)))
+
+// Claude accounts signed in before the two-step sign-in existed: reminded
+// once that their own folder still needs a sign-in. Nothing converts them.
+function remindDirLogins(): void {
+  if (!cliProfilesApi.loaded.value) return
+  const reminded = loadDirLoginReminded()
+  const ids = dirLoginReminderTargets(
+    cliProfilesApi.profilesForAgent(FOLLOW_SWITCH_AGENT).map((p) => p.id).filter((id) => !pendingLoginPanes.has(id) && !dirLoginStarting.has(id)),
+    (id) => cliProfilesApi.identityFor(FOLLOW_SWITCH_AGENT, id)?.signedIn === true,
+    followDirSignedIn,
+    reminded,
+  )
+  if (ids.length === 0) return
+  for (const id of ids) reminded.add(id)
+  saveDirLoginReminded(reminded)
+  notifyRestore.toast(
+    i18n.global.t('settings.accounts.cli.dir-remind', { count: ids.length }),
+    { type: 'info', duration: 20000 }
+  )
+}
+watch([cliProfilesApi.loaded, cliProfilesApi.accountDirs, cliProfilesApi.identities], remindDirLogins)
 
 // Guided install request currently on screen (null = none). One dialog at a
 // time: several panes of the same CLI exiting 127 together (e.g. a pipeline
@@ -20217,16 +20718,17 @@ const effectiveLayoutMode = computed<'grid' | 'spotlight' | 'sidebar' | 'fullscr
 // are a step change in width, and widening makes xterm reflow the scrollback.
 // A CLI that paints absolute-positioned full-width rows (claude) can never
 // repaint what reflow strands there — its redraw addresses the viewport only —
-// so the garbled history is permanent. Cap each pane at its grid-mode width on
-// the way in: the extra space is left blank instead of becoming columns, and
-// switching back is then a no-op resize. Set before the fit below, which is
-// what reads the cap. Panes stay uncapped in grid mode, where the container is
-// the width the user actually chose.
+// so the garbled history is permanent. Cap each pane at the cols it has now
+// (its grid-mode width, or the current width when switching between stage
+// modes) on the way in: the extra space is left blank instead of becoming
+// columns, and switching back to grid is then a no-op resize. Set before the
+// fit below, which is what reads the cap. Panes stay uncapped in grid mode,
+// where the container is the width the user actually chose. Widening the
+// window itself past the width it had on entry lifts the cap (see
+// onWindowResize) — and a pane that was lifted reflows when it goes back to
+// grid, the accepted cost of widening.
 watch(effectiveLayoutMode, (mode) => {
-  const capped = mode !== 'grid'
-  for (const ref of Object.values(paneRefs)) {
-    (ref as unknown as { lockCols?: (locked: boolean) => void })?.lockCols?.(capped)
-  }
+  stageWidthCap.enterMode(mode)
   void nextTick(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -21148,6 +21650,18 @@ function paneIsCommander(p: ActivePane): boolean {
   <!-- An agent's skills_install waits here for the user's approval. -->
   <SkillInstallApprovalDialog :backend="backend" />
   <PluginAgentRequestDialog :backend="backend" />
+  <!-- An agent's cli_account_sign_in waits here for the user's yes. -->
+  <AgentSignInConfirmDialog
+    v-if="agentSignInConfirm.pending.value"
+    :request="agentSignInConfirm.pending.value"
+    @answer="agentSignInConfirm.answer"
+  />
+  <!-- An agent's cli_account_switch waits here for the user's yes. -->
+  <AgentAccountSwitchConfirmDialog
+    v-if="agentAccountSwitchConfirm.pending.value"
+    :request="agentAccountSwitchConfirm.pending.value"
+    @answer="agentAccountSwitchConfirm.answer"
+  />
   <RestoreScopeModal
     v-if="showRestoreScopeModal"
     :open="showRestoreScopeModal"

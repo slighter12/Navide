@@ -12,6 +12,10 @@
  *   A digit selects that option; Esc is the menu's "No" choice.
  * - aider: a line prompt "(Y)es/(N)o … [Yes]:" answered with y/n + Enter.
  *   It has no option menus.
+ * - grok: its folder-trust prompt ("Yes, proceed y / No, quit n") takes the
+ *   hotkey alone, no Enter. "No, quit" exits the CLI — that is the prompt's
+ *   own No. It has no other prompt Navide can see. Its "Yes" is refused:
+ *   Grok keeps the folder trusted for good, so it is a permanent allow.
  *
  * A permanent-allow option ("don't ask again", "always allow", "for this
  * session" …) is never pressed from here: that choice is made at the computer.
@@ -25,6 +29,10 @@ export type AnswerKeys = { ok: true; keys: string } | { ok: false; error: string
 
 const MENU_VENDORS = new Set(['claude', 'codex'])
 const LINE_PROMPT_VENDORS = new Set(['aider'])
+const HOTKEY_VENDORS = new Set(['grok'])
+// Vendors whose "allow" is always permanent. Keep in sync with
+// PERMANENT_ALLOW_AGENTS in backend/agent_team_backend/channels/relay.py.
+const PERMANENT_ALLOW_VENDORS = new Set(['grok'])
 
 const ESC = '\x1b'
 const MENU_LINE = /^\s*(?:[❯›>]\s*)?(\d)\.\s+(.+?)\s*$/
@@ -36,6 +44,8 @@ const PERMANENT_ALLOW = new RegExp(
     '\\balways\\b',
     '\\b(?:this|the) session\\b',
     '\\bauto[- ]?accept',
+    // "Yes, and switch to auto mode": auto mode then approves every later prompt.
+    '\\bauto mode\\b',
     '\\ballow all\\b',
     '\\bpermanent',
     '不再詢問|不再询问|一律允許|一律允许|自動核准|自动批准|總是允許|总是允许|始終允許|始终允许',
@@ -119,6 +129,13 @@ export function resolveAnswerKeys(input: {
   if (LINE_PROMPT_VENDORS.has(agentKey)) {
     if (answer.kind !== 'permission') return { ok: false, error: `unsupported for ${agentKey}` }
     return { ok: true, keys: answer.choice === 'allow' ? 'y\r' : 'n\r' }
+  }
+  if (HOTKEY_VENDORS.has(agentKey)) {
+    if (answer.kind !== 'permission') return { ok: false, error: `unsupported for ${agentKey}` }
+    if (answer.choice === 'allow' && PERMANENT_ALLOW_VENDORS.has(agentKey)) {
+      return { ok: false, error: 'trusting a folder allows permanently' }
+    }
+    return { ok: true, keys: answer.choice === 'allow' ? 'y' : 'n' }
   }
   if (!MENU_VENDORS.has(agentKey)) return { ok: false, error: `unsupported for ${agentKey}` }
 

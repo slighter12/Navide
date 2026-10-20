@@ -126,6 +126,7 @@ BUSY_BUTTONS = [("↩️ 撤回排隊中的訊息", CANCEL_CALLBACK), ("⏹ 中�
 MSG_UNBOUND = "🔌 這個聊天室已和 pane「{name}」中斷連接，之後的訊息不會再送進 pane。"
 MSG_BOUND = "🔗 已連接 pane「{name}」，在這裡傳的訊息會送進這個 pane；傳 stop 可以中斷。"
 MSG_CHAT_TAKEN = "這個聊天室已連接到另一個 pane，請先在那個 pane 解除連接"
+MSG_LOGIN_PANE = "這個 pane 正在登入 CLI 帳號，畫面上有授權網址或代碼，不能連接到聊天室"
 MSG_UNBOUND_CLOSED = "🔌 pane「{name}」已關閉，這個聊天室已中斷連接。"
 MSG_QUEUE_FULL = "⚠️ 這個 pane 已有太多訊息在排隊，請稍後再傳"
 MSG_CHAT_RATE = "⚠️ 1 分鐘內傳了超過 {max} 則，這則沒有送進 pane，請 {wait} 秒後重送"
@@ -228,6 +229,9 @@ class Seams:
     # pane_id -> {until: ms | None, buffer: str}: the pane's usage-limit reading and screen
     # tail, via the UI probe; read-only, never a quota fetch
     limit_info: Callable[[str], Awaitable[dict[str, Any]]] = lambda _pane_id: _no_limit()
+    # pane_id -> True for a CLI sign-in pane (login_panes): never bound, its screen
+    # holds an authorization URL or code
+    is_login_pane: Callable[[str], bool] = lambda _pane_id: False
     # msg_key -> its settled status after asking the window to withdraw it ("cancelled" when it
     # did; "delivered"/"failed" when too late; "queued" when no window answered; "unknown")
     cancel: Callable[[str], Awaitable[str]] = lambda _msg_key: _no_cancel()
@@ -1136,6 +1140,8 @@ class ChannelManager:
         if not current:
             return {"ok": False, "error": "pane not found"}
         pane_id = current
+        if self._seams.is_login_pane(pane_id):
+            return {"ok": False, "error": MSG_LOGIN_PANE}
         adapter = self._adapters.get((platform, account))
         if adapter is None:
             return {"ok": False, "error": f"{_bot_label((platform, account))} is not connected"}
@@ -1598,15 +1604,19 @@ class ChannelManager:
             self.store.rename_pane(binding.pane_id, pane_id)
         self._spawn(self._remember_wake_target(binding, pane_id))
         key = binding.location().key()
-        if wake_pressed or key in self._wake_kept:
-            # The pane is back (on its own, or a wake button from before it came back): what
+        # A typed /wake (offered where there are no buttons) is answered like the button, never
+        # sent to the CLI as a prompt.
+        wake_asked = wake_pressed or _command_word(
+            quick_menu.strip_mention(msg.text, self._identity(msg))) in WAKE_WORDS
+        if wake_asked or key in self._wake_kept:
+            # The pane is back (on its own, or a wake asked for before it came back): what
             # was kept for it goes in first, in order.
             lang = prompt_skills.language(await self._ui_settings())
-            if wake_pressed:
+            if wake_asked:
                 await self._reply(msg, wake.text(lang, "already_online"))
-            # A new message follows unless this was the button: it keeps its place in the queue.
-            await self._deliver_kept(msg, binding, pane_id, lang, reserve=0 if wake_pressed else 1)
-            if wake_pressed:
+            # A new message follows unless this was a wake: it keeps its place in the queue.
+            await self._deliver_kept(msg, binding, pane_id, lang, reserve=0 if wake_asked else 1)
+            if wake_asked:
                 return
         # "<@bot> stop" or "@bot /cancel" is the command, addressed to the bot.
         command = quick_menu.strip_mention(msg.text, self._identity(msg))
@@ -2966,7 +2976,8 @@ class ChannelManager:
             self._awaiting_shown[pane_id] = _Shown(prompt)
             return
         self._retire_relay(pane_id, MSG_RELAY_SUPERSEDED)  # one live request per pane
-        request = self.relay.create(pane_id, kind, options, loc, prompt=prompt)
+        request = self.relay.create(pane_id, kind, options, loc, prompt=prompt,
+                                    agent_key=str(info.get("agent") or ""))
         text = who + relay.prompt_text(request, prompt)
         buttons = relay.buttons_for(request) if adapter.capabilities.buttons else None
         try:
@@ -3096,8 +3107,9 @@ class ChannelManager:
         for b in self.store.bindings():
             entry = bot(b.platform, b.account)
             # A chat bound under another token (or never seen again) still shows up.
+            # Untitled: a binding's title is the pane's name at bind time, not the chat's.
             chat = entry["chats"].setdefault(b.chat_id, {
-                "chat_id": b.chat_id, "title": "" if b.thread_id else b.title, "kind": "",
+                "chat_id": b.chat_id, "title": "", "kind": "",
                 "supports_topics": bool(b.thread_id), "bindings": []})
             pane = self._pane_info(b, directory)
             chat["bindings"].append({**b.public(), "pane_id": self._seams.resolve_pane(b.pane_id) or b.pane_id,

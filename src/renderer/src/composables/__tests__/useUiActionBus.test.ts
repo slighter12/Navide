@@ -612,3 +612,131 @@ describe('useUiActionBus — announcing the bus to the backend', () => {
     expect(sent.filter((s) => s.type === 'ui.invoke.ready')).toHaveLength(ready.length)
   })
 })
+
+// ui.accounts.* is reachable from MCP only, through its dedicated tools: the
+// window never registers it in the command registry (so no keybinding and no
+// ui_list_actions entry can reach it), and the bus hands it to the account
+// actions App.vue provides, with the caller pane taken from the credential.
+describe('useUiActionBus — account actions', () => {
+  function setup(signIn = vi.fn(async () => ({ status: 'started', loginPaneId: 'login-1' }))) {
+    const { backend, emit, sent } = createMockBackend()
+    useUiActionBus({ backend, currentWorkspace: ref('/ws'), buildSnapshot: () => ({}), accountActions: { signIn } })
+    return { signIn, sent, emit }
+  }
+
+  it('hands ui.accounts.signIn to the account actions with the caller pane', async () => {
+    const { signIn, sent, emit } = setup()
+    const args = { agentKey: 'codex', profileId: 'p-2', mode: 'isolated', reason: 'out of quota' }
+    emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.signIn', args, caller_pane_id: 'pa', addressed: true }))
+    await flush()
+    expect(signIn).toHaveBeenCalledWith(args, 'pa', expect.any(AbortSignal))
+    const reply = sent.find((s) => s.type === 'ui.invoke.result')
+    expect(reply?.payload).toMatchObject({ ok: true, result: { status: 'started', loginPaneId: 'login-1' } })
+  })
+
+  it('refuses a caller with no pane', async () => {
+    const { signIn, sent, emit } = setup()
+    emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.signIn', args: {}, addressed: true }))
+    await flush()
+    expect(signIn).not.toHaveBeenCalled()
+    const reply = sent.find((s) => s.type === 'ui.invoke.result')
+    expect(reply?.payload).toMatchObject({ ok: false })
+  })
+
+  it('never runs a registered command of that name', async () => {
+    const registered = vi.fn(() => 'ran')
+    registerCommand('ui.accounts.signIn', registered)
+    const { backend, emit, sent } = createMockBackend()
+    useUiActionBus({ backend, currentWorkspace: ref('/ws'), buildSnapshot: () => ({}) })
+    emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.signIn', args: {}, caller_pane_id: 'pa', addressed: true }))
+    await flush()
+    expect(registered).not.toHaveBeenCalled()
+    expect(sent.find((s) => s.type === 'ui.invoke.result')?.payload).toMatchObject({ ok: false })
+  })
+
+  it('refuses an unknown account action', async () => {
+    const { signIn, sent, emit } = setup()
+    emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.remove', args: {}, caller_pane_id: 'pa', addressed: true }))
+    await flush()
+    expect(signIn).not.toHaveBeenCalled()
+    expect(sent.find((s) => s.type === 'ui.invoke.result')?.payload).toMatchObject({ ok: false })
+  })
+
+  // Plan mcp_614482 P3: cli_account_switch reaches the window's switch the
+  // same way, with the caller pane and the withdrawal signal.
+  it('hands ui.accounts.switch to the account actions with the caller pane', async () => {
+    const { backend, emit, sent } = createMockBackend()
+    const signIn = vi.fn()
+    const switchAccount = vi.fn(async () => ({ status: 'switched', from: 'A', to: 'B' }))
+    useUiActionBus({ backend, currentWorkspace: ref('/ws'), buildSnapshot: () => ({}), accountActions: { signIn, switch: switchAccount } })
+    const args = { agentKey: 'claude', profileId: 'p-2', reason: 'out of quota' }
+    emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.switch', args, caller_pane_id: 'pa', addressed: true }))
+    await flush()
+    expect(switchAccount).toHaveBeenCalledWith(args, 'pa', expect.any(AbortSignal))
+    expect(signIn).not.toHaveBeenCalled()
+    expect(sent.find((s) => s.type === 'ui.invoke.result')?.payload).toMatchObject({ ok: true, result: { status: 'switched' } })
+  })
+
+  it('refuses ui.accounts.switch from a caller with no pane, or with no switch action', async () => {
+    const { backend, emit, sent } = createMockBackend()
+    const switchAccount = vi.fn()
+    useUiActionBus({ backend, currentWorkspace: ref('/ws'), buildSnapshot: () => ({}), accountActions: { signIn: vi.fn(), switch: switchAccount } })
+    emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.switch', args: {}, addressed: true }))
+    await flush()
+    expect(switchAccount).not.toHaveBeenCalled()
+    expect(sent.find((s) => s.type === 'ui.invoke.result')?.payload).toMatchObject({ ok: false })
+
+    const other = createMockBackend()
+    useUiActionBus({ backend: other.backend, currentWorkspace: ref('/ws'), buildSnapshot: () => ({}), accountActions: { signIn: vi.fn() } })
+    other.emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.switch', args: {}, caller_pane_id: 'pa', addressed: true }))
+    await flush()
+    expect(other.sent.find((s) => s.type === 'ui.invoke.result')?.payload).toMatchObject({ ok: false })
+  })
+
+  it('acts only on the project the window is showing', async () => {
+    const { backend, emit, sent } = createMockBackend()
+    const signIn = vi.fn()
+    useUiActionBus({ backend, currentWorkspace: ref('/other'), buildSnapshot: () => ({}), ownsWorkspace: () => true, accountActions: { signIn } })
+    emit('ui.invoke.request', baseRequest({ action: 'ui.accounts.signIn', args: {}, caller_pane_id: 'pa', addressed: true }))
+    await flush()
+    expect(signIn).not.toHaveBeenCalled()
+    expect(sent.find((s) => s.type === 'ui.invoke.result')?.payload).toMatchObject({ ok: false })
+  })
+})
+
+// Review #438 LOW-1: a sign-in confirmation outlives nothing that asked for it.
+// The handler gets a signal that aborts when the backend withdraws the request
+// (ui.invoke.cancel) or the window loses the backend, so the dialog closes
+// instead of opening a pane nobody is waiting for.
+describe('useUiActionBus — withdrawn account requests', () => {
+  function setup() {
+    const { backend, emit } = createMockBackend()
+    const status = ref('connected')
+    const signals: AbortSignal[] = []
+    const signIn = vi.fn((_args: Record<string, unknown>, _caller: string, signal?: AbortSignal) => {
+      signals.push(signal!)
+      return new Promise(() => { /* the user has not answered */ })
+    })
+    useUiActionBus({ backend, currentWorkspace: ref('/ws'), buildSnapshot: () => ({}), connectionStatus: status, accountActions: { signIn } })
+    emit('ui.invoke.request', baseRequest({ request_id: 'r-1', action: 'ui.accounts.signIn', args: {}, caller_pane_id: 'pa', addressed: true }))
+    return { emit, status, signals }
+  }
+
+  it('aborts the handler when the backend withdraws that request', async () => {
+    const { emit, signals } = setup()
+    await flush()
+    expect(signals[0].aborted).toBe(false)
+    emit('ui.invoke.cancel', { request_id: 'other' })
+    expect(signals[0].aborted).toBe(false)
+    emit('ui.invoke.cancel', { request_id: 'r-1' })
+    expect(signals[0].aborted).toBe(true)
+  })
+
+  it('aborts the handler when the window loses the backend', async () => {
+    const { status, signals } = setup()
+    await flush()
+    status.value = 'reconnecting'
+    await flush()
+    expect(signals[0].aborted).toBe(true)
+  })
+})
