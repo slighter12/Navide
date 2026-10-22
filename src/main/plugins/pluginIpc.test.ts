@@ -244,7 +244,8 @@ function signedDetail(
   digest: string,
   packageId = 'acme.demo',
   publisherId = 'acme',
-  version = '1.0.0'
+  version = '1.0.0',
+  envelopeExtra: Pick<RegistryPackageEnvelope, 'channel' | 'expiresAt'> = {}
 ): WireDetail {
   const registryEnvelope: RegistryPackageEnvelope = {
     schemaVersion: 1,
@@ -255,6 +256,7 @@ function signedDetail(
     publisherId,
     keyId: 'registry-test-1',
     signedAt: '2026-08-16T11:00:00.000Z',
+    ...envelopeExtra,
   }
   const trustMetadata: RegistryTrustMetadata = {
     schemaVersion: 1,
@@ -872,8 +874,9 @@ describe('plugins:remove boundary validation', () => {
         /capability and backend risk confirmation/
       )
       expect(grants.get('acme.demo', '1.0.0')).toBeNull()
+      // L1: the new answer itself writes the grant, on approval.
       await commit(null, { id: 'acme.demo', publisherConfirmed: true, riskConfirmed: true })
-      expect(grants.get('acme.demo', '1.0.0')).toBeNull()
+      expect(grants.get('acme.demo', '1.0.0')).toMatchObject({ shell: 'full', highRiskShellConfirmed: true })
       await restart(null, { id: 'acme.demo' })
       expect(grants.get('acme.demo', '1.0.0')).toMatchObject({ shell: 'full', highRiskShellConfirmed: true })
     } finally {
@@ -1034,6 +1037,37 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
   const disclosedManifest = {
     schemaVersion: 2, id: 'acme.demo', version: '1.0.0', publisher: 'acme', permissions: DISCLOSED_PERMISSIONS,
   }
+
+  it('carries the source from the verified envelope channel through prepareInstall', async () => {
+    const pkg = buildPkg('acme.demo', 'acme', {}, '1.0.0')
+    const root = mkdtempSync(join(tmpdir(), 'navide-plugin-ipc-prepare-source-'))
+    try {
+      registerPluginIpc(new FrontendPluginManager(), root, () => true, TRUST_CONFIG, undefined, TEST_PREFLIGHT_OPTIONS)
+      const prepare = handlers.get('plugins:prepareInstall')!
+      installFetch(signedDetail(pkg.digest, 'acme.demo', 'acme', '1.0.0'), pkg.bytes, pkg.digest)
+      const baseline = (await prepare(null, { namespace: 'acme', name: 'demo' })) as Record<string, unknown>
+      // An envelope without a channel keeps the version-number reading.
+      expect(baseline.source).toBe('marketplace')
+      const { source: _baselineSource, ...mainFields } = baseline
+      const cases: Array<[Pick<RegistryPackageEnvelope, 'channel' | 'expiresAt'>, string]> = [
+        [{ channel: 'stable' }, 'marketplace'],
+        [{ channel: 'pre-release' }, 'prerelease'],
+        [{ channel: 'testplace', expiresAt: '2099-01-01T00:00:00.000Z' }, 'testplace'],
+      ]
+      for (const [extra, expected] of cases) {
+        installFetch(signedDetail(pkg.digest, 'acme.demo', 'acme', '1.0.0', extra), pkg.bytes, pkg.digest)
+        const result = (await prepare(null, { namespace: 'acme', name: 'demo' })) as Record<string, unknown>
+        expect(result.source).toBe(expected)
+        // A test build also carries its signed expiry for the trust dialog (W5b).
+        expect(result.expiresAt).toBe(extra.expiresAt)
+        // Every other field is what main returns for the same package.
+        const { source: _source, expiresAt: _expiresAt, ...rest } = result
+        expect(rest).toEqual(mainFields)
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 
   it('carries the signed disclosure, scan and registry facts through prepareInstall', async () => {
     const { bytes, digest } = buildPkg('acme.demo', 'acme', DISCLOSED_PERMISSIONS)
@@ -1481,7 +1515,8 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
       ).toEqual({
         id: 'acme.demo',
         requires: [],
-        restartRequired: true,
+        restartRequired: false,
+        activatedVersion: '1.0.0',
       })
       expect(existsSync(immutablePluginPackageDir(root, 'acme.demo', '1.0.0', 'universal') + '/backend/entry')).toBe(true)
 
@@ -1551,12 +1586,17 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
         publisherConfirmed: true,
       })).rejects.toThrow(/capability and backend risk confirmation/)
 
+      expect(new PluginCapabilityGrantStore(root).get('acme.demo', '1.0.0')).toBeNull()
+      // L1: approved, so active and granted at once.
       await commitHandler(null, {
         id: 'acme.demo',
         publisherConfirmed: true,
         riskConfirmed: true,
       })
-      expect(new PluginCapabilityGrantStore(root).get('acme.demo', '1.0.0')).toBeNull()
+      expect(new PluginCapabilityGrantStore(root).get('acme.demo', '1.0.0')).toMatchObject({
+        shell: 'full',
+        highRiskShellConfirmed: true,
+      })
       const restartHandler = handlers.get('plugins:restart')
       if (!restartHandler) throw new Error('restart handler not registered')
       await restartHandler(null, { id: 'acme.demo' })
@@ -1887,11 +1927,12 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
       installFetch(signedDetail(pkg.digest, 'acme.demo', 'acme', '1.0.0'), pkg.bytes, pkg.digest)
       vi.setSystemTime(1_000_000)
       await handlers.get('plugins:prepareInstall')!(null, { namespace: 'acme', name: 'demo' })
+      // L1: a fresh install is activated on approval, so that is its install time.
       await handlers.get('plugins:commitInstall')!(null, { id: 'acme.demo', publisherConfirmed: true })
-      expect(new PluginInstallScanStore(root).installedAt('acme.demo')).toBeNull()
+      expect(new PluginInstallScanStore(root).installedAt('acme.demo')).toBe(1_000_000)
       vi.setSystemTime(2_000_000)
       await handlers.get('plugins:restart')!(null, { id: 'acme.demo' })
-      expect(new PluginInstallScanStore(root).installedAt('acme.demo')).toBe(2_000_000)
+      expect(new PluginInstallScanStore(root).installedAt('acme.demo')).toBe(1_000_000)
     } finally {
       vi.useRealTimers()
       await manager.closeBackendPlugins()
@@ -1903,6 +1944,71 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
     registerPluginIpc(new FrontendPluginManager(), '/plugins', () => false, TRUST_CONFIG)
     await expect(Promise.resolve().then(() => handlers.get('plugins:activityReport')!(null, { id: 'acme.demo' }))).rejects.toThrow()
     expect(() => handlers.get('plugins:installedDisclosures')!(null)).toThrow()
+  })
+
+  it('lists a Marketplace install with its legacy provenance unchanged and a marketplace source', async () => {
+    const stable = buildPkg('acme.demo', 'acme', {}, '1.0.0')
+    installFetch(signedDetail(stable.digest, 'acme.demo', 'acme', '1.0.0'), stable.bytes, stable.digest)
+    const root = mkdtempSync(join(tmpdir(), 'navide-plugin-ipc-source-'))
+    const manager = new FrontendPluginManager()
+    try {
+      registerPluginIpc(manager, root, () => true, TRUST_CONFIG, undefined, TEST_PREFLIGHT_OPTIONS)
+      await handlers.get('plugins:prepareInstall')!(null, { namespace: 'acme', name: 'demo' })
+      await handlers.get('plugins:commitInstall')!(null, { id: 'acme.demo', publisherConfirmed: true, riskConfirmed: true })
+      await handlers.get('plugins:restart')!(null, { id: 'acme.demo' })
+      expect(handlers.get('plugins:listInstalled')!(null)).toMatchObject([
+        { id: 'acme.demo', provenance: 'official-registry', source: 'marketplace' },
+      ])
+      // The view contribution payload gains only `source`; every other field
+      // is the projection main sends.
+      const catalog = manager.listContributionCatalog()
+      expect(catalog.length).toBeGreaterThan(0)
+      expect(await handlers.get('plugins:listContributions')!(null)).toEqual(
+        catalog.map(({ iconFile: _iconFile, ...entry }) => ({
+          ...entry,
+          icon: null,
+          iconMonochrome: false,
+          source: 'marketplace',
+        }))
+      )
+      expect(handlers.get('plugins:installedDisclosures')!(null)).toEqual([
+        expect.objectContaining({ id: 'acme.demo', source: 'marketplace' }),
+      ])
+      expect(
+        (handlers.get('plugins:installedDisclosures')!(null) as Array<Record<string, unknown>>)[0]
+      ).not.toHaveProperty('expiresAt')
+      // The Registry-signed envelope's channel decides the source, so a
+      // testplace version is never shown as a reviewed Marketplace release.
+      const selection = new PluginActivationSelector(root).read('acme.demo')?.active
+      const packageDir = selection
+        ? new PluginActivationSelector(root).packageDir('acme.demo', selection)
+        : join(root, 'acme.demo')
+      const receiptPath = join(packageDir, REGISTRY_RECEIPT_NAME)
+      const receipt = JSON.parse(readFileSync(receiptPath, 'utf8')) as { envelope: Record<string, unknown> }
+      receipt.envelope.channel = 'testplace'
+      receipt.envelope.expiresAt = '2027-01-01T00:00:00.000Z'
+      writeFileSync(receiptPath, JSON.stringify(receipt))
+      expect(handlers.get('plugins:listInstalled')!(null)).toMatchObject([
+        {
+          id: 'acme.demo',
+          provenance: 'official-registry',
+          source: 'testplace',
+          expiresAt: '2027-01-01T00:00:00.000Z',
+        },
+      ])
+      expect(handlers.get('plugins:installedDisclosures')!(null)).toEqual([
+        expect.objectContaining({
+          id: 'acme.demo',
+          source: 'testplace',
+          expiresAt: '2027-01-01T00:00:00.000Z',
+        }),
+      ])
+      expect(await handlers.get('plugins:listContributions')!(null)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ pluginId: 'acme.demo', source: 'testplace' })])
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('stages an immutable replacement without touching the active runtime until restart', async () => {
@@ -2677,6 +2783,133 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
     }
   })
 
+  it('on the next launch, leaves a package displaced by a rollback staged and discloses it', async () => {
+    const first = buildPkg('acme.demo', 'acme', {}, '1.0.0')
+    const second = buildPkg('acme.demo', 'acme', {}, '1.0.1')
+    const root = mkdtempSync(join(tmpdir(), 'navide-plugin-rollback-relaunch-'))
+    const manager = new FrontendPluginManager()
+    const relaunched = new FrontendPluginManager()
+    try {
+      registerPluginIpc(manager, root, () => true, TRUST_CONFIG, undefined, TEST_PREFLIGHT_OPTIONS)
+      const prepare = handlers.get('plugins:prepareInstall')!
+      const commit = handlers.get('plugins:commitInstall')!
+      const restart = handlers.get('plugins:restart')!
+      installFetch(signedDetail(first.digest, 'acme.demo', 'acme', '1.0.0'), first.bytes, first.digest)
+      await prepare(null, { namespace: 'acme', name: 'demo' })
+      await commit(null, { id: 'acme.demo', publisherConfirmed: true, riskConfirmed: true })
+      await restart(null, { id: 'acme.demo' })
+      installFetch(signedDetail(second.digest, 'acme.demo', 'acme', '1.0.1'), second.bytes, second.digest)
+      await prepare(null, { namespace: 'acme', name: 'demo', version: '1.0.1' })
+      await commit(null, { id: 'acme.demo', publisherConfirmed: true, riskConfirmed: true })
+      await restart(null, { id: 'acme.demo' })
+      await handlers.get('plugins:rollback')!(null, { id: 'acme.demo' })
+      const afterRollback = new PluginActivationSelector(root).read('acme.demo')
+
+      handlers.clear()
+      const controller = registerPluginIpc(relaunched, root, () => true, TRUST_CONFIG, undefined, TEST_PREFLIGHT_OPTIONS)
+      expect(await controller.activateStagedFirstInstalls()).toEqual([])
+      // The user's rollback stands: nothing is promoted for them.
+      expect(new PluginActivationSelector(root).read('acme.demo')).toEqual(afterRollback)
+      expect(controller.stagedUpdates()).toEqual([
+        { pluginId: 'acme.demo', activeVersion: '1.0.0', stagedVersion: '1.0.1' },
+      ])
+    } finally {
+      await manager.closeBackendPlugins()
+      await relaunched.closeBackendPlugins()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('O1: an agent update with an identical disclosure switches at once, recorded with the agent, and Back works', async () => {
+    const first = buildPkg('acme.demo', 'acme', {}, '1.0.0')
+    const second = buildPkg('acme.demo', 'acme', {}, '1.0.1')
+    const root = mkdtempSync(join(tmpdir(), 'navide-plugin-o1-switch-'))
+    const manager = new FrontendPluginManager()
+    const captureHandler = vi.spyOn(manager, 'setPluginAgentActionHandler')
+    const onPackageSwitched = vi.fn()
+    const onPluginAgentAction = vi.fn()
+    const requester = { paneId: 'p-7', paneName: 'dev', workspace: '/w', callerKind: 'pane' as const }
+    try {
+      registerPluginIpc(manager, root, () => true, TRUST_CONFIG, undefined, { ...TEST_PREFLIGHT_OPTIONS, onPackageSwitched, onPluginAgentAction })
+      const agentAction = captureHandler.mock.calls[0]![0]
+      installFetch(signedDetail(first.digest, 'acme.demo', 'acme', '1.0.0'), first.bytes, first.digest)
+      await handlers.get('plugins:prepareInstall')!(null, { namespace: 'acme', name: 'demo' })
+      await handlers.get('plugins:commitInstall')!(null, { id: 'acme.demo', publisherConfirmed: true, riskConfirmed: true })
+
+      installFetch(signedDetail(second.digest, 'acme.demo', 'acme', '1.0.1'), second.bytes, second.digest)
+      await expect(agentAction({ request_id: 'pa:1', action: 'update', plugin_id: 'acme.demo', version: '1.0.1', requester }))
+        .resolves.toMatchObject({ ok: true, updated: true, fromVersion: '1.0.0', pluginVersion: '1.0.1' })
+
+      // Switched at once: 1.0.1 runs, nothing is left staged.
+      const record = new PluginActivationSelector(root).read('acme.demo')
+      expect(record?.active?.packageVersion).toBe('1.0.1')
+      expect(record?.candidate).toBeUndefined()
+      // Recorded, naming the agent that started it.
+      expect(onPackageSwitched).toHaveBeenCalledWith(expect.objectContaining({
+        pluginId: 'acme.demo',
+        fromVersion: '1.0.0',
+        toVersion: '1.0.1',
+        source: 'marketplace',
+        agent: requester,
+      }))
+      // Back works: the row's rollback target is the version it replaced.
+      expect(handlers.get('plugins:listInstalled')!(null)).toMatchObject([
+        { id: 'acme.demo', packageVersion: '1.0.1', rollbackKind: 'previous', rollbackToVersion: '1.0.0' },
+      ])
+      await expect(handlers.get('plugins:rollback')!(null, { id: 'acme.demo' })).resolves.toMatchObject({ packageVersion: '1.0.0' })
+      // One row in the window: the switch record names the agent; no separate "updated" notice.
+      expect(onPluginAgentAction).not.toHaveBeenCalled()
+    } finally {
+      await manager.closeBackendPlugins()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('O1: a failed switch keeps the old version, stays staged, and tells the agent and the window so (review M2)', async () => {
+    const first = buildPkg('acme.demo', 'acme', {}, '1.0.0')
+    const second = buildPkg('acme.demo', 'acme', {}, '1.0.1')
+    const root = mkdtempSync(join(tmpdir(), 'navide-plugin-o1-switch-fail-'))
+    const manager = new FrontendPluginManager()
+    const captureHandler = vi.spyOn(manager, 'setPluginAgentActionHandler')
+    const onPackageSwitched = vi.fn()
+    const onPackageSwitchFailed = vi.fn()
+    const onPluginAgentAction = vi.fn()
+    const requester = { paneId: 'p-7', paneName: 'dev', workspace: '/w', callerKind: 'pane' as const }
+    try {
+      registerPluginIpc(manager, root, () => true, TRUST_CONFIG, undefined, {
+        ...TEST_PREFLIGHT_OPTIONS,
+        onPackageSwitched,
+        onPackageSwitchFailed,
+        onPluginAgentAction,
+        onActivationChange: ({ activation }: { activation?: { packageVersion: string } }) => {
+          if (activation?.packageVersion === '1.0.1') throw new Error('the view did not start')
+        },
+      })
+      const agentAction = captureHandler.mock.calls[0]![0]
+      installFetch(signedDetail(first.digest, 'acme.demo', 'acme', '1.0.0'), first.bytes, first.digest)
+      await handlers.get('plugins:prepareInstall')!(null, { namespace: 'acme', name: 'demo' })
+      await handlers.get('plugins:commitInstall')!(null, { id: 'acme.demo', publisherConfirmed: true, riskConfirmed: true })
+
+      installFetch(signedDetail(second.digest, 'acme.demo', 'acme', '1.0.1'), second.bytes, second.digest)
+      await expect(agentAction({ request_id: 'pa:2', action: 'update', plugin_id: 'acme.demo', version: '1.0.1', requester }))
+        .resolves.toMatchObject({ ok: true, updated: true, switched: false, fromVersion: '1.0.0', pluginVersion: '1.0.1' })
+
+      expect(new PluginActivationSelector(root).read('acme.demo')).toMatchObject({
+        active: { packageVersion: '1.0.0' },
+        candidate: { packageVersion: '1.0.1' },
+      })
+      expect(onPackageSwitched).not.toHaveBeenCalled()
+      expect(onPackageSwitchFailed).toHaveBeenCalledWith(expect.objectContaining({
+        pluginId: 'acme.demo', activeVersion: '1.0.0', stagedVersion: '1.0.1',
+      }))
+      // Only the "switch failed" row: no "an agent updated" notice.
+      expect(onPluginAgentAction).not.toHaveBeenCalled()
+    } finally {
+      await manager.closeBackendPlugins()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('drains a backend-only active version before promoting an explicit rollback', async () => {
     const first = buildBackendPkg('1.0.0')
     const second = buildBackendPkg('1.0.1')
@@ -3057,8 +3290,14 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
           publisherConfirmed: true,
           riskConfirmed: true,
         })
-      ).toEqual({ id: 'acme.demo', requires: ['fs', 'ui', 'shell'], restartRequired: true })
-      expect(grants.get('acme.demo', '1.0.0')).toBeNull()
+      ).toEqual({ id: 'acme.demo', requires: ['fs', 'ui', 'shell'], restartRequired: false, activatedVersion: '1.0.0' })
+      // L1: the grant is written when the approved first install is activated.
+      expect(grants.get('acme.demo', '1.0.0')).toEqual({
+        packageVersion: '1.0.0',
+        system: ['fs', 'ui'],
+        shell: 'allowlist',
+        storage: true,
+      })
       const restartHandler = handlers.get('plugins:restart')
       if (!restartHandler) throw new Error('restart handler not registered')
       await restartHandler(null, { id: 'acme.demo' })
@@ -3145,7 +3384,7 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
           publisherConfirmed: true,
           riskConfirmed: true,
         })
-      ).toEqual({ id: 'acme.demo', requires: [], restartRequired: true })
+      ).toEqual({ id: 'acme.demo', requires: [], restartRequired: false, activatedVersion: '1.0.0' })
       const restartHandler = handlers.get('plugins:restart')
       if (!restartHandler) throw new Error('restart handler not registered')
       await restartHandler(null, { id: 'acme.demo' })
@@ -3205,7 +3444,7 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
           publisherConfirmed: true,
           riskConfirmed: true,
         })
-      ).toEqual({ id: 'acme.demo', requires: [], restartRequired: true })
+      ).toEqual({ id: 'acme.demo', requires: [], restartRequired: false, activatedVersion: '1.0.0' })
       const restartHandler = handlers.get('plugins:restart')
       if (!restartHandler) throw new Error('restart handler not registered')
       await restartHandler(null, { id: 'acme.demo' })
@@ -3802,7 +4041,7 @@ describe('plugins:prepareInstall wire → verifier mapping', () => {
       expect(prepared.requiresPublisherTrust).toBe(true)
       expect(
         await commitHandler(null, { id: 'acme.demo', publisherConfirmed: true })
-      ).toEqual({ id: 'acme.demo', requires: [], restartRequired: true })
+      ).toEqual({ id: 'acme.demo', requires: [], restartRequired: false, activatedVersion: '1.0.0' })
       const restartHandler = handlers.get('plugins:restart')
       if (!restartHandler) throw new Error('restart handler not registered')
       await restartHandler(null, { id: 'acme.demo' })
@@ -4999,6 +5238,26 @@ describe('Pre-release channel (Phase 4)', () => {
       minNavideVersion: '0.3.0',
       engineCompatible: false,
     })
+  })
+
+  // K5 RULE ZERO: the renderer's "Install pre-release" only calls the existing
+  // switch and installs an explicit version, so with the switch off the main
+  // process answers exactly as on main.
+  it('keeps the switch-off candidates and the per-extension scope unchanged (K5)', async () => {
+    serve([{ version: '0.1.0-alpha.1', target: 'universal', yanked: false }])
+    registerWith('1.2.0')
+    const detail = async (name: string) =>
+      (await handlers.get('plugins:marketplaceDetail')!(null, { namespace: 'acme', name })) as Record<string, unknown>
+    // A Navide plugin with only a pre-release has no switch-off candidate.
+    expect(await detail('other')).toMatchObject({ latest_installable_version: null, gets_prereleases: false })
+    // Build metadata does not make a version a pre-release.
+    serve([{ version: '1.3.0+build.7', target: 'universal', yanked: false }])
+    expect(await detail('other')).toMatchObject({ latest_installable_version: '1.3.0+build.7' })
+    // Turning one switch on leaves every other Navide plugin off.
+    serve(VERSIONS)
+    expect(await setPrerelease('acme.demo', true)).toEqual({ id: 'acme.demo', enabled: true })
+    expect(await detail('other')).toMatchObject({ latest_installable_version: '1.3.0', gets_prereleases: false })
+    expect(await detail('demo')).toMatchObject({ latest_installable_version: '1.3.1-beta.2', gets_prereleases: true })
   })
 
   it('validates the switch arguments', async () => {

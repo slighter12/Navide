@@ -215,26 +215,29 @@ async def test_pieces_and_progress_need_an_authenticated_host_and_a_pending_requ
     assert malformed["error"]["code"] == "BAD_REQUEST"
 
 
-async def _longest_loop_slice(monkeypatch: pytest.MonkeyPatch, work: Any) -> tuple[Any, float]:
-    """``work``'s result and the most CPU time (``time.thread_time``) one
-    event-loop step took meanwhile: every callback the loop runs, a task's
+async def _loop_step_times(
+    monkeypatch: pytest.MonkeyPatch, work: Any, steps: list[tuple[float, float]] | None = None
+) -> tuple[Any, list[tuple[float, float]]]:
+    """``work``'s result and when (``time.thread_time``) every event-loop step
+    taken meanwhile started and ended: every callback the loop runs, a task's
     step between two awaits included, is one step. CPU time leaves out the OS
     pausing the process, so a busy machine does not change it; garbage is
-    collected first, so a collection of the test's own garbage is not counted."""
+    collected first, so a collection of the test's own garbage is not counted.
+    ``steps``, when given, is filled as the steps end: while a step runs,
+    ``len(steps)`` is its index."""
     import gc
     import time
 
     gc.collect()
-    longest = 0.0
+    steps = [] if steps is None else steps
     run = asyncio.events.Handle._run
 
     def timed(handle: asyncio.events.Handle) -> None:
-        nonlocal longest
         started = time.thread_time()
         try:
             run(handle)
         finally:
-            longest = max(longest, time.thread_time() - started)
+            steps.append((started, time.thread_time()))
 
     monkeypatch.setattr(asyncio.events.Handle, "_run", timed)
     try:
@@ -245,7 +248,13 @@ async def _longest_loop_slice(monkeypatch: pytest.MonkeyPatch, work: Any) -> tup
         await asyncio.sleep(0)
     finally:
         monkeypatch.setattr(asyncio.events.Handle, "_run", run)
-    return result, longest
+    return result, steps
+
+
+async def _longest_loop_slice(monkeypatch: pytest.MonkeyPatch, work: Any) -> tuple[Any, float]:
+    """``work``'s result and the most CPU time one event-loop step took meanwhile."""
+    result, steps = await _loop_step_times(monkeypatch, work)
+    return result, max((ended - started for started, ended in steps), default=0.0)
 
 
 @pytest.mark.asyncio

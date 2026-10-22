@@ -7,9 +7,12 @@ type UpdateState = import('../../shared/updater').UpdateState
 type ExecutionPolicyApi = import('../../shared/executionPolicy').ExecutionPolicyApi
 type FnKeyApi = import('../../shared/fnKey').FnKeyApi
 type DeepLinkApi = import('../../shared/deepLink').DeepLinkApi
+type DeveloperApi = import('../../shared/marketplaceDeveloper').DeveloperApi
 type ManifestPermissionsSummary = import('../../shared/executionPolicy').ManifestPermissionsSummary
 type PackageVersionGrantSummary = import('../../shared/executionPolicy').PackageVersionGrantSummary
 type LegacyPlansPreferenceProjection = import('../../shared/plansPreferences').LegacyPlansPreferenceProjection
+type PluginSource = import('../../shared/pluginSource').PluginSource
+type LocalInstallDetails = import('../../shared/pluginSource').LocalInstallDetails
 type PluginManifestDisclosure = import('../../shared/pluginDisclosure').ManifestDisclosure
 type PluginDisclosureDiff = import('../../shared/pluginDisclosure').DisclosureDiff
 type PluginRegistryDisclosureFacts = import('../../shared/pluginDisclosure').RegistryDisclosureFacts
@@ -94,21 +97,28 @@ declare global {
       onPlansRecoveryChanged: (cb: (change: PlansRecoveryChanged) => void) => () => void
       onPlansBackendStopped: (cb: (stopped: { workspacePath: string }) => void) => () => void
       onPluginAgentAction?: (cb: (notice: {
-        action: 'disable' | 'enable'
+        action: 'disable' | 'enable' | 'update'
         pluginId: string
         pluginVersion: string
+        /** `update` only: the version it was updated from. */
+        fromVersion?: string
         requester: { paneId: string | null; paneName: string | null; workspace: string | null; callerKind: 'pane' | 'external' | 'host' }
       }) => void) => () => void
+      onPluginStagedCandidateNotActivated?: (cb: (notice: { pluginId: string; version: string; reason: string }) => void) => () => void
+      onPluginStagedUpdates?: (cb: (updates: { pluginId: string; activeVersion: string; stagedVersion: string; reason?: string }[]) => void) => () => void
+      onPluginSwitched?: (cb: (notice: { pluginId: string; fromVersion: string; toVersion: string; source: 'marketplace' | 'local-unsigned'; at: number; agent?: { paneId: string | null; paneName: string | null; workspace: string | null; callerKind: 'pane' | 'external' | 'host'; tainted?: true } }) => void) => () => void
       onMenuAction: (cb: (action: string) => void) => void
       onSystemResumed: (cb: () => void) => () => void
       setRecentWorkspaces: (list: { path: string; name: string; exists: boolean }[]) => void
-      openMainWindow: (args?: { workspace_path?: string }) => Promise<{ ok: boolean }>
+      openMainWindow: (args?: { workspace_path?: string; background?: boolean }) => Promise<{ ok: boolean }>
       pickWorkspace: (defaultPath?: string) => Promise<string | null>
       newWorkspace: () => Promise<NewWorkspaceResult>
       getHomeDir: () => Promise<string>
       dockSurfaceProvided?: (surface: string) => Promise<boolean>
       listOpenWorkspaces: () => Promise<string[]>
       focusWorkspaceWindow: (workspacePath: string) => Promise<boolean>
+      /** Title of ANOTHER window holding the workspace, or '' (none, or only this one). */
+      workspaceHolder?: (workspacePath: string) => Promise<string>
       reportAdoptedWorkspaces: (paths: string[]) => void
       takeRestoredAdoptedWorkspaces: () => Promise<string[]>
       onOpenWorkspacesChanged: (cb: () => void) => () => void
@@ -128,6 +138,9 @@ declare global {
       detachGroup: (args: { groupId: string; workspacePath: string; bounds?: { x: number; y: number; width: number; height: number } }) => Promise<{ ok: boolean }>
       detachWorkspace: (args: { workspacePath: string; bounds?: { x: number; y: number; width: number; height: number } }) => Promise<{ ok: boolean }>
       getDetachedGroups: () => Promise<string[]>
+      focusSelf?: () => Promise<{ ok: boolean }>
+      closeSelf?: () => Promise<{ ok: boolean; error?: string }>
+      canCloseSelf?: () => Promise<{ ok: boolean; error?: string }>
       reattachGroup: (args?: { groupId?: string }) => Promise<{ ok: boolean }>
       onGroupDetached: (cb: (groupId: string) => void) => void
       onGroupReattached: (cb: (groupId: string) => void) => void
@@ -377,6 +390,7 @@ declare global {
       }
       fnKey?: FnKeyApi
       deepLink?: DeepLinkApi
+      developer?: DeveloperApi
       executionPolicy?: ExecutionPolicyApi
       plugins?: {
         listInstalled: () => Promise<InstalledPluginSummary[]>
@@ -391,6 +405,12 @@ declare global {
           version: string
           disclosure: PluginManifestDisclosure | null
           scan: PluginScanReport | null
+          /** Source and review state; see `shared/pluginSource.ts`. */
+          source?: PluginSource
+          /** Test build expiry (ISO-8601), from the signed envelope; testplace only. */
+          expiresAt?: string
+          /** Whether the active package declares views (R2 MED-6 on #436). */
+          hasViews?: boolean
         }>>
         /** Backend children, subscriptions, Bridge requests and queue backlog, now and at the most (never capped). */
         backendResourceUsage?: () => Promise<{
@@ -424,6 +444,13 @@ declare global {
           kind: 'custom'
           location: 'top' | 'bottom' | 'right' | 'left' | 'main' | 'window'
           manifestOrder: number
+          /** Source and review state of the package that contributes this view. */
+          source?: PluginSource
+          /** A test build: its signed expiry and how the user joined the test. */
+          expiresAt?: string
+          testplaceVia?: 'invite' | 'code'
+          /** DX 9.4 A1, a local file only: its SHA-256 and install time. */
+          localInstall?: LocalInstallDetails
         }>>
         hostThemeChanged: (theme: string) => void
         prepareContribution: (args: {
@@ -470,23 +497,57 @@ declare global {
           namespace: string
           name: string
           version?: string
+          testplace?: boolean
         }) => Promise<PreparedInstallSummary>
         commitInstall: (
           id: string,
-          approval?: { publisherConfirmed?: boolean; riskConfirmed?: boolean }
-        ) => Promise<{ id: string; requires: string[]; restartRequired: true }>
+          approval?: { publisherConfirmed?: boolean; riskConfirmed?: boolean; replaceConfirmed?: boolean; reattachBackendData?: boolean }
+        ) => Promise<{ id: string; requires: string[]; restartRequired: boolean; activatedVersion?: string; activationError?: string }>
+        installFromFile?: () => Promise<PreparedInstallSummary | null>
+        commitLocalInstall?: (
+          id: string,
+          approval: { riskConfirmed: boolean; replaceConfirmed?: boolean; reattachBackendData?: boolean; expectedDigest?: string }
+        ) => Promise<{ id: string; requires: string[]; restartRequired: boolean; activatedVersion?: string; activationError?: string }>
+        prepareAgentFileInstall?: (
+          stagingId: string,
+          requester?: { callerKind: string; paneName?: string },
+        ) => Promise<PreparedInstallSummary>
+        prepareLocalRollback?: (id: string) => Promise<PreparedInstallSummary & { rollbackFrom: string }>
+        discardAgentStaged?: (stagingId: string) => Promise<void>
+        developerMode?: () => Promise<DeveloperModeState>
+        setDeveloperMode?: (enabled: boolean) => Promise<DeveloperModeState>
+        loadFromFolder?: () => Promise<PreparedInstallSummary | null>
+        commitFolderLoad?: (id: string, approval: { riskConfirmed: boolean; expectedFolder?: string }) => Promise<DeveloperModeState>
+        reloadDeveloperPlugin?: (id: string) => Promise<
+          | { reloaded: true; requiresConsent: false }
+          | { reloaded: false; requiresConsent: true; prepared: PreparedInstallSummary }
+        >
+        removeDeveloperFolder?: (id: string) => Promise<DeveloperModeState>
+        setDeveloperFolderAutoReload?: (id: string, enabled: boolean) => Promise<DeveloperModeState>
+        onDeveloperFolderEvent?: (
+          handler: (event: { pluginId: string; kind: 'reloaded' | 'needs-consent' | 'reload-failed'; error?: string; running?: boolean }) => void,
+        ) => () => void
+        selfHostedQuarantine?: () => Promise<Array<{ id: string; version: string | null }>>
+        testplaceList?: () => Promise<TestplaceListing[]>
+        testplaceJoin?: (code: string) => Promise<{ id: string }>
+        testplaceLeave?: (id: string) => Promise<{ ok: true }>
+        testplaceInvite?: (id: string, labels: string[]) => Promise<import('../../shared/marketplaceDeveloper').DeveloperCallResult>
+        expiredTestplace?: () => Promise<ExpiredTestplaceBuild[]>
+        keepExpiredTestplace?: (id: string) => Promise<{ ok: true }>
+        adoptTestplaceRelease?: (id: string) => Promise<{ adopted: boolean }>
         restart: (id: string) => Promise<{
           id: string
           packageVersion: string
           restoredInstances: number
           skippedDestroyedHostWindows: number
         }>
-        rollback: (id: string) => Promise<{
+        rollback: (id: string, options?: { consentConfirmed?: boolean }) => Promise<{
           id: string
           packageVersion: string
           restoredInstances: number
           skippedDestroyedHostWindows: number
         }>
+        discardCandidate?: (id: string) => Promise<{ ok: boolean }>
         remove: (id: string, nativeBackendData?: 'keep' | 'delete') => Promise<{ ok: boolean }>
         nativeBackendData: (id: string) => Promise<{ exists: boolean; bytes: number; path: string }>
         /** The installed version's disclosure (Manifest v2), or null. */
@@ -545,10 +606,26 @@ declare global {
     manifestPermissions?: ManifestPermissionsSummary
     packageVersionGrant?: PackageVersionGrantSummary | null
     provenance?: 'official-registry' | 'developer-local-unpacked' | 'factory-bundled'
+    /** Source and review state; see `shared/pluginSource.ts`. */
+    source?: PluginSource
+    /** Test build expiry (ISO-8601), from the signed envelope; testplace only. */
+    expiresAt?: string
+    /** How the user joined that test, when recorded; testplace only. */
+    testplaceVia?: 'invite' | 'code'
+    /** A3: a local file a vetted publisher signed, and whether that key is
+     *  still active (`verified`) or revoked since (`revoked`). */
+    localSignature?: 'verified' | 'revoked'
+    /** Decision d5: Navide blocked the `.vsix` this local install came from;
+     *  `reason` null when its list names none. */
+    digestBlock?: { reason: 'security' | 'admin' | 'qualification-revoked' | 'developer-withdrawn' | 'testplace-withdrawn' | null }
+    /** DX 9.4 A1, a local file only: its SHA-256 and install time. */
+    localInstall?: LocalInstallDetails
     warning?: string
     pendingCandidateVersion?: string
     rollbackKind?: 'factory' | 'previous'
     rollbackToVersion?: string
+    /** L4: the rollback target is a kept file version; going back asks again. */
+    rollbackNeedsConsent?: true
     /** Lowest Navide release the installed version needs (label only). */
     minNavideVersion?: string
     /** False when this Navide release is older; the Host still runs it. */
@@ -602,6 +679,8 @@ declare global {
     extension_pack?: string[] | null
     /** Trust tier of the latest version ('signed-verified' or 'unsigned'). */
     trust_tier?: string | null
+    /** Newest pre-release newer than `latest_version` (Registry's view). */
+    latest_prerelease_version?: string | null
     /** Plan B D1 list card: the latest version's manifest disclosure and scan
      *  report as the Registry listed them, kept by the main process only when
      *  well formed and naming this item; unverified display data. */
@@ -759,6 +838,8 @@ declare global {
     trustTier: 'signed-verified' | 'unsigned'
     sensitive: string[]
     containsBackendExecutable: boolean
+    /** R2 MED-6 on #436: the manifest declares views (`contributes.views`). */
+    hasViews?: boolean
     /** Declared agent tools (sorted, timeouts defaulted); absent when none. */
     agentTools?: Array<{
       name: string
@@ -771,6 +852,8 @@ declare global {
     }>
     requiresConfirmation: boolean
     publisherId: string
+    /** Source and review state, when the Host sends one; see `shared/pluginSource.ts`. */
+    source?: PluginSource
     requiresPublisherTrust: boolean
     requiresRiskConfirmation: boolean
     /** Plan B D2: what this update changes, computed by the Host from the
@@ -783,6 +866,88 @@ declare global {
     scan?: PluginScanReport | null
     /** Unsigned Registry facts, never verified. */
     registry?: PluginRegistryDisclosureFacts | null
+    /** Card K3: the package's source; `local-unsigned` for a file install. */
+    source?: PluginSource
+    /** A Testplace build: its signed expiry and how the user joined the test. */
+    expiresAt?: string
+    testplaceVia?: 'invite' | 'code'
+    /** Card K3: sha256 of the picked file, shown in the consent dialog. */
+    digest?: string
+    /** Card K3 (D7): the installed package of the same id a file install replaces. */
+    replaces?: { version: string | null; source: 'marketplace' | 'local-unsigned' }
+    /** Card K3 (D7): the local file install a Marketplace install replaces. */
+    replacesLocal?: { version: string | null }
+    /** D7: the replaced package's native backend data will be set aside. */
+    backendDataSetAside?: boolean
+    /** D7: data set aside earlier from the incoming source, which the user may take back. */
+    reattachableBackendData?: true
+    /** MED-1 on #425: false when the takedown list could not be checked. */
+    takedownChecked?: boolean
+    /** A3: what the `<file>.sig` beside a local file shows against the
+     *  Navide-vetted publisher keys; `none` when there is no signature. */
+    localSignature?: { state: 'none' } | { state: 'verified' | 'revoked' | 'unverifiable'; publisherId: string; keyId?: string }
+    /** Card K4: the developer folder this summary was read from. */
+    folder?: string
+    /** W1: whether the shared static scan ran on a local file (`scan` holds it). */
+    localScan?: 'ran' | 'unavailable'
+  }
+
+  /** One test the user joined (Testplace, W5b). */
+  interface TestplaceListing {
+    id: string
+    namespace: string
+    name: string
+    displayName: string | null
+    description: string | null
+    publisher: string
+    via: 'invite' | 'code' | null
+    versions: Array<{ version: string; target: string; expiresAt: string | null; installable: boolean; compatible: boolean | null }>
+  }
+
+  /** D3: an installed Testplace build stopped because it expired; its data is kept. */
+  interface ExpiredTestplaceBuild {
+    id: string
+    version: string | null
+    expiresAt: string | null
+    artifactDigest?: string
+    /** False when it was taken down or fails for another reason: no "keep using". */
+    canKeep: boolean
+    /** Its developer or Navide took it back (S8 T-MED-1). */
+    withdrawn?: true
+    keepRefusal?: 'withdrawn' | 'signed-out' | 'not-a-tester' | 'registry-outdated' | 'unreachable'
+  }
+
+  /** Card K4: the Developer Mode switch and the developer folders consented to. */
+  interface DeveloperModeState {
+    enabled: boolean
+    /** A2-5 (G5): when Navide first saw settings another program wrote, while any is left. */
+    externalChange?: { detectedAt: string; modifiedAt: string | null; reason?: 'signing-unavailable' | 'signature-missing' }
+    folders: Array<{
+      pluginId: string
+      path: string
+      consentedAt: string
+      loaded: boolean
+      unavailable?: string
+      externallyChanged?: true
+      /** DESIGN-A2 G3: who had the folder loaded. */
+      loadedBy?:
+        | { kind: 'user' }
+        | { kind: 'agent'; callerKind: string; paneName?: string; approvedAt: string }
+        | { kind: 'unknown' }
+      /** Review MED-1 on #536 / #552: why the loader record did not verify. */
+      loadedByUnverified?: 'changed' | 'key-changed' | 'no-key'
+      /** No secure storage on this machine: the loader record is not signed. */
+      loadedByUnsigned?: true
+      autoReload?: boolean
+      /** G1: the last automatic reload could not read the folder; the running version stays. */
+      reloadError?: string
+      lastLoad?: {
+        at: string
+        trigger: 'user-load' | 'manual-reload' | 'auto-reload' | 'startup' | 'developer-mode-on'
+        fingerprint?: string
+        fileCount?: number
+      }
+    }>
   }
 }
 

@@ -399,15 +399,16 @@ describe.skipIf(!REGISTRY_AVAILABLE)('real Registry → App install pipeline', (
     expect(tree(main.root)).toEqual(before)
   })
 
-  it('(3) commitInstall + restart grants exactly the installed version', async () => {
+  it('(3) an approved commitInstall grants exactly the installed version', async () => {
     await main.call('plugins:prepareInstall', { namespace: PUBLISHER, name: NAME })
     await expect(main.call('plugins:commitInstall', { id: ID, publisherConfirmed: true }))
       .rejects.toThrow(/risk confirmation/)
     await main.call('plugins:prepareInstall', { namespace: PUBLISHER, name: NAME })
+    // L1: a first install is activated, and its grant written, on approval.
     await expect(main.call('plugins:commitInstall', { id: ID, publisherConfirmed: true, riskConfirmed: true }))
-      .resolves.toMatchObject({ id: ID, restartRequired: true })
-    // Staged only: no grant until the candidate is activated.
-    expect(new PluginCapabilityGrantStore(main.root).get(ID, '0.1.0')).toBeNull()
+      .resolves.toMatchObject({ id: ID, restartRequired: false, activatedVersion: '0.1.0' })
+    expect(new PluginCapabilityGrantStore(main.root).get(ID, '0.1.0')).toMatchObject({ packageVersion: '0.1.0' })
+    // A Restart that still follows has nothing left to do.
     await expect(main.call('plugins:restart', { id: ID })).resolves.toMatchObject({ id: ID, packageVersion: '0.1.0' })
     expect(new PluginCapabilityGrantStore(main.root).get(ID, '0.1.0')).toMatchObject({
       packageVersion: '0.1.0',
@@ -624,5 +625,28 @@ describe.skipIf(!REGISTRY_AVAILABLE)('real Registry → App install pipeline', (
 
     // Preparing never writes, accepted or refused.
     expect(tree(h.root)).toEqual(before)
+  })
+})
+
+describe('released App and testplace envelopes', () => {
+  it('a v0.2.24 App refuses a testplace envelope, so it can never install one', () => {
+    const stable = {
+      schemaVersion: 1,
+      artifactDigest: 'a'.repeat(64),
+      packageId: 'acme.demo',
+      version: '1.0.0',
+      target: 'universal',
+      publisherId: 'acme',
+      keyId: 'registry-2026',
+      signedAt: '2026-10-19T00:00:00Z',
+    }
+    expect(() => v0224AssertRegistryPackageEnvelopeShape(stable)).not.toThrow()
+    expect(() =>
+      v0224AssertRegistryPackageEnvelopeShape({
+        ...stable,
+        channel: 'testplace',
+        expiresAt: '2027-01-17T00:00:00Z',
+      })
+    ).toThrow(/unknown fields channel, expiresAt/)
   })
 })

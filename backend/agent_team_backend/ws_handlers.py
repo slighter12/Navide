@@ -35,6 +35,7 @@ from . import (
     confirm_token,
     device_trust,
     executions_service,
+    launch_id,
     native_mcp,
     native_memory,
     osplat,
@@ -390,6 +391,29 @@ async def marketplace_query_result(
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
 
 
+@handler("marketplace.developer.result")
+async def marketplace_developer_result(
+    session: "Session", msg_id: str, msg_type: str, payload: dict
+) -> None:
+    """Return the Host's answer to a ``marketplace.developer.request`` (W3 status tools)."""
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    from .mcp_server import marketplace_forms
+
+    request_id = payload.get("request_id") if isinstance(payload, dict) else None
+    if not isinstance(request_id, str) or not request_id or not isinstance(payload.get("ok"), bool):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "marketplace.developer.result is malformed")
+        )
+        return
+    response = {key: value for key, value in payload.items() if key != "request_id"}
+    delivered = marketplace_forms.resolve_developer_query(request_id, response)
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "delivered": delivered}))
+
+
 @handler("plugins.agent_action.result")
 async def plugins_agent_action_result(
     session: "Session", msg_id: str, msg_type: str, payload: dict
@@ -420,6 +444,39 @@ _ACTIVITY_ROW_FIELDS = _ACTIVITY_ROW_REQUIRED | {"workspace", "denied_reason", "
 _HOST_ACTIVITY_SOURCES = frozenset(("broker", "shell"))
 #: Calls into a plugin's own backend, counted by the Host per batch.
 _BACKEND_CALL_ROW_FIELDS = frozenset(("plugin_id", "plugin_version", "workspace", "source", "address", "outcome", "count"))
+#: Card K4: the Host events a row may report, the Developer Mode switch and
+#: (A2-5) its settings changed outside Navide. They are filed under the Host's
+#: own event identity, which no plugin can hold.
+_HOST_EVENT_PLUGIN_ID = "host"
+_HOST_EVENT_ADDRESSES = frozenset(("developerMode.on", "developerMode.off", "developerMode.externalChange"))
+
+
+def _host_event_row(app: Any, row: dict) -> str | None:
+    """Record one Host event row; the skip reason when it is not recorded.
+
+    Exact fields (``at`` optional, Unix ms), the Host's own identity, no
+    workspace, a known address, ``allowed`` and a count of one.
+    """
+    if set(row) - {"at"} != _BACKEND_CALL_ROW_FIELDS:
+        return "malformed"
+    if (
+        row["plugin_id"] != _HOST_EVENT_PLUGIN_ID
+        or not isinstance(row["plugin_version"], str)
+        or row["workspace"] != ""
+        or row["address"] not in _HOST_EVENT_ADDRESSES
+        or row["outcome"] != "allowed"
+        or row["count"] != 1
+        or isinstance(row["count"], bool)
+    ):
+        return "malformed"
+    at = row.get("at")
+    if "at" in row and (isinstance(at, bool) or not isinstance(at, int) or at < 0):
+        return "bad at"
+    recorded = app.plugin_audit_log.record_activity(
+        plugin_id=_HOST_EVENT_PLUGIN_ID, plugin_version=row["plugin_version"], source="host",
+        address=row["address"], outcome="allowed", at_ms=at,
+    )
+    return None if recorded else "refused"
 
 
 def _backend_call_row(app: Any, row: dict) -> str | None:
@@ -458,7 +515,8 @@ async def plugin_activity_record(
     Rows with source ``backend`` (calls into a plugin's own backend, counted)
     go to the per-minute counts instead. The ``backend.`` address prefix and
     the source must agree: a backend row with another address, or another row
-    with a ``backend.`` address, is skipped.
+    with a ``backend.`` address, is skipped. A ``host`` row (card K4: the
+    Developer Mode switch) must be exactly the Host's own event shape.
     """
     from . import app
 
@@ -479,6 +537,13 @@ async def plugin_activity_record(
     for row in rows:
         if isinstance(row, dict) and row.get("source") == "backend":
             reason = _backend_call_row(app, row)
+            if reason is None:
+                accepted += 1
+            else:
+                skipped[reason] += 1
+            continue
+        if isinstance(row, dict) and row.get("source") == "host":
+            reason = _host_event_row(app, row)
             if reason is None:
                 accepted += 1
             else:
@@ -6261,13 +6326,18 @@ async def share_publish(session: "Session", msg_id: str, msg_type: str, payload:
     as a disconnect and nothing else. The error minted here names the file
     export as the way out instead.
     """
-    from . import share_codes
+    from . import settings_bundle, share_codes
 
     bundle = payload.get("bundle")
     if not isinstance(bundle, dict):
         await session.send_json(
             make_error(msg_id, msg_type, "INVALID_BUNDLE", "bundle must be an object")
         )
+        return
+    try:
+        bundle = settings_bundle.without_secrets(bundle)
+    except settings_bundle.BundleError as err:
+        await session.send_json(make_error(msg_id, msg_type, err.code, err.message, err.details))
         return
     ttl = payload.get("ttlSeconds")
     if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl <= 0:
@@ -8325,6 +8395,9 @@ def note_terminal_exit(payload: dict) -> None:
     entry = _dock_record_to_retire(payload)
     if entry is not None:
         _retire_dock_record(*entry)
+    target = _live_stamp_to_clear(payload)
+    if target is not None:
+        _clear_live_stamp(*target)
 
 
 async def note_terminal_exit_async(payload: dict) -> None:
@@ -8333,6 +8406,41 @@ async def note_terminal_exit_async(payload: dict) -> None:
     entry = _dock_record_to_retire(payload)
     if entry is not None:
         await asyncio.to_thread(_retire_dock_record, *entry)
+    target = _live_stamp_to_clear(payload)
+    if target is not None:
+        await asyncio.to_thread(_clear_live_stamp, *target)
+
+
+def _live_stamp_to_clear(payload: dict) -> tuple[str, str] | None:
+    """The (workspace, pane) whose last_live_launch an exit clears, or None.
+
+    The 'auto' resume scope restores the panes whose CLI was still running when
+    the app ended. A CLI that stops while the app runs — on its own ("exit",
+    "error") or through a requested kill ("killed": Kill All, closing a
+    workspace, a pipeline restart, an idle reclaim) — is not one of them. The
+    app ending is "shutdown" (kill_all at backend shutdown) and keeps the stamp.
+    A rebuild's kill names the OLD pane id, which the replacement's spawn
+    re-keys away, so the rebuilt pane stays stamped."""
+    if payload.get("reason") not in ("exit", "error", "killed"):
+        return None
+    workspace_path = str(payload.get("workspace_path") or "")
+    pane_id = str(payload.get("pane_id") or "")
+    if not workspace_path or not pane_id:
+        return None
+    return workspace_path, pane_id
+
+
+def _clear_live_stamp(workspace_path: str, pane_id: str) -> None:
+    from . import app
+
+    try:
+        # peek, not load_or_create: an exit must never create a project.
+        project = app.project_store.peek(workspace_path)
+        if project is None or not any(p.pane_id == pane_id for p in project.panes):
+            return
+        app.project_store.set_pane_resume_state(workspace_path, pane_id=pane_id, last_live_launch="")
+    except Exception:  # noqa: BLE001 — the PTY is already gone; a lost stamp clear must not fail its caller
+        log.exception("clearing live stamp of %s in %s failed", pane_id, workspace_path)
 
 
 def _dock_record_to_retire(payload: dict) -> tuple[str, str, str, str] | None:
@@ -8394,6 +8502,7 @@ def _record_dock_spawn(payload: dict, metadata: dict, agent_key: str, term_id: s
             origin=origin,
             surface=surface,
             window_kind=window_kind,
+            launch_id=launch_id.current(),
         )
         # The store leaves a window pane's record alone when a panel's create
         # names its id; its Agent History entry must be left alone with it.
@@ -10302,6 +10411,8 @@ async def project_set_pane_resume_state(session: "Session", msg_id: str, msg_typ
     turn_state = payload.get("last_turn_state")
     report_to = payload.get("report_to")
     report_pending = payload.get("report_pending")
+    report_cross = payload.get("report_cross")
+    live_launch = payload.get("last_live_launch")
     applied = False
     if ws_raw and pane_id:
         project = app.project_store.set_pane_resume_state(
@@ -10310,6 +10421,8 @@ async def project_set_pane_resume_state(session: "Session", msg_id: str, msg_typ
             last_turn_state=turn_state if isinstance(turn_state, str) else None,
             report_to=report_to if isinstance(report_to, str) else None,
             report_pending=report_pending if isinstance(report_pending, bool) else None,
+            last_live_launch=live_launch if isinstance(live_launch, str) else None,
+            report_cross=report_cross if isinstance(report_cross, bool) else None,
         )
         # Not an error, but say so: a write that matched no record is lost.
         applied = any(p.pane_id == pane_id for p in project.panes)
@@ -11124,6 +11237,7 @@ async def pipeline_slot_spawn(session: "Session", msg_id: str, msg_type: str, pa
         session_home_id=payload.get("session_home_id", ""),
         profile_id=slot_pin,
         run_group_id=payload.get("run_group_id", ""),
+        launch_id=launch_id.current(),
     )
     app.pane_account_history.pin(str(payload["pane_id"]), _account_pin_for_history(slot_pin))
     from .guard.taint import pipeline_pane_spawned
@@ -11326,6 +11440,40 @@ async def pipeline_abort(session: "Session", msg_id: str, msg_type: str, payload
     )
 
 
+@handler("pipeline.reset")
+async def pipeline_reset(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The backend leg of pipeline_reset: the renderer kills the panes, this
+    returns the stored run to idle so it stops answering pipeline_status and
+    survives no restart (#417). Run history (log, run directory) is kept."""
+    from . import app
+
+    project = app.project_store.reset_pipeline(payload["workspace_path"])
+    if project is not None:
+        log.info("pipeline reset: %s is idle again", project.workspace_path)
+        _mirror_pipeline_state(project)
+    await session.send_json(
+        make_response(msg_id, msg_type, app._project_payload(project) if project is not None else {"project": None})
+    )
+
+
+@handler("pipeline.start_refused")
+async def pipeline_start_refused(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The renderer refused a start before it reached pipeline.start. Recorded
+    in the backend log and the workspace's pipeline.log (outside any run, so
+    not the last run's file), since a refusal used to leave no trace (#417)."""
+    from . import app
+
+    ws_path = payload["workspace_path"]
+    reason = str(payload.get("reason", ""))
+    pipeline_id = str(payload.get("pipeline_id", ""))
+    log.warning("pipeline start refused in %s (pipeline %s): %s", ws_path, pipeline_id or "?", reason)
+    app.project_store.append_event(
+        ws_path,
+        {"event": "pipeline_start_refused", "pipeline_id": pipeline_id, "reason": reason},
+    )
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+
+
 @handler("pipeline.node_states")
 async def pipeline_node_states(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     """The renderer engine reports per-graph-node run state; stored on the
@@ -11449,6 +11597,7 @@ async def manual_pane_spawn(session: "Session", msg_id: str, msg_type: str, payl
         output_log_file=payload.get("output_log_file", ""),
         origin=payload.get("origin", ""),
         spawned_by=payload.get("spawned_by", ""),
+        launch_id=launch_id.current(),
     )
     app.pane_account_history.pin(str(payload["pane_id"]), _account_pin_for_history(manual_pin))
     await session.send_json(
@@ -12248,6 +12397,9 @@ async def ui_invoke_ready(session: "Session", msg_id: str, msg_type: str, payloa
     window_id = payload.get("window_id")
     if isinstance(window_id, str) and _WINDOW_ID.fullmatch(window_id):
         session.window_id = window_id
+    held = payload.get("workspaces")
+    if isinstance(held, list):
+        session.held_workspaces = tuple(p for p in held if isinstance(p, str) and p)
     if payload.get("focused"):
         session.ui_focused_at = next(_UI_FOCUS_SEQ)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))

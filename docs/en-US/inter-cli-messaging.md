@@ -438,6 +438,24 @@ thresholds the call still succeeds and the requester is told what it costs. A
 malformed request (unknown agent key, missing or taken name, empty task) comes
 back as a [spawn feedback notice](#spawn-feedback-notices) naming the problem.
 
+### Into another project
+
+`cli_open_agent(workspace_path=...)` from a pane opens the child in that
+project — its working directory, CLAUDE.md, memory, Plans and git — while the
+caller stays its parent: the child reports to the caller's `<folder>/<pane>`
+address and the caller reclaims it by the `address` the tool returns.
+`window: "current"` (the default) has the caller's window take the project
+into its sidebar without switching to it; `window: "new"` opens it in a
+window of its own without taking focus; `window: "existing"` opens it in the
+window that already holds the project (any window), or with `window_id` (from
+`window_list`) in that window, which adopts the project when no window holds
+it (a detached group window cannot: `window-cannot-hold`). One project lives
+in one window, so a project another window already holds is refused with
+`workspace-in-other-window` and `holding_window_id`. The child's sidebar row
+says who opened it ("Opened by alpha/lead"), because the tree cannot draw a
+parent that lives in another project. Naming your own workspace is the same as
+omitting it.
+
 ### Stand-in reports
 
 The report back is the child's own output, not something Navide composes. What
@@ -987,8 +1005,30 @@ Platforms that need a public webhook (LINE, Teams, WhatsApp Cloud, SMS) are out 
 
 One pane ↔ one location. A binding survives window reloads, pane rebuilds,
 group detach and workspace switches; it ends only when you unbind it (or close
-the pane for real). A message for a bound pane that is not currently open is
-answered with "pane 目前不在線上" and the binding is kept.
+the pane for real). A message for a bound pane that is not online is answered
+in the Navide language ("the Navide window it belongs to is not open, or the
+pane was closed") and the binding is kept. For a minute after Navide starts, a
+pane that has not registered yet is waited for instead. Once the binding knows
+the pane's workspace and conversation (it learns them whenever the pane is seen
+online), the reply also offers **▶️ 喚醒** (typed: `/wake`) and keeps the
+message:
+
+- Waking opens the pane's Navide window if needed and brings the pane back on
+  its own conversation, or not at all. It is refused, with the reason and
+  before anything opens, when no Navide window is open, the CLI is out of quota
+  (cached reading), the conversation cannot be resumed, the resume behaviour is
+  "never" or "ask", or another pane already runs that conversation.
+- Kept messages (at most 20 per chat, 30 minutes) go in, in order, after a wake
+  or when the pane comes back on its own. Messages pushed out, expired, not
+  fitting the pane's queue (`MAX_QUEUED_PER_PANE`) or lost to a Navide restart
+  are named back to the chat. `stop`, `/cancel` and `/resume` are not kept.
+- One wake at a time across all chats; per chat 5 minutes apart and at most 10
+  a day. A wake refused before anything opened does not count.
+- A wake (button or typed `/wake`) for a pane that is already online is
+  answered that it is online and is never sent to the CLI.
+- The first 40 characters of each kept message are stored in `navide.db`
+  (`channels.wake_kept`, `channels.wake_lost`) until sent or reported; see
+  privacy.md.
 
 ### Who may talk to a pane
 

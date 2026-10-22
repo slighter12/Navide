@@ -13,6 +13,7 @@ Navide は **Local-first** ですが、常に完全オフラインという意�
 - Application Data Directory 内の Host 管理 Plugin Storage Partition。認証済みの Plugin/Package ごとに分離され、Workspace Scope では認証済み Workspace ごとに分離されます。Navide や Plugin Registry へ送信されません
 - Local CLI Log から得た Token Attribution と Deduplication Metadata
 - Local の `navide.db` 内の、サードパーティ Navide Plugin の Activity Log（`plugin_activity`）：Plugin、`namespace.method`、時刻、Workspace、許可／拒否／失敗、Workspace 相対の File Path（Workspace 外の Path は `<outside-workspace>` のみ。File の内容は保存しません）、Shell 呼び出しは実行ファイルと Subcommand のみ。詳細は 7 日間、その後は日ごとの件数のみ 90 日間保持します。同梱の Plans、Git、Mini-IDE は記録しません。この端末の外へは送信されません
+- Local の `navide.db` 内の、pane がオフラインの間に届いたチャットメッセージのプレビュー（`channels.wake_kept`、再起動をまたぐ場合は `channels.wake_lost`）：バインドされたチャットから pane がオフラインの間に届いた各メッセージの先頭 40 文字で、送られなかったメッセージをチャットに伝えるために使います。マスクせずにそのまま保存するため、メッセージの先頭に機密があればそれも保存されます。メッセージが pane に送られた時、またはチャットに伝えた時点で削除し、チャットのバインド解除や bot の削除時にも削除します。bot が無効の間は、再び起動するまで保持します。この端末の外へは送信されません
 - 任意の AI Provider API Key。制限された File Permission（対応 System では `0600`）で保護された Local Settings File に保存
 
 Navide は Project Telemetry Service を運営せず、Navide Account を必要としません。
@@ -95,7 +96,7 @@ Agent CLI の Credential は各 CLI の Configuration に残ります。Cloud AI
 
 **Portable Credential** はユーザーが自ら選ぶ例外です。各ベンダーが「別の Machine へ持ち運ぶ」ために公式に用意した値（例：`claude setup-token` が出力する Token）を、Settings → Accounts に貼り付けます。Navide はこの Device 上で暗号化して保存し、その CLI の新しい Pane を起動するときに環境変数としてのみ渡します。CLI 自身の Login File には書き込みません。ある Device から削除しても、その Device からだけ削除されます。
 
-Settings → Sync で **Credentials** を有効にすると（既定は無効）、貼り付けた各 Credential は Device 上で Account の Sync Key により暗号化されてから送信され、Navide Cloud はサービス側で開けない暗号文だけを保存します。同じ Account にサインインした別の Device がそれを復号し、ディスク上では同じく暗号文として保持し、Pane にのみ渡します。サービス側から見えるのは不透明な Item ID、Revision 番号、Timestamp、書き込んだ Device だけで、どの CLI やどの Account のものかは分かりません。ある Device で削除しても Cloud や他の Device からは削除されず、セクションを有効にするまで何も Upload されません。Device で Account を切り替えると、その Device が Import した Credential は破棄され、セクションは再び無効になります。
+貼り付けた Credential がアップロードされることはありません。アカウントの Credential と Key はご自身の Machine から出ることはありません。Settings → Sync に Credentials セクションはなく、古いビルドでオンのまま残った Credentials スイッチはオフとして扱われ、Navide Cloud はどのバージョンから送られた Credential の Record も受け付けません。MCP 設定は、同期を有効にした場合、Machine 上で暗号化してからアップロードされ、サーバーは復号キーを持ちません。
 
 Local File Permission は、同じ Machine 上の他 User による偶発的 Access を減らしますが、Malware、Compromised User Account、Unrestricted Agent、Backup、同等権限の Process からは保護しません。
 

@@ -22,6 +22,14 @@ Depending on enabled features, Navide stores:
   the executable and subcommand only. Detail rows are kept 7 days, then only
   per-day counts for 90 days. The bundled Plans, Git and Mini-IDE are not
   logged. It never leaves this machine
+- Previews of chat messages kept for an offline pane, in the local `navide.db`
+  (`channels.wake_kept`, then `channels.wake_lost` across a restart): the first
+  40 characters of each message a bound chat sent while its pane was not
+  online, so the chat can be told which ones were not sent. They are stored as
+  typed, without masking, so a secret at the start of a message is stored too.
+  They are deleted once the message is sent in or the chat has been told, when
+  the chat is unbound, or when its bot is removed; while that bot stays
+  disabled they wait for it. They never leave this machine
 - Optional AI provider API keys in a local settings file protected with restrictive file permissions (`0600` on supported systems)
 
 Navide does not operate a project telemetry service and does not require a Navide account.
@@ -133,7 +141,7 @@ Agent CLI credentials remain in each CLI's own configuration. If you enter cloud
 
 **Portable CLI credentials** are the exception you opt into: a value a vendor documents for carrying between machines (for example the token `claude setup-token` prints) that you paste in Settings → Accounts. Navide stores it encrypted on this device and hands it to new panes of that CLI in their environment only; it never writes it into the CLI's own login files. Removing it from a device removes it from that device.
 
-If you switch on **Credentials** under Settings → Sync (off by default), each pasted credential is encrypted on your device with your account's sync key before it leaves and stored by Navide Cloud as ciphertext the service cannot open. Another device signed in to the same account decrypts it and keeps it encrypted at rest, again handing it to panes only. What the service can see is an opaque item id, a revision number, a timestamp and which device wrote the record — not which CLI or account the credential belongs to. Removing a credential on one device does not remove it from the cloud or your other devices, and nothing is uploaded until you switch the section on; switching accounts on a device drops what that device imported and switches the section off again.
+Pasted credentials are never uploaded. Account credentials and keys never leave your machine: Settings → Sync has no Credentials section, a Credentials switch an older build left on is treated as off, and Navide Cloud refuses credential records from any version. MCP settings, if you turn their sync on, are encrypted on your machine before they are uploaded, and the server has no key to decrypt them.
 
 Local file permissions reduce accidental access by other users on the same machine but do not protect against malware, a compromised user account, unrestricted agents, backups, or processes with equivalent permissions.
 
