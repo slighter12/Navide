@@ -357,6 +357,58 @@ async def test_abandoned_create_blocks_another_pane_resuming_the_same_session(ri
     assert service._lost is None and not service._unresolved
 
 
+async def test_create_cancelled_mid_send_never_leaves_a_torn_control_frame(rig):
+    # The create frame carries the child environment; padded here so it exceeds the AF_UNIX
+    # buffers (8 KiB each) whatever the caller's own environment, the send to the stopped
+    # sidecar suspends part-way through it, and the cancel lands inside that send.
+    service = rig.service()
+    await service._ensure_started()
+    env = {**rig.env, "NAVIDE_FRAME_PADDING": "x" * 65536}
+    rig.signal_sidecar(service, signal.SIGSTOP)
+    first = asyncio.create_task(service.create_async(
+        pane_id="pane-torn", agent_key="terminal", command=[base_python_executable(), "-u", str(rig.peer)],
+        cwd=str(rig.workspace), env=env))
+    await rig.until(lambda: service._dispatched, "create frame partly written to the stopped sidecar")
+    await asyncio.sleep(0.2)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(first, 5)  # the caller is released at once; its frame is not
+    rig.signal_sidecar(service, signal.SIGCONT)
+
+    # The channel still frames: a request sent after the cancelled one is answered.
+    assert "bookkeeping" in await service._request("ping")
+    replacement = await asyncio.wait_for(rig.shell(service, "pane-torn"), 30)
+    assert service._lost is None and alive(replacement.proc.pid)
+    assert not [r for r in rig.receipts() if r["event"] == "runtime_invalidated"]
+    assert not service._launches and not service._unresolved
+
+
+async def test_replacement_create_after_the_abandoned_launch_lost_the_runtime_starts_a_fresh_one(rig):
+    service = rig.service()
+    await service._ensure_started()
+    lost_generation = service._runtime_generation
+    rig.signal_sidecar(service, signal.SIGSTOP)
+    first = asyncio.create_task(service.create_async(
+        pane_id="pane-reloss", agent_key="terminal", command=[base_python_executable(), "-u", str(rig.peer)],
+        cwd=str(rig.workspace), env=rig.env))
+    await rig.until(lambda: service._dispatched, "create dispatched to the stopped sidecar")
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    second = asyncio.create_task(rig.shell(service, "pane-reloss"))
+    await asyncio.sleep(0.5)
+    assert not second.done(), "replacement overlapped an unresolved launch"
+
+    rig.signal_sidecar(service, signal.SIGKILL)  # the abandoned launch ends in a runtime loss
+    replacement = await asyncio.wait_for(second, 40)
+
+    assert service._runtime_generation != lost_generation and service._lost is None
+    assert alive(replacement.proc.pid)
+    invalidated = [r for r in rig.receipts() if r["event"] == "runtime_invalidated"]
+    assert len(invalidated) == 1 and invalidated[0]["lost_generation"] == lost_generation
+    assert invalidated[0]["complete"]
+
+
 async def test_observation_across_runtime_loss_is_unchanged_and_not_duplicated(rig):
     import hashlib  # noqa: F401
     sid = "22222222-2222-4222-8222-222222222222"
