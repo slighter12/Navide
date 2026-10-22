@@ -42,11 +42,42 @@ unsafe extern "C" {
     fn sqlite3_finalize(statement: *mut c_void) -> c_int;
 }
 
+/// Is `path` a WAL-mode database (header bytes 18 and 19, the file format versions, are 2)?
+fn wal_header(path: &Path) -> bool {
+    use std::io::Read;
+    let mut header = [0u8; 20];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_ok()
+        && header.starts_with(b"SQLite format 3\0")
+        && header[18] == 2
+        && header[19] == 2
+}
+
 // Exactly one short-lived read-only connection per query, as in the Python baseline.
 struct ReadConnection(*mut c_void);
 impl ReadConnection {
     fn open(path: &Path) -> Result<Self, i32> {
-        let name = CString::new(format!("file:{}?mode=ro", path.display())).map_err(|_| 1)?;
+        // A WAL store whose last writer closed has no -wal/-shm left, and the system SQLite
+        // refuses a plain read-only open of it (SQLITE_CANTOPEN: it may not create the -shm),
+        // where the Python baseline's bundled SQLite creates both. With neither file present the
+        // database file alone holds every committed row, so `immutable=1` reads it with no
+        // locking and without creating or writing anything beside the store. A writer that
+        // appears meanwhile writes to a new -wal first: those rows are read on the next pass,
+        // which sees the -wal and takes the ordinary read-only path. Only a store whose header
+        // says WAL (read/write versions 2) is opened this way: a rollback-journal store keeps
+        // the ordinary open, whose locking it needs (a writer there changes pages in place).
+        let sidecars = ["-wal", "-shm"].map(|suffix| {
+            let mut name = path.as_os_str().to_owned();
+            name.push(suffix);
+            Path::new(&name).exists()
+        });
+        let uri = if !sidecars.contains(&true) && wal_header(path) {
+            format!("file:{}?mode=ro&immutable=1", path.display())
+        } else {
+            format!("file:{}?mode=ro", path.display())
+        };
+        let name = CString::new(uri).map_err(|_| 1)?;
         let mut raw = std::ptr::null_mut();
         let code = unsafe { sqlite3_open_v2(name.as_ptr(), &mut raw, 1 | 0x40, std::ptr::null()) };
         if code != 0 {
@@ -551,6 +582,55 @@ mod tests {
             drop(self.writer.take());
             std::fs::remove_dir_all(&self.root).unwrap();
         }
+    }
+
+    fn files(fixture: &Fixture) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(&fixture.root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_wal_store_is_read_while_held_open_and_after_its_last_writer_closed() {
+        let mut own = Fixture::new();
+        own.sql("PRAGMA journal_mode=WAL", &[]);
+        own.message(
+            "m1",
+            json!({"role":"assistant","time":{"completed":1},"tokens":{"input":3,"output":2}}),
+        );
+        own.part("p1", "m1", json!({"type":"text","text":"one"}));
+        // Held open: the live -wal/-shm are read through the ordinary read-only open.
+        assert_eq!(
+            own.observe("usage", json!({}), json!([]))["events"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let first = own.observe("activity", json!({}), json!([]));
+        assert_eq!(first["seen"], json!(["opencode_part::1"]));
+        own.part("p2", "m1", json!({"type":"text","text":"two"}));
+        // OpenCode quits: closing the last connection checkpoints, and its SQLite (like Python's)
+        // removes -wal/-shm. The system SQLite this test writes with keeps them (persistent
+        // WAL), so they are removed here, after the checkpoint, as OpenCode's would be.
+        drop(own.writer.take());
+        for suffix in ["-wal", "-shm"] {
+            let _ = std::fs::remove_file(own.root.join(format!("opencode.db{suffix}")));
+        }
+        assert_eq!(files(&own), ["opencode.db"]);
+        let usage = own.observe("usage", json!({}), json!([]));
+        assert_eq!(usage["events"][0]["dedup_key"], "msg:m1");
+        let activity = own.observe("activity", json!({}), first["seen"].clone());
+        assert_eq!(activity["events"][0]["dedup_key"], "part:2");
+        assert_eq!(activity["seen"], json!(["opencode_part::2"]));
+        assert_eq!(
+            files(&own),
+            ["opencode.db"],
+            "reading created or left nothing beside the store"
+        );
     }
 
     #[test]
