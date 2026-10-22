@@ -166,6 +166,8 @@ class RuntimeSession:
 class RustTerminalService(TerminalService):
     """Reuse presentation, not Python native handles or process lifecycle."""
 
+    _sending: asyncio.Future | None = None  # the frame write in progress, finished even if its caller left
+
     def __init__(self, emit):
         super().__init__(emit)
         self._runtime: asyncio.subprocess.Process | None = None
@@ -313,6 +315,8 @@ class RustTerminalService(TerminalService):
         for slot_id in list(self._slots):
             self._close_slot(slot_id)
         self._claimed_ttys.clear()
+        if self._sending is not None:
+            self._sending.cancel()  # an unfinished frame dies with the channel it was written to
         if self._sock is not None:
             with suppress(OSError):
                 self._sock.close()
@@ -1002,6 +1006,10 @@ class RustTerminalService(TerminalService):
             future = self._loop.create_future()
             try:
                 async with self._send_lock:
+                    if self._sending is not None:
+                        await asyncio.wait({self._sending})  # a frame whose caller left is finished first
+                        if self._lost:
+                            raise RuntimeError(self._lost)
                     if self._request_number >= 2**64 - 1:
                         raise RuntimeError("REQUEST_ID_EXHAUSTED")
                     self._request_number += 1
@@ -1014,8 +1022,18 @@ class RustTerminalService(TerminalService):
                     if (on_dispatch := _ON_DISPATCH.get()) is not None:
                         on_dispatch(request_id, future)
                         keep = True
-                    await self._loop.sock_sendall(self._sock, encoded)
-                    self._ledger.sent(_OPS[op], len(encoded))
+                    # E1 framing: a frame goes out whole or the channel is lost. A caller's
+                    # cancellation never cuts the write (only a retirement does, closing the
+                    # channel with it); the next sender waits for it under the send lock.
+                    send = self._sending = asyncio.ensure_future(self._loop.sock_sendall(self._sock, encoded))
+
+                    def sent(task: asyncio.Task) -> None:
+                        if self._sending is task:
+                            self._sending = None
+                        if not task.cancelled() and task.exception() is None:
+                            self._ledger.sent(_OPS[op], len(encoded))
+                    send.add_done_callback(sent)
+                    await asyncio.shield(send)
                 if deadline is None:
                     deadline = self._limits[{"ping": "ping_ms", "create": "create_answer_ms"}.get(op, "request_ms")] / 1000
                 frame = await asyncio.wait_for(asyncio.shield(future), deadline)
@@ -1148,6 +1166,7 @@ class RustTerminalService(TerminalService):
                     f"(pid {held.proc.pid}, {int(time.monotonic() - held.ended_monotonic)} s since its terminal ended); "
                     "release or rebuild the pane to stop it")
         await self._await_unresolved(keys)
+        await self._ensure_started()  # the awaited launch may have ended in a loss that retired the generation
         if cancelled is not None and cancelled():
             raise CreateCancelled("create cancelled before it was dispatched")
         argv = self._resolve_command(kwargs.get("spawn_command") or kwargs["command"])
