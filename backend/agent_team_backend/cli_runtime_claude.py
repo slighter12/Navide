@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from dataclasses import replace
 import hashlib
 import os
@@ -44,7 +45,8 @@ def _validate(args):
             old_water = max((int(key[8:]) for key in previous if key.startswith("act_hw::")), default=0)
             if (len(markers) != 1 or not markers[0][8:].isascii() or not markers[0][8:].isdecimal()
                     or int(markers[0][8:]) <= old_water
-                    or set(seen) - set(markers) != {key for key in previous if not key.startswith("act_hw::")}
+                    or {key for key in seen if not key.startswith(("act_hw::", "act_pos::"))}
+                    != {key for key in previous if not key.startswith(("act_hw::", "act_pos::"))}
                     or result["events"]):
                 raise RuntimeError("PROTOCOL_ERROR: invalid activity high-water progress")
     return validate
@@ -120,11 +122,21 @@ class NativeClaudeReader(LogReader):
         if result.get("error"):
             return result  # Activity applies native high-water before propagating this failure.
         raw_anchor = result.pop("anchor_blob")
-        anchor = hashlib.blake2b(raw_anchor, digest_size=8).hexdigest() if raw_anchor else ""
-        result["checkpoint"]["anchor"] = anchor
-        for event in result["events"]:
-            if "checkpoint" in event:
-                event["checkpoint"]["anchor"] = anchor
+        result["checkpoint"]["anchor"] = hashlib.blake2b(raw_anchor, digest_size=8).hexdigest() if raw_anchor else ""
+        if mode == "usage":
+            # Each event gets its own cursor: the result's, ended at the event, with the
+            # recent-key window as it stood after it.
+            if result.get("usage_cursor_schema") != 2:
+                raise RuntimeError("PROTOCOL_ERROR: incompatible Claude usage cursor")
+            recent_keys = [] if result["usage_reset"] else cursor.get("recent_keys", [])
+            recent = deque([str(key) for key in recent_keys][-64:], maxlen=64)
+            for event in result["events"]:
+                end = event.pop("cursor_end")
+                recent.append(event["dedup_key"])
+                event_checkpoint = dict(result["checkpoint"])
+                event_checkpoint["offset"] = end
+                event_checkpoint["recent_keys"] = list(recent)
+                event["checkpoint"] = event_checkpoint
         return result
 
     def parse_incremental(self, path, checkpoint):

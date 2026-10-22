@@ -152,7 +152,8 @@ async def test_native_checkpoint_restart_preserves_question_background_partial_a
         assert cursor["kind"] == "jsonl"
         assert cursor["offset"] == (len(stage1) if stage == 1 else path.stat().st_size)
         assert len(cursor["recent_keys"]) == stage
-        assert activity_cursor["keys"] == [f"act_hw::{5 if stage == 1 else 10}"]
+        assert [key for key in activity_cursor["keys"] if not key.startswith("act_pos::")] == [f"act_hw::{5 if stage == 1 else 10}"]
+        assert len([key for key in activity_cursor["keys"] if key.startswith("act_pos::")]) == 1
         totals = store.snapshot(str(workspace))["global"]["all_time"]
         assert [totals[k] for k in ("input", "output")] == ([15, 4] if stage == 1 else [22, 9])
         db.close()
@@ -290,7 +291,7 @@ async def test_native_activity_error_advances_before_next_poll_completion(tmp_pa
         assert [event["event_type"] for event in activity] == ["agent_active", "turn_complete"]
         assert [event["text"] for event in activity if event["event_type"] == "turn_complete"] == ["After exceptional record"]
         errors = [row for row in receipts(tmp_path) if row.get("event") == "observed" and row.get("error")]
-        assert len(errors) == 1 and errors[0]["seen"] == ["act_hw::2"]
+        assert len(errors) == 1 and [key for key in errors[0]["seen"] if not key.startswith("act_pos::")] == ["act_hw::2"]
         assert errors[0]["event_count"] == 0 and errors[0]["session_id"] == tid
         await backend.request(ws, "terminal.kill", {"terminal_session_id": tid, "force": True})
 

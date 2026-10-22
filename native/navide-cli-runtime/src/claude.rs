@@ -1,6 +1,6 @@
 //! Claude JSONL interpretation; application policy and checkpoint storage stay outside.
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
@@ -41,6 +41,13 @@ fn anchor(file: &mut File, end: u64) -> io::Result<Vec<u8>> {
     let mut bytes = vec![0; (end - start) as usize];
     file.read_exact(&mut bytes)?;
     Ok(bytes)
+}
+fn activity_fingerprint(file: &mut File, end: u64) -> io::Result<String> {
+    let start = end.saturating_sub(32);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = vec![0; (end - start) as usize];
+    file.read_exact(&mut bytes)?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 fn usage(rec: &Value, common: &Value, seen: &mut HashSet<String>) -> Option<Value> {
     if rec["type"] != "assistant" || !rec["message"]["usage"].is_object() {
@@ -314,8 +321,36 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
             || args["checkpoint"]["identity"] != identity
             || stat.len() < offset
             || (!expected.is_empty() && anchor(&mut file, offset)? != expected));
+    let activity_position = args["seen"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(|key| key.strip_prefix("act_pos::"))
+        .find_map(|value| {
+            let (line, rest) = value.split_once(':')?;
+            let (position, rest) = rest.split_once(':')?;
+            let (saved_identity, fingerprint) = rest.rsplit_once(':')?;
+            let line = line.parse::<u64>().ok()?;
+            let position = position.parse::<u64>().ok()?;
+            (saved_identity == identity && position <= stat.len()).then_some((
+                line,
+                position,
+                fingerprint.to_owned(),
+            ))
+        });
+    let activity_position = match activity_position {
+        Some((line, position, fingerprint))
+            if activity_fingerprint(&mut file, position)? == fingerprint =>
+        {
+            Some((line, position))
+        }
+        _ => None,
+    };
     let start = if mode == "usage" && !rotated {
         offset
+    } else if mode == "activity" {
+        activity_position.map_or(0, |(_, position)| position)
     } else {
         0
     };
@@ -323,18 +358,18 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
     let mut reader = BufReader::new(file);
     let mut position = start;
     let mut committed = start;
-    let mut recent = if rotated {
-        Vec::new()
+    let mut recent: VecDeque<String> = if rotated {
+        VecDeque::new()
     } else {
         args["checkpoint"]["recent_keys"]
             .as_array()
-            .cloned()
+            .map(|keys| keys.iter().map(string).collect())
             .unwrap_or_default()
     };
     if recent.len() > 64 {
         recent.drain(..recent.len() - 64);
     }
-    let mut seen: HashSet<String> = recent.iter().map(string).collect();
+    let mut seen: HashSet<String> = recent.iter().cloned().collect();
     if mode == "session_usage" {
         seen = args["seen"]
             .as_array()
@@ -354,8 +389,9 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
     let initial_water = high_water;
     let mut events = Vec::new();
     let mut records = Vec::new();
-    let mut line_no = 0;
-    let mut usage_ends = Vec::new();
+    let mut line_no = activity_position.map_or(0, |(line, _)| line);
+    let mut activity_committed = start;
+    let mut activity_committed_line = line_no;
     let mut activity_error = None;
     loop {
         let mut raw = Vec::new();
@@ -365,6 +401,10 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
         line_no += 1;
         position += raw.len() as u64;
         let complete = raw.ends_with(b"\n");
+        if mode == "activity" && complete {
+            activity_committed = position;
+            activity_committed_line = line_no;
+        }
         if mode == "usage" && !complete {
             break;
         }
@@ -412,14 +452,15 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
             }
             "turns" => records.push((line_no, rec)),
             _ => {
-                if let Some(event) = usage(&rec, &common, &mut seen) {
+                if let Some(mut event) = usage(&rec, &common, &mut seen) {
                     if mode == "usage" {
-                        recent.push(event["dedup_key"].clone());
+                        recent.push_back(string(&event["dedup_key"]));
                         if recent.len() > 64 {
-                            recent.remove(0);
+                            if let Some(expired) = recent.pop_front() {
+                                seen.remove(&expired);
+                            }
                         }
-                        seen = recent.iter().map(string).collect();
-                        usage_ends.push((position, recent.clone()));
+                        event["cursor_end"] = json!(position);
                     }
                     events.push(event);
                 }
@@ -437,22 +478,26 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
     checkpoint.insert("identity".into(), json!(identity));
     checkpoint.insert("offset".into(), json!(committed));
     checkpoint.insert("recent_keys".into(), json!(recent));
-    for (event, (end, keys)) in events.iter_mut().zip(usage_ends) {
-        let mut cursor = checkpoint.clone();
-        cursor.insert("offset".into(), json!(end));
-        cursor.insert("recent_keys".into(), json!(keys));
-        event["checkpoint"] = json!(cursor);
-    }
     let mut next_seen = args["seen"].as_array().cloned().unwrap_or_default();
-    if mode == "activity" && high_water > initial_water {
-        next_seen.retain(|v| !v.as_str().is_some_and(|s| s.starts_with("act_hw::")));
-        next_seen.push(json!(format!("act_hw::{high_water}")));
+    if mode == "activity" && (high_water > initial_water || activity_committed > start) {
+        next_seen.retain(|v| {
+            !v.as_str()
+                .is_some_and(|s| s.starts_with("act_hw::") || s.starts_with("act_pos::"))
+        });
+        if high_water > 0 {
+            next_seen.push(json!(format!("act_hw::{high_water}")));
+        }
+        let fingerprint = activity_fingerprint(&mut file, activity_committed)?;
+        next_seen.push(json!(format!(
+            "act_pos::{activity_committed_line}:{activity_committed}:{identity}:{fingerprint}"
+        )));
     } else if mode == "session_usage" {
         next_seen = seen.into_iter().map(Value::String).collect();
     }
     Ok((
         json!({"parser":"rust-claude-jsonl-v1","path":path,"native_session_id":sid,"cwd":cwd,"identity":identity,
         "mode":mode,"events":events,"checkpoint":checkpoint,"seen":next_seen,"error":activity_error,
+        "usage_reset":rotated,"usage_cursor_schema":2,
         "turns":if mode == "turns" { turns(&records, sid) } else { Vec::new() }}),
         Some(raw_anchor),
     ))
