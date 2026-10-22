@@ -77,4 +77,77 @@ describe('PluginDisclosureOverview (D5, D-f)', () => {
     expect(names[0]).toBe('acme.\\u{202e}quiet 1.0.0\\u{200b}')
     expect(names[1]).toBe('acme.plain 2.0.0')
   })
+
+  // #415 review MED-2: an open activity panel stops polling with the overview.
+  it('stops the open activity panel polling while paused and resumes it after', async () => {
+    vi.useFakeTimers()
+    try {
+      const backendCallConcurrency = vi.fn(async () => [])
+      ;(window as unknown as Record<string, unknown>).agentTeam = {
+        plugins: {
+          installedDisclosures: vi.fn().mockResolvedValue([{ id: 'acme.one', version: '1.0.0', disclosure: null, scan: null }]),
+          activityReport: vi.fn(async () => ({ ok: true, report })),
+          backendCallConcurrency,
+          backendResourceUsage: vi.fn(async () => null),
+        },
+      }
+      wrapper = mount(PluginDisclosureOverview, { global: { plugins: [i18n] } })
+      await flushPromises()
+      const details = wrapper.get('.nv-overview-details').element as HTMLDetailsElement
+      details.open = true
+      await wrapper.get('.nv-overview-details').trigger('toggle')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(backendCallConcurrency).toHaveBeenCalledTimes(2)
+
+      await wrapper.setProps({ paused: true })
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(backendCallConcurrency).toHaveBeenCalledTimes(2)
+
+      await wrapper.setProps({ paused: false })
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(backendCallConcurrency.mock.calls.length).toBeGreaterThan(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('PluginDisclosureOverview source row (K2)', () => {
+  it('gives a card the source row the Host names, and never guesses one', async () => {
+    ;(window as unknown as Record<string, unknown>).agentTeam = {
+      plugins: {
+        installedDisclosures: vi.fn().mockResolvedValue([
+          { id: 'nerdtechnic.devmap', version: '0.2.0', disclosure, scan: null },
+          { id: 'acme.pre', version: '2.0.0-beta.1', disclosure: null, scan: null, source: 'prerelease' },
+          { id: 'acme.beta', version: '3.0.0-rc.1', disclosure: null, scan: null },
+          { id: 'acme.mkt', version: '1.0.0', disclosure: null, scan: null, source: 'marketplace' },
+          // Far in the future: a test build past its expiry reads differently (D3).
+          { id: 'acme.tp', version: '1.0.0', disclosure: null, scan: null, source: 'testplace', expiresAt: '2099-01-17T00:00:00Z' },
+        ]),
+        activityReport: vi.fn(async () => ({ ok: false, error: 'not ready' })),
+      },
+    }
+    wrapper = mount(PluginDisclosureOverview, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect(wrapper.find('[data-id="nerdtechnic.devmap"] .nv-source-row').exists()).toBe(false)
+    expect(wrapper.get('[data-id="acme.pre"] .nv-source-row').attributes('data-source')).toBe('prerelease')
+    expect(wrapper.find('[data-id="acme.beta"] .nv-source-row').exists()).toBe(false)
+    // Without a Host source nothing reads as reviewed (a pre-release or testplace build included).
+    for (const id of ['nerdtechnic.devmap', 'acme.beta']) {
+      expect(wrapper.get(`[data-id="${id}"]`).text()).not.toMatch(/Reviewed|reviewed/)
+    }
+    expect(wrapper.get('[data-id="acme.mkt"] .nv-source-row').text()).toBe('Source and review Reviewed')
+    const testRow = wrapper.get('[data-id="acme.tp"] .nv-source-row')
+    expect(testRow.get('.nv-source-badge').text()).toBe('Test build, no human review, expires 2099-01-17')
+    // S8: a tester is told when a withdrawal reaches them offline.
+    expect(testRow.get('.nv-source-revoke').text()).toBe(
+      'While you are offline or not signed in to Navide Cloud, a withdrawal by its developer takes effect at the latest when it expires (up to 90 days).'
+    )
+    expect(testRow.text()).toBe(
+      'Source and review Test build, no human review, expires 2099-01-17' +
+        'While you are offline or not signed in to Navide Cloud, a withdrawal by its developer takes effect at the latest when it expires (up to 90 days).'
+    )
+  })
 })

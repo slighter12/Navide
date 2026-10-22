@@ -37,6 +37,7 @@ import {
 } from './pluginInstallPaths'
 import { PluginActivationSelector } from './pluginActivationSelector'
 import { copyManifestPermissionsSummary, type ManifestPermissionsSummary } from '../../shared/executionPolicy'
+import type { PluginSource } from '../../shared/pluginSource'
 
 export {
   assertManifestFiles,
@@ -217,6 +218,8 @@ export interface PluginActivationCatalogEntry {
   views: PluginViewLaunchDescriptor[]
   backend?: PluginBackendActivation
   provenance?: 'official-registry' | 'developer-local-unpacked' | 'factory-bundled'
+  /** Source and review state; see `shared/pluginSource.ts`. */
+  source?: PluginSource
   artifactDigest?: string
 }
 
@@ -347,6 +350,8 @@ export interface InstalledPluginPackageSummary {
   packageVersion?: string
   manifestPermissions?: ManifestPermissionsSummary
   provenance?: 'official-registry' | 'developer-local-unpacked' | 'factory-bundled'
+  /** Source and review state; see `shared/pluginSource.ts`. */
+  source?: PluginSource
   warning?: string
   /** The v2 manifest's `engines.navide`, verbatim, when it declares one. */
   enginesNavide?: string
@@ -449,9 +454,11 @@ export function scanInstalledPlugins(root: string): ScannedPlugin[] {
       // lifecycle record, so an arbitrary legacy directory must not be
       // mistaken for a corrupt selector merely because its directory name is
       // not an id.
-      const selected = isValidManifestV2PluginId(name)
-        ? lifecycleSelector.read(name)?.active
-        : undefined
+      const record = isValidManifestV2PluginId(name) ? lifecycleSelector.read(name) : null
+      const selected = record?.active
+      // A first install staged without Restart has no package selected yet and
+      // no legacy package at the root: it is not broken, it waits to be promoted.
+      if (!selected && record?.candidate && !existsSync(join(dir, 'manifest.json'))) continue
       out.push(selected ? loadPluginDir(lifecycleSelector.packageDir(name, selected)) : loadPluginDir(dir))
     } catch {
       // A lifecycle selector that exists but cannot be validated may still

@@ -13,6 +13,7 @@ Navide 採用 **Local-first**，但不代表所有情況都完全離線。Electr
 - 應用程式資料目錄中的 Host 管理 Plugin Storage Partition；它們依驗證過的 Plugin／Package 及（Workspace Scope）驗證過的 Workspace 分隔，不會傳送給 Navide 或 Plugin Registry
 - 從本機 CLI Log 衍生的 Token Attribution 與 Deduplication Metadata
 - 本機 `navide.db` 裡的第三方 Navide 外掛活動紀錄（`plugin_activity`）：哪個外掛、哪個 `namespace.method`、時間、workspace、被允許／拒絕／失敗、workspace 內的相對路徑（workspace 外的路徑只記 `<outside-workspace>`，從不存檔案內容），shell 呼叫只記執行檔與子指令。明細保留 7 天，之後只留每日計數 90 天。內建的 Plans、Git、Mini-IDE 不記錄。這些資料不會離開這台電腦
+- 本機 `navide.db` 裡，pane 離線時聊天室訊息的預覽（`channels.wake_kept`，重啟後改存 `channels.wake_lost`）：綁定的聊天室在 pane 不在線上時傳來的每則訊息，前 40 個字，用來告訴聊天室哪幾則沒有送進去。照原樣存放、不做遮罩，所以訊息開頭若是機密也會一併存下。訊息送進 pane 或聊天室已被告知後刪除；聊天室解除綁定或 bot 被移除時也會刪除；bot 停用期間會保留到它再次啟動。這些資料不會離開這台電腦
 - 選用的 AI Provider API Key；它會儲存在受限制檔案權限保護的本機設定檔中（受支援系統上為 `0600`）
 
 Navide 不營運專案 Telemetry 服務，也不要求建立 Navide 帳號。
@@ -93,7 +94,7 @@ Agent CLI 憑證保留在各 CLI 自己的設定中。如果在 Navide 輸入 Cl
 
 **可攜憑證**是你主動選擇的例外：各家官方為「帶到別台機器」設計的值（例如 `claude setup-token` 印出的 token），在設定 → 帳號貼入。Navide 在這台裝置上加密保存，只在啟動該 CLI 的新 pane 時以環境變數交給它，不會寫進 CLI 自己的登入檔。從一台裝置移除，就只從那台裝置移除。
 
-若在設定 → 同步開啟 **憑證**（預設關閉），每一份貼入的憑證會先在你的裝置上以帳號同步金鑰加密再離開，Navide Cloud 只保存服務端無法打開的密文。登入同一帳號的另一台裝置會解開它、同樣以密文形式保存在磁碟上，並只交給 pane 使用。服務端能看到的只有不透明的項目 id、版本號、時間戳與寫入的裝置——看不出屬於哪個 CLI 或哪個帳號。在一台裝置移除不會刪掉雲端或其他裝置上的那一份；區段未開啟前不會上傳任何東西；在某台裝置切換帳號會清掉該裝置匯入的憑證並把區段重新關閉。
+貼入的憑證永遠不會上傳。帳號憑證與金鑰不會離開你的機器：設定 → 同步沒有「憑證」區段，舊版留下開著的憑證開關一律視為關閉，Navide Cloud 也會拒收任何版本送來的憑證記錄。MCP 設定若你開啟同步，會先在你的機器加密才上傳，伺服器沒有解密金鑰。
 
 本機檔案權限可以降低同一部電腦其他使用者意外存取的機會，但無法防範 Malware、遭入侵的使用者帳號、無限制 Agent、Backup，或具有同等權限的 Process。
 

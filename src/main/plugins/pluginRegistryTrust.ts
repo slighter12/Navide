@@ -18,7 +18,14 @@ export interface RegistryPackageEnvelope {
   publisherId: string
   keyId: string
   signedAt: string
+  /** Present only on a testplace version, together with expiresAt; stable
+   * and pre-release envelopes keep the 8 fields above. */
+  channel?: string
+  expiresAt?: string
 }
+
+/** Release channels this App can install. Anything else is refused. */
+const REGISTRY_RELEASE_CHANNELS: ReadonlySet<string> = new Set(['stable', 'pre-release', 'testplace'])
 
 /** The Registry-signed disclosure envelope (contract section 3.5). It is
  * separate from the 8-field package envelope, which stays unchanged so that
@@ -75,6 +82,11 @@ export type RegistryTrustErrorCode =
   | 'PACKAGE_BLOCKED'
   | 'DISCLOSURE_INVALID'
   | 'DISCLOSURE_MISMATCH'
+  | 'CHANNEL_UNSUPPORTED'
+  | 'TESTPLACE_EXPIRED'
+  /** Its developer (or Navide) took a test build back; its testers learn it
+   *  from the tester detail, never from public metadata (S8 T-MED-1). */
+  | 'TESTPLACE_WITHDRAWN'
 
 export class RegistryTrustError extends Error {
   constructor(
@@ -98,16 +110,21 @@ export function assertRegistryPackageEnvelopeShape(
   label = 'registry envelope'
 ): asserts value is RegistryPackageEnvelope {
   const envelope = requireTrustObject(value, label)
-  assertExactTrustFields(envelope, label, [
-    'schemaVersion',
-    'artifactDigest',
-    'packageId',
-    'version',
-    'target',
-    'publisherId',
-    'keyId',
-    'signedAt',
-  ])
+  assertExactTrustFields(
+    envelope,
+    label,
+    [
+      'schemaVersion',
+      'artifactDigest',
+      'packageId',
+      'version',
+      'target',
+      'publisherId',
+      'keyId',
+      'signedAt',
+    ],
+    ['channel', 'expiresAt']
+  )
   if (envelope.schemaVersion !== 1) throw new Error(`${label} schemaVersion is unsupported`)
   for (const field of [
     'artifactDigest',
@@ -119,6 +136,9 @@ export function assertRegistryPackageEnvelopeShape(
     'signedAt',
   ]) {
     requiredString(envelope[field], `${label}.${field}`)
+  }
+  for (const field of ['channel', 'expiresAt']) {
+    if (envelope[field] !== undefined) requiredString(envelope[field], `${label}.${field}`)
   }
   if (!isValidManifestV2PluginId(envelope.packageId)) {
     throw new Error(`${label}.packageId is invalid`)
@@ -260,11 +280,17 @@ export interface VerifyRegistryPackageTrustInput {
   /** Host-derived target; the Registry response cannot choose this value. */
   expectedHostTarget?: string
   now?: Date
+  /** D3: the user chose to keep using this expired testplace artifact. Only
+   * the expiry check is skipped; it runs after every other check, so a
+   * blocked package or a bad signature is still refused. */
+  allowExpiredTestplace?: boolean
 }
 
 export interface VerifiedRegistryPackageTrust {
   publisherId: string
   keyId: string
+  /** Set when an expired testplace artifact was allowed (allowExpiredTestplace). */
+  expired?: true
 }
 
 export function verifyRegistryTrustMetadata(
@@ -351,6 +377,20 @@ export function verifyRegistryPackageTrust(
   if (input.envelope.schemaVersion !== 1) {
     throw new RegistryTrustError('TRUST_METADATA_INVALID', 'unsupported registry trust schema')
   }
+  const channel = input.envelope.channel
+  if (channel !== undefined && !REGISTRY_RELEASE_CHANNELS.has(channel)) {
+    throw new RegistryTrustError('CHANNEL_UNSUPPORTED', `unknown release channel '${channel}'`)
+  }
+  if ((channel === 'testplace') !== (input.envelope.expiresAt !== undefined)) {
+    throw new RegistryTrustError(
+      'CHANNEL_UNSUPPORTED',
+      'a registry envelope carries expiresAt exactly when its channel is testplace'
+    )
+  }
+  const expiresAt =
+    input.envelope.expiresAt === undefined
+      ? null
+      : timestamp(input.envelope.expiresAt, 'registry envelope expiresAt')
   assertPluginTargetCompatible(
     input.envelope.target,
     input.expectedHostTarget ?? currentPluginHostTarget()
@@ -414,6 +454,16 @@ export function verifyRegistryPackageTrust(
     throw new RegistryTrustError(
       'REGISTRY_SIGNATURE_INVALID',
       'registry signature failed verification against the authorized signer'
+    )
+  }
+  // Checked after the signature, so only a Registry-signed expiry counts.
+  if (expiresAt !== null && expiresAt <= now) {
+    if (input.allowExpiredTestplace === true) {
+      return { publisherId: input.envelope.publisherId, keyId: signer.keyId, expired: true }
+    }
+    throw new RegistryTrustError(
+      'TESTPLACE_EXPIRED',
+      `testplace version '${input.envelope.packageId}@${input.envelope.version}' expired at ${input.envelope.expiresAt}`
     )
   }
 

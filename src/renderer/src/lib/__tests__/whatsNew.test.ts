@@ -90,6 +90,13 @@ describe('pickText', () => {
 
   it('falls back to zh-TW for an unknown locale', () => {
     expect(pickText(text, 'ja-JP')).toBe('你好')
+    expect(pickText(text, 'it-IT')).toBe('你好')
+  })
+
+  it('falls back to en-US for a later UI language', () => {
+    expect(pickText(text, 'ko-KR')).toBe('hi')
+    expect(pickText(text, 'zh-CN')).toBe('hi')
+    expect(pickText({ ...text, 'ko-KR': '안녕' }, 'ko-KR')).toBe('안녕')
   })
 })
 
@@ -134,6 +141,84 @@ describe('0.2.10 — Channels and Voice Input', () => {
   it('is not shown to a build still running 0.2.9', () => {
     expect(pickWhatsNew('0.2.9', '0.2.8')?.version).toBe('0.2.9')
     expect(pickWhatsNew('0.2.9', '0.2.9')).toBeNull()
+  })
+})
+
+// R3 MED-2 on 0.2.26: release.sh bumps package.json to 0.2.26 at release time,
+// so the entry must exist before that bump. These pin it without touching
+// package.json: the bump is simulated by passing 0.2.26 as the running version.
+describe('0.2.26 — wake, Auto resume, file and folder installs', () => {
+  const entry = whatsNewFor('0.2.26')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    expect(entry?.features?.map((f) => f.name['en-US'])).toEqual(['Wake from chat', 'Resume scope Auto', 'Install from a file or folder'])
+    const texts: WhatsNewText[] = [
+      entry!.title,
+      ...entry!.highlights,
+      ...entry!.features!.flatMap((f) => [f.name, f.tagline, f.where]),
+    ]
+    for (const text of texts) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('shows once to someone updating from 0.2.25', () => {
+    expect(pickWhatsNew('0.2.26', '0.2.25')?.version).toBe('0.2.26')
+    expect(pickWhatsNew('0.2.26', '0.2.26')).toBeNull()
+    expect(pickWhatsNewOnDemand('0.2.26', false)?.version).toBe('0.2.26')
+    expect(WHATS_NEW[2].version).toBe('0.2.26')
+    expect(WHATS_NEW[3].version).toBe('0.2.25')
+  })
+})
+
+// Authored ahead of the 0.2.27 bump, like 0.2.26 above. One entry for the
+// release: Navide Browser (#459) and blocked local installs, with the
+// downgrade to 0.2.26 (decision d6 (a)); docs wrap-up adjusts the wording.
+describe('0.2.27 — Navide Browser and blocked local installs', () => {
+  const entry = whatsNewFor('0.2.27')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('names Navide Browser and the downgrade to 0.2.26', () => {
+    expect(entry!.title['en-US']).toContain('Navide Browser')
+    expect(entry!.highlights.some((text) => text['en-US'].startsWith('Navide Browser'))).toBe(true)
+    expect(entry!.highlights.some((text) =>
+      text['en-US'].startsWith('Behaviour change:') && text['en-US'].includes('0.2.26') && text['en-US'].includes('quarantined'),
+    )).toBe(true)
+  })
+
+  it('shows once to someone updating from 0.2.26, and not to a build still running 0.2.26', () => {
+    expect(pickWhatsNew('0.2.27', '0.2.26')?.version).toBe('0.2.27')
+    expect(pickWhatsNew('0.2.27', '0.2.27')).toBeNull()
+    expect(WHATS_NEW[1].version).toBe('0.2.27')
+    expect(pickWhatsNew('0.2.26', '0.2.25')?.version).toBe('0.2.26')
+  })
+})
+
+// Authored ahead of the 0.2.28 bump, like 0.2.27 above. The default UI
+// language line is the wording #519 settled; Korean (Beta) is added by its own PR.
+describe('0.2.28 — take effect at once, window tools and the English fallback', () => {
+  const entry = whatsNewFor('0.2.28')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('says the default UI language is now English and the Developer Mode re-consent', () => {
+    expect(entry!.highlights.some((text) => text['en-US'].startsWith('The default UI language has changed:'))).toBe(true)
+    expect(entry!.highlights.some((text) =>
+      text['en-US'].startsWith('Behaviour change:') && text['en-US'].includes('Developer Mode') && text['en-US'].includes('0.2.27'),
+    )).toBe(true)
+  })
+
+  it('shows once to someone updating from 0.2.27, as the newest entry, and not to a build still running 0.2.27', () => {
+    expect(pickWhatsNew('0.2.28', '0.2.27')?.version).toBe('0.2.28')
+    expect(pickWhatsNew('0.2.28', '0.2.28')).toBeNull()
+    expect(WHATS_NEW[0].version).toBe('0.2.28')
+    expect(pickWhatsNew('0.2.27', '0.2.26')?.version).toBe('0.2.27')
   })
 })
 

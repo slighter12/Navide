@@ -15,6 +15,7 @@ from .signing import (
     public_key_from_private,
     sign_json,
 )
+from .versions import PRERELEASE_CHANNEL, STABLE_CHANNEL, TESTPLACE_CHANNEL
 
 
 def _timestamp(value: datetime) -> str:
@@ -24,6 +25,10 @@ def _timestamp(value: datetime) -> str:
         .isoformat()
         .replace("+00:00", "Z")
     )
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 def _blocked_package(value: str) -> dict[str, str]:
@@ -257,12 +262,25 @@ class RegistryTrustSigner:
         target: str,
         publisher_id: str,
         now: datetime | None = None,
+        channel: str = STABLE_CHANNEL,
+        expires_at: datetime | None = None,
     ) -> tuple[dict, str]:
+        """Only a testplace envelope carries `channel` and `expiresAt`. Stable
+        and pre-release envelopes keep the exact 8 fields every released App
+        accepts, and released Apps reject the 10-field testplace one."""
         signed_at = now or datetime.now(timezone.utc)
         if self.status not in {"active", "rotating"}:
             raise ValueError(f"registry signer is {self.status}")
         if not self.not_before <= signed_at <= self.not_after:
             raise ValueError("registry signer is outside its validity period")
+        if channel == TESTPLACE_CHANNEL:
+            if expires_at is None:
+                raise ValueError("a testplace version needs an expiry")
+        elif channel in {STABLE_CHANNEL, PRERELEASE_CHANNEL}:
+            if expires_at is not None:
+                raise ValueError(f"a {channel} version cannot expire")
+        else:
+            raise ValueError(f"unknown release channel '{channel}'")
         envelope = {
             "schemaVersion": 1,
             "artifactDigest": artifact_digest,
@@ -273,6 +291,9 @@ class RegistryTrustSigner:
             "keyId": self.key_id,
             "signedAt": _timestamp(signed_at),
         }
+        if channel == TESTPLACE_CHANNEL:
+            envelope["channel"] = channel
+            envelope["expiresAt"] = _timestamp(expires_at)
         return envelope, sign_json(self.signer_private_key, envelope)
 
     def sign_disclosure_envelope(
@@ -361,3 +382,37 @@ class RegistryTrustSigner:
             ],
         }
         return metadata, sign_json(self.root_private_key, metadata)
+
+    def signed_local_install(
+        self,
+        *,
+        publisher_keys: list[dict],
+        blocked_digests: list[dict],
+        now: datetime | None = None,
+    ) -> tuple[dict, str]:
+        """Root-signed document for locally installed packages (A3): approved
+        publisher keys, revoked ones included, and blocked package digests,
+        each with its reason (`{digest, reason}`; decision d5).
+        A separate document because released Apps reject any new field in
+        `signed_metadata`, which stays byte-for-byte unchanged; `kind` keeps
+        the two apart under the same root key."""
+        generated_at = now or datetime.now(timezone.utc)
+        document = {
+            "schemaVersion": 1,
+            "kind": "local-install-trust",
+            "registryProfile": self.registry_profile,
+            "generatedAt": _timestamp(generated_at),
+            "expiresAt": _timestamp(generated_at + self.metadata_ttl),
+            "blockedDigests": [{"digest": d["digest"], "reason": d["reason"]} for d in blocked_digests],
+            "publisherKeys": [
+                {
+                    "publisherId": key["publisherId"],
+                    "keyId": key["keyId"],
+                    "publicKey": key["publicKey"],
+                    "status": key["status"],
+                    "revokedAt": _timestamp(_aware(key["revokedAt"])) if key["revokedAt"] else None,
+                }
+                for key in publisher_keys
+            ],
+        }
+        return document, sign_json(self.root_private_key, document)

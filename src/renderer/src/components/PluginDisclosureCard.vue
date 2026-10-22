@@ -7,8 +7,15 @@
 // Order (D6): the one-line summary, risk level, then what the scan found that
 // the package does not declare (red, the only red on the card), the scan
 // sentences, what the package declares (collapsed), what was declared but
-// not seen (grey), the fixed scan-coverage and honest-limits text, and last
-// the Registry's facts.
+// not seen (grey), the fixed scan-coverage and honest-limits text, the fixed
+// view-network line, and last the Registry's facts.
+//
+// View network (R2 MED-3 on 0.2.26): a view is an ordinary web page with network
+// access the Host does not filter, while the signed `network` field covers only
+// commands and the native backend. `hasViews` (from the manifest's
+// `contributes.views`, outside the signed card) says whether the package has
+// views: true states it, false (backend or agent tools only) says nothing, and
+// unknown (Registry data carries no manifest) states it conditionally.
 //
 // Provenance (review I1 on #354): listing and detail data is raw Registry
 // output that nothing has verified yet; only a prepareInstall result has had
@@ -28,14 +35,29 @@ import {
 import { disclosureClauses, disclosureList } from '../lib/disclosureText'
 import { revealInvisibleText } from '../../../shared/pluginAgentTools'
 import PluginDisclosureSummary from './PluginDisclosureSummary.vue'
+import PluginSourceBadge from './PluginSourceBadge.vue'
+import type { PluginSource } from '../../../shared/pluginSource'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   disclosure: ManifestDisclosure | null | undefined
   scan?: ScanReport | null
   registry?: RegistryDisclosureFacts | null
   /** True only for a prepareInstall result (signature and digests checked). */
   verified?: boolean
-}>()
+  /** Card K3: a package picked from a file. Its disclosure is the Host's
+   *  reading of the package's own manifest; no Registry stands behind it. */
+  localSource?: boolean
+  /** K2: adds the fixed "Source and review" row; absent renders as before. */
+  source?: PluginSource
+  publisher?: string
+  expiresAt?: string | null
+  /** R2 MED-6 on #436: whether the package declares views; undefined when the
+   *  surface cannot tell (Registry listing data). Not part of the signed card. */
+  hasViews?: boolean
+}>(), {
+  // Absent must stay unknown, not Vue's boolean-prop false.
+  hasViews: undefined,
+})
 const { t, te, locale } = useI18n()
 
 const scan = computed(() => (props.disclosure ? props.scan ?? null : null))
@@ -51,9 +73,12 @@ function list(values: unknown): string {
 }
 
 /** `coverage` is both a sentence and the prefix of `coverage.incomplete`, so
- * the plain one reads `scan.coverage.base` (nested i18n keys cannot be both). */
+ * the plain one reads `scan.coverage.base` (nested i18n keys cannot be both).
+ * A file's card (localSource) reads `coverage.local`: Navide scanned it on this
+ * computer, not the Registry at publish. Marketplace cards are as before. */
 function scanKey(key: string): string {
-  return key === 'coverage' ? 'pluginDisclosure.scan.coverage.base' : `pluginDisclosure.scan.${key}`
+  if (key === 'coverage') return props.localSource ? 'pluginDisclosure.scan.coverage.local' : 'pluginDisclosure.scan.coverage.base'
+  return `pluginDisclosure.scan.${key}`
 }
 
 /** Third-party text with every invisible character spelled out, so a scanned
@@ -85,7 +110,9 @@ const clauses = computed(() => (props.disclosure ? disclosureClauses(t, locale.v
 /** F1 on #360: "verified" names only what prepareInstall checked; without a
  *  scan report there is no scan signature to speak of. */
 const provenance = computed(() =>
-  !props.verified
+  props.localSource
+    ? 'pluginDisclosure.provenance.local'
+    : !props.verified
     ? 'pluginDisclosure.provenance.unverified'
     : scan.value
       ? 'pluginDisclosure.provenance.verified'
@@ -140,6 +167,7 @@ const facts = computed(() => {
 
 <template>
   <section class="nv-disclosure" :aria-label="$t('pluginDisclosure.title')">
+    <PluginSourceBadge v-if="source" row :source="source" :publisher="publisher" :expires-at="expiresAt" />
     <p v-if="!disclosure" class="nv-disclosure-none">{{ $t('pluginDisclosure.noDisclosure') }}</p>
     <template v-else>
       <p class="nv-disclosure-provenance" :class="verified ? 'nv-disclosure-provenance--verified' : 'nv-disclosure-provenance--unverified'">
@@ -155,7 +183,7 @@ const facts = computed(() => {
         </ul>
       </div>
 
-      <h5 class="nv-disclosure-heading">{{ $t('pluginDisclosure.scanHeading') }}</h5>
+      <h5 class="nv-disclosure-heading">{{ $t(localSource ? 'pluginDisclosure.scanHeadingLocal' : 'pluginDisclosure.scanHeading') }}</h5>
       <ul v-if="scan" class="nv-disclosure-sentences">
         <li
           v-for="sentence in bodySentences"
@@ -165,7 +193,7 @@ const facts = computed(() => {
           {{ scanText(sentence) }}
         </li>
       </ul>
-      <p v-else class="nv-disclosure-noscan">{{ $t('pluginDisclosure.scan.noScan') }}</p>
+      <p v-else class="nv-disclosure-noscan">{{ $t(localSource ? 'pluginDisclosure.scan.noScanLocal' : 'pluginDisclosure.scan.noScan') }}</p>
 
       <details class="nv-disclosure-declared">
         <summary>{{ $t('pluginDisclosure.declaredHeading') }}</summary>
@@ -184,9 +212,12 @@ const facts = computed(() => {
       <p class="nv-disclosure-limits">
         <template v-if="coverageSentence">
           {{ scanText(coverageSentence) }}
-          {{ verified ? $t('pluginDisclosure.signedByRegistry') : $t('pluginDisclosure.scannedByRegistry') }}
+          {{ localSource ? $t('pluginDisclosure.scannedLocally') : verified ? $t('pluginDisclosure.signedByRegistry') : $t('pluginDisclosure.scannedByRegistry') }}
         </template>
-        <template v-else>{{ $t('pluginDisclosure.limitsWithoutScan') }}</template>
+        <template v-else>{{ $t(localSource ? 'pluginDisclosure.limitsWithoutScanLocal' : 'pluginDisclosure.limitsWithoutScan') }}</template>
+      </p>
+      <p v-if="hasViews !== false" class="nv-disclosure-view-network">
+        {{ hasViews ? $t('pluginDisclosure.viewNetwork') : $t('pluginDisclosure.viewNetworkIfViews') }}
       </p>
 
       <template v-if="facts.length">
@@ -231,6 +262,7 @@ const facts = computed(() => {
 .nv-disclosure-notseen,
 .nv-disclosure-facts,
 .nv-disclosure-limits,
+.nv-disclosure-view-network,
 .nv-disclosure-noscan,
 .nv-disclosure-none {
   color: var(--text-secondary);

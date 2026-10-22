@@ -227,3 +227,99 @@ describe('canonical registry trust JSON', () => {
     )
   })
 })
+
+describe('verifyRegistryPackageTrust release channel', () => {
+  function codeOf(run: () => unknown): string | undefined {
+    try {
+      run()
+    } catch (error) {
+      return (error as { code?: string }).code
+    }
+    return undefined
+  }
+
+  it('verifies an envelope without channel fields exactly as before', () => {
+    const plain = envelope()
+    expect(Object.keys(plain)).toHaveLength(8)
+    expect(verify(plain)).toEqual({ publisherId: 'acme', keyId: 'registry-2026' })
+  })
+
+  it('accepts a testplace envelope before its signed expiry', () => {
+    const testplace = envelope({ channel: 'testplace', expiresAt: '2026-11-14T11:00:00Z' })
+    expect(verify(testplace)).toEqual({ publisherId: 'acme', keyId: 'registry-2026' })
+  })
+
+  it('refuses an expired testplace envelope with TESTPLACE_EXPIRED', () => {
+    const testplace = envelope({ channel: 'testplace', expiresAt: '2026-08-16T11:59:59Z' })
+    expect(codeOf(() => verify(testplace))).toBe('TESTPLACE_EXPIRED')
+  })
+
+  it('refuses a channel it does not know (fail closed)', () => {
+    for (const channel of ['nightly', 'Testplace', '']) {
+      expect(codeOf(() => verify(envelope({ channel })))).toBe('CHANNEL_UNSUPPORTED')
+    }
+  })
+
+  it('refuses a testplace envelope without an expiry and an expiry without testplace', () => {
+    expect(codeOf(() => verify(envelope({ channel: 'testplace' })))).toBe('CHANNEL_UNSUPPORTED')
+    expect(codeOf(() => verify(envelope({ expiresAt: '2026-11-14T11:00:00Z' })))).toBe(
+      'CHANNEL_UNSUPPORTED'
+    )
+    expect(
+      codeOf(() => verify(envelope({ channel: 'testplace', expiresAt: 'not-a-time' })))
+    ).toBe('TRUST_METADATA_INVALID')
+  })
+
+  it('does not let a changed expiry pass the registry signature', () => {
+    const signed = envelope({ channel: 'testplace', expiresAt: '2026-08-16T11:59:59Z' })
+    const extended = { ...signed, expiresAt: '2099-01-01T00:00:00Z' }
+    expect(codeOf(() => verify(extended, trust(), signature(signed)))).toBe(
+      'REGISTRY_SIGNATURE_INVALID'
+    )
+  })
+
+  // D3: the user kept an expired test build; only the expiry check is skipped.
+  function verifyKept(envelopeValue: RegistryPackageEnvelope, trustValue = trust()) {
+    return verifyRegistryPackageTrust({
+      envelope: envelopeValue,
+      envelopeSignature: signature(envelopeValue),
+      trustMetadata: trustValue,
+      trustMetadataSignature: signature(trustValue, root.privateKey),
+      pinnedRootKey: rootPublicKey,
+      expected: {
+        artifactDigest: 'a'.repeat(64),
+        packageId: 'acme.demo',
+        version: '1.0.0',
+        target: 'universal',
+        publisherId: 'acme',
+      },
+      now: new Date(NOW),
+      allowExpiredTestplace: true,
+    })
+  }
+
+  it('allows a kept expired testplace envelope and says it is expired', () => {
+    const expired = envelope({ channel: 'testplace', expiresAt: '2026-08-16T11:59:59Z' })
+    expect(verifyKept(expired)).toEqual({ publisherId: 'acme', keyId: 'registry-2026', expired: true })
+    // Not expired yet: nothing to mark.
+    const live = envelope({ channel: 'testplace', expiresAt: '2026-11-14T11:00:00Z' })
+    expect(verifyKept(live)).toEqual({ publisherId: 'acme', keyId: 'registry-2026' })
+  })
+
+  it('still refuses a kept expired testplace version that was taken down', () => {
+    const expired = envelope({ channel: 'testplace', expiresAt: '2026-08-16T11:59:59Z' })
+    const blocked = trust({ blockedPackages: [{ packageId: 'acme.demo', version: '1.0.0' }] })
+    expect(codeOf(() => verifyKept(expired, blocked))).toBe('PACKAGE_BLOCKED')
+    const tampered = { ...expired, expiresAt: '2099-01-01T00:00:00Z' }
+    expect(codeOf(() => verifyRegistryPackageTrust({
+      envelope: tampered,
+      envelopeSignature: signature(expired),
+      trustMetadata: trust(),
+      trustMetadataSignature: signature(trust(), root.privateKey),
+      pinnedRootKey: rootPublicKey,
+      expected: { artifactDigest: 'a'.repeat(64), packageId: 'acme.demo', version: '1.0.0', target: 'universal', publisherId: 'acme' },
+      now: new Date(NOW),
+      allowExpiredTestplace: true,
+    }))).toBe('REGISTRY_SIGNATURE_INVALID')
+  })
+})

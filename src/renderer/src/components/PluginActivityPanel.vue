@@ -10,7 +10,7 @@
 // from plugins:backendCallConcurrency and, once #367 lands,
 // plugins:backendResourceUsage. Sizes of -1 are unknown: shown as such and
 // never added up.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   sumKnownBytes,
@@ -20,9 +20,11 @@ import {
 } from '../../../shared/pluginActivity'
 import { revealInvisibleText as reveal } from '../../../shared/pluginAgentTools'
 import { formatBytes } from '../lib/formatBytes'
+import { disclosureList } from '../lib/disclosureText'
 import { createQueueTrend, pluginBackendUsage, type PluginBackendUsage } from '../lib/backendQueueTrend'
 
-const props = withDefaults(defineProps<{ pluginId: string; pollMs?: number }>(), { pollMs: 5000 })
+// `paused` stops the live polling while the panel is out of view.
+const props = withDefaults(defineProps<{ pluginId: string; pollMs?: number; paused?: boolean }>(), { pollMs: 5000, paused: false })
 const { t, te, locale } = useI18n()
 
 const report = ref<PluginActivityReport | null>(null)
@@ -71,14 +73,23 @@ async function loadLive(): Promise<void> {
   }
 }
 
-onMounted(() => {
-  void loadReport()
+function startPolling(): void {
+  if (timer || props.paused) return
   void loadLive()
   timer = setInterval(() => void loadLive(), props.pollMs)
-})
-onBeforeUnmount(() => {
+}
+
+function stopPolling(): void {
   if (timer) clearInterval(timer)
+  timer = null
+}
+
+watch(() => props.paused, (paused) => { if (paused) stopPolling(); else startPolling() })
+onMounted(() => {
+  void loadReport()
+  startPolling()
 })
+onBeforeUnmount(stopPolling)
 
 function date(ms: number | null): string {
   return ms === null ? '' : new Date(ms).toLocaleString(locale.value)
@@ -131,7 +142,7 @@ function caller(call: PluginActivityToolCall): string {
 }
 
 function list(values: string[]): string {
-  return values.join(locale.value.startsWith('en') ? ', ' : '、')
+  return disclosureList(locale.value, values)
 }
 
 const sizes = computed(() => {

@@ -34,6 +34,7 @@ from . import guard_hooks
 from .guard import runtime as guard_runtime
 from . import ws_auth
 from . import error_ledger
+from . import launch_id
 from . import loop_watchdog
 from . import mem_probe
 from . import osplat
@@ -478,6 +479,19 @@ async def nudge_plugin_request_recovery(session: "Session") -> None:
         log.warning("plugin request recovery nudge failed: %s", err)
 
 
+def has_main_window() -> bool:
+    """Whether a main window is connected now (forms open there)."""
+    return any(not s.dead and is_main_window(s) for s in list(_SESSIONS))
+
+
+def main_window_sessions() -> list["Session"]:
+    """The main windows connected now that announced a page-load id."""
+    return [
+        s for s in list(_SESSIONS)
+        if not s.dead and is_main_window(s) and getattr(s, "window_id", "")
+    ]
+
+
 def live_main_window_ids() -> set[str]:
     """The page-load ids (``ui.invoke.ready`` window_id) of the main windows connected now."""
     return {
@@ -652,6 +666,12 @@ class Session:
         # A main window's page-load id (`ui.invoke.ready` window_id): stays the
         # same across reconnects, changes when the window reloads (B2-c).
         self.window_id = ""
+        # The workspaces a main window holds (`ui.invoke.ready` workspaces):
+        # the one it opened with plus the ones its sidebar adopted, re-announced
+        # whenever that list changes. Read by the MCP self-close checks, which
+        # count a window holding the caller's workspace as the caller's own
+        # even when none of that workspace's panes sit in it.
+        self.held_workspaces: tuple[str, ...] = ()
         # Set by `window.prove` answering this connection's challenge (see
         # navide_window_proof_matches): a Navide window, as opposed to any
         # other client holding the token. ui_bus_ready is self-declared.
@@ -2281,6 +2301,9 @@ async def _reclaim_orphan_codex_homes() -> None:
 @app.on_event("startup")
 async def _start_log_watcher() -> None:
     _sanitize_inherited_cli_env()
+    # Before any client connects: every spawn record stamps this launch, and the
+    # renderer's 'auto' resume scope compares against the one before it.
+    launch_id.rotate(ui_settings_store)
     if tokens_store.has_quota_changes():
         _schedule_tokens_broadcast("")
 
@@ -2785,6 +2808,37 @@ _HOOK_VENDORS = frozenset(
 # vendor's hook file, not something the vendor spec exposes.
 _SUBAGENT_COUNTING_VENDORS = frozenset({"claude"})
 
+# Hook events that pair a permission box with the tool result that answers it.
+# PermissionRequest carries no tool_use_id, so the pairing is the tool name plus
+# a fingerprint of its input — both Post events repeat the same tool_input.
+_TOOL_KEYED_EVENTS = frozenset({"permission_request", "post_tool_use", "post_tool_use_failure"})
+
+# The two tool results. Both hooks are installed async, so the last tool's result
+# can land after Stop: they only release a permission hold and must never count
+# as the agent working, or a finished pane would read as mid-turn again.
+_TOOL_RESULT_EVENTS = frozenset({"post_tool_use", "post_tool_use_failure"})
+
+
+# Tools whose answer is written into their input (AskUserQuestion's `answers`,
+# ExitPlanMode's approved plan), so the input a Post event repeats differs from
+# the one the box was raised with. They are keyed by name alone, which is enough:
+# only one such box is ever open at a time.
+_INPUT_REWRITTEN_TOOLS = frozenset({"AskUserQuestion", "ExitPlanMode"})
+
+
+def _hook_tool_key(payload: dict) -> str:
+    """`<tool_name>:<hash of tool_input>`, or "" when the payload names no tool."""
+    name = str(payload.get("tool_name") or "")
+    if not name:
+        return ""
+    if name in _INPUT_REWRITTEN_TOOLS:
+        return name
+    try:
+        canonical = json.dumps(payload.get("tool_input"), sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return ""
+    return f"{name}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:16]}"
+
 # Tools whose PreToolUse payload names a file the agent is about to write.
 # Read-only tools carry a file_path too, so the set — not the field — is what
 # decides whether a hook becomes a preview record.
@@ -2911,7 +2965,8 @@ async def cli_hook(vendor: str, request: Request) -> Any:
     Hook commands installed by `claude_hooks` / `qwen_hooks` / `copilot_hooks`
     POST here with:
       - Header X-Agent-Team-Event: pre_tool_use | stop | notification |
-        subagent_stop
+        subagent_stop | permission_request | post_tool_use |
+        post_tool_use_failure
       - Body: the JSON payload the CLI pipes to the hook on stdin
 
     The three vendors disagree on where hooks are configured but agree on what
@@ -2949,7 +3004,10 @@ async def cli_hook(vendor: str, request: Request) -> Any:
     # a new event_type to keep working.
     if event_kind == "stop":
         event_type = "turn_complete"
-    elif event_kind in ("pre_tool_use", "notification", "subagent_stop"):
+    elif event_kind in (
+        "pre_tool_use", "notification", "subagent_stop",
+        "permission_request", "post_tool_use", "post_tool_use_failure",
+    ):
         event_type = "agent_active"
     else:
         return {"ok": False, "reason": f"unknown event kind: {event_kind!r}"}
@@ -3021,8 +3079,9 @@ async def cli_hook(vendor: str, request: Request) -> Any:
     # composer or not). It reports the pane waiting, not working, so recording
     # it as agent_active would replace the turn_complete entry for good —
     # cli_get_status would show a finished pane as active, with no turn text.
-    # The broadcast below still carries it for the renderer to judge.
-    if pane_id and notification_type != "idle_prompt":
+    # The broadcast below still carries it for the renderer to judge. A tool
+    # result is left out for the same reason: it can arrive after Stop.
+    if pane_id and notification_type != "idle_prompt" and event_kind not in _TOOL_RESULT_EVENTS:
         # The log-reader sink is not the only writer of _pane_activity any
         # more: for the hook vendors the Stop hook is the earliest and most
         # reliable end-of-turn signal there is, and cli_wait_idle could not see
@@ -3043,6 +3102,10 @@ async def cli_hook(vendor: str, request: Request) -> Any:
         "timestamp": "",
         "detail": "hook:stop-blocked" if blocked_envelope else f"hook:{event_kind}",
         "notification_type": notification_type,
+        # Which tool a permission box is for, and which tool a result is of, so
+        # the frontend releases a held box only on its own tool finishing.
+        # Empty on every other event kind.
+        "tool_key": _hook_tool_key(payload) if event_kind in _TOOL_KEYED_EVENTS else "",
         # Background subagents this pane is still waiting on. Always present so
         # the frontend can trust a 0 as "none running" rather than "not
         # reported"; vendors without these hooks never send the field at all
@@ -3050,11 +3113,12 @@ async def cli_hook(vendor: str, request: Request) -> Any:
         "pending_subagents": subagent_tracker.pending(pane_id),
     }))
     # Dev time: only real work signals. A notification (idle_prompt /
-    # permission_prompt) is mapped to agent_active above for the busy-state
-    # path, but it marks the agent WAITING — beating on it would open an agent
+    # permission_prompt) or a permission_request is mapped to agent_active above
+    # for the busy-state path, but it marks the agent WAITING — beating on it would open an agent
     # interval at exactly the moment nothing is running. Guarded like the
     # preview record: this endpoint's response must not depend on the store.
-    if event_kind != "notification":
+    # A late tool result is no work signal either: it can follow Stop.
+    if event_kind not in ("notification", "permission_request", *_TOOL_RESULT_EVENTS):
         try:
             if dev_time_store.agent_event(ws_path or cwd, pane_id or "", event_type, ""):
                 await broadcast(
@@ -3896,7 +3960,42 @@ def _probe_agent_cli_for_spawn(agent_key: str, requested_command: Any = None) ->
             message += f" — {hint}"
             error_details["hint"] = hint
         raise AgentCliProbeError(message, error_details)
+    if dep.official_regex and re.search(dep.official_regex, output) is None:
+        # A same-named CLI from someone else (issue #402: a community `grok`
+        # at ~/.grok/bin/grok). The spawn goes ahead — it may be what the user
+        # wants — but the pane says what it is running.
+        install = dep.install_for(osplat.platform_id).command or dep.docs_url
+        details["warning"] = (
+            f"{executable_display} does not identify as {dep.label} "
+            f"(--version printed {output.splitlines()[0][:60] if output else 'nothing'!r}); "
+            f"to use {dep.label}, install it with: {install}"
+        )
+    else:
+        untested = _untested_version_note(agent_key, dep.label, version)
+        if untested:
+            details["untested_version"] = untested
     return details
+
+
+def _leading_version(text: str) -> tuple[int, ...]:
+    # "2026.08.25-3e8eec8" -> (2026, 8, 25): a build suffix is not a version.
+    m = re.match(r"\d+(?:\.\d+)*", text.strip())
+    return tuple(int(p) for p in m.group(0).split(".")) if m else ()
+
+
+def _untested_version_note(agent_key: str, label: str, version: str | None) -> str:
+    """A line for the pane when the CLI is newer than the version Navide was
+    last verified against. Disclosure only: the spawn goes ahead either way."""
+    spec = cli_vendor(agent_key)
+    switch = spec.account_switch if spec is not None else None
+    verified = switch.verified_version if switch is not None else ""
+    found, known = _leading_version(version or ""), _leading_version(verified)
+    if not found or not known or found <= known:
+        return ""
+    return (
+        f"{label} {version} is newer than the last version Navide verified "
+        f"({verified}); it should work, but this version has not been tested"
+    )
 
 
 _HOME_PREFIX = str(Path.home())

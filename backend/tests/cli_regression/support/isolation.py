@@ -18,7 +18,7 @@ from .redacted_diagnostics import redact
 CLI_NAMES = frozenset({
     "claude", "codex", "gemini", "kimi", "grok", "qwen", "opencode", "kilo",
     "kilocode", "cursor-agent", "agent", "copilot", "pi", "droid", "aider",
-    "agy", "antigravity", "muse", "mcode",
+    "agy", "antigravity", "muse", "mcode", "goose",
 })
 
 
