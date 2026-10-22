@@ -179,7 +179,8 @@ it.runIf(process.platform === 'darwin')('native Claude production-client checkpo
       expect(durable.usage.kind).toBe('jsonl')
       expect(durable.usage.offset).toBe(stage === 1 ? firstOffset : durable.file_size)
       expect(durable.usage.recent_keys).toHaveLength(stage)
-      expect(durable.activity.keys).toEqual([`act_hw::${stage === 1 ? 5 : 10}`])
+      expect(durable.activity.keys.filter((key: string) => !key.startsWith('act_pos::'))).toEqual([`act_hw::${stage === 1 ? 5 : 10}`])
+      expect(durable.activity.keys.filter((key: string) => key.startsWith('act_pos::'))).toHaveLength(1)
       expect([durable.totals.input, durable.totals.output]).toEqual(stage === 1 ? [15, 4] : [22, 9])
     }
     expect(new Set(tids).size).toBe(2)

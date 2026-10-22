@@ -1,6 +1,7 @@
 """Supplemental native-protocol parity; principal proofs use production WS."""
 from contextlib import closing
 from dataclasses import asdict
+from collections import deque
 import hashlib
 import json
 import sys
@@ -21,9 +22,14 @@ def observe(peer, path, mode, **args):
     result["anchor_blob"] = anchor
     spelling = hashlib.blake2b(anchor, digest_size=8).hexdigest() if anchor else ""
     result["checkpoint"]["anchor"] = spelling
-    for event in result["events"]:
-        if "checkpoint" in event:
-            event["checkpoint"]["anchor"] = spelling
+    if mode == "usage":
+        assert result["usage_cursor_schema"] == 2
+        recent = deque([] if result["usage_reset"] else
+                       [str(key) for key in args.get("checkpoint", {}).get("recent_keys", [])][-64:], maxlen=64)
+        for event in result["events"]:
+            end = event.pop("cursor_end")
+            recent.append(event["dedup_key"])
+            event["checkpoint"] = {**result["checkpoint"], "offset": end, "recent_keys": list(recent)}
     if mode == "activity":
         events = [ActivityEvent(**row) for row in result["events"]]
         for event in events:
@@ -76,8 +82,8 @@ def test_native_usage_activity_and_turns_match_existing_reader(tmp_path):
         activity = observe(peer, path, "activity", seen=[])
         expected_activity = baseline.parse_activity(path, seen)
         assert activity["events"] == [asdict(e) for e in expected_activity]
-        assert activity["seen"] == sorted(seen)
-        assert observe(peer, path, "activity", seen=sorted(seen))["events"] == []
+        assert [key for key in activity["seen"] if not key.startswith("act_pos::")] == sorted(seen)
+        assert observe(peer, path, "activity", seen=activity["seen"])["events"] == []
         assert observe(peer, path, "turns")["turns"] == [asdict(t) for t in baseline.turns_for_session(path)]
         prior = set()
         assert observe(peer, path, "session_usage", seen=[])["events"] == [asdict(e) for e in baseline.parse_session_file(path, prior)]
@@ -106,6 +112,24 @@ def test_native_image_prompt_activity_matches_upstream_reader(tmp_path):
         assert activity["events"] == [asdict(event) for event in expected]
 
 
+def test_native_activity_cursor_falls_back_after_same_inode_rewrite(tmp_path):
+    path = tmp_path / "home/.claude/projects/-tmp-parity/rewrite.jsonl"
+    path.parent.mkdir(parents=True)
+    first = assistant(1, [{"type": "text", "text": "first"}], "end_turn")
+    second = assistant(2, [{"type": "text", "text": "second"}], "end_turn")
+    third = assistant(3, [{"type": "text", "text": "third"}], "end_turn")
+    path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
+    baseline = ClaudeLogReader()
+    seen = set()
+    with closing(NativePeer(tmp_path)) as peer:
+        initial = observe(peer, path, "activity", seen=[])
+        assert initial["events"] == [asdict(event) for event in baseline.parse_activity(path, seen)]
+        first["message"]["content"][0]["text"] = "changed first line with a different byte length"
+        path.write_text("".join(json.dumps(row) + "\n" for row in (first, second, third)))
+        resumed = observe(peer, path, "activity", seen=initial["seen"])
+        assert resumed["events"] == [asdict(event) for event in baseline.parse_activity(path, seen)]
+
+
 def test_native_partial_anchor_rewrite_rotation_and_activity_highwater(tmp_path):
     path = tmp_path / "home/.claude/projects/-tmp-parity/session.jsonl"
     path.parent.mkdir(parents=True)
@@ -121,7 +145,7 @@ def test_native_partial_anchor_rewrite_rotation_and_activity_highwater(tmp_path)
         one = observe(peer, path, "activity", seen=[])
         assert one["events"] == [asdict(e) for e in baseline.parse_activity(path, seen)]
         path.write_bytes(first + second)  # Valid unterminated record: activity consumes it, usage does not.
-        continued = observe(peer, path, "activity", seen=sorted(seen))
+        continued = observe(peer, path, "activity", seen=one["seen"])
         assert continued["events"] == [asdict(e) for e in baseline.parse_activity(path, seen)]
         assert observe(peer, path, "usage", checkpoint=first_expected.checkpoint,
                        expected=first_result["anchor_blob"])["events"] == []
@@ -180,7 +204,7 @@ def test_native_exceptional_activity_returns_progress_without_swallowing_error(t
         assert failed.meta["code"] == "IO_FAILED" and failed.meta["effect"] == "partial"
         assert "not an object" in failed.meta["message"]
         assert failed.meta["observation_parts"] >= 1, "exception lost its activity progress"
-        assert set(progress["seen"]) == seen and progress["events"] == []
+        assert {key for key in progress["seen"] if not key.startswith("act_pos::")} == seen and progress["events"] == []
         assert progress["parser"] == "rust-claude-jsonl-v1" and progress["path"] == str(path)
         assert progress["ownership"]["session_id"] is None
         result = observe(peer, path, "activity", seen=sorted(seen))
