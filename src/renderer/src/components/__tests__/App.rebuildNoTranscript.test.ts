@@ -44,7 +44,7 @@ function harness(sessionOnDisk: boolean | undefined) {
     isPaneMuted: () => false,
     accountFollow: { has: () => false, remove: vi.fn(), add: vi.fn() },
     messagingHoldKey: () => null,
-    onKill: vi.fn(async () => {}),
+    onKill: vi.fn(async () => true),
     spawnPane: vi.fn(async () => {
       panes.value.push({ id: 'new', pinnedSessionId: 'sid-new', profileId: 'acct-b' })
       return 'new'
