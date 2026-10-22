@@ -225,8 +225,8 @@ export default class CliContractReporter implements Reporter {
       }
       return
     }
-    mkdirSync(resolve('test-results/ci'), { recursive: true })
-    appendFileSync(resolve('test-results/ci/native-codex-lifecycle.jsonl'), line)
+    mkdirSync(resolve(process.cwd(), 'test-results/ci'), { recursive: true })
+    appendFileSync(resolve(process.cwd(), 'test-results/ci/native-codex-lifecycle.jsonl'), line)
   }
 
   onHookStart(context: Parameters<NonNullable<Reporter['onHookStart']>>[0]): void {
