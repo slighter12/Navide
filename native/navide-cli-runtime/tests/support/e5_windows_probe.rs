@@ -19,7 +19,8 @@ mod windows {
     use windows_sys::Win32::System::Threading::{
         CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
         UpdateProcThreadAttribute, WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT,
-        PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTUPINFOEXW,
+        PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTF_USESTDHANDLES,
+        STARTUPINFOEXW,
     };
 
     fn pipe() -> io::Result<(OwnedHandle, OwnedHandle)> {
@@ -120,6 +121,8 @@ mod windows {
         let mut command = wide(OsStr::new("cmd.exe /d /q /k"));
         let mut startup = STARTUPINFOEXW::default();
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+        // Null std handles: a redirected parent must not hand its stdio to the child.
+        startup.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
         startup.lpAttributeList = attrs.as_ptr();
         let mut process = PROCESS_INFORMATION::default();
         // SAFETY: all pointers remain valid throughout CreateProcessW; the attribute list holds
