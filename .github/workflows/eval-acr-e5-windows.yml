@@ -421,6 +421,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Annotate step outcomes
+        if: always()
+        shell: pwsh
+        env:
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: pwsh -NoProfile -File tests/cli/e5-windows-report-outcomes.ps1
+
       - name: Require every Windows case
         if: always()
         shell: pwsh
