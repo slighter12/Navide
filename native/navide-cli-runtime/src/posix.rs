@@ -640,6 +640,8 @@ struct CreateArgs {
     /// reported on `SESSION_OWNED` (G2 delta section 4).
     argv_source: &'static str,
     argv0: compose::Argv0,
+    /// `Some("credential")` when the managed-credential outer wrapper composed the argv (delta 10.2).
+    outer: Option<&'static str>,
     rows: u16,
     cols: u16,
 }
@@ -653,13 +655,16 @@ fn refused(error: compose::ComposeError) -> io::Error {
         Compose(why) => ("compose", why),
         Validate(why) => ("validate", why),
         Composition(why) => ("composition", why),
+        Credential(why) => ("credential", why),
     };
     io::Error::other(format!("invalid {stage}: {why}"))
 }
 
 /// The child's argv from the wire-2 `launch` object (delta section 2). The pre-composed `argv` shape is
 /// only what a subject that composes in Python is admitted to use; every other subject is composed here.
-fn launch_argv(agent: &str, args: &Value) -> io::Result<(Vec<String>, &'static str, compose::Argv0)> {
+type LaunchArgv = (Vec<String>, &'static str, compose::Argv0, Option<&'static str>);
+
+fn launch_argv(agent: &str, args: &Value) -> io::Result<LaunchArgv> {
     if args.get("argv").is_some() || args.get("argv_source").is_some() || args.get("argv0").is_some() {
         return Err(io::Error::other("invalid launch_shape: argv, argv_source and argv0 are not CREATE fields"));
     }
@@ -680,20 +685,19 @@ fn launch_argv(agent: &str, args: &Value) -> io::Result<(Vec<String>, &'static s
             .collect::<io::Result<_>>()?;
         let program = argv.first().filter(|p| !p.is_empty()).ok_or_else(|| io::Error::other("invalid launch_shape: argv is empty"))?;
         let attested = compose::attest(program);
-        return Ok((argv, "python", attested));
+        return Ok((argv, "python", attested, None));
     }
     let composed = compose::compose(agent, launch).map_err(refused)?;
     let mut argv = vec![composed.program];
     argv.extend(composed.args);
-    Ok((argv, composed.argv_source, composed.argv0))
+    Ok((argv, composed.argv_source, composed.argv0, composed.outer))
 }
 
 fn create_args(args: &Value) -> io::Result<CreateArgs> {
+    // Admission is the composition table's (`compose::admit`), independent of whether the sidecar
+    // also observes the subject (delta 10.4).
     let agent = args["agent_key"].as_str().unwrap_or("").to_owned();
-    if !matches!(agent.as_str(), "" | "terminal") && !adapters::integrated(&agent) {
-        return Err(io::Error::other("agent runtime not integrated"));
-    }
-    let (argv, argv_source, argv0) = launch_argv(&agent, args)?;
+    let (argv, argv_source, argv0, outer) = launch_argv(&agent, args)?;
     Ok(CreateArgs {
         id: text(args, "session_id")?.to_owned(),
         generation: text(args, "session_generation")?.to_owned(),
@@ -704,6 +708,7 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
         argv,
         argv_source,
         argv0,
+        outer,
         rows: dimension(args, "rows")?,
         cols: dimension(args, "cols")?,
     })
@@ -711,10 +716,14 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
 
 /// The `SESSION_OWNED` meta (5.2) for a session whose root is `root`.
 fn owned_meta(create: u64, handle: &SessionHandle, root: &Value, parsed: &CreateArgs) -> Value {
-    json!({"create_id":create,"session_id":handle.id,"session_generation":handle.generation,
+    let mut meta = json!({"create_id":create,"session_id":handle.id,"session_generation":handle.generation,
         "pane_id":handle.pane,"workspace_path":handle.workspace,"root":root,
         "pty":handle.pty.owned_record(),"argv_source":parsed.argv_source,
-        "argv0":argv0_json(&parsed.argv0)})
+        "argv0":argv0_json(&parsed.argv0)});
+    if let Some(outer) = parsed.outer {
+        meta["outer"] = json!(outer);
+    }
+    meta
 }
 
 fn argv0_json(argv0: &compose::Argv0) -> Value {
@@ -730,7 +739,7 @@ fn handoff_size_ok(create: u64, args: &CreateArgs) -> bool {
     let meta = json!({"create_id":create,"session_id":args.id,"session_generation":args.generation,
         "pane_id":args.pane,"workspace_path":args.workspace,"root":root,
         "pty":{"tty":"x".repeat(TTY_NAME_MAX)},"argv_source":args.argv_source,
-        "argv0":argv0_json(&args.argv0)});
+        "outer":"credential","argv0":argv0_json(&args.argv0)});
     let bytes = serde_json::to_vec(&meta)
         .map(|b| b.len())
         .unwrap_or(usize::MAX);
@@ -3024,6 +3033,7 @@ mod lifecycle_tests {
             argv: vec!["x".into()],
             argv_source: "rust",
             argv0: compose::attest(&"/x".repeat(300)),
+            outer: None,
             rows: 24,
             cols: 80,
         };

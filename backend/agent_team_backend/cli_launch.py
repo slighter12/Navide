@@ -38,10 +38,7 @@ def admit_composition(agent_key: str, *, platform: str, managed_credential_path:
     declared = _composition_of(agent_key)
     if platform == "windows":
         return "python"  # ticket 04 transition, removed by ticket 07
-    if declared == "rust" and managed_credential_path:
-        # The credential wrapper (`wrap_command`) is Python-composed text around the launch.
-        raise LaunchRefused("COMPOSITION_UNSUPPORTED", "credential_wrapper",
-                            "a managed credential path is not composed by the Rust runtime yet")
+    # A managed credential path no longer needs Python text: the `credential` shape carries the wrapper.
     return declared
 
 
@@ -318,10 +315,25 @@ def _command_text(command: str | list[str]) -> tuple[str, str | list[str]]:
     return "list", command[-1]
 
 
-def build_launch(agent_key: str, base: str | list[str], final: str | list[str], *, login: bool = False) -> dict:
+def build_launch(agent_key: str, base: str | list[str], final: str | list[str], *, login: bool = False,
+                 credential: dict | None = None) -> dict:
     """The structured launch for `final`, the command after every injector, given `base`, the command
     just before the injectors ran. The submitted part is tokenised; what the injectors appended
-    becomes plain `arg` words. A result that is not `base + suffix` is refused before CREATE."""
+    becomes plain `arg` words. A result that is not `base + suffix` is refused before CREATE.
+
+    `credential` is a `credential_launch.wrap_plan`: the launch is then wrapped in the `credential` shape
+    that the Rust runtime renders around it (delta 10.2)."""
+    launch = _build_inner(agent_key, base, final, login=login)
+    if credential is None:
+        return launch
+    outer = {"shape": "credential", "helper": list(credential["helper"]), "unset": list(credential["unset"]),
+             "inner": launch}
+    if credential.get("entrypoint") is not None:
+        outer["entrypoint"] = credential["entrypoint"]
+    return outer
+
+
+def _build_inner(agent_key: str, base: str | list[str], final: str | list[str], *, login: bool) -> dict:
     form, base_text = _command_text(base)
     final_form, final_text = _command_text(final)
     if form != final_form or not isinstance(final_text, str) or not isinstance(base_text, str):

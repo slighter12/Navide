@@ -9050,7 +9050,7 @@ async def _terminal_create_impl(
                     resume_dedup_id,
                 )
                 raise _TerminalCreateReapTimeout(stale.id)
-    async def _spawn_and_claim(spawn_command=None) -> Any:
+    async def _spawn_and_claim(spawn_command=None, credential=None) -> Any:
         native = isinstance(session.terminals, RustTerminalService)
         create = session.terminals.create_async if native else session.terminals.create
         term = create(
@@ -9067,7 +9067,8 @@ async def _terminal_create_impl(
             **({"spawn_command": spawn_command} if spawn_command is not None else {}),
             **({"cancelled": lambda: transaction["cancelled"] or session.dead,
                 "cancel_record": transaction, "base_command": base_command,
-                "login_subcommand": login_subcommand} if native else {}),
+                "login_subcommand": login_subcommand,
+                **({"credential": credential} if credential is not None else {})} if native else {}),
         )
         if native:
             try:
@@ -9214,7 +9215,7 @@ async def _terminal_create_impl(
             quota_tx_id = str(payload.get("quota_transaction_id") or "")
             quota_pane_id = str(payload.get("quota_original_pane_id") or "")
             if managed_path:
-                from .credential_launch import CredentialLaunch, wrap_command
+                from .credential_launch import CredentialLaunch, wrap_command, wrap_plan
                 from .credential_store import StoreUnverified
 
                 async def owned_vault_call(fn):
@@ -9231,14 +9232,16 @@ async def _terminal_create_impl(
                 launch = await CredentialLaunch.start(vendor_spec.credential_path_env_vars)
                 names = tuple(dict.fromkeys((*quota_failover.credential_env_vars(agent_key),
                     *(name for _, values in vendor_spec.account_switch.uncertain_env_by_scope for name in values))))
-                wrapped = wrap_command(payload["command"], vendor_spec,
-                    launch.helper_argv(login=is_login, vendor=agent_key, credential_env=names),
-                    env={key: value for key, value in {**os.environ, **env}.items() if key not in (env_remove or ())})
+                helper_argv = launch.helper_argv(login=is_login, vendor=agent_key, credential_env=names)
+                wrap_env = {key: value for key, value in {**os.environ, **env}.items() if key not in (env_remove or ())}
+                wrapped = wrap_command(payload["command"], vendor_spec, helper_argv, env=wrap_env)
+                # The same decision as typed data: the Rust runtime renders the wrapper (delta 10.2).
+                plan = wrap_plan(payload["command"], vendor_spec, helper_argv, env=wrap_env)
                 if wrapped is None and is_login:
                     raise quota_failover.FailoverRefused("CREDENTIAL_STORE_UNVERIFIED", "this login command cannot verify its credential store")
                 if wrapped is not None:
                     env.update(launch.env)
-                term = await _spawn_and_claim(wrapped)
+                term = await _spawn_and_claim(wrapped, plan)
                 metadata["credential_launch_term_id"] = term.id
                 term.metadata.update(metadata)
                 try:
