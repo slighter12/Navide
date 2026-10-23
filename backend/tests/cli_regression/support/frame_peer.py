@@ -27,8 +27,8 @@ from agent_team_backend.cli_runtime_frames import Direction, FrameType, code
 from .isolation import isolated_environment
 
 ROOT = Path(__file__).resolve().parents[4]
-PRODUCT = ROOT / "native/navide-cli-runtime/target/release/navide-cli-runtime"
-HARNESS = ROOT / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime"
+PRODUCT = Path(os.environ.get("NAVIDE_CLI_RUNTIME_BIN") or ROOT / "native/navide-cli-runtime/target/release/navide-cli-runtime")
+HARNESS = Path(os.environ.get("NAVIDE_CLI_RUNTIME_HARNESS_BIN") or ROOT / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime")
 
 
 class FramePeer:

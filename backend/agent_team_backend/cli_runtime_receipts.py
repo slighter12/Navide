@@ -18,8 +18,22 @@ from .cli_runtime_handoff import slave_name_of
 
 
 def controlling_terminal_device(pid: int) -> int | None:
-    """The root's controlling-terminal device (`e_tdev` of `proc_pidinfo(PROC_PIDTBSDINFO)`, macOS), or None when
-    it has none. Read directly: psutil caches its tty map at first use and misses ttys created later."""
+    """Read the root's controlling-terminal device directly, or return None when it has none.
+
+    psutil caches its tty map at first use and misses ttys created later.
+    """
+    if sys.platform == "linux":
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat_file:
+                fields = stat_file.read().rsplit(")", 1)[1].split()
+            encoded = int(fields[4])  # tty_nr is field 7; fields[0] is state (field 3).
+            if encoded == 0:
+                return None
+            major = (encoded >> 8) & 0xFFF
+            minor = (encoded & 0xFF) | ((encoded >> 12) & 0xFFF00)
+            return os.makedev(major, minor)
+        except (OSError, IndexError, ValueError):
+            return None
     import ctypes
     import ctypes.util
     library = ctypes.CDLL(ctypes.util.find_library("proc"), use_errno=True)

@@ -25,8 +25,8 @@ from tests.test_cli_runtime_lifecycle import LifeRig
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(sys.platform != "darwin" or not PRODUCT.is_file() or not HARNESS.is_file(),
-                       reason="requires the explicitly built macOS native runtime (product and harness)"),
+    pytest.mark.skipif(sys.platform not in ("darwin", "linux") or not PRODUCT.is_file() or not HARNESS.is_file(),
+                       reason="requires the explicitly built POSIX native runtime (product and harness)"),
 ]
 
 
