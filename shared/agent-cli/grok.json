@@ -1,6 +1,6 @@
 {
   "key": "grok",
-  "composition": "python",
+  "composition": "rust",
   "command": "grok",
   "model_flag": "--model",
   "effort_flag": null,

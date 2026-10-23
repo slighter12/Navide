@@ -1,6 +1,6 @@
 {
   "key": "cursor",
-  "composition": "python",
+  "composition": "rust",
   "command": "agent",
   "model_flag": "--model",
   "effort_flag": null,

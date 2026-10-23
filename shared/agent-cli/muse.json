@@ -1,6 +1,6 @@
 {
   "key": "muse",
-  "composition": "python",
+  "composition": "rust",
   "command": "muse",
   "model_flag": "--model",
   "effort_flag": "--reasoning-effort",

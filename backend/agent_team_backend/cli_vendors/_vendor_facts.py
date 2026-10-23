@@ -36,7 +36,7 @@ class VendorFacts(NamedTuple):
 FACTS: dict[str, VendorFacts] = {
     'aider': VendorFacts(
         key='aider',
-        composition='python',
+        composition='rust',
         command='aider',
         model_flag=None,
         effort_flag=None,
@@ -51,7 +51,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'antigravity': VendorFacts(
         key='antigravity',
-        composition='python',
+        composition='rust',
         command='agy',
         model_flag='--model',
         effort_flag='--effort',
@@ -111,7 +111,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'cursor': VendorFacts(
         key='cursor',
-        composition='python',
+        composition='rust',
         command='agent',
         model_flag='--model',
         effort_flag=None,
@@ -126,7 +126,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'droid': VendorFacts(
         key='droid',
-        composition='python',
+        composition='rust',
         command='droid',
         model_flag=None,
         effort_flag=None,
@@ -141,7 +141,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'goose': VendorFacts(
         key='goose',
-        composition='python',
+        composition='rust',
         command='goose',
         model_flag=None,
         effort_flag=None,
@@ -156,7 +156,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'grok': VendorFacts(
         key='grok',
-        composition='python',
+        composition='rust',
         command='grok',
         model_flag='--model',
         effort_flag=None,
@@ -186,7 +186,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'kimi': VendorFacts(
         key='kimi',
-        composition='python',
+        composition='rust',
         command='kimi',
         model_flag='--model',
         effort_flag=None,
@@ -201,7 +201,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'mcode': VendorFacts(
         key='mcode',
-        composition='python',
+        composition='rust',
         command='mcode',
         model_flag=None,
         effort_flag=None,
@@ -216,7 +216,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'muse': VendorFacts(
         key='muse',
-        composition='python',
+        composition='rust',
         command='muse',
         model_flag='--model',
         effort_flag='--reasoning-effort',
@@ -246,7 +246,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'pi': VendorFacts(
         key='pi',
-        composition='python',
+        composition='rust',
         command='pi',
         model_flag='--model',
         effort_flag='--thinking',
