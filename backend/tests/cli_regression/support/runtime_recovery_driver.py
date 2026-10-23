@@ -159,7 +159,7 @@ def _install_common(root: Path, backend: BackendProcess) -> dict:
     async def descendants(_argument):
         entries = in_data_dir(root / "data", pty_registry._load)()
         return {pid: len(info.get("descendants") or {}) for pid, info in entries.items()
-                if info.get("owner") == backend.process.pid}
+                if info.get("owner") == backend.python_process().pid}
 
     async def create_send_release(argument):
         (root / f"create-send-release-{int(argument)}").write_text("")
