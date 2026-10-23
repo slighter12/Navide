@@ -622,14 +622,18 @@ fn end_tree(
     )
 }
 
+/// `deadline` is the one absolute bound of the whole cleanup: the wait for the tree to empty takes what
+/// is left of it (never more than the escalation bound), so a late gate or an already expired no-gate
+/// deadline cannot extend the cleanup. A tree still not empty then is reported as survivors.
 fn end_tree_by(
-    _deadline: Instant,
+    deadline: Instant,
     terminate: impl FnOnce(),
     wait_empty: impl FnOnce(Duration) -> io::Result<bool>,
     members: impl FnOnce() -> io::Result<Vec<Value>>,
 ) -> io::Result<Vec<Value>> {
     terminate();
-    let bound = Duration::from_millis(KILL_ESCALATION_MS + REAP_CONFIRM_MS);
+    let bound = Duration::from_millis(KILL_ESCALATION_MS + REAP_CONFIRM_MS)
+        .min(deadline.saturating_duration_since(Instant::now()));
     if wait_empty(bound)? {
         return Ok(Vec::new());
     }
@@ -715,7 +719,11 @@ fn kill_cleanup(
     }
     retain_members(handle, &mut state.owned);
     let _ = handle.pty.terminate_tree();
-    if handle.exit.wait(ROOT_REAP).is_none() {
+    if handle
+        .exit
+        .wait(ROOT_REAP.min(deadline.saturating_duration_since(Instant::now())))
+        .is_none()
+    {
         outcome.failure = Some("root reap timeout".into());
         return outcome;
     }
