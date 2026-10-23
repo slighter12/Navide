@@ -1,5 +1,6 @@
 {
   "key": "antigravity",
+  "composition": "python",
   "command": "agy",
   "model_flag": "--model",
   "effort_flag": "--effort",

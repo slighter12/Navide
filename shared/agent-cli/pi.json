@@ -1,5 +1,6 @@
 {
   "key": "pi",
+  "composition": "python",
   "command": "pi",
   "model_flag": "--model",
   "effort_flag": "--thinking",

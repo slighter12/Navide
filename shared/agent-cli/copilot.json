@@ -1,5 +1,6 @@
 {
   "key": "copilot",
+  "composition": "python",
   "command": "copilot",
   "model_flag": "--model",
   "effort_flag": "--reasoning-effort",

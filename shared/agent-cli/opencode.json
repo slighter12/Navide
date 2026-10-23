@@ -1,5 +1,6 @@
 {
   "key": "opencode",
+  "composition": "python",
   "command": "opencode",
   "model_flag": "--model",
   "effort_flag": null,

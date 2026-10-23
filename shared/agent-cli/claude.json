@@ -1,5 +1,6 @@
 {
   "key": "claude",
+  "composition": "rust",
   "command": "claude",
   "model_flag": "--model",
   "effort_flag": "--effort",
