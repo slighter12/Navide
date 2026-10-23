@@ -2,6 +2,7 @@
 use super::Table;
 use std::collections::{HashMap, HashSet};
 use std::io;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 const MAX_PIDS: usize = 4 * 1024 * 1024 / std::mem::size_of::<i32>();
@@ -14,9 +15,46 @@ const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
 /// so another session's snapshot can never rewrite the evidence this one admits and signals against.
 /// Internal only: the table and the wire keep the legacy string.
 #[derive(Default)]
-pub(super) struct Births(HashMap<i32, (String, u64)>);
+pub(super) struct Births(
+    HashMap<i32, (String, u64)>,
+    /// Live members of a verified owned group that the pre-6.9 group fallback refused to signal because
+    /// this session never admitted them: pid -> (parent, group, start string, exact birth ticks). They are
+    /// never signalled, so cleanup must report them instead of calling itself complete.
+    Mutex<HashMap<i32, (i32, i32, String, u64)>>,
+);
 
 impl Births {
+    /// Remember a live group member the fallback left alone.
+    fn refuse(&self, pid: i32, seen: &Process) {
+        let start = match (boot_seconds(), clock_ticks()) {
+            (Ok(boot), Ok(ticks)) => {
+                legacy_start(seen.birth_ticks, boot, ticks).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        self.1
+            .lock()
+            .unwrap()
+            .insert(pid, (seen.parent, seen.group, start, seen.birth_ticks));
+    }
+
+    /// The refused members that are still alive now (same exact instance, not a zombie). A member whose
+    /// state cannot be read stays listed: fail closed.
+    pub(super) fn refused_alive(&self) -> Table {
+        let mut alive = Table::new();
+        for (&pid, (parent, group, start, ticks)) in self.1.lock().unwrap().iter() {
+            let gone = match process(pid) {
+                Ok(None) => true,
+                Ok(Some(live)) => live.birth_ticks != *ticks || matches!(live.state, b'Z' | b'X'),
+                Err(_) => false,
+            };
+            if !gone {
+                alive.insert(pid, (*parent, *group, start.clone()));
+            }
+        }
+        alive
+    }
+
     fn ticks(&self, pid: i32, start: &str) -> Option<u64> {
         self.0
             .get(&pid)
@@ -420,10 +458,12 @@ fn signal_group_members(group: i32, signal: i32, births: &Births) -> bool {
     };
     let mut delivered = false;
     for (&member, seen) in &all {
-        if seen.group != group
-            || matches!(seen.state, b'Z' | b'X')
-            || !births.admitted(member, seen)
-        {
+        if seen.group != group || matches!(seen.state, b'Z' | b'X') {
+            continue;
+        }
+        if !births.admitted(member, seen) {
+            // Never signalled, but never forgotten: cleanup reports it while it is alive.
+            births.refuse(member, seen);
             continue;
         }
         // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor or -1.
@@ -817,6 +857,59 @@ mod tests {
             libc::kill(-pid, libc::SIGKILL);
             libc::kill(bystander, libc::SIGKILL);
         }
+    }
+
+    /// A same-group child born after the cleanup's first snapshot is never signalled by the fallback, and the
+    /// survivors cleanup emits (`with_unresolved` is the last step of `cleanup`) must name it: once the root is
+    /// gone nothing else would, and `cleanup_complete` would read true while it runs.
+    #[test]
+    fn an_unadmitted_group_member_the_fallback_refuses_is_named_in_the_cleanup_survivors() {
+        use super::super::with_unresolved;
+        let (mut leader, pid, start, _, bystander) = group_of_three();
+        let admitted_only_leader = ledger(pid, &start, process(pid).unwrap().unwrap().birth_ticks);
+        let late: Vec<i32> = scan(Instant::now() + Duration::from_secs(2))
+            .unwrap()
+            .into_iter()
+            .filter(|(member, seen)| *member != pid && seen.group == pid)
+            .map(|(member, _)| member)
+            .collect();
+        assert!(late.len() >= 2, "the group never formed");
+        assert!(signal_with(
+            pid,
+            &start,
+            libc::SIGKILL,
+            true,
+            &admitted_only_leader,
+            false
+        ));
+        leader.wait().unwrap();
+        let survivors = with_unresolved(Vec::new(), &admitted_only_leader);
+        for member in &late {
+            assert!(
+                survivors.iter().any(|entry| entry["pid"] == *member),
+                "unadmitted live member {member} is missing from the survivors: {survivors:?}"
+            );
+        }
+        assert!(
+            survivors.iter().all(|entry| entry["pid"] != pid),
+            "the signalled, reaped leader was reported: {survivors:?}"
+        );
+        // SAFETY: the unadmitted members and the bystander are this test's own sleepers.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+            libc::kill(bystander, libc::SIGKILL);
+        }
+        for member in &late {
+            assert!(wait_exit(&[*member], Instant::now() + Duration::from_secs(2)).is_empty());
+        }
+        // Reap-independent: a member that is gone (or a zombie) is no longer listed.
+        let gone = Instant::now() + Duration::from_secs(2);
+        while !with_unresolved(Vec::new(), &admitted_only_leader).is_empty()
+            && Instant::now() < gone
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(with_unresolved(Vec::new(), &admitted_only_leader).is_empty());
     }
 
     #[test]
