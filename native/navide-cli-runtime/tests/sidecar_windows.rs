@@ -78,7 +78,7 @@ struct Sidecar {
     child: Child,
     stdin: Option<ChildStdin>,
     frames: mpsc::Receiver<frame::Frame>,
-    trace: std::cell::RefCell<Vec<String>>,
+    pending: std::cell::RefCell<Vec<frame::Frame>>,
     next_id: u64,
     dir: PathBuf,
     ready: Value,
@@ -141,7 +141,7 @@ fn start(name: &str) -> Sidecar {
         stdin: child.stdin.take(),
         child,
         frames,
-        trace: std::cell::RefCell::new(Vec::new()),
+        pending: std::cell::RefCell::new(Vec::new()),
         next_id: 0,
         dir,
         ready,
@@ -166,19 +166,35 @@ impl Sidecar {
         self.next_id
     }
 
+    /// The first frame (queued earlier or newly arrived) that `wanted` accepts. Frames that do not
+    /// match stay queued, so an event that arrives early is still there when it is asked for.
     fn recv_until(&self, what: &str, wanted: impl Fn(&frame::Frame) -> bool) -> frame::Frame {
+        let found = {
+            let mut pending = self.pending.borrow_mut();
+            pending
+                .iter()
+                .position(&wanted)
+                .map(|at| pending.remove(at))
+        };
+        if let Some(frame) = found {
+            return frame;
+        }
         let deadline = Instant::now() + LONG;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match self.frames.recv_timeout(left) {
                 Ok(frame) if wanted(&frame) => return frame,
-                Ok(other) => self.trace.borrow_mut().push(format!(
-                    "{:?} code={} id={} {}",
-                    other.frame_type, other.code, other.correlation_id, other.meta
-                )),
+                Ok(other) => self.pending.borrow_mut().push(other),
                 Err(error) => panic!(
                     "waiting for {what}: {error}; unmatched frames: {:#?}",
-                    self.trace.borrow()
+                    self.pending
+                        .borrow()
+                        .iter()
+                        .map(|f| format!(
+                            "{:?} code={} id={} {}",
+                            f.frame_type, f.code, f.correlation_id, f.meta
+                        ))
+                        .collect::<Vec<_>>()
                 ),
             }
         }
@@ -498,9 +514,22 @@ fn closing_the_console_completes_under_a_saturating_cli_both_ways() {
         sidecar.answer(adopt);
         // Nobody reads yet: wait (bounded) until the pipe holds output, i.e. the CLI is saturating it.
         let deadline = Instant::now() + LONG;
-        while peek(&output).unwrap_or(0) < 16 * 1024 {
-            assert!(Instant::now() < deadline, "the CLI never produced output");
-            std::thread::sleep(Duration::from_millis(5));
+        // The pipe's own buffer is the limit, so "saturated" means the held byte count has stopped
+        // growing while the CLI still writes.
+        let (mut last, mut steady) = (0u32, 0u32);
+        while steady < 10 {
+            assert!(
+                Instant::now() < deadline,
+                "the CLI never saturated the output pipe (held {last} bytes)"
+            );
+            let now = peek(&output).unwrap_or(0);
+            steady = if now >= 1024 && now == last {
+                steady + 1
+            } else {
+                0
+            };
+            last = now;
+            std::thread::sleep(Duration::from_millis(20));
         }
         let kill = sidecar.send(
             code::KILL,

@@ -398,6 +398,9 @@ mod tests {
         let tag = u64::from_str_radix(file["runtime_tag"].as_str().unwrap(), 16).unwrap();
         for vector in file["invalid"].as_array().unwrap() {
             let name = vector["name"].as_str().unwrap();
+            if cfg!(windows) && name == "TTY_SERVICING on POSIX" {
+                continue;
+            }
             let bytes = unhex(vector["hex"].as_str().unwrap());
             let dir = direction(vector["direction"].as_str().unwrap());
             let header: [u8; HEADER_LEN] = bytes[..HEADER_LEN].try_into().unwrap();
