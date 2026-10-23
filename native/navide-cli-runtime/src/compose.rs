@@ -12,8 +12,17 @@ pub struct Composed {
     pub program: String,
     pub args: Vec<String>,
     pub argv_source: &'static str,
-    /// Rust-attested first element of the child's argv, at most 256 bytes (delta section 4).
-    pub argv0: String,
+    /// Bounded Rust attestation of the executed program (delta section 4).
+    pub argv0: Argv0,
+}
+
+/// `len` is the full byte length of the program path; `head`/`tail` are its longest prefix/suffix of
+/// at most 128 bytes that fall on character boundaries.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Argv0 {
+    pub len: usize,
+    pub head: String,
+    pub tail: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -72,7 +81,10 @@ mod tests {
             ["-ilc", "claude --mcp-config '/p a/c.json'  --keep  'two  spaces' \\ x"]
         );
         assert_eq!(result.argv_source, "rust");
-        assert_eq!(result.argv0, "/bin/bash");
+        assert_eq!(
+            result.argv0,
+            Argv0 { len: 9, head: "/bin/bash".into(), tail: "/bin/bash".into() }
+        );
     }
 
     #[test]
@@ -107,6 +119,45 @@ mod tests {
         );
     }
 
+    /// The tokenizer keeps `--effort extreme` literal (delta 2.3), so the launch that works today
+    /// still reaches the CLI; an `opt` outside `known_efforts` is refused, never rendered.
+    #[test]
+    fn a_handwritten_effort_stays_literal_and_an_unknown_effort_opt_is_refused() {
+        let result = composed(
+            "claude",
+            wrapped(json!([{"lit": "claude --effort extreme --dangerously-skip-permissions"}])),
+        );
+        assert_eq!(result.args[1], "claude --effort extreme --dangerously-skip-permissions");
+        let refused = compose(
+            "claude",
+            &wrapped(json!([{"lit": "claude"}, {"opt": "effort", "value": "extreme"}])),
+        )
+        .unwrap_err();
+        assert!(matches!(refused, ComposeError::Option(_)));
+    }
+
+    #[test]
+    fn the_attestation_is_the_bounded_cut_of_a_path_over_256_bytes() {
+        let ascii = format!("/{}/bash", "a".repeat(299));
+        let result = composed(
+            "claude",
+            json!({"shape": "wrapped", "shell": ascii, "flags": ["-lc"], "words": [{"lit": "x"}]}),
+        );
+        assert_eq!(result.program, ascii);
+        assert_eq!(result.argv0.len, ascii.len());
+        assert_eq!(result.argv0.head, &ascii[..128]);
+        assert_eq!(result.argv0.tail, &ascii[ascii.len() - 128..]);
+        // 'é' is two bytes: the cuts fall on character boundaries.
+        let multibyte = format!("/{}/bash", "é".repeat(150));
+        let result = composed(
+            "claude",
+            json!({"shape": "wrapped", "shell": multibyte, "flags": ["-lc"], "words": [{"lit": "x"}]}),
+        );
+        assert_eq!(result.argv0.len, multibyte.len());
+        assert_eq!(result.argv0.head, format!("/{}", "é".repeat(63)));
+        assert_eq!(result.argv0.tail, format!("{}/bash", "é".repeat(61)));
+    }
+
     #[test]
     fn login_option_is_spelled_from_login_args_and_exe_replaces_the_head() {
         let result = composed(
@@ -125,7 +176,8 @@ mod tests {
         );
         assert_eq!(result.program, "claude");
         assert_eq!(result.args, ["--name", "a b", "c d", "--model", "x y"]);
-        assert_eq!(result.argv0, "claude");
+        assert_eq!(result.argv0.len, 6);
+        assert_eq!(result.argv0.head, "claude");
     }
 
     /// Known behaviour carried over (delta 2.2): the rendered words land in the last element.
