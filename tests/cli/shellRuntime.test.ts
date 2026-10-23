@@ -4,7 +4,7 @@ import { basename, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { expect, it } from 'vitest'
 import { createWsClient, type TerminalOutputFrame } from '../../src/shared/wsClient'
-import { driverEnv, makeTempRoot, pythonExecutable } from './recoveryDriver'
+import { driverEnv, isWindows, makeTempRoot, pythonExecutable } from './recoveryDriver'
 
 async function until(predicate: () => boolean, message: string, timeout = 15_000): Promise<void> {
   const deadline = Date.now() + timeout
@@ -101,16 +101,22 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         await until(() => (output.get(tid) ?? '').includes('"text": "during-burst-世界"'), 'input while bursting')
         await until(() => (output.get(tid) ?? '').includes('BURST_DONE'), 'complete burst')
         let previous = -1
+        // A ConPTY re-renders long lines as screen rows: it cuts a wrapped line with CR LF and cursor-position
+        // sequences. Those are layout, not content, so they are removed before the exact-bytes comparison
+        // (a CR LF that is followed by the line's own filler cannot be a line end). POSIX bytes are compared as sent.
+        const burstView = isWindows
+          ? output.get(tid)!.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\r\n(?=x)/g, '')
+          : output.get(tid)!
         for (let line = 0; line < 128; line++) {
           const expected = `BURST ${String(line).padStart(4, '0')} ${'x'.repeat(2048)}`
-          const position = output.get(tid)!.indexOf(expected)
+          const position = burstView.indexOf(expected)
           if (position <= previous) {
             // Show the stream around the line's first row, so a terminal that re-flows long lines is diagnosable.
-            const at = output.get(tid)!.indexOf(`BURST ${String(line).padStart(4, '0')} `)
-            expect.fail(`burst line ${line} is not contiguous (position ${position}, previous ${previous}); stream at its start: ${JSON.stringify(output.get(tid)!.slice(Math.max(0, at - 30), at + 450))}`)
+            const at = burstView.indexOf(`BURST ${String(line).padStart(4, '0')} `)
+            expect.fail(`burst line ${line} is not contiguous (position ${position}, previous ${previous}); stream at its start: ${JSON.stringify(burstView.slice(Math.max(0, at - 30), at + 450))}`)
           }
           expect(position).toBeGreaterThan(previous)
-          expect(output.get(tid)!.indexOf(expected, position + 1)).toBe(-1)
+          expect(burstView.indexOf(expected, position + 1)).toBe(-1)
           previous = position
         }
         expect((await client.send('terminal.resize', { terminal_session_id: tid, cols: 120, rows: 40 })).ok).toBe(true)
