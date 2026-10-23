@@ -17,11 +17,9 @@ import json
 import os
 from pathlib import Path
 import queue
-import signal
 import subprocess
 import sys
 import threading
-import time
 from ctypes import wintypes
 
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -30,6 +28,9 @@ kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWO
 kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
 kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
 
+kernel32.SetConsoleCtrlHandler.argtypes = [ctypes.c_void_p, wintypes.BOOL]
+
+CTRL_C_EVENT = 0
 STD_INPUT_HANDLE = -10
 ENABLE_ECHO_INPUT = 0x0004
 CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -85,8 +86,7 @@ def main() -> int:
         return 0
     ctty, input_mode = console_input_without_echo()
     lock = threading.Lock()
-    interrupts = queue.SimpleQueue()
-    last_interrupt = [0.0]
+    interrupted = threading.Event()
 
     def emit(text: str) -> None:
         with lock:
@@ -97,12 +97,17 @@ def main() -> int:
         size = os.get_terminal_size(sys.stdout.fileno())
         return [size.columns, size.lines]
 
-    # The handler only records: it must not take the stdout lock the main thread may hold.
-    def on_interrupt(*_args) -> None:
-        last_interrupt[0] = time.monotonic()
-        interrupts.put(1)
+    # A console control handler runs on a thread of its own, so it answers at once and needs neither the main
+    # thread nor a signal check: Python's SIGINT handler only runs when the main thread next executes bytecode.
+    def on_control(kind: int) -> bool:
+        if kind != CTRL_C_EVENT:
+            return False
+        interrupted.set()  # before the answer: the reader must see it if its console read was aborted
+        emit("INTERRUPTED")
+        return True
 
-    signal.signal(signal.SIGINT, on_interrupt)
+    handler = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)(on_control)
+    kernel32.SetConsoleCtrlHandler(handler, True)
     emit("NATIVE_READY " + json.dumps({
         "pid": os.getpid(), "argv": sys.argv[1:], "cwd": os.getcwd(),
         "home": os.environ.get("HOME") or os.environ["USERPROFILE"],
@@ -124,8 +129,10 @@ def main() -> int:
             except OSError:
                 raw = ""
             if raw == "":
-                # A Ctrl+C can abort the console read and surface as an empty read: that is not the end of input.
-                if time.monotonic() - last_interrupt[0] < 2.0:
+                # A Ctrl+C aborts the console read and surfaces as an empty read: that is not the end of input.
+                # The control handler runs concurrently, so give it a bounded moment to say it was the cause.
+                if interrupted.wait(2.0):
+                    interrupted.clear()
                     continue
                 lines.put(None)
                 return
@@ -140,35 +147,13 @@ def main() -> int:
         emit("BURST_DONE")
 
     while True:
-        while not interrupts.empty():
-            interrupts.get()
-            emit("INTERRUPTED")
-        try:
-            raw = lines.get(timeout=0.05)
-        except queue.Empty:
-            continue
+        raw = lines.get()
         if raw is None:
             return 0
         line = raw.rstrip("\r\n")
         if line == "burst":
             worker = threading.Thread(target=burst)
             worker.start()
-        elif line == "ctrlc-self":
-            # Diagnostic only (sent by the test after a missed interrupt): does CTRL_C_EVENT raised on this
-            # console reach this process, and what state is it in?
-            kernel32.GenerateConsoleCtrlEvent(0, 0)
-            fired = False
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and not fired:
-                try:
-                    interrupts.get(timeout=0.05)
-                    fired = True
-                except queue.Empty:
-                    pass
-            mode = wintypes.DWORD()
-            kernel32.GetConsoleMode(kernel32.GetStdHandle(STD_INPUT_HANDLE), ctypes.byref(mode))
-            emit("CTRLC_SELF " + json.dumps({"fired": fired, "handler": repr(signal.getsignal(signal.SIGINT)),
-                                             "inputMode": mode.value, "ignoredAtStart": ignored}))
         elif line == "size":
             emit("SIZE " + json.dumps(dimensions()))
         elif line == "split":
