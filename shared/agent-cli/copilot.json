@@ -1,6 +1,6 @@
 {
   "key": "copilot",
-  "composition": "python",
+  "composition": "rust",
   "command": "copilot",
   "model_flag": "--model",
   "effort_flag": "--reasoning-effort",

@@ -1,6 +1,6 @@
 {
   "key": "codex",
-  "composition": "python",
+  "composition": "rust",
   "command": "codex",
   "model_flag": "--model",
   "effort_flag": null,
