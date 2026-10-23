@@ -131,7 +131,8 @@ enum Msg {
     TtyEof,
     /// Python's pump is servicing the output: the pre-close gate is open (7.3).
     Servicing,
-    Shutdown,
+    /// End the session; the flag says whether the control channel is still alive (a SHUTDOWN request).
+    Shutdown(bool),
     Exited,
 }
 
@@ -657,7 +658,15 @@ fn natural_cleanup(handle: &SessionHandle, state: &mut State) -> Outcome {
 /// R-e on Windows: no hangup step. A session that never adopted closes its originals (the third way
 /// of 7.3 to open the gate); the tree is terminated through the job; `SESSION_EXITED` is sent; then
 /// the console closes once Python is servicing or has closed its read end.
-fn kill_cleanup(handle: &SessionHandle, state: &mut State, wire: &Wire) -> Outcome {
+///
+/// With `peer_alive == false` (the channel is lost, 11) nobody can service or close the read end and
+/// the console dies with this process, so the console is not closed here and no gate is awaited.
+fn kill_cleanup(
+    handle: &SessionHandle,
+    state: &mut State,
+    wire: &Wire,
+    peer_alive: bool,
+) -> Outcome {
     let mut outcome = Outcome::default();
     if !handle.adopted.load(Ordering::SeqCst) && handle.pty.release_originals() {
         handle.gate.satisfy(GateReason::OriginalsClosed);
@@ -673,7 +682,9 @@ fn kill_cleanup(handle: &SessionHandle, state: &mut State, wire: &Wire) -> Outco
         Ok(survivors) => outcome.survivors = survivors,
         Err(error) => outcome.failure = Some(error.to_string()),
     }
-    finish_close(handle, &mut outcome);
+    if peer_alive {
+        finish_close(handle, &mut outcome);
+    }
     outcome
 }
 
@@ -762,13 +773,13 @@ fn session_thread(
             }
             Ok(Msg::Kill(force)) => {
                 state.closing = Some(force);
-                let outcome = kill_cleanup(&handle, &mut state, &wire);
+                let outcome = kill_cleanup(&handle, &mut state, &wire, true);
                 send_exited(&handle, &mut state, &wire);
                 return finish(&handle, &wire, &sessions, outcome);
             }
-            Ok(Msg::Shutdown) => {
+            Ok(Msg::Shutdown(peer_alive)) => {
                 state.closing = Some(false);
-                let outcome = kill_cleanup(&handle, &mut state, &wire);
+                let outcome = kill_cleanup(&handle, &mut state, &wire, peer_alive);
                 send_exited(&handle, &mut state, &wire);
                 return finish(&handle, &wire, &sessions, outcome);
             }
@@ -1344,7 +1355,7 @@ pub fn run() -> io::Result<()> {
         .collect();
     for handle in &handles {
         if !handle.finished() {
-            handle.send(Msg::Shutdown);
+            handle.send(Msg::Shutdown(matches!(ended, Ended::Shutdown(_))));
         }
     }
     let mut clean = true;

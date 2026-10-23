@@ -42,7 +42,11 @@ peek_named_pipe = bind(
     BOOL,
     [HANDLE, ctypes.c_void_p, DWORD, LPDWORD, LPDWORD, LPDWORD],
 )
-compare_object_handles = bind("CompareObjectHandles", BOOL, [HANDLE, HANDLE])
+# CompareObjectHandles is exported by KernelBase.dll, not kernel32.dll.
+kernelbase = ctypes.WinDLL("kernelbase", use_last_error=True)
+compare_object_handles = kernelbase.CompareObjectHandles
+compare_object_handles.restype = BOOL
+compare_object_handles.argtypes = [HANDLE, HANDLE]
 read_file = bind("ReadFile", BOOL, [HANDLE, ctypes.c_void_p, DWORD, LPDWORD, ctypes.c_void_p])
 write_file = bind("WriteFile", BOOL, [HANDLE, ctypes.c_void_p, DWORD, LPDWORD, ctypes.c_void_p])
 

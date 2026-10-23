@@ -87,7 +87,8 @@ mod windows {
                     list,
                     0,
                     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
-                    (&hpc as *const HPCON).cast(),
+                    // The attribute value IS the HPCON (documented), not a pointer to it.
+                    hpc as *const std::ffi::c_void,
                     size_of::<HPCON>(),
                     null_mut(),
                     null(),
