@@ -248,7 +248,7 @@ jobs:
         if: always() && steps.py_env.outcome == 'success'
         continue-on-error: true
         shell: pwsh
-        run: pwsh -NoProfile -File tests/cli/e5-windows-pytest-file.ps1 -File backend/tests/test_cli_runtime_windows_close.py -Passed 3
+        run: pwsh -NoProfile -File tests/cli/e5-windows-pytest-file.ps1 -File backend/tests/test_cli_runtime_windows_close.py -Passed 4
 
       - name: Python client - missing binary fails the create
         id: py_missing
