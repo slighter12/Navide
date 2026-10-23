@@ -789,3 +789,100 @@ fn an_unserviced_natural_exit_is_reported_incomplete_within_the_cleanup_bound() 
     unsafe { CancelSynchronousIo(pump.as_raw_handle()) };
     join_bounded(pump, "the cancelled pump");
 }
+
+/// A console child that installs a Ctrl+C handler, counts its firings and can raise CTRL_C_EVENT on its own
+/// console, so "ignored in this process" is measured directly rather than read from process parameters.
+const CTRL_C_CHILD: &str = r#"import ctypes, sys, threading
+from ctypes import wintypes
+k = ctypes.WinDLL("kernel32")
+fired = [0]
+event = threading.Event()
+Handler = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+def handle(kind):
+    if kind == 0:
+        fired[0] += 1
+        print("CC_FIRED %d" % fired[0], flush=True)
+        event.set()
+        return True
+    return False
+callback = Handler(handle)
+k.SetConsoleCtrlHandler(callback, True)
+print("CC_READY", flush=True)
+for line in sys.stdin:
+    if line.strip() == "selfcheck":
+        event.clear()
+        k.GenerateConsoleCtrlEvent(0, 0)
+        print("SELF_OK" if event.wait(10) else "SELF_MISSED", flush=True)
+    elif line.strip() == "quit":
+        break
+"#;
+
+impl Session {
+    fn seen_within(&mut self, needle: &str, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        loop {
+            if String::from_utf8_lossy(&self.seen).contains(needle) {
+                return true;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.bytes.recv_timeout(left) {
+                Ok(chunk) => self.seen.extend(chunk),
+                Err(_) => return false,
+            }
+        }
+    }
+}
+
+/// Ctrl+C through the product path: the byte 0x03 written to the session's input end must raise
+/// CTRL_C_EVENT in a console child. Repeated, so a flaky delivery shows as a rate. The child also checks
+/// whether a handler fires for GenerateConsoleCtrlEvent on its own console.
+#[test]
+fn ctrl_c_written_to_the_input_end_reaches_a_console_child_every_time() {
+    const ITERATIONS: usize = 20;
+    let mut sidecar = start("ctrlc");
+    let script = sidecar.dir.join("ctrl_c_child.py");
+    std::fs::write(&script, CTRL_C_CHILD).unwrap();
+    let (mut self_ok, mut delivered) = (0, 0);
+    for round in 0..ITERATIONS {
+        let sid = format!("cc-{round}");
+        let mut session = sidecar.open(
+            &sid,
+            vec![
+                "python".into(),
+                "-u".into(),
+                script.to_string_lossy().into_owned(),
+            ],
+        );
+        session.read_until("CC_READY");
+        write_all(&session.input, b"selfcheck\r\n");
+        let own = session.seen_within("SELF_OK", LONG);
+        if own {
+            self_ok += 1;
+        } else {
+            assert!(
+                session.seen_within("SELF_MISSED", LONG),
+                "no self-check verdict in round {round}"
+            );
+        }
+        let expected = format!("CC_FIRED {}", if own { 2 } else { 1 });
+        write_all(&session.input, &[0x03]);
+        if session.seen_within(&expected, Duration::from_secs(10)) {
+            delivered += 1;
+        }
+        let cleaned = sidecar.kill_and_clean(&mut session);
+        assert_eq!(cleaned["cleanup_complete"], true, "{cleaned}");
+        join_bounded(session.pump.take().unwrap(), "a pump");
+    }
+    receipt(
+        "ctrl-c-delivery",
+        json!({"status": if delivered == ITERATIONS { "pass" } else { "fail" },
+            "stage":"input-0x03","iterations":ITERATIONS,"delivered":delivered,"self_check_ok":self_ok}),
+    );
+    println!(
+        "ctrl-c-delivery: delivered={delivered}/{ITERATIONS} own_console_ok={self_ok}/{ITERATIONS}"
+    );
+    assert_eq!(
+        delivered, ITERATIONS,
+        "0x03 reached the child in {delivered}/{ITERATIONS} rounds (own-console CTRL_C_EVENT worked in {self_ok})"
+    );
+}

@@ -182,6 +182,13 @@ jobs:
           if ($code -ne 0) { exit 1 }
           if ($out -notmatch 'test result: ok\. 1 passed') { Write-Host "case not collected: $env:CASE"; exit 1 }
 
+      - name: Ctrl+C reaches a console child, 20 rounds (diagnostic)
+        id: ctrlc
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/cli/e5-windows-cargo-case.ps1 -Case ctrl_c_written_to_the_input_end_reaches_a_console_child_every_time
+
       - name: Install the backend test environment
         id: py_env
         if: always()
