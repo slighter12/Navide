@@ -702,13 +702,9 @@ class RustTerminalService(TerminalService):
                 feed.buffer.extend(data)
             else:
                 feed.eof = True
-            while (feed.buffer or feed.eof) and not self._lost:
+            # One read is at most the receiver's per-call budget, so a single call drains it.
+            if not self._lost:
                 self._on_socket_readable()
-                if feed.eof and not feed.buffer:
-                    break
-                if not feed.buffer:
-                    break
-                await asyncio.sleep(0)  # the receiver's per-call budget ended: let the loop breathe
             if feed.eof or self._lost:
                 return
 
