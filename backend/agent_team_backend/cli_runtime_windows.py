@@ -22,6 +22,7 @@ import ctypes
 import errno
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -35,6 +36,12 @@ _FILE_TYPE_PIPE = 3
 _DUPLICATE_SAME_ACCESS = 2
 _HANDLE_FLAG_INHERIT = 1
 _THREAD_TERMINATE = 0x0001
+_ERROR_NOT_FOUND = 1168
+#: Immediate (never slept) re-issues of a cancel that found no call in progress yet: the window is the few
+#: instructions between a worker announcing its call and entering it.
+_CANCEL_RETRIES = 1000
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_ERROR_INVALID_PARAMETER = 87
 
 
 class PullRejected(Exception):
@@ -76,6 +83,8 @@ class _Api:
         self.open_thread = bind(k32, "OpenThread", handle, [dword, boolean, dword])
         self.thread_id = bind(k32, "GetCurrentThreadId", dword, [])
         self.compare = bind(base, "CompareObjectHandles", boolean, [handle, handle])
+        self.open_process = bind(k32, "OpenProcess", handle, [dword, boolean, dword])
+        self.process_times = bind(k32, "GetProcessTimes", boolean, [handle, *([ctypes.POINTER(wintypes.FILETIME)] * 4)])
 
 
 _api: _Api | None = None
@@ -176,6 +185,10 @@ class WindowsMaster:
     _on_writable: Callable[[], None] | None = None
     _closing: bool = False
     _closed: bool = False
+    _begun: bool = False
+    _service: bool = False
+    _pump_blocking: bool = False
+    _writer_blocking: bool = False
     pump_join_ms: int = 0
 
     # ---- the pump -------------------------------------------------------------------------------
@@ -215,10 +228,15 @@ class WindowsMaster:
         buffer = ctypes.create_string_buffer(_READ_CHUNK)
         got = k.wintypes.DWORD()
         while True:
-            handle = self.output_handle
-            if handle is None or self._closing:
-                break
-            if not k.read(handle, buffer, _READ_CHUNK, ctypes.byref(got), None):
+            with self._lock:
+                handle = self.output_handle
+                if handle is None or self._closing:
+                    break
+                self._pump_blocking = True
+            ok = k.read(handle, buffer, _READ_CHUNK, ctypes.byref(got), None)
+            with self._lock:
+                self._pump_blocking = False
+            if not ok:
                 # ERROR_BROKEN_PIPE (109) is the ordinary end of the stream; a cancelled read
                 # (ERROR_OPERATION_ABORTED 995) is our own close.
                 code = ctypes.get_last_error()
@@ -281,9 +299,18 @@ class WindowsMaster:
             self._callback, self._reading, self._paused = callback, True, False
         self._wake()
 
+    def enter_service_mode(self) -> None:
+        """7.3: from here `pause_reading` is a no-op, so the console's final output reaches the Terminal
+        Stream even while its sink is slow, and the stream's own bounded buffers absorb it."""
+        with self._lock:
+            self._service = True
+            self._paused = False
+        self._wake()
+
     def pause_reading(self) -> None:
         with self._lock:
-            self._paused = True
+            if not self._service:
+                self._paused = True
 
     def resume_reading(self) -> None:
         with self._lock:
@@ -352,7 +379,14 @@ class WindowsMaster:
             while view:
                 buffer = ctypes.create_string_buffer(bytes(view[: 64 * 1024]))
                 size = min(len(view), 64 * 1024)
-                if not k.write(handle, buffer, size, ctypes.byref(written), None):
+                with self._lock:
+                    if self._closing:
+                        return
+                    self._writer_blocking = True
+                ok = k.write(handle, buffer, size, ctypes.byref(written), None)
+                with self._lock:
+                    self._writer_blocking = False
+                if not ok:
                     with self._lock:
                         self._write_error = True
                     return
@@ -368,44 +402,83 @@ class WindowsMaster:
 
     # ---- close ----------------------------------------------------------------------------------
 
-    def close(self) -> None:
-        """Close-once. Cancels the blocked pump and writer, joins them under `THREAD_CLOSE_S`, then closes
-        both pulled handles. Closing the output read end is what satisfies the sidecar's pre-close gate
-        (7.3) when the stream is not being serviced any more."""
+    def begin_close(self) -> None:
+        """Close step 1 (idempotent, never waits): stop the stream and cancel the blocked pump and writer.
+        `CancelSynchronousIo` does not wait for the call it cancels, so this returns at once; `finish_close`
+        is the bounded join. Splitting them lets a lost generation cancel every worker before it joins any."""
         with self._lock:
-            if self._closed:
-                return
-            self._closed = self._closing = True
+            self._closing = True
             self._stopped, self._reading, self._callback = True, False, None
             self._on_writable = None
             if self._outbox_ready is not None:
                 self._outbox_ready.notify_all()
+            if self._begun:
+                return
+            self._begun = True
         k = api()
-        import time
-        started = time.monotonic()
         for thread, tid in ((self._pump, self._pump_tid), (self._writer, self._writer_tid)):
-            if thread is None:
+            if thread is None or not tid:
                 continue
-            deadline = started + THREAD_CLOSE_S
-            while thread.is_alive() and time.monotonic() < deadline:
-                if tid:
-                    thread_handle = k.open_thread(_THREAD_TERMINATE, False, tid)
-                    if thread_handle:
-                        k.cancel_io(thread_handle)
-                        k.close(thread_handle)
-                thread.join(0.01)
+            # A worker that has not entered its blocking call yet sees `_closing` and leaves by itself;
+            # one that is inside it is cancelled. `ERROR_NOT_FOUND` means "no call in progress right now":
+            # retry at once (no wait) only while the thread is alive, which ends when it returns.
+            for _attempt in range(_CANCEL_RETRIES):
+                if not thread.is_alive():
+                    break
+                thread_handle = k.open_thread(_THREAD_TERMINATE, False, tid)
+                if not thread_handle:
+                    break
+                cancelled = k.cancel_io(thread_handle)
+                code = ctypes.get_last_error()
+                k.close(thread_handle)
+                if cancelled or code != _ERROR_NOT_FOUND or not self._blocking(thread):
+                    break
+
+    def _blocking(self, thread: threading.Thread) -> bool:
+        """Whether the worker has announced that it is about to block in (or is inside) its I/O call."""
+        with self._lock:
+            return self._pump_blocking if thread is self._pump else self._writer_blocking
+
+    def finish_close(self, deadline: float) -> bool:
+        """Close step 2: one bounded `join(remaining)` per worker against the caller's absolute `deadline`
+        (`time.monotonic()`), then close both pulled handles. True only when both workers ended and both
+        handles are closed. A worker still alive at the deadline leaves its handles open and the answer
+        False: the close is incomplete and nothing may behave as though the read end were closed (7.3)."""
+        self.begin_close()
+        started = time.monotonic()
+        for thread in (self._pump, self._writer):
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(max(0.0, deadline - time.monotonic()))
         self.pump_join_ms = int((time.monotonic() - started) * 1000)
-        alive = any(t is not None and t.is_alive() for t in (self._pump, self._writer))
-        if not alive:
-            for name in ("input_handle", "output_handle"):
-                handle = getattr(self, name)
-                setattr(self, name, None)
-                if handle is not None:
-                    k.close(handle)
+        if any(t is not None and t.is_alive() for t in (self._pump, self._writer)):
+            return False
+        k = api()
+        with self._lock:
+            handles = (self.input_handle, self.output_handle)
+            self.input_handle = self.output_handle = None
+            self._closed = True
+        for handle in handles:
+            if handle is not None:
+                k.close(handle)
+        return True
+
+    def close(self) -> bool:
+        """Close-once, bounded by `THREAD_CLOSE_S`. Closing the output read end is what satisfies the
+        sidecar's pre-close gate (7.3) when the stream is not being serviced any more. The answer says
+        whether the close completed."""
+        return self.finish_close(time.monotonic() + THREAD_CLOSE_S)
 
     @property
     def closed(self) -> bool:
         return self._closed
+
+
+def close_together(masters: list[WindowsMaster], deadline: float) -> list[WindowsMaster]:
+    """Cancel every master's workers, then join them all against one absolute `deadline` (E1 7.3, 11 step 2).
+    Returns the masters whose close did not complete."""
+    for master in masters:
+        master.begin_close()
+    return [master for master in masters if not master.finish_close(deadline)]
 
 
 class StdoutFeed:
@@ -429,13 +502,42 @@ class StdoutFeed:
         raise BlockingIOError
 
 
-def registry_start(pid: int, filetime: str) -> str:
-    """The `lstart` the ownership registry stores for a Windows root: psutil's creation time, accepted only
-    when it names the same instant as the sidecar's FILETIME (100 ns ticks since 1601). Empty if it does not."""
+#: `inspect_start` verdicts. Only MATCH names a process the journal's root can be; ABSENT proves it gone;
+#: the other two leave the record an unresolved cleanup fact (it is never signalled, never dropped).
+MATCH, ABSENT, DIFFERS, UNVERIFIABLE = "match", "absent", "differs", "unverifiable"
+
+
+def inspect_start(pid: int, filetime: str) -> tuple[str, str]:
+    """Compare the sidecar's journalled FILETIME with the exact kernel creation time of the process now at
+    `pid`, while this call holds an open handle to it. Windows does not reuse a pid while any handle to the
+    process exists, so the instance compared is the instance whose `lstart` is then read through psutil
+    (the identity the registry and the orphan sweep store and match). No tolerance: anything but equality
+    is not a match. Returns `(verdict, lstart)`; `lstart` is set only for MATCH."""
     import psutil
     try:
-        created = psutil.Process(pid).create_time()
-        expected = int(filetime) / 1e7 - 11644473600
-    except (psutil.Error, ValueError):
-        return ""
-    return repr(float(created)) if abs(created - expected) < 0.05 else ""
+        expected = int(filetime)
+    except ValueError:
+        return UNVERIFIABLE, ""
+    k = api()
+    handle = k.open_process(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return (ABSENT if ctypes.get_last_error() == _ERROR_INVALID_PARAMETER else UNVERIFIABLE), ""
+    try:
+        created, exited, kernel, user = (k.wintypes.FILETIME() for _ in range(4))
+        if not k.process_times(handle, ctypes.byref(created), ctypes.byref(exited),
+                               ctypes.byref(kernel), ctypes.byref(user)):
+            return UNVERIFIABLE, ""
+        if (created.dwHighDateTime << 32 | created.dwLowDateTime) != expected:
+            return DIFFERS, ""
+        try:
+            return MATCH, repr(float(psutil.Process(pid).create_time()))
+        except psutil.Error:
+            return UNVERIFIABLE, ""
+    finally:
+        k.close(handle)
+
+
+def registry_start(pid: int, filetime: str) -> str:
+    """The `lstart` the ownership registry stores for a Windows root; empty unless its creation time is
+    exactly the sidecar's FILETIME (see `inspect_start`)."""
+    return inspect_start(pid, filetime)[1]

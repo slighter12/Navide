@@ -228,6 +228,28 @@ jobs:
           if ($code -ne 0) { exit 1 }
           if ($out -notmatch '1 passed') { Write-Host "case not collected or skipped: $env:CASE"; exit 1 }
 
+      - name: Python client - an unjoined pump is reported and sends no TTY_EOF
+        id: py_unjoined
+        if: always() && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CASE: test_windows_an_unjoined_pump_is_reported_and_the_generation_is_retired_without_tty_eof
+          NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}\e5-cargo-target\release\navide-cli-runtime.exe
+        run: |
+          $out = uv --project backend run pytest "backend/tests/test_cli_runtime_windows.py::$env:CASE" -q -p no:cacheprovider 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) { exit 1 }
+          if ($out -notmatch '1 passed') { Write-Host "case not collected or skipped: $env:CASE"; exit 1 }
+
+      - name: Python handle - generation close under one deadline, service mode
+        id: py_close
+        if: always() && steps.py_env.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/cli/e5-windows-pytest-file.ps1 -File backend/tests/test_cli_runtime_windows_close.py -Passed 3
+
       - name: Python client - missing binary fails the create
         id: py_missing
         if: always() && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'
@@ -269,24 +291,6 @@ jobs:
         run: |
           bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request' --reporter=json --outputFile=test-results/ci/e5-windows-ts-results.json
           if ($LASTEXITCODE -ne 0) { exit 1 }
-
-      # Where does an ignored Ctrl+C come from? CONSOLE_IGNORE_CTRL_C is inherited through CreateProcess, so
-      # measure it at three points of the chain: this runner step, a node child of it, and (below) the
-      # console children the product itself launches under ConPTY.
-      - name: Probe Ctrl+C ignore flag - runner step and node child
-        if: always()
-        shell: pwsh
-        run: |
-          Write-Host ("runner-step: " + (python -I -B backend/tests/cli_regression/support/native_shell_peer_win.py --probe-ctrl-c))
-          Write-Host ("node-child: " + (node -e "process.stdout.write(require('child_process').spawnSync('python',['-I','-B',process.argv[1],'--probe-ctrl-c']).stdout)" backend/tests/cli_regression/support/native_shell_peer_win.py))
-          exit 0
-
-      - name: Show the Ctrl+C flag the product launch chain gave the console peers
-        if: always()
-        shell: pwsh
-        run: |
-          if (Test-Path test-results/ci/e5-windows-ctrlc.log) { Get-Content test-results/ci/e5-windows-ctrlc.log } else { Write-Host 'no peer reached the ready line' }
-          exit 0
 
       - name: Show the TypeScript case failures (endpoint tokens redacted)
         if: always() && steps.ts_seam.outcome == 'failure'

@@ -362,18 +362,23 @@ class JournalIdentityConflict(ValueError):
 
 def _registry_identities(records: "list[dict]") -> "list[dict]":
     """A Windows sidecar journals the root's creation time as a FILETIME; the registry stores psutil's
-    creation time (see `osplat`). Translate once at ingestion. A root that no longer exists (or whose
-    time does not match) cannot be a live orphan, so its record is dropped, never guessed."""
+    creation time (see `osplat`). Translate once at ingestion. A root that is verifiably absent cannot be a
+    live orphan and is dropped. A record that cannot be proved equal (the pid cannot be inspected, or its
+    process was created at another time) is kept, flagged `unverifiable`, and is never signalled: it is an
+    unresolved cleanup fact, not a cleaned one. POSIX records pass through untouched."""
     if not any(r.get("start_kind") == "windows-filetime" for r in records):
         return records
-    from . import cli_runtime_windows
+    from . import cli_runtime_windows as windows
     converted = []
     for record in records:
         if record.get("start_kind") == "windows-filetime":
-            lstart = cli_runtime_windows.registry_start(record["pid"], record["start_value"])
-            if not lstart:
+            verdict, lstart = windows.inspect_start(record["pid"], record["start_value"])
+            if verdict == windows.ABSENT:
                 continue
-            record = {**record, "start_value": lstart, "start_kind": "windows-psutil"}
+            if verdict == windows.MATCH:
+                record = {**record, "start_value": lstart, "start_kind": "windows-psutil"}
+            else:
+                record = {**record, "unverifiable": True}
         converted.append(record)
     return converted
 
@@ -395,6 +400,9 @@ def ingest_journal(path: Path, owner: int | None = None) -> list[dict]:
         # A pid cannot be shared by two live processes, so within one journal the later
         # record supersedes an earlier one (the earlier birth was reaped before it).
         latest = {record["pid"]: record for record in records}
+        # An unverifiable record has no identity the registry could match: it is returned to the caller
+        # (who must treat the generation as unverifiable) and the journal that names it is kept.
+        latest = {pid: record for pid, record in latest.items() if not record.get("unverifiable")}
         conflicting = [
             str(record["pid"]) for record in latest.values()
             if (existing := entries.get(str(record["pid"]))) is not None and not (
@@ -443,7 +451,11 @@ def _ingest_stale_journals(details: "dict | None" = None) -> bool:
             owner, records = _read_journal(path)
             if owner is not None and (owner == me or _backend_alive(owner)):
                 continue  # a live backend (this one or a sibling) still owns it
-            ingest_journal(path)
+            translated = ingest_journal(path)
+            if any(r.get("unverifiable") for r in translated):
+                log.warning("ownership journal %s names a root whose identity cannot be verified", path.name)
+                complete = False  # the journal stays and the fence stays closed until the pid is settled
+                continue
             ingested.append((path, {r["pid"] for r in records}))
         except JournalIdentityConflict as err:
             log.warning("ownership journal %s: %s", path.name, err)

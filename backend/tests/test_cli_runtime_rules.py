@@ -153,18 +153,31 @@ RAW_READ_ALLOWLIST = {
 }
 
 
+#: `libc::poll` call sites that wait on something other than a PTY master: function name -> what it polls.
+POLL_ALLOWLIST = {
+    "wait_exit": "pidfds of owned processes, waiting for their exit (Linux)",
+    "pidfd_exited": "one pidfd with a zero timeout, to prove the bound process has not exited",
+}
+
+
 def enclosing_fn(text: str, offset: int) -> str:
     names = list(re.finditer(r"(?m)^\s*(?:pub(?:\([a-z]+\))?\s+)?(?:unsafe\s+)?fn\s+(\w+)", text[:offset]))
     return names[-1].group(1) if names else "?"
 
 
 def test_the_sidecar_never_reads_polls_or_queries_a_pty_master():
-    offenders, used = [], set()
-    forbidden = re.compile(r"FIONREAD|tcgetpgrp|libc::poll\(|libc::select\(|libc::epoll|EVFILT_READ")
+    offenders, used, polled = [], set(), set()
+    forbidden = re.compile(r"FIONREAD|tcgetpgrp|libc::select\(|libc::epoll|EVFILT_READ")
     for path in rust_files():
         text = production(path)
         for match in forbidden.finditer(text):
             offenders.append(f"{path.name}: {match.group(0)}")
+        for match in re.finditer(r"libc::poll\(", text):
+            owner = enclosing_fn(text, match.start())
+            if owner in POLL_ALLOWLIST:
+                polled.add(owner)
+            else:
+                offenders.append(f"{path.name}: {match.group(0)} in fn {owner}")
         for match in re.finditer(r"libc::(?:read|readv|recv|recvmsg)\(", text):
             owner = enclosing_fn(text, match.start())
             if owner in RAW_READ_ALLOWLIST:
@@ -173,6 +186,7 @@ def test_the_sidecar_never_reads_polls_or_queries_a_pty_master():
                 offenders.append(f"{path.name}: {match.group(0)} in fn {owner}")
     assert not offenders, offenders
     assert used == set(RAW_READ_ALLOWLIST), f"stale read allowlist: {set(RAW_READ_ALLOWLIST) - used}"
+    assert polled == set(POLL_ALLOWLIST), f"stale poll allowlist: {set(POLL_ALLOWLIST) - polled}"
     pty = production(RUST_SRC / "session_pty.rs")
     assert not re.search(r"fn\s+(read|write|poll|pending|foreground)\w*\s*\(", pty), "SessionPty exposes no read/write/poll/query"
     assert "pub fn lend_master" in pty and "BorrowedFd" in pty
