@@ -182,6 +182,61 @@ jobs:
           if ($code -ne 0) { exit 1 }
           if ($out -notmatch 'test result: ok\. 1 passed') { Write-Host "case not collected: $env:CASE"; exit 1 }
 
+      - name: Install the backend test environment
+        id: py_env
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -m pip install uv
+          uv sync --project backend --frozen
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Python client - 4 concurrent isolated sessions, unicode, resize, exit
+        id: py_concurrent
+        if: always() && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CASE: test_windows_service_runs_concurrent_isolated_sessions_with_unicode_resize_and_exit
+          NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}\e5-cargo-target\release\navide-cli-runtime.exe
+        run: |
+          $out = uv --project backend run pytest "backend/tests/test_cli_runtime_windows.py::$env:CASE" -q -p no:cacheprovider 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) { exit 1 }
+          if ($out -notmatch '1 passed') { Write-Host "case not collected or skipped: $env:CASE"; exit 1 }
+
+      - name: Python client - sidecar death recovers on a fresh runtime
+        id: py_recovery
+        if: always() && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CASE: test_windows_sidecar_death_with_sessions_fails_visibly_and_recovers_on_a_fresh_runtime
+          NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}\e5-cargo-target\release\navide-cli-runtime.exe
+        run: |
+          $out = uv --project backend run pytest "backend/tests/test_cli_runtime_windows.py::$env:CASE" -q -p no:cacheprovider 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) { exit 1 }
+          if ($out -notmatch '1 passed') { Write-Host "case not collected or skipped: $env:CASE"; exit 1 }
+
+      - name: Python client - missing binary fails the create
+        id: py_missing
+        if: always() && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CASE: test_windows_missing_binary_fails_the_create_instead_of_skipping
+          NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}\e5-cargo-target\release\navide-cli-runtime.exe
+        run: |
+          $out = uv --project backend run pytest "backend/tests/test_cli_runtime_windows.py::$env:CASE" -q -p no:cacheprovider 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) { exit 1 }
+          if ($out -notmatch '1 passed') { Write-Host "case not collected or skipped: $env:CASE"; exit 1 }
+
       - name: Write redacted outcomes
         if: always()
         shell: pwsh
@@ -199,6 +254,10 @@ jobs:
           GATE_W5: ${{ steps.gw5.outcome }}
           LOSS: ${{ steps.loss.outcome }}
           UNSERVICED: ${{ steps.unserviced.outcome }}
+          PY_ENV: ${{ steps.py_env.outcome }}
+          PY_CONCURRENT: ${{ steps.py_concurrent.outcome }}
+          PY_RECOVERY: ${{ steps.py_recovery.outcome }}
+          PY_MISSING: ${{ steps.py_missing.outcome }}
         run: |
           $build = [System.Environment]::OSVersion.Version.Build
           $rows = @(
@@ -214,7 +273,11 @@ jobs:
             "runtime=rust-sidecar platform=windows build=$build case=W10 status=$env:CASE_W10 stage=isolation",
             "runtime=rust-sidecar platform=windows build=$build case=G-W5 status=$env:GATE_W5 stage=scale-and-cancel",
             "runtime=rust-sidecar platform=windows build=$build case=uniform-loss status=$env:LOSS stage=stdin-eof",
-            "runtime=rust-sidecar platform=windows build=$build case=unserviced-exit status=$env:UNSERVICED stage=cleanup-bound"
+            "runtime=rust-sidecar platform=windows build=$build case=unserviced-exit status=$env:UNSERVICED stage=cleanup-bound",
+            "runtime=python-client platform=windows build=$build case=py-env status=$env:PY_ENV stage=install",
+            "runtime=python-client platform=windows build=$build case=py-concurrent-w10 status=$env:PY_CONCURRENT stage=production-client",
+            "runtime=python-client platform=windows build=$build case=py-sidecar-death status=$env:PY_RECOVERY stage=recovery",
+            "runtime=python-client platform=windows build=$build case=py-missing-binary status=$env:PY_MISSING stage=negative-control"
           )
           $rows | Set-Content test-results/ci/e5-windows-outcomes.log
 
