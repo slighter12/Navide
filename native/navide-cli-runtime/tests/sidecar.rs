@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! The real sidecar binary over a real socketpair: handshake, framing errors and one session's
 //! handoff (E1 H1, H5-style rejects, F3 sidecar side, P1/P11 smoke). The Python seam tests live in
 //! `backend/tests`; these isolate the binary itself.
