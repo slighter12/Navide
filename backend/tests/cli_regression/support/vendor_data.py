@@ -26,7 +26,7 @@ class VendorData:
         self.fixture = json.loads((FIXTURES / f"{key}.json").read_text(encoding="utf-8"))
         self.home = root / "home"
         self.workspace = root / "workspace with spaces"
-        self.home.mkdir()
+        self.home.mkdir(exist_ok=True)  # a backend's isolated environment creates it first
         self.workspace.mkdir()
         set_home(self.home)
         for name in ("CLAUDE_CONFIG_DIR", "GROK_HOME", "KIMI_CODE_HOME", "QWEN_RUNTIME_DIR",
