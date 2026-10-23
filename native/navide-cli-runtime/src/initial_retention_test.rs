@@ -36,7 +36,7 @@ fn initial_retention_keeps_detached_real_owned_rows() {
     assert_eq!(captured.pbi_ppid, pid as u32);
     let mut root = Some(root);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let known = snapshot(Some(pid), &Table::new()).unwrap();
+        let known = snapshot(Some(pid), &Table::new(), &mut Births::default()).unwrap();
         assert!(known.contains_key(&detached_pid));
         root.as_mut()
             .unwrap()
@@ -46,7 +46,7 @@ fn initial_retention_keeps_detached_real_owned_rows() {
             .write_all(b"RETIRE\n")
             .unwrap();
         root.as_mut().unwrap().wait().unwrap();
-        let table = snapshot(None, &known).unwrap();
+        let table = snapshot(None, &known, &mut Births::default()).unwrap();
         assert!(!table.contains_key(&pid));
         assert_eq!(table[&detached_pid].0, 1);
         assert!(descendants(&table, pid).is_empty()); // The old narrowing loses it.
@@ -54,6 +54,7 @@ fn initial_retention_keeps_detached_real_owned_rows() {
             pid,
             root: identity(pid, &known[&pid]),
             descendants: Table::new(),
+            births: Births::default(),
         };
         root.take();
         // Identical helper used by the real spawn initializer before owned ACK.

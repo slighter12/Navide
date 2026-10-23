@@ -362,10 +362,11 @@ class JournalIdentityConflict(ValueError):
 
 def _registry_identities(records: "list[dict]") -> "list[dict]":
     """A Windows sidecar journals the root's creation time as a FILETIME; the registry stores psutil's
-    creation time (see `osplat`). Translate once at ingestion. A root that is verifiably absent cannot be a
-    live orphan and is dropped. A record that cannot be proved equal (the pid cannot be inspected, or its
-    process was created at another time) is kept, flagged `unverifiable`, and is never signalled: it is an
-    unresolved cleanup fact, not a cleaned one. POSIX records pass through untouched."""
+    creation time (see `osplat`). Translate once at ingestion. A root that is verifiably absent, or whose pid
+    now belongs to a process created at another time (the exact FILETIME differs under an open handle), cannot
+    be a live orphan and is dropped; the process now at that pid is never signalled. A record whose pid cannot
+    be inspected is kept, flagged `unverifiable`, and is never signalled: it is an unresolved cleanup fact, not
+    a cleaned one. POSIX records pass through untouched."""
     if not any(r.get("start_kind") == "windows-filetime" for r in records):
         return records
     from . import cli_runtime_windows as windows
@@ -374,6 +375,11 @@ def _registry_identities(records: "list[dict]") -> "list[dict]":
         if record.get("start_kind") == "windows-filetime":
             verdict, lstart = windows.inspect_start(record["pid"], record["start_value"])
             if verdict == windows.ABSENT:
+                continue
+            if verdict == windows.DIFFERS:
+                # An exact FILETIME under an open handle proves the journalled root is gone. It is kept as
+                # `proven_gone` so a registry row for this pid still has its recorded descendants cleaned.
+                converted.append({**record, "proven_gone": True})
                 continue
             if verdict == windows.MATCH:
                 record = {**record, "start_value": lstart, "start_kind": "windows-psutil"}
@@ -402,7 +408,8 @@ def ingest_journal(path: Path, owner: int | None = None) -> list[dict]:
         latest = {record["pid"]: record for record in records}
         # An unverifiable record has no identity the registry could match: it is returned to the caller
         # (who must treat the generation as unverifiable) and the journal that names it is kept.
-        latest = {pid: record for pid, record in latest.items() if not record.get("unverifiable")}
+        latest = {pid: record for pid, record in latest.items()
+                  if not record.get("unverifiable") and not record.get("proven_gone")}
         conflicting = [
             str(record["pid"]) for record in latest.values()
             if (existing := entries.get(str(record["pid"]))) is not None and not (
@@ -456,6 +463,9 @@ def _ingest_stale_journals(details: "dict | None" = None) -> bool:
                 log.warning("ownership journal %s names a root whose identity cannot be verified", path.name)
                 complete = False  # the journal stays and the fence stays closed until the pid is settled
                 continue
+            # A root proven gone by a differing FILETIME is handled like a collision: the live process now at
+            # that pid is never signalled, but the registry row's recorded descendants are verified and cleaned.
+            collisions.update(str(r["pid"]) for r in translated if r.get("proven_gone"))
             ingested.append((path, {r["pid"] for r in records}))
         except JournalIdentityConflict as err:
             log.warning("ownership journal %s: %s", path.name, err)

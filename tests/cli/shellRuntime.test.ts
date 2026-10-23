@@ -312,3 +312,107 @@ it.runIf(process.platform === 'darwin')('delivers the last words written before 
     }
   })
 }, 90_000)
+
+function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+/** One authenticated client with per-session output and exit records, for the Windows principal-seam cases below. */
+async function windowsClient(endpoint: any) {
+  let connections = 0
+  const client = createWsClient({ onStatus: (status) => { if (status === 'connected') connections++ } })
+  const output = new Map<string, string>()
+  const decoders = new Map<string, TextDecoder>()
+  const exits = new Map<string, any>()
+  client.on('terminal.output', (payload) => {
+    const frame = payload as TerminalOutputFrame
+    const decoder = decoders.get(frame.terminal_session_id) ?? new TextDecoder()
+    decoders.set(frame.terminal_session_id, decoder)
+    output.set(frame.terminal_session_id, (output.get(frame.terminal_session_id) ?? '') + decoder.decode(frame.data, { stream: true }))
+  })
+  client.on('terminal.exit', (payload) => { exits.set((payload as { terminal_session_id: string }).terminal_session_id, payload) })
+  client.connect(endpoint.url)
+  await until(() => connections === 1, 'authenticated WS')
+  const open = async (pane: string, command: string | string[], cwd: string) => {
+    const created = await client.send<{ terminal_session_id: string }>('terminal.create', {
+      pane_id: pane, agent_key: 'terminal', command, cwd, cols: 100, rows: 30, create_generation: pane,
+    }, 30_000)
+    expect(created.ok, JSON.stringify(created)).toBe(true)
+    const tid = created.payload!.terminal_session_id
+    await until(() => (output.get(tid) ?? '').includes('NATIVE_READY '), `${pane}: native child READY`, 60_000)
+    const ready = JSON.parse(output.get(tid)!.split('NATIVE_READY ')[1].split('\r\n')[0])
+    return { tid, ready }
+  }
+  const input = async (tid: string, data: string) => {
+    expect((await client.send('terminal.input', { terminal_session_id: tid, data })).ok).toBe(true)
+  }
+  const kill = async (tid: string) => {
+    expect((await client.send('terminal.kill', { terminal_session_id: tid, force: true })).ok).toBe(true)
+  }
+  return { client, output, exits, open, input, kill }
+}
+
+// E5 final review 5: the product's own Windows wrapper forms (`shellCommandArgv`, src/shared/osplat.ts), not the fixture launcher.
+// The shell stays up after the program under -NoExit and /k, so an exit is the program's, then the shell's own.
+for (const kind of ['pwsh', 'cmd'] as const) {
+  it.runIf(process.platform === 'win32')(`uses one actual native runtime through the product's ${kind} wrapper: descendant cleanup, interrupt and exit`, async () => {
+    await withBackend('', async (root, endpoint) => {
+      const argv: string[] = endpoint.productWrappers[kind]
+      expect(argv.length).toBeGreaterThan(1)
+      const { client, output, exits, open, input, kill } = await windowsClient(endpoint)
+      try {
+        // descendant cleanup: a kill takes the program and both children it spawned
+        const tree = await open(`wrap-${kind}-tree`, argv, root)
+        await input(tree.tid, 'spawn-tree-hup\r')
+        await until(() => (output.get(tree.tid) ?? '').includes('TREE '), `${kind}: the program spawned its children`)
+        const children: number[] = JSON.parse(output.get(tree.tid)!.split('TREE ')[1].split('\r\n')[0]).pids
+        expect(children).toHaveLength(2)
+        await kill(tree.tid)
+        await until(() => [tree.ready.pid, ...children].every((pid) => !pidAlive(pid)), `${kind}: the program and its children outlived the kill`, 30_000)
+
+        // interrupt: Ctrl+C reaches the program through the wrapper
+        const interrupt = await open(`wrap-${kind}-int`, argv, root)
+        expect((await client.send('terminal.interrupt', { terminal_session_id: interrupt.tid })).ok).toBe(true)
+        await until(() => (output.get(interrupt.tid) ?? '').includes('INTERRUPTED'), `${kind}: Ctrl+C did not reach the program`)
+        await kill(interrupt.tid)
+        await until(() => !pidAlive(interrupt.ready.pid), `${kind}: the program outlived the kill`, 30_000)
+
+        // exit: the program ends with its own tail, then the shell it ran in
+        const done = await open(`wrap-${kind}-exit`, argv, root)
+        await input(done.tid, 'exit\r')
+        await until(() => (output.get(done.tid) ?? '').includes('FINAL_TAIL café 世界'), `${kind}: the program's final output`)
+        await until(() => !pidAlive(done.ready.pid), `${kind}: the program did not exit`, 30_000)
+        await input(done.tid, 'exit\r')
+        await until(() => exits.has(done.tid), `${kind}: the shell did not exit`, 30_000)
+      } finally {
+        client.dispose('wrapper case complete')
+      }
+    })
+  }, 240_000)
+}
+
+// W10: kill, then recreate, repeatedly, with the creates of each round concurrent, so pipe and console handles are reused.
+it.runIf(process.platform === 'win32')('uses one actual native runtime for kill and recreate cycles with concurrent creates that keep every session isolated', async () => {
+  await withBackend('', async (root, endpoint) => {
+    const { client, output, open, input, kill } = await windowsClient(endpoint)
+    try {
+      for (let round = 0; round < 3; round++) {
+        const sessions = await Promise.all([0, 1, 2, 3].map((slot) => open(`cycle-${round}-${slot}`, endpoint.command, root)))
+        expect(new Set(sessions.map((s) => s.ready.pid)).size).toBe(4)
+        await Promise.all(sessions.map((s, slot) => input(s.tid, `mark-${round}-${slot}\r`)))
+        await Promise.all(sessions.map((s, slot) => until(
+          () => (output.get(s.tid) ?? '').includes(`"text": "mark-${round}-${slot}"`), `round ${round} slot ${slot}: its own bytes`)))
+        sessions.forEach((s, slot) => {
+          const text = output.get(s.tid)!
+          expect(text.split('NATIVE_READY ').length - 1, `round ${round} slot ${slot} READY count`).toBe(1)
+          for (let other = 0; other < 4; other++) if (other !== slot) expect(text).not.toContain(`mark-${round}-${other}`)
+          expect(text).not.toContain(`mark-${round - 1}-`)
+        })
+        await Promise.all(sessions.map((s) => kill(s.tid)))
+        await until(() => sessions.every((s) => !pidAlive(s.ready.pid)), `round ${round}: a killed session's program is still alive`, 60_000)
+      }
+    } finally {
+      client.dispose('W10 cycle complete')
+    }
+  })
+}, 300_000)

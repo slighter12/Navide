@@ -23,6 +23,15 @@ def launcher_wrapped(root: Path, command: list[str]) -> list[str]:
     return [base_python_executable(), "-u", str(launcher), *command]
 
 
+def product_wrappers(peer: Path) -> dict[str, list[str]]:
+    """The argv forms `shellCommandArgv` (src/shared/osplat.ts) produces for a Windows shell pane, unchanged:
+    `pwsh -NoLogo -NoExit -Command <cmd>` and `cmd /k <cmd>`. The command is the peer with plain arguments."""
+    command = " ".join([base_python_executable(), "-u", str(peer), "alpha"])
+    pwsh = shutil.which("pwsh") or shutil.which("powershell") or "powershell.exe"
+    return {"pwsh": [pwsh, "-NoLogo", "-NoExit", "-Command", command],
+            "cmd": [os.environ.get("ComSpec", "cmd.exe"), "/k", command]}
+
+
 async def main(root: Path, mode: str, fault: str = ""):
     backend = BackendProcess(root)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = mode
@@ -80,6 +89,7 @@ async def main(root: Path, mode: str, fault: str = ""):
         pending = root / "wire.pending.json"
         pending.write_text(json.dumps({"url": backend.url, "command": command, "arguments": arguments,
                                        "wrapped": launcher_wrapped(root, command) if windows else ["/bin/bash", "-ilc", shlex.join(command)],
+                                       "productWrappers": product_wrappers(peer) if windows else {},
                                        "backend": {"pid": identity.pid, "created": identity.create_time()}}))
         pending.replace(root / "wire.json")
         try:
