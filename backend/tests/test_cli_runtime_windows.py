@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -86,6 +87,19 @@ def rig(tmp_path, monkeypatch):
     yield made
 
 
+def record_requests(service) -> list[tuple[str, str]]:
+    """Wrap the service's control-request path so each (operation, session id) is recorded, then passed through."""
+    sent: list[tuple[str, str]] = []
+    original = service._request
+
+    async def recording(operation, payload, session=None, *args, **kwargs):
+        sent.append((operation, getattr(session, "id", "")))
+        return await original(operation, payload, session, *args, **kwargs)
+
+    service._request = recording
+    return sent
+
+
 async def start(rig, pane: str):
     session = await rig.service.create_async(
         pane_id=pane, agent_key="terminal", command=[sys.executable, "-u", str(PEER)],
@@ -105,6 +119,7 @@ async def stop(rig):
 
 async def test_windows_service_runs_concurrent_isolated_sessions_with_unicode_resize_and_exit(rig):
     try:
+        sent = record_requests(rig.service)
         names = [f"w{n}" for n in range(4)]
         sessions = await asyncio.gather(*(start(rig, name) for name in names))
         for session, name in zip(sessions, names):
@@ -133,6 +148,7 @@ async def test_windows_service_runs_concurrent_isolated_sessions_with_unicode_re
             last_out = max(i for i, (kind, sid) in enumerate(rig.sink.order) if kind == "out" and sid == session.id)
             exit_at = rig.sink.order.index(("exit", session.id))
             assert exit_at > last_out, "output followed terminal.exit"
+            assert ("tty_eof", session.id) in sent, "a completed close must announce its closed read end"
     finally:
         await stop(rig)
 
@@ -156,12 +172,46 @@ async def test_windows_sidecar_death_with_sessions_fails_visibly_and_recovers_on
         await stop(rig)
 
 
+async def test_windows_an_unjoined_pump_is_reported_and_the_generation_is_retired_without_tty_eof(rig, monkeypatch, tmp_path):
+    import json
+    from agent_team_backend import cli_runtime_windows as winrt
+    receipts = tmp_path / "receipts"
+    receipts.mkdir()
+    monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(receipts))  # read by the service when it is built
+    release = threading.Event()
+    original = winrt.WindowsMaster._pump_main
+
+    def pump_that_outlives_the_stream(self):  # ends its reads normally, then ignores every cancel
+        original(self)
+        release.wait(60)
+
+    monkeypatch.setattr(winrt.WindowsMaster, "_pump_main", pump_that_outlives_the_stream)
+    monkeypatch.setattr(winrt, "THREAD_CLOSE_S", 0.5)
+    try:
+        sent = record_requests(rig.service)
+        session = await start(rig, "stuck")
+        await rig.service.write_async(session.id, "quit\r")
+        await until(lambda: rig.service._invalidation is not None, "the incomplete close retired the generation", 30)
+        async with asyncio.timeout(cli_runtime.TASK_DRAIN_S + cli_runtime.SIDECAR_EXIT_S + cli_runtime.PERSIST_WAIT_S + 20):
+            await asyncio.shield(rig.service._invalidation)
+        events = [json.loads(line) for line in (receipts / "runtime-receipts.jsonl").read_text("utf-8").splitlines()]
+        incomplete = [e for e in events if e["event"] == "handle_close_incomplete"]
+        assert [e["session_id"] for e in incomplete] == [session.id], events
+        assert ("tty_eof", session.id) not in sent, "TTY_EOF announced a closed read end that was still open"
+        invalidated = [e for e in events if e["event"] == "runtime_invalidated"]
+        assert invalidated and invalidated[-1]["complete"] is False, "an unjoined worker must keep the fence closed"
+        assert str(rig.service._lost).startswith("CLEANUP_FAILED"), rig.service._lost
+    finally:
+        release.set()
+        await stop(rig)
+
+
 async def test_windows_missing_binary_fails_the_create_instead_of_skipping(tmp_path, monkeypatch):
     from tests.cli_regression.support.isolation import isolated_environment
     env = isolated_environment(tmp_path)
     monkeypatch.setenv("AGENT_TEAM_DATA_DIR", env["AGENT_TEAM_DATA_DIR"])
     monkeypatch.setenv("NAVIDE_CLI_RUNTIME_BIN", str(tmp_path / "missing-runtime.exe"))
     service = RustTerminalService(Sink())
-    with pytest.raises(Exception):
+    with pytest.raises(FileNotFoundError, match="missing at explicit override"):
         await service.create_async(pane_id="x", agent_key="terminal", command=[sys.executable, "-c", "pass"],
                                    cwd=str(tmp_path), cols=80, rows=24, env=env)

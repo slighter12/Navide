@@ -2,9 +2,36 @@
 use super::Table;
 use std::collections::{HashMap, HashSet};
 use std::io;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const MAX_PIDS: usize = 4 * 1024 * 1024 / std::mem::size_of::<i32>();
+/// `PIDFD_SIGNAL_PROCESS_GROUP` (Linux 6.9+): signal the whole group of the process a pidfd names.
+const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
+
+type Births = std::collections::HashMap<i32, (String, u64)>;
+
+/// The kernel start ticks behind every `posix-lstart` value this sidecar handed out, by pid. The wire
+/// value has one-second resolution, so two processes that held the same pid within a second share it;
+/// the ticks tell them apart. Internal only: the table and the wire keep the legacy string.
+fn births() -> &'static Mutex<Births> {
+    static BIRTHS: OnceLock<Mutex<Births>> = OnceLock::new();
+    BIRTHS.get_or_init(Default::default)
+}
+
+fn note_birth(pid: i32, start: &str, ticks: u64) {
+    if let Ok(mut births) = births().lock() {
+        births.insert(pid, (start.to_string(), ticks));
+    }
+}
+
+fn noted_ticks(pid: i32, start: &str) -> Option<u64> {
+    let births = births().lock().ok()?;
+    births
+        .get(&pid)
+        .filter(|(noted, _)| noted == start)
+        .map(|(_, ticks)| *ticks)
+}
 
 #[derive(Clone, PartialEq, Eq)]
 struct Process {
@@ -218,7 +245,10 @@ pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<
             return Err(io::Error::other("unknown retained birth"));
         }
         if let Some(value) = process(pid)? {
-            if legacy_start(value.birth_ticks, boot, ticks)? == expected.2 {
+            // The string alone cannot tell a same-second replacement from the retained process.
+            if legacy_start(value.birth_ticks, boot, ticks)? == expected.2
+                && noted_ticks(pid, &expected.2).is_none_or(|noted| noted == value.birth_ticks)
+            {
                 known.insert(pid, value);
             }
         }
@@ -240,20 +270,87 @@ pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<
             return current
                 .into_iter()
                 .map(|(pid, value)| {
-                    Ok((
-                        pid,
-                        (
-                            value.parent,
-                            value.group,
-                            legacy_start(value.birth_ticks, boot, ticks)?,
-                        ),
-                    ))
+                    let start = legacy_start(value.birth_ticks, boot, ticks)?;
+                    note_birth(pid, &start, value.birth_ticks);
+                    Ok((pid, (value.parent, value.group, start)))
                 })
                 .collect();
         }
         known.extend(current.clone());
         previous = Some(current);
     }
+}
+
+struct Pidfd(i32);
+
+impl Drop for Pidfd {
+    fn drop(&mut self) {
+        // SAFETY: the descriptor was opened by `signal` and is owned by this guard.
+        unsafe { libc::close(self.0) };
+    }
+}
+
+/// Whether the process a pidfd names has exited (readable). An error reads as exited: fail closed.
+/// Polls a pidfd, never a pty master.
+fn pidfd_exited(fd: i32) -> bool {
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one initialized pollfd and a zero timeout.
+    unsafe { libc::poll(&mut pollfd, 1, 0) != 0 }
+}
+
+/// Signal the process instance `pid` named when `expected_start` was recorded, or nothing (E5 review-a 1).
+/// The pid is bound with `pidfd_open` first; its identity (start string and, when this sidecar recorded
+/// them, the exact kernel start ticks) is then read, and the pidfd must still be alive afterwards, which
+/// proves the stat read belonged to the instance the pidfd names. The signal goes through that pidfd, so
+/// a pid recycled after the check is never signalled. A process that cannot be bound is not signalled.
+/// `group` signals the instance's process group (pidfd group signalling where the kernel has it, else the
+/// group of the verified, still unreaped leader). Returns whether a signal was delivered.
+pub(super) fn signal(pid: i32, expected_start: &str, signal: i32, group: bool) -> bool {
+    // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor or -1.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as i32;
+    if fd < 0 {
+        return false;
+    }
+    let pidfd = Pidfd(fd);
+    let Ok(Some(live)) = process(pid) else {
+        return false;
+    };
+    if pidfd_exited(pidfd.0) {
+        return false;
+    }
+    let (Ok(boot), Ok(ticks)) = (boot_seconds(), clock_ticks()) else {
+        return false;
+    };
+    match legacy_start(live.birth_ticks, boot, ticks) {
+        Ok(start) if start == expected_start => {}
+        _ => return false,
+    }
+    if noted_ticks(pid, expected_start).is_some_and(|noted| noted != live.birth_ticks) {
+        return false;
+    }
+    let flags = if group { PIDFD_SIGNAL_PROCESS_GROUP } else { 0 };
+    // SAFETY: a valid pidfd, a signal number, no siginfo.
+    let sent = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            pidfd.0,
+            signal,
+            std::ptr::null::<libc::siginfo_t>(),
+            flags,
+        )
+    };
+    if sent == 0 {
+        return true;
+    }
+    if group && io::Error::last_os_error().raw_os_error() == Some(libc::EINVAL) {
+        // SAFETY: the leader was verified alive and unreaped just above, so the group id is still its own.
+        return unsafe { libc::kill(-pid, signal) } == 0;
+    }
+    false
 }
 
 pub(super) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
@@ -376,5 +473,55 @@ mod tests {
         unsafe { libc::kill(-pid, libc::SIGKILL) };
         let _ = child.wait();
         result.unwrap();
+    }
+
+    /// A same-second replacement at a retained pid: the stored ticks differ from the live process while the
+    /// `posix-lstart` string is identical, which is exactly what the string alone cannot see.
+    fn sleeper() -> (std::process::Child, i32, String, u64) {
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let table = snapshot(Some(pid), &Table::new()).unwrap();
+        let start = table.get(&pid).unwrap().2.clone();
+        let ticks = process(pid).unwrap().unwrap().birth_ticks;
+        (child, pid, start, ticks)
+    }
+
+    #[test]
+    fn a_signal_reaches_only_the_instance_whose_ticks_were_recorded() {
+        let (mut child, pid, start, ticks) = sleeper();
+        note_birth(pid, &start, ticks + 1); // the recorded instance is not the one at this pid
+        assert!(!signal(pid, &start, libc::SIGKILL, false));
+        assert!(child.try_wait().unwrap().is_none(), "the replacement was signalled");
+        note_birth(pid, &start, ticks);
+        assert!(signal(pid, &start, libc::SIGKILL, false));
+        let status = child.wait().unwrap();
+        assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(libc::SIGKILL));
+    }
+
+    #[test]
+    fn a_wrong_start_string_or_an_exited_process_is_never_signalled() {
+        let (mut child, pid, start, ticks) = sleeper();
+        note_birth(pid, &start, ticks);
+        assert!(!signal(pid, "Thu Jan  1 00:00:00 1970", libc::SIGKILL, false));
+        assert!(child.try_wait().unwrap().is_none());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!signal(pid, &start, libc::SIGKILL, false), "a gone pid has nothing to signal");
+    }
+
+    #[test]
+    fn a_retained_seed_with_other_ticks_is_not_readmitted() {
+        let (mut child, pid, start, ticks) = sleeper();
+        let seeds: Table = [(pid, (1, pid, start.clone()))].into_iter().collect();
+        note_birth(pid, &start, ticks + 1);
+        assert!(snapshot(None, &seeds).unwrap().is_empty());
+        note_birth(pid, &start, ticks);
+        assert!(snapshot(None, &seeds).unwrap().contains_key(&pid));
+        child.kill().unwrap();
+        child.wait().unwrap();
     }
 }

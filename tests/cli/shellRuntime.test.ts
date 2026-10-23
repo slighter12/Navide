@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, copyFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, copyFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { expect, it } from 'vitest'
@@ -85,11 +85,6 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         expect(ready.providerKeys).toEqual([])
         expect([ready.isatty, ready.ctty, ready.foreground]).toEqual([true, true, true])
         expect(ready.dimensions).toEqual([100, 30])
-        if (isWindows) {
-          // Status-only record of what the product's launch chain handed the console child (read by the workflow).
-          mkdirSync(resolve('test-results/ci'), { recursive: true })
-          appendFileSync(resolve('test-results/ci/e5-windows-ctrlc.log'), `peer=${index} wrapped=${index % 2 === 1} ctrlCIgnoredAtStart=${ready.ctrlCIgnoredAtStart} inputModeAtStart=${ready.inputModeAtStart}\n`)
-        }
         peers.push({ tid, pid: ready.pid, workspace })
         expect(ready.pid).toBeGreaterThan(0)
       }

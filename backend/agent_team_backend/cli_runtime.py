@@ -199,6 +199,8 @@ class RustTerminalService(TerminalService):
         self._stdout_task: asyncio.Task | None = None
         # sid -> the claimed master of a session not yet published (or never to be), I2.
         self._slots: dict[str, HandoffSlot | winrt.WindowsMaster] = {}
+        self._closing_masters: dict[str, list] = {}  # Windows: per generation, workers cancelled and still to join
+        self._close_deadline: dict[str, float] = {}
         self._feed: winrt.StdoutFeed | None = None
         # slave names held by live or pending sessions of this generation (6.4 check 3).
         self._claimed_ttys: set[str] = set()
@@ -312,11 +314,26 @@ class RustTerminalService(TerminalService):
                 task.cancel()
         # Step 2: close every Python handle of the generation, every close through the close-once
         # wrapper (a stream already closed normally is a no-op), every unpublished slot, the channel.
-        for retained in self._retained.values():
-            if retained.handle is not None:
-                retained.handle.close()
-        for slot_id in list(self._slots):
-            self._close_slot(slot_id)
+        if WINDOWS:
+            # Step 1 asks the sidecar to end first; step 2 then cancels EVERY worker before it joins any
+            # (the join runs in `_invalidate`, off the loop, under one generation-wide THREAD_CLOSE_S).
+            if self._runtime is not None and self._runtime.returncode is None:
+                with suppress(ProcessLookupError):
+                    self._runtime.kill()
+            closing = [h for h in (r.handle for r in self._retained.values()) if isinstance(h, winrt.WindowsMaster)]
+            closing += [self._slots[s] for s in list(self._slots) if isinstance(self._slots[s], winrt.WindowsMaster)]
+            for master in closing:
+                master.begin_close()
+            self._closing_masters[generation] = closing
+            self._close_deadline[generation] = time.monotonic() + winrt.THREAD_CLOSE_S
+            for slot_id in list(self._slots):
+                self._slots.pop(slot_id, None)
+        else:
+            for retained in self._retained.values():
+                if retained.handle is not None:
+                    retained.handle.close()
+            for slot_id in list(self._slots):
+                self._close_slot(slot_id)
         self._claimed_ttys.clear()
         if self._sending is not None:
             self._sending.cancel()  # an unfinished frame dies with the channel it was written to
@@ -328,7 +345,7 @@ class RustTerminalService(TerminalService):
             with suppress(Exception):
                 self._runtime.stdin.close()  # the sidecar sees the channel closed (uniform loss)
         self._stage("handles_closed")
-        if self._runtime is not None and self._runtime.returncode is None:
+        if not WINDOWS and self._runtime is not None and self._runtime.returncode is None:
             with suppress(ProcessLookupError):
                 self._runtime.kill()  # through the owned process handle, never by name or pid alone
 
@@ -455,10 +472,13 @@ class RustTerminalService(TerminalService):
                 # unverifiable generation, never an empty one.
                 journal = in_data_dir(self._data_dir, pty_registry.journal_path, generation)()
                 journalled: set[str] = set()
+                journal_unverifiable = False
                 try:
                     records = await asyncio.to_thread(in_data_dir(
                         self._data_dir, pty_registry.ingest_journal, journal, os.getpid()))
                     journalled = {r.get("session_id") for r in records}
+                    # A record whose process cannot be proved the journalled one is an open cleanup fact.
+                    journal_unverifiable = any(r.get("unverifiable") for r in records)
                 except (OSError, ValueError, sqlite3.Error) as error:
                     log.error("ownership journal unreadable: %s", type(error).__name__)
                     journal_unreadable = True
@@ -471,12 +491,28 @@ class RustTerminalService(TerminalService):
                 result = await asyncio.wait_for(reaping, self._limits["cleanup_ms"] / 1000)
                 self._stage("reaped", signalled=len(result["signalled"]), unresolved=len(result["unresolved"]),
                             unverifiable=int(bool(result["unverifiable"])))
-                if journal_unreadable:
+                if journal_unreadable or journal_unverifiable:
                     result = {**result, "unverifiable": True}
                 complete = (not result["unresolved"] and not result["unverifiable"]
                             and not unknown and not self._cleanup_failed)
 
-            await asyncio.gather(drain_tasks(), settle_streams(), cleanup())
+            async def join_handles() -> None:  # step 2 (Windows): the join of workers already cancelled
+                nonlocal handles_incomplete
+                masters = self._closing_masters.pop(generation, [])
+                deadline = self._close_deadline.pop(generation, time.monotonic())
+                if not WINDOWS:
+                    return
+                stuck = await asyncio.to_thread(winrt.close_together, masters, deadline) if masters else []
+                for master in stuck:  # left open to process exit; the fence stays closed (E1 7.3)
+                    self._receipt({"event": "handle_close_incomplete", "session_id": master.session_id,
+                                   "platform": RECEIPT_PLATFORM, "path": "loss"})
+                handles_incomplete = len(stuck)
+                self._stage("workers_joined", workers=len(masters), incomplete=len(stuck))
+
+            handles_incomplete = 0
+            await asyncio.gather(drain_tasks(), settle_streams(), cleanup(), join_handles())
+            if handles_incomplete:
+                complete = False
             presented = []
             for session in lost:
                 session.cleanup_error = None if complete else "CLEANUP_FAILED: runtime loss cleanup incomplete"
@@ -990,6 +1026,7 @@ class RustTerminalService(TerminalService):
         # see the output, the EOF and run `_finish_stream`.
         session.exit_record = record
         session.proc.returncode = record.get("exit_code")
+        self._enter_service_mode(session)
         self._maybe_publish_exit(session, generation)
 
     async def _persist_owned(self, record: dict) -> None:
@@ -1450,8 +1487,16 @@ class RustTerminalService(TerminalService):
             await self._request("adopt", {}, session)
         if WINDOWS:
             # 7.3: the pump is reading continuously, so the console may close once the root exits.
+            self._enter_service_mode(session)  # a root that already exited (the deferred path)
             with suppress(Exception):
                 await self._request("tty_servicing", {}, session)
+
+    @staticmethod
+    def _enter_service_mode(session: RuntimeSession) -> None:
+        """7.3 service mode: once the root has exited, `pause_reading` becomes a no-op on a Windows handle, so
+        the console's final output reaches the Terminal Stream while the sidecar closes the console."""
+        if WINDOWS and session.exit_record is not None and isinstance(session.handle, winrt.WindowsMaster):
+            session.handle.enter_service_mode()
 
     def _launch_keys(self, kwargs: dict) -> set[str]:
         """What an unresolved earlier launch must not overlap: the pane, and the
@@ -1701,9 +1746,21 @@ class RustTerminalService(TerminalService):
                     return
                 # `closed` is still false until here, so none of the baseline's discard paths ran.
                 self._close_stream_state(session)
-                session.handle.close()  # the first moment our master closes
+                if WINDOWS:
+                    # The join waits on worker threads: off the loop, bounded by THREAD_CLOSE_S.
+                    closed = await asyncio.to_thread(session.handle.close)
+                else:
+                    session.handle.close()  # the first moment our master closes
+                    closed = True
                 self._claimed_ttys.discard(session.tty)
         if self._retired_generation(generation):
+            return
+        if closed is False:
+            # A worker did not join: the read end is NOT closed, so `TTY_EOF` would announce a gate that
+            # does not hold (7.3). Report it and retire the generation; loss owns the session from here.
+            self._receipt({"event": "handle_close_incomplete", "session_id": session.id,
+                           "platform": RECEIPT_PLATFORM, "path": "stream"})
+            self._lose("HANDLE_CLOSE_INCOMPLETE: a pump or writer did not end within THREAD_CLOSE_S")
             return
         session.ended_monotonic = time.monotonic()
         with suppress(Exception):  # a lost sidecar is handled by loss, never by this task

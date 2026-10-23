@@ -36,41 +36,15 @@ ENABLE_ECHO_INPUT = 0x0004
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
-def ctrl_c_ignored_at_start() -> bool | None:
-    """Read-only: is CONSOLE_IGNORE_CTRL_C set in this process's parameters (inherited from the parent chain)?
-    Reads PEB -> ProcessParameters -> ConsoleFlags (x64 layout); None when it cannot be read."""
-    try:
-        if ctypes.sizeof(ctypes.c_void_p) != 8:
-            return None
-
-        class ProcessBasicInformation(ctypes.Structure):
-            _fields_ = [("Reserved1", ctypes.c_void_p), ("PebBaseAddress", ctypes.c_void_p),
-                        ("Reserved2", ctypes.c_void_p * 2), ("UniqueProcessId", ctypes.c_void_p),
-                        ("Reserved3", ctypes.c_void_p)]
-
-        ntdll = ctypes.WinDLL("ntdll")
-        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-        ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p,
-                                                    wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
-        info, returned = ProcessBasicInformation(), wintypes.ULONG()
-        if ntdll.NtQueryInformationProcess(kernel32.GetCurrentProcess(), 0, ctypes.byref(info),
-                                           ctypes.sizeof(info), ctypes.byref(returned)) != 0:
-            return None
-        parameters = ctypes.c_void_p.from_address(info.PebBaseAddress + 0x20).value
-        return bool(ctypes.c_ulong.from_address(parameters + 0x18).value & 1)
-    except (OSError, ValueError, AttributeError, TypeError):
-        return None
-
-
-def console_input_without_echo() -> tuple[bool, int | None]:
+def console_input_without_echo() -> bool:
     """Turn the console's input echo off (the POSIX peer clears ECHO) and nothing else: Ctrl+C handling is left
     exactly as the launch chain delivered it, so a chain that breaks it fails the interrupt case instead of
-    being worked around. Returns (stdin is a console, the input mode found at start)."""
+    being worked around. Returns whether stdin is a console."""
     handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
     mode = wintypes.DWORD()
     if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-        return False, None
-    return bool(kernel32.SetConsoleMode(handle, mode.value & ~ENABLE_ECHO_INPUT)), mode.value
+        return False
+    return bool(kernel32.SetConsoleMode(handle, mode.value & ~ENABLE_ECHO_INPUT))
 
 
 def in_console_process_list() -> bool:
@@ -80,11 +54,7 @@ def in_console_process_list() -> bool:
 
 
 def main() -> int:
-    ignored = ctrl_c_ignored_at_start()  # before this program re-enables Ctrl+C
-    if sys.argv[1:] == ["--probe-ctrl-c"]:
-        print(json.dumps({"ctrlCIgnoredAtStart": ignored}))
-        return 0
-    ctty, input_mode = console_input_without_echo()
+    ctty = console_input_without_echo()
     lock = threading.Lock()
     interrupted = threading.Event()
 
@@ -114,8 +84,7 @@ def main() -> int:
         "providerKeys": sorted(key for key in os.environ if any(word in key.upper() for word in
                                  ("API_KEY", "AUTH_TOKEN", "ACCESS_TOKEN", "SECRET_KEY"))),
         "isatty": sys.stdin.isatty(), "ctty": ctty, "foreground": ctty and in_console_process_list(),
-        "dimensions": dimensions(), "ctrlCIgnoredAtStart": ignored,
-        "inputModeAtStart": input_mode,
+        "dimensions": dimensions(),
     }, ensure_ascii=False))
     if ready_file := os.environ.get("NAVIDE_PEER_READY_FILE"):
         Path(ready_file).write_text(str(os.getpid()))  # the handler is installed from here on

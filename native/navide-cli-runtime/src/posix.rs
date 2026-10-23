@@ -430,6 +430,24 @@ fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
     }
 }
 
+/// Signal an owned process whose identity (`expected_start`) was just matched against a fresh table.
+/// Linux binds the signal to the verified process instance through a pidfd; macOS signals by number
+/// right after the match, as before.
+fn signal_owned(pid: i32, expected_start: &str, signal: i32, group: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = expected_start;
+        // SAFETY: identity (pid + birth) matched against a fresh table by the caller.
+        unsafe {
+            libc::kill(if group { -pid } else { pid }, signal);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::signal(pid, expected_start, signal, group);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn snapshot(initial_child: Option<i32>, known: &Table) -> io::Result<Table> {
     darwin::snapshot(initial_child, known)
@@ -1011,19 +1029,14 @@ fn cleanup(
         libc::SIGTERM
     };
     if root_live {
-        // SAFETY: root PID+birth is matched and its own child group remains owned.
-        unsafe {
-            libc::kill(-pid, signal);
-        }
+        // The root's PID+birth is matched and its own child group remains owned.
+        signal_owned(pid, root_start.as_deref().unwrap_or_default(), signal, true);
     }
     // Signalled owned descendants, confirmed gone before cleanup reports them absent.
     let mut signalled: Vec<(i32, (i32, i32, String))> = Vec::new();
     for (&child, old) in &state.owned.descendants {
         if before.get(&child).is_some_and(|entry| entry.2 == old.2) {
-            // SAFETY: identity (pid + birth) matched against a fresh table just above.
-            unsafe {
-                libc::kill(child, signal);
-            }
+            signal_owned(child, &old.2, signal, false);
             signalled.push((child, old.clone()));
         }
     }
@@ -1055,17 +1068,12 @@ fn cleanup(
             .get(&pid)
             .is_some_and(|entry| Some(entry.2.as_str()) == root_start.as_deref())
     {
-        // SAFETY: root identity re-verified against the fresh table.
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
+        // The root identity was re-verified against the fresh table.
+        signal_owned(pid, root_start.as_deref().unwrap_or_default(), libc::SIGKILL, true);
     }
     for (&child, old) in &state.owned.descendants {
         if after.get(&child).is_some_and(|entry| entry.2 == old.2) {
-            // SAFETY: identity (pid + birth) re-verified against the fresh table.
-            unsafe {
-                libc::kill(child, libc::SIGKILL);
-            }
+            signal_owned(child, &old.2, libc::SIGKILL, false);
             signalled.push((child, old.clone()));
         }
     }

@@ -459,3 +459,60 @@ def test_n3_a_surviving_recorded_descendant_keeps_its_row_the_journal_and_the_fe
     assert path.exists(), "the journal must stay while the collision is unresolved"
     row = pty_registry._load().get(str(root))
     assert row and str(descendant) in (row.get("descendants") or {}), "the descendant's identity was erased"
+
+
+# ── a Windows root whose FILETIME cannot be proved equal is an unresolved fact, never a dropped one ──────
+
+def _windows_record(pid: int) -> dict:
+    return {**_record(pid, owner=1), "start_kind": "windows-filetime", "start_value": "133800000000000000"}
+
+
+def _inspect(monkeypatch, verdict: str, lstart: str = ""):
+    from agent_team_backend import cli_runtime_windows
+    monkeypatch.setattr(cli_runtime_windows, "inspect_start", lambda pid, filetime: (verdict, lstart))
+    return cli_runtime_windows
+
+
+@pytest.mark.parametrize("verdict", ["differs", "unverifiable"])
+def test_a_windows_root_that_cannot_be_proved_equal_is_kept_signals_nothing_and_fences(monkeypatch, verdict):
+    root = _orphan()
+    _inspect(monkeypatch, verdict)
+    path = _journal("dead-gen", _windows_record(root))
+
+    assert pty_registry._ingest_stale_journals() is False
+    assert pty_registry.reap_stale(grace=0.2) == []
+
+    assert _alive(root) and path.exists(), "the journal that names the root must be kept"
+    assert _fence(), "the fence must not open while an unverifiable record exists"
+    assert str(root) not in pty_registry._load(), "an unmatchable identity must not enter the registry"
+
+
+def test_the_loss_path_sees_an_unverifiable_windows_record_instead_of_an_empty_journal(monkeypatch):
+    root = _orphan()
+    _inspect(monkeypatch, "differs")
+    path = _journal("lost-gen", _windows_record(root))
+
+    records = pty_registry.ingest_journal(path, os.getpid())
+
+    assert [r["pid"] for r in records if r.get("unverifiable")] == [root]
+    assert _alive(root) and str(root) not in pty_registry._load()
+
+
+def test_a_windows_root_that_is_verifiably_absent_is_dropped_and_the_fence_opens(monkeypatch):
+    root = _orphan()
+    _inspect(monkeypatch, "absent")
+    path = _journal("dead-gen", _windows_record(root))
+
+    assert pty_registry.reap_stale(grace=0.2) == []
+
+    assert _fence() is None and not path.exists()
+
+
+def test_a_matching_windows_root_enters_the_registry_by_the_identity_the_inspection_read(monkeypatch):
+    root = _orphan()
+    _inspect(monkeypatch, "match", lstart=osplat.process_tree.start_time(root))
+    _journal("dead-gen", _windows_record(root))
+
+    signalled = pty_registry.reap_stale(grace=0.2)
+
+    assert root in signalled and _wait_gone(root)
