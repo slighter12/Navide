@@ -167,7 +167,8 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
       client.dispose('native shell complete')
     }
   })
-}, 90_000)
+  // ConPTY re-renders every burst row, so four concurrent 256 KB bursts take far longer than on a POSIX pty.
+}, isWindows ? 300_000 : 90_000)
 
 for (const [first, second] of [['terminal.resize', 'terminal.redraw'], ['terminal.redraw', 'terminal.reattach'], ['terminal.reattach', 'terminal.resize']]) {
   it.runIf(process.platform === 'darwin')(`holds overlapping ${first}/${second} output until each public ACK`, async () => {
