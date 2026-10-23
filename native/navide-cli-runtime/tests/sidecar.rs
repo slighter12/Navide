@@ -29,6 +29,10 @@ struct Sidecar {
     /// Set on drop; the watchdog stops waiting once it is, and `Drop` joins it before the socket closes.
     finished: Arc<AtomicBool>,
     watchdog: Option<std::thread::JoinHandle<()>>,
+    /// When the watchdog's bound started counting (`None`: not armed yet).
+    armed: Arc<Mutex<Option<Instant>>>,
+    /// Set if the watchdog had to fall back to killing the sidecar, i.e. the sidecar's own teardown failed.
+    fallback_used: Arc<AtomicBool>,
 }
 
 /// A hard bound on every test that talks to a sidecar: `recvmsg` and `read_line` block with no
@@ -48,10 +52,12 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 fn start_with(name: &str, args: &[&str], journal: Option<PathBuf>) -> Sidecar {
-    start_bounded(name, args, journal, WATCHDOG)
+    start_bounded(name, args, journal, WATCHDOG, true)
 }
 
-fn start_bounded(name: &str, args: &[&str], journal: Option<PathBuf>, bound: Duration) -> Sidecar {
+/// `arm_now: false` leaves the watchdog idle until `Sidecar::arm`, so a test can count the bound from
+/// the moment it deliberately stalls rather than from process start.
+fn start_bounded(name: &str, args: &[&str], journal: Option<PathBuf>, bound: Duration, arm_now: bool) -> Sidecar {
     let dir = temp_dir(name);
     let mut pair = [0i32; 2];
     assert_eq!(
@@ -84,26 +90,33 @@ fn start_bounded(name: &str, args: &[&str], journal: Option<PathBuf>, bound: Dur
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let finished = Arc::new(AtomicBool::new(false));
     let child = Arc::new(Mutex::new(child));
+    let armed = Arc::new(Mutex::new(if arm_now { Some(Instant::now()) } else { None }));
+    let fallback_used = Arc::new(AtomicBool::new(false));
     let (flag, shared, sock) = (finished.clone(), child.clone(), pair[0]);
+    let (armed_at, fallback) = (armed.clone(), fallback_used.clone());
     let watchdog = std::thread::spawn(move || {
-        let wait = |span: Duration| {
-            let deadline = Instant::now() + span;
-            while Instant::now() < deadline {
-                if flag.load(Ordering::SeqCst) {
-                    return true;
-                }
-                std::thread::sleep(Duration::from_millis(20));
+        // Wait for the arm instant plus the bound; an unarmed watchdog waits for the arm.
+        loop {
+            if flag.load(Ordering::SeqCst) {
+                return;
             }
-            flag.load(Ordering::SeqCst)
-        };
-        if wait(bound) {
-            return;
+            if let Some(at) = *armed_at.lock().unwrap() {
+                if at.elapsed() >= bound {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
         }
         // `Drop` joins this thread before it closes `sock`, so the descriptor is still ours here.
         unsafe { libc::shutdown(sock, libc::SHUT_RDWR) };
-        if wait(GRACE) {
-            return;
+        let deadline = Instant::now() + GRACE;
+        while Instant::now() < deadline {
+            if flag.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
+        fallback.store(true, Ordering::SeqCst);
         let _ = shared.lock().unwrap().kill();
     });
     Sidecar {
@@ -114,6 +127,8 @@ fn start_bounded(name: &str, args: &[&str], journal: Option<PathBuf>, bound: Dur
         dir,
         finished,
         watchdog: Some(watchdog),
+        armed,
+        fallback_used,
     }
 }
 
@@ -122,6 +137,13 @@ fn start(name: &str) -> Sidecar {
 }
 
 impl Sidecar {
+    /// Start counting the watchdog's bound now and return that instant.
+    fn arm(&self) -> Instant {
+        let now = Instant::now();
+        *self.armed.lock().unwrap() = Some(now);
+        now
+    }
+
     fn line(&mut self) -> Value {
         let mut line = String::new();
         self.stdout.read_line(&mut line).unwrap();
@@ -569,41 +591,62 @@ fn process_exists(pid: libc::pid_t) -> bool {
 
 /// After a bounded failure the sidecar has exited and the session it launched (its own session, so a
 /// kill of the sidecar alone would not reach it) is gone.
-fn assert_clean(sidecar: &mut Sidecar, pid: libc::pid_t, started: Instant) {
-    assert!(started.elapsed() < SHORT_BOUND + GRACE, "the stalled read was not released in time");
-    assert!(started.elapsed() >= SHORT_BOUND - Duration::from_millis(100), "released before the bound");
-    sidecar.exit_status();
-    let deadline = Instant::now() + Duration::from_secs(10);
+/// Scheduling slack on top of the bound; the 10 s grace (a fallback kill) is never an acceptable release.
+const ALLOWANCE: Duration = Duration::from_millis(500);
+
+/// The root of a launched session leads a session of its own (`setsid` in the sidecar's spawn), which is
+/// why killing the sidecar alone would not reach it.
+fn assert_own_session(pid: libc::pid_t) {
+    assert!(process_exists(pid), "the session must be alive before the stall");
+    assert_eq!(unsafe { libc::getsid(pid) }, pid, "the live root must lead its own session");
+}
+
+/// The blocked call was released by the watchdog's socket shutdown (not earlier, not by the fallback),
+/// the sidecar then ended by its own teardown with a success status, and the session it launched is gone.
+fn assert_released_cleanly(sidecar: &mut Sidecar, pid: libc::pid_t, armed: Instant, released: Duration) {
+    assert!(released >= SHORT_BOUND, "released after {released:?}, before the bound: not the watchdog");
+    assert!(released < SHORT_BOUND + ALLOWANCE, "released after {released:?}, outside the bound");
+    let status = sidecar.exit_status();
+    assert!(
+        !sidecar.fallback_used.load(Ordering::SeqCst),
+        "the sidecar had to be killed ({:?} after arming)",
+        armed.elapsed()
+    );
+    assert!(status.success(), "the sidecar did not end cleanly by its own teardown: {status:?}");
+    let deadline = Instant::now() + Duration::from_secs(5);
     while process_exists(pid) {
         assert!(Instant::now() < deadline, "the launched session {pid} survived the sidecar");
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
 #[test]
 fn a_stalled_recvmsg_is_released_within_the_bound_and_leaves_no_owned_process() {
-    let mut sidecar = start_bounded("stall-recv", &[], None, SHORT_BOUND);
+    let mut sidecar = start_bounded("stall-recv", &[], None, SHORT_BOUND, false);
     sidecar.line();
     let (pid, master) = live_session(&mut sidecar);
-    assert!(process_exists(pid), "the session must be alive before the stall");
-    let started = Instant::now();
+    assert_own_session(pid);
+    let armed = sidecar.arm();
     // Nothing more is coming: the blocking receive can only return because the watchdog released it.
     while sidecar.recv().is_some() {}
-    assert_clean(&mut sidecar, pid, started);
+    let released = armed.elapsed();
+    assert_released_cleanly(&mut sidecar, pid, armed, released);
     unsafe { libc::close(master) };
 }
 
 #[test]
 fn a_stalled_read_line_is_released_within_the_bound_and_leaves_no_owned_process() {
-    let mut sidecar = start_bounded("stall-line", &[], None, SHORT_BOUND);
+    let mut sidecar = start_bounded("stall-line", &[], None, SHORT_BOUND, false);
     sidecar.line();
     let (pid, master) = live_session(&mut sidecar);
-    let started = Instant::now();
+    assert_own_session(pid);
+    let armed = sidecar.arm();
     let mut line = String::new();
     // The sidecar writes nothing further to stdout; the read ends only when the sidecar has gone.
     let read = sidecar.stdout.read_line(&mut line).unwrap();
+    let released = armed.elapsed();
     assert_eq!(read, 0, "unexpected stdout line {line:?}");
-    assert_clean(&mut sidecar, pid, started);
+    assert_released_cleanly(&mut sidecar, pid, armed, released);
     unsafe { libc::close(master) };
 }
 
