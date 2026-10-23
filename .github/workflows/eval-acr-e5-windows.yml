@@ -264,6 +264,24 @@ jobs:
           bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request' --reporter=json --outputFile=test-results/ci/e5-windows-ts-results.json
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+      # Where does an ignored Ctrl+C come from? CONSOLE_IGNORE_CTRL_C is inherited through CreateProcess, so
+      # measure it at three points of the chain: this runner step, a node child of it, and (below) the
+      # console children the product itself launches under ConPTY.
+      - name: Probe Ctrl+C ignore flag - runner step and node child
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ("runner-step: " + (python -I -B backend/tests/cli_regression/support/native_shell_peer_win.py --probe-ctrl-c))
+          Write-Host ("node-child: " + (node -e "process.stdout.write(require('child_process').spawnSync('python',['-I','-B',process.argv[1],'--probe-ctrl-c']).stdout)" backend/tests/cli_regression/support/native_shell_peer_win.py))
+          exit 0
+
+      - name: Show the Ctrl+C flag the product launch chain gave the console peers
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path test-results/ci/e5-windows-ctrlc.log) { Get-Content test-results/ci/e5-windows-ctrlc.log } else { Write-Host 'no peer reached the ready line' }
+          exit 0
+
       - name: Show the TypeScript case failures (endpoint tokens redacted)
         if: always() && steps.ts_seam.outcome == 'failure'
         shell: pwsh
