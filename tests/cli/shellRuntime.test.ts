@@ -130,7 +130,15 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         await input(tid, 'size\r')
         await until(() => (output.get(tid) ?? '').includes('SIZE [120, 40]'), 'actual dimensions')
         expect((await client.send('terminal.interrupt', { terminal_session_id: tid })).ok).toBe(true)
-        await until(() => (output.get(tid) ?? '').includes('INTERRUPTED'), `controlling tty interrupt (peer ${peers.findIndex((peer) => peer.tid === tid)})`)
+        try {
+          await until(() => (output.get(tid) ?? '').includes('INTERRUPTED'), `controlling tty interrupt (peer ${peers.findIndex((peer) => peer.tid === tid)})`)
+        } catch (error) {
+          if (!isWindows) throw error
+          // Diagnosis only: ask the peer whether a CTRL_C_EVENT raised on its own console reaches it.
+          await input(tid, 'ctrlc-self\r')
+          await until(() => (output.get(tid) ?? '').includes('CTRLC_SELF '), 'peer self-check answer', 20_000).catch(() => undefined)
+          throw new Error(`${(error as Error).message}; ${(output.get(tid) ?? '').split('\r\n').filter((row) => row.startsWith('CTRLC_SELF ')).join(' | ') || 'no self-check answer'}`)
+        }
       }))
       client.reconnectNow('actual transport loss')
       await until(() => connections === 2, 'new authenticated connection')
