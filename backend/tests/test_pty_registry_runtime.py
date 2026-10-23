@@ -473,10 +473,9 @@ def _inspect(monkeypatch, verdict: str, lstart: str = ""):
     return cli_runtime_windows
 
 
-@pytest.mark.parametrize("verdict", ["differs", "unverifiable"])
-def test_a_windows_root_that_cannot_be_proved_equal_is_kept_signals_nothing_and_fences(monkeypatch, verdict):
+def test_a_windows_root_that_cannot_be_inspected_is_kept_signals_nothing_and_fences(monkeypatch):
     root = _orphan()
-    _inspect(monkeypatch, verdict)
+    _inspect(monkeypatch, "unverifiable")
     path = _journal("dead-gen", _windows_record(root))
 
     assert pty_registry._ingest_stale_journals() is False
@@ -487,9 +486,36 @@ def test_a_windows_root_that_cannot_be_proved_equal_is_kept_signals_nothing_and_
     assert str(root) not in pty_registry._load(), "an unmatchable identity must not enter the registry"
 
 
-def test_the_loss_path_sees_an_unverifiable_windows_record_instead_of_an_empty_journal(monkeypatch):
+def test_a_proven_differing_windows_root_is_gone_so_an_unrelated_process_never_fences(monkeypatch):
+    # An exact FILETIME compared under an open handle that differs proves the journalled root is gone;
+    # the live process now at that pid is somebody else's and is neither signalled nor allowed to fence.
     root = _orphan()
     _inspect(monkeypatch, "differs")
+    path = _journal("dead-gen", _windows_record(root))
+
+    assert pty_registry._ingest_stale_journals() is True
+    assert pty_registry.reap_stale(grace=0.2) == []
+
+    assert _alive(root), "the unrelated process at the recycled pid must never be signalled"
+    assert _fence() is None and not path.exists() and str(root) not in pty_registry._load()
+
+
+def test_a_proven_differing_windows_root_still_has_its_recorded_descendants_verified_by_identity(monkeypatch):
+    root, descendant, unrelated = _orphan(), _orphan(), _orphan()
+    _older_row_with_descendant(root, descendant)
+    _inspect(monkeypatch, "differs")
+    path = _journal("dead-gen", _windows_record(root))
+
+    pty_registry.reap_stale(grace=0.2)
+
+    assert _wait_gone(descendant), "a recorded descendant is verified and cleaned by its own identity"
+    assert _alive(root) and _alive(unrelated), "the process now at the recycled root pid is never signalled"
+    assert _fence() is None and not path.exists() and pty_registry._load() == {}
+
+
+def test_the_loss_path_sees_an_unverifiable_windows_record_instead_of_an_empty_journal(monkeypatch):
+    root = _orphan()
+    _inspect(monkeypatch, "unverifiable")
     path = _journal("lost-gen", _windows_record(root))
 
     records = pty_registry.ingest_journal(path, os.getpid())

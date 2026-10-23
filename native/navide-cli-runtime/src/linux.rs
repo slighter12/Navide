@@ -2,35 +2,39 @@
 use super::Table;
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const MAX_PIDS: usize = 4 * 1024 * 1024 / std::mem::size_of::<i32>();
 /// `PIDFD_SIGNAL_PROCESS_GROUP` (Linux 6.9+): signal the whole group of the process a pidfd names.
 const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
 
-type Births = std::collections::HashMap<i32, (String, u64)>;
+/// The kernel start ticks behind the `posix-lstart` values one session recorded, by pid. The wire value
+/// has one-second resolution, so two processes that held the same pid within a second share it; the
+/// ticks tell them apart. Each session owns its ledger (it lives and dies with the session's `Owned`),
+/// so another session's snapshot can never rewrite the evidence this one admits and signals against.
+/// Internal only: the table and the wire keep the legacy string.
+#[derive(Default)]
+pub(super) struct Births(HashMap<i32, (String, u64)>);
 
-/// The kernel start ticks behind every `posix-lstart` value this sidecar handed out, by pid. The wire
-/// value has one-second resolution, so two processes that held the same pid within a second share it;
-/// the ticks tell them apart. Internal only: the table and the wire keep the legacy string.
-fn births() -> &'static Mutex<Births> {
-    static BIRTHS: OnceLock<Mutex<Births>> = OnceLock::new();
-    BIRTHS.get_or_init(Default::default)
-}
-
-fn note_birth(pid: i32, start: &str, ticks: u64) {
-    if let Ok(mut births) = births().lock() {
-        births.insert(pid, (start.to_string(), ticks));
+impl Births {
+    fn ticks(&self, pid: i32, start: &str) -> Option<u64> {
+        self.0
+            .get(&pid)
+            .filter(|(noted, _)| noted == start)
+            .map(|(_, ticks)| *ticks)
     }
-}
 
-fn noted_ticks(pid: i32, start: &str) -> Option<u64> {
-    let births = births().lock().ok()?;
-    births
-        .get(&pid)
-        .filter(|(noted, _)| noted == start)
-        .map(|(_, ticks)| *ticks)
+    /// Record the first instance seen at `pid` with this start string. A later process with the same
+    /// string but other ticks is a replacement: it never overwrites, and the caller drops it.
+    fn admit(&mut self, pid: i32, start: &str, ticks: u64) -> bool {
+        match self.ticks(pid, start) {
+            Some(noted) => noted == ticks,
+            None => {
+                self.0.insert(pid, (start.to_string(), ticks));
+                true
+            }
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -227,7 +231,11 @@ fn owned_scan(
     Ok(owned)
 }
 
-pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<Table> {
+pub(super) fn snapshot(
+    initial_child: Option<i32>,
+    seeds: &Table,
+    births: &mut Births,
+) -> io::Result<Table> {
     let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
     let boot = boot_seconds()?;
     let ticks = clock_ticks()?;
@@ -247,7 +255,9 @@ pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<
         if let Some(value) = process(pid)? {
             // The string alone cannot tell a same-second replacement from the retained process.
             if legacy_start(value.birth_ticks, boot, ticks)? == expected.2
-                && noted_ticks(pid, &expected.2).is_none_or(|noted| noted == value.birth_ticks)
+                && births
+                    .ticks(pid, &expected.2)
+                    .is_none_or(|noted| noted == value.birth_ticks)
             {
                 known.insert(pid, value);
             }
@@ -267,14 +277,15 @@ pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<
             Err(error) => return Err(error),
         };
         if previous.as_ref() == Some(&current) {
-            return current
-                .into_iter()
-                .map(|(pid, value)| {
-                    let start = legacy_start(value.birth_ticks, boot, ticks)?;
-                    note_birth(pid, &start, value.birth_ticks);
-                    Ok((pid, (value.parent, value.group, start)))
-                })
-                .collect();
+            let mut table = Table::new();
+            for (pid, value) in current {
+                let start = legacy_start(value.birth_ticks, boot, ticks)?;
+                // A same-second replacement of a pid this session already recorded is not owned.
+                if births.admit(pid, &start, value.birth_ticks) {
+                    table.insert(pid, (value.parent, value.group, start));
+                }
+            }
+            return Ok(table);
         }
         known.extend(current.clone());
         previous = Some(current);
@@ -309,7 +320,25 @@ fn pidfd_exited(fd: i32) -> bool {
 /// a pid recycled after the check is never signalled. A process that cannot be bound is not signalled.
 /// `group` signals the instance's process group (pidfd group signalling where the kernel has it, else the
 /// group of the verified, still unreaped leader). Returns whether a signal was delivered.
-pub(super) fn signal(pid: i32, expected_start: &str, signal: i32, group: bool) -> bool {
+pub(super) fn signal(
+    pid: i32,
+    expected_start: &str,
+    signal: i32,
+    group: bool,
+    births: &Births,
+) -> bool {
+    signal_with(pid, expected_start, signal, group, births, true)
+}
+
+/// `pidfd_group` false stands in for a kernel without `PIDFD_SIGNAL_PROCESS_GROUP` (pre-6.9).
+fn signal_with(
+    pid: i32,
+    expected_start: &str,
+    signal: i32,
+    group: bool,
+    births: &Births,
+    pidfd_group: bool,
+) -> bool {
     // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor or -1.
     let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as i32;
     if fd < 0 {
@@ -329,28 +358,65 @@ pub(super) fn signal(pid: i32, expected_start: &str, signal: i32, group: bool) -
         Ok(start) if start == expected_start => {}
         _ => return false,
     }
-    if noted_ticks(pid, expected_start).is_some_and(|noted| noted != live.birth_ticks) {
+    if births
+        .ticks(pid, expected_start)
+        .is_some_and(|noted| noted != live.birth_ticks)
+    {
         return false;
     }
-    let flags = if group { PIDFD_SIGNAL_PROCESS_GROUP } else { 0 };
+    if !group {
+        return send_pidfd(pidfd.0, signal, 0);
+    }
+    if pidfd_group {
+        if send_pidfd(pidfd.0, signal, PIDFD_SIGNAL_PROCESS_GROUP) {
+            return true;
+        }
+        if io::Error::last_os_error().raw_os_error() != Some(libc::EINVAL) {
+            return false;
+        }
+    }
+    // Pre-6.9 kernel: a numeric group kill is not bound to the instance verified above, so each live
+    // group member is signalled through its own pidfd instead. A member that cannot be bound stays unresolved.
+    signal_group_members(live.group, signal)
+}
+
+fn send_pidfd(fd: i32, signal: i32, flags: libc::c_uint) -> bool {
     // SAFETY: a valid pidfd, a signal number, no siginfo.
-    let sent = unsafe {
+    unsafe {
         libc::syscall(
             libc::SYS_pidfd_send_signal,
-            pidfd.0,
+            fd,
             signal,
             std::ptr::null::<libc::siginfo_t>(),
             flags,
-        )
+        ) == 0
+    }
+}
+
+/// Signal every live member of process group `group` through that member's own pidfd. The member's group
+/// is read after the pidfd is bound and the pidfd must still be alive, so a recycled pid is never signalled.
+fn signal_group_members(group: i32, signal: i32) -> bool {
+    let Ok(all) = scan(Instant::now() + Duration::from_millis(super::SNAPSHOT_MS)) else {
+        return false;
     };
-    if sent == 0 {
-        return true;
+    let mut delivered = false;
+    for (&member, seen) in &all {
+        if seen.group != group || matches!(seen.state, b'Z' | b'X') {
+            continue;
+        }
+        // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor or -1.
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, member, 0) } as i32;
+        if fd < 0 {
+            continue;
+        }
+        let pidfd = Pidfd(fd);
+        let bound = matches!(process(member), Ok(Some(live)) if live.group == group
+            && live.birth_ticks == seen.birth_ticks);
+        if bound && !pidfd_exited(pidfd.0) && send_pidfd(pidfd.0, signal, 0) {
+            delivered = true;
+        }
     }
-    if group && io::Error::last_os_error().raw_os_error() == Some(libc::EINVAL) {
-        // SAFETY: the leader was verified alive and unreaped just above, so the group id is still its own.
-        return unsafe { libc::kill(-pid, signal) } == 0;
-    }
-    false
+    delivered
 }
 
 pub(super) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
@@ -440,10 +506,11 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id() as i32;
+        let mut births = Births::default();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let deadline = Instant::now() + Duration::from_secs(2);
             let first = loop {
-                let current = snapshot(Some(pid), &Table::new()).unwrap();
+                let current = snapshot(Some(pid), &Table::new(), &mut births).unwrap();
                 if current.len() > 1 || Instant::now() >= deadline {
                     break current;
                 }
@@ -467,7 +534,7 @@ mod tests {
             assert_eq!(unsafe { libc::kill(-pid, libc::SIGKILL) }, 0);
             let pids: Vec<_> = first.keys().copied().collect();
             assert!(wait_exit(&pids, Instant::now() + Duration::from_secs(2)).is_empty());
-            assert!(snapshot(None, &first).unwrap().is_empty());
+            assert!(snapshot(None, &first, &mut births).unwrap().is_empty());
         }));
         // SAFETY: the unreaped child prevents pid/group reuse until wait below.
         unsafe { libc::kill(-pid, libc::SIGKILL) };
@@ -477,51 +544,127 @@ mod tests {
 
     /// A same-second replacement at a retained pid: the stored ticks differ from the live process while the
     /// `posix-lstart` string is identical, which is exactly what the string alone cannot see.
-    fn sleeper() -> (std::process::Child, i32, String, u64) {
+    fn sleeper() -> (std::process::Child, i32, String, u64, Births) {
         let child = Command::new("/bin/sleep")
             .arg("30")
             .process_group(0)
             .spawn()
             .unwrap();
         let pid = child.id() as i32;
-        let table = snapshot(Some(pid), &Table::new()).unwrap();
+        let mut births = Births::default();
+        let table = snapshot(Some(pid), &Table::new(), &mut births).unwrap();
         let start = table.get(&pid).unwrap().2.clone();
         let ticks = process(pid).unwrap().unwrap().birth_ticks;
-        (child, pid, start, ticks)
+        (child, pid, start, ticks, births)
+    }
+
+    /// A session ledger that recorded `ticks` for `pid`, as a session whose process died and was replaced.
+    fn ledger(pid: i32, start: &str, ticks: u64) -> Births {
+        let mut births = Births::default();
+        assert!(births.admit(pid, start, ticks));
+        births
     }
 
     #[test]
     fn a_signal_reaches_only_the_instance_whose_ticks_were_recorded() {
-        let (mut child, pid, start, ticks) = sleeper();
-        note_birth(pid, &start, ticks + 1); // the recorded instance is not the one at this pid
-        assert!(!signal(pid, &start, libc::SIGKILL, false));
+        let (mut child, pid, start, ticks, _) = sleeper();
+        let stale = ledger(pid, &start, ticks + 1); // the recorded instance is not the one at this pid
+        assert!(!signal(pid, &start, libc::SIGKILL, false, &stale));
         assert!(child.try_wait().unwrap().is_none(), "the replacement was signalled");
-        note_birth(pid, &start, ticks);
-        assert!(signal(pid, &start, libc::SIGKILL, false));
+        let own = ledger(pid, &start, ticks);
+        assert!(signal(pid, &start, libc::SIGKILL, false, &own));
         let status = child.wait().unwrap();
         assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(libc::SIGKILL));
     }
 
+    /// Old session A recorded ticks for a retained descendant; a new session B then admits a root that now
+    /// holds the same pid in the same `posix-lstart` second. B's snapshot must not touch what A recorded.
+    #[test]
+    fn a_new_session_cannot_overwrite_another_sessions_birth_evidence() {
+        let (mut child, pid, start, ticks, mut session_b) = sleeper();
+        let session_a = ledger(pid, &start, ticks + 1);
+        let admitted = snapshot(Some(pid), &Table::new(), &mut session_b).unwrap();
+        assert!(admitted.contains_key(&pid));
+        assert!(!signal(pid, &start, libc::SIGKILL, false, &session_a), "A's cleanup signalled B's process");
+        assert!(child.try_wait().unwrap().is_none());
+        let seeds: Table = [(pid, (1, pid, start.clone()))].into_iter().collect();
+        let mut session_a = session_a;
+        assert!(snapshot(None, &seeds, &mut session_a).unwrap().is_empty(), "A re-admitted B's process");
+        assert!(signal(pid, &start, libc::SIGKILL, false, &session_b));
+        child.wait().unwrap();
+    }
+
     #[test]
     fn a_wrong_start_string_or_an_exited_process_is_never_signalled() {
-        let (mut child, pid, start, ticks) = sleeper();
-        note_birth(pid, &start, ticks);
-        assert!(!signal(pid, "Thu Jan  1 00:00:00 1970", libc::SIGKILL, false));
+        let (mut child, pid, start, _, births) = sleeper();
+        assert!(!signal(pid, "Thu Jan  1 00:00:00 1970", libc::SIGKILL, false, &births));
         assert!(child.try_wait().unwrap().is_none());
         child.kill().unwrap();
         child.wait().unwrap();
-        assert!(!signal(pid, &start, libc::SIGKILL, false), "a gone pid has nothing to signal");
+        assert!(!signal(pid, &start, libc::SIGKILL, false, &births), "a gone pid has nothing to signal");
     }
 
     #[test]
     fn a_retained_seed_with_other_ticks_is_not_readmitted() {
-        let (mut child, pid, start, ticks) = sleeper();
+        let (mut child, pid, start, ticks, _) = sleeper();
         let seeds: Table = [(pid, (1, pid, start.clone()))].into_iter().collect();
-        note_birth(pid, &start, ticks + 1);
-        assert!(snapshot(None, &seeds).unwrap().is_empty());
-        note_birth(pid, &start, ticks);
-        assert!(snapshot(None, &seeds).unwrap().contains_key(&pid));
+        let mut stale = ledger(pid, &start, ticks + 1);
+        assert!(snapshot(None, &seeds, &mut stale).unwrap().is_empty());
+        let mut own = ledger(pid, &start, ticks);
+        assert!(snapshot(None, &seeds, &mut own).unwrap().contains_key(&pid));
         child.kill().unwrap();
         child.wait().unwrap();
+    }
+
+    /// A leader with two group members, as `pre-6.9` sees them: `PIDFD_SIGNAL_PROCESS_GROUP` unsupported.
+    fn group_of_three() -> (std::process::Child, i32, String, Births, i32) {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "sleep 30 & sleep 30 & wait"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let mut births = Births::default();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let table = loop {
+            let table = snapshot(Some(pid), &Table::new(), &mut births).unwrap();
+            if table.len() >= 3 || Instant::now() >= deadline {
+                break table;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            births = Births::default();
+        };
+        assert!(table.len() >= 3, "the group never formed");
+        let start = table.get(&pid).unwrap().2.clone();
+        let other_group = Command::new("/bin/sleep").arg("30").process_group(0).spawn().unwrap();
+        let bystander = other_group.id() as i32;
+        std::mem::forget(other_group); // reaped by init when the test process exits
+        (child, pid, start, births, bystander)
+    }
+
+    #[test]
+    fn the_pre_6_9_group_fallback_signals_each_member_by_pidfd_and_nothing_else() {
+        let (mut leader, pid, start, births, bystander) = group_of_three();
+        assert!(signal_with(pid, &start, libc::SIGKILL, true, &births, false));
+        let status = leader.wait().unwrap();
+        assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(libc::SIGKILL));
+        assert!(
+            wait_exit(&[bystander], Instant::now() + Duration::from_millis(200)) == vec![bystander],
+            "a process outside the verified group was signalled"
+        );
+        // SAFETY: the bystander is this test's own process.
+        unsafe { libc::kill(bystander, libc::SIGKILL) };
+    }
+
+    #[test]
+    fn the_pre_6_9_group_fallback_never_signals_by_number_once_the_leader_is_gone() {
+        let (mut leader, pid, start, births, bystander) = group_of_three();
+        leader.kill().unwrap();
+        leader.wait().unwrap(); // the leader is reaped before the signal: nothing left to bind
+        assert!(!signal_with(pid, &start, libc::SIGKILL, true, &births, false));
+        // SAFETY: the bystander is this test's own process.
+        unsafe { libc::kill(bystander, libc::SIGKILL) };
+        // SAFETY: the orphaned members are this test's own sleepers.
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
     }
 }

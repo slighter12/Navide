@@ -616,22 +616,36 @@ fn end_tree(handle: &SessionHandle, owned: &mut Owned) -> io::Result<Vec<Value>>
     Ok(handle.pty.members()?.iter().map(Identity::record).collect())
 }
 
-/// `ClosePseudoConsole` on its own thread, only after the pre-close gate (7.3), under `limit`.
-fn close_console(handle: &SessionHandle, limit: Duration) -> Result<(), String> {
-    let permit = handle
-        .gate
-        .wait(limit)
+/// `ClosePseudoConsole` on its own thread, only after the pre-close gate (7.3). `deadline` is the one
+/// absolute bound of the whole cleanup (`cleanup_ms` from the root's exit or the kill): the gate wait and
+/// the close-thread wait share what is left of it, so a late gate never earns a fresh `cleanup_ms`.
+fn close_console(handle: &SessionHandle, deadline: Instant) -> Result<(), String> {
+    close_by(
+        deadline,
+        |left| handle.gate.wait(left),
+        |permit| {
+            handle
+                .pty
+                .close_console(permit)
+                .map_err(|error| format!("close thread: {error}"))
+        },
+    )
+}
+
+fn close_by<P>(
+    deadline: Instant,
+    wait_gate: impl FnOnce(Duration) -> Option<P>,
+    start_close: impl FnOnce(P) -> Result<mpsc::Receiver<()>, String>,
+) -> Result<(), String> {
+    let permit = wait_gate(deadline.saturating_duration_since(Instant::now()))
         .ok_or("pre-close gate not satisfied within cleanup_ms")?;
-    let done = handle
-        .pty
-        .close_console(permit)
-        .map_err(|error| format!("close thread: {error}"))?;
-    done.recv_timeout(limit)
+    let done = start_close(permit)?;
+    done.recv_timeout(deadline.saturating_duration_since(Instant::now()))
         .map_err(|_| "ClosePseudoConsole did not return within cleanup_ms".to_owned())
 }
 
-fn finish_close(handle: &SessionHandle, outcome: &mut Outcome) {
-    if let Err(reason) = close_console(handle, Duration::from_millis(cleanup_ms())) {
+fn finish_close(handle: &SessionHandle, outcome: &mut Outcome, deadline: Instant) {
+    if let Err(reason) = close_console(handle, deadline) {
         outcome.unverifiable.push(handle_root_record(handle));
         outcome.failure.get_or_insert(reason);
     }
@@ -649,11 +663,16 @@ fn handle_root_record(handle: &SessionHandle) -> Value {
 /// go by identity and the console closes.
 fn natural_cleanup(handle: &SessionHandle, state: &mut State) -> Outcome {
     let mut outcome = Outcome::default();
+    // The clock started when the root's exit was observed (`gate_deadline`); a gate that was already open
+    // at that point starts it now.
+    let deadline = *state
+        .gate_deadline
+        .get_or_insert_with(|| Instant::now() + Duration::from_millis(cleanup_ms()));
     match end_tree(handle, &mut state.owned) {
         Ok(survivors) => outcome.survivors = survivors,
         Err(error) => outcome.failure = Some(error.to_string()),
     }
-    finish_close(handle, &mut outcome);
+    finish_close(handle, &mut outcome, deadline);
     outcome
 }
 
@@ -670,6 +689,7 @@ fn kill_cleanup(
     peer_alive: bool,
 ) -> Outcome {
     let mut outcome = Outcome::default();
+    let deadline = Instant::now() + Duration::from_millis(cleanup_ms());
     if !handle.adopted.load(Ordering::SeqCst) && handle.pty.release_originals() {
         handle.gate.satisfy(GateReason::OriginalsClosed);
     }
@@ -685,7 +705,7 @@ fn kill_cleanup(
         Err(error) => outcome.failure = Some(error.to_string()),
     }
     if peer_alive {
-        finish_close(handle, &mut outcome);
+        finish_close(handle, &mut outcome, deadline);
     }
     outcome
 }
@@ -1430,6 +1450,48 @@ pub fn run() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// E5 final review 3: a gate that opens near the deadline leaves the close thread only what is left of
+    /// the one bound, not a fresh `cleanup_ms`.
+    #[test]
+    fn a_gate_delivered_near_the_deadline_leaves_the_close_only_the_remaining_bound() {
+        let bound = Duration::from_millis(1000);
+        let late = Duration::from_millis(900);
+        let started = Instant::now();
+        let (_never_answers, done) = mpsc::channel::<()>();
+        let result = close_by(
+            started + bound,
+            |left| {
+                std::thread::sleep(left.min(late));
+                Some(())
+            },
+            |()| Ok(done),
+        );
+        assert!(result.is_err(), "a hung close must be reported incomplete");
+        let took = started.elapsed();
+        assert!(
+            took < bound + Duration::from_millis(400),
+            "cleanup took {took:?} for a {bound:?} bound"
+        );
+    }
+
+    #[test]
+    fn a_gate_delivered_near_the_deadline_still_finishes_when_the_close_returns() {
+        let started = Instant::now();
+        let (answer, done) = mpsc::channel();
+        let result = close_by(
+            started + Duration::from_millis(1000),
+            |_| {
+                std::thread::sleep(Duration::from_millis(900));
+                Some(())
+            },
+            |()| {
+                answer.send(()).unwrap();
+                Ok(done)
+            },
+        );
+        assert_eq!(result, Ok(()));
+    }
 
     #[test]
     fn a_cancel_before_the_release_is_prevented_and_the_release_then_refuses() {

@@ -48,6 +48,80 @@ async def test_pause_reading_suppresses_delivery_until_service_mode_then_is_a_no
     assert deliveries.calls > baseline, "service mode must deliver even though the stream asked to pause"
 
 
+@pytest.mark.asyncio
+async def test_service_mode_delivers_the_final_output_through_the_real_stream_before_the_exit_event():
+    """E5 final review 6: drive the real Terminal Stream (not a callback) with a final burst that sits behind a
+    pause request, and account for every byte on the wire before `terminal.exit`."""
+    from types import SimpleNamespace
+
+    from agent_team_backend.terminals import TerminalService, TerminalSession
+
+    sink_open = asyncio.Event()
+    events: list = []
+
+    async def emit(event) -> None:
+        if isinstance(event, bytes):
+            await sink_open.wait()  # a slow sink: the stream's drain is on the wire while the burst arrives
+        events.append(event)
+
+    svc = TerminalService(emit)
+    loop = asyncio.get_running_loop()
+    class _NoWin32Close(winrt.WindowsMaster):
+        def close(self) -> None:  # the Win32 handle close is covered by the Windows-only cases below
+            self._closed = True
+
+    master = _NoWin32Close("s1", None, None)
+    master._loop = loop
+    proc = SimpleNamespace(returncode=0, pid=1, poll=lambda: 0)
+    session = TerminalSession(id="s1", pane_id="p1", agent_key="terminal", command=["x"], cwd=".",
+                              handle=master, proc=proc)
+    svc._sessions["s1"] = session
+    master.start_reading(loop, lambda: svc._on_readable(session))
+
+    master._chunks.append(b"a" * 4096)
+    master.buffered = 4096
+    master._wake()
+    for _ in range(200):  # the first flush is on the wire (blocked): the stream asked to pause
+        await asyncio.sleep(0.01)
+        if master._paused:
+            break
+    assert master._paused, "the stream never paused the reader"
+
+    final = [bytes([65 + n]) * 65536 for n in range(32)]  # 2 MiB, well above any pause threshold
+    for chunk in final:
+        master._chunks.append(chunk)
+    master.buffered += sum(map(len, final))
+    master._wake()
+    await asyncio.sleep(0.05)
+    assert master.buffered == sum(map(len, final)), "a paused reader must not deliver before the root exits"
+
+    master.enter_service_mode()  # the root exited: the final output must reach the Terminal Stream
+    sink_open.set()
+    for _ in range(500):
+        await asyncio.sleep(0.01)
+        if master.buffered == 0:
+            break
+    assert master.buffered == 0, "service mode left the final output undelivered"
+
+    master.eof = True
+    master._wake()
+    sink_open.set()
+    for _ in range(300):
+        await asyncio.sleep(0.01)
+        if any(not isinstance(e, bytes) for e in events):
+            break
+
+    exit_at = next((i for i, e in enumerate(events) if not isinstance(e, bytes)), None)
+    assert exit_at is not None, "terminal.exit never reached the sink"
+    header = 1 + 4 + 1 + len(b"s1") + 1 + len(b"p1")
+    delivered = b"".join(e[header:] for e in events[:exit_at])
+    dropped = svc._out_dropped.get("s1", 0)
+    expected = b"a" * 4096 + b"".join(final)
+    assert delivered == expected or len(delivered) + dropped == len(expected), (
+        f"{len(delivered)} bytes delivered and {dropped} accounted as dropped of {len(expected)}")
+    assert delivered.endswith(final[-1]), "the newest bytes carry the screen state and must arrive"
+
+
 def _pipe() -> tuple[int, int]:
     import ctypes
     from ctypes import wintypes

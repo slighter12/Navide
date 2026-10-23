@@ -250,7 +250,16 @@ struct Owned {
     pid: i32,
     root: Value,
     descendants: Table,
+    /// This session's own exact birth evidence (Linux); never shared with another session.
+    births: Births,
 }
+
+#[cfg(target_os = "linux")]
+use linux::Births;
+/// macOS identifies a process by its full-resolution start time and keeps no separate ledger.
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct Births(());
 
 #[derive(Default)]
 struct Registry {
@@ -433,10 +442,10 @@ fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
 /// Signal an owned process whose identity (`expected_start`) was just matched against a fresh table.
 /// Linux binds the signal to the verified process instance through a pidfd; macOS signals by number
 /// right after the match, as before.
-fn signal_owned(pid: i32, expected_start: &str, signal: i32, group: bool) {
+fn signal_owned(pid: i32, expected_start: &str, signal: i32, group: bool, births: &Births) {
     #[cfg(target_os = "macos")]
     {
-        let _ = expected_start;
+        let _ = (expected_start, births);
         // SAFETY: identity (pid + birth) matched against a fresh table by the caller.
         unsafe {
             libc::kill(if group { -pid } else { pid }, signal);
@@ -444,17 +453,17 @@ fn signal_owned(pid: i32, expected_start: &str, signal: i32, group: bool) {
     }
     #[cfg(target_os = "linux")]
     {
-        linux::signal(pid, expected_start, signal, group);
+        linux::signal(pid, expected_start, signal, group, births);
     }
 }
 
 #[cfg(target_os = "macos")]
-fn snapshot(initial_child: Option<i32>, known: &Table) -> io::Result<Table> {
+fn snapshot(initial_child: Option<i32>, known: &Table, _births: &mut Births) -> io::Result<Table> {
     darwin::snapshot(initial_child, known)
 }
 #[cfg(target_os = "linux")]
-fn snapshot(initial_child: Option<i32>, known: &Table) -> io::Result<Table> {
-    linux::snapshot(initial_child, known)
+fn snapshot(initial_child: Option<i32>, known: &Table, births: &mut Births) -> io::Result<Table> {
+    linux::snapshot(initial_child, known, births)
 }
 #[cfg(all(test, target_os = "macos"))]
 fn descendants(table: &Table, pid: i32) -> Table {
@@ -551,7 +560,11 @@ struct GateContext<'a> {
     sessions: &'a Sessions,
     request: u64,
 }
-fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Table, Value)> {
+fn gate_owner(
+    report_r: i32,
+    gate_w: i32,
+    ctx: &GateContext,
+) -> io::Result<(Table, Value, Births)> {
     let GateContext {
         journal,
         wire,
@@ -577,7 +590,8 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         got += n as usize;
     }
     let pid = i32::from_ne_bytes(buffer);
-    let table = snapshot(Some(pid), &Table::new())
+    let mut births = Births::default();
+    let table = snapshot(Some(pid), &Table::new(), &mut births)
         .map_err(|_| io::Error::other("OWNERSHIP_JOURNAL_FAILED: identity unavailable"))?;
     let root = table
         .get(&pid)
@@ -603,7 +617,7 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         return Err(io::Error::other("OWNERSHIP_JOURNAL_FAILED: gate release"));
     }
     drop(registry);
-    Ok((table, root))
+    Ok((table, root, births))
 }
 
 /// Validated `create` arguments.
@@ -856,7 +870,7 @@ fn spawn_gated(
             Ok(())
         });
     }
-    let (child, table, root) = {
+    let (child, table, root, births) = {
         let journal = wire.journal.as_path();
         let (id_ref, generation_ref, argv0) = (&parsed.id, &parsed.generation, &argv[0]);
         let (spawned, verdict) = thread::scope(|scope| {
@@ -892,7 +906,7 @@ fn spawn_gated(
             )),
         };
         match (spawned, verdict) {
-            (Ok(child), Ok((table, root))) => (child, table, root),
+            (Ok(child), Ok((table, root, births))) => (child, table, root, births),
             (Ok(mut child), Err(error)) => {
                 // Cannot happen (the gate is released only after success); stay safe regardless.
                 let _ = child.kill();
@@ -950,6 +964,7 @@ fn spawn_gated(
         pid,
         root,
         descendants: Table::new(),
+        births,
     };
     retain_owned(&mut owned, &table);
     Ok(Spawned {
@@ -1015,7 +1030,7 @@ fn cleanup(
     if handle.exit.get().is_some() && state.owned.descendants.is_empty() {
         return Ok(Vec::new());
     }
-    let before = snapshot(None, &known_owned(&state.owned))?;
+    let before = snapshot(None, &known_owned(&state.owned), &mut state.owned.births)?;
     retain_owned(&mut state.owned, &before);
     let root_start = state.owned.root["start_value"].as_str().map(String::from);
     let root_live = handle.exit.get().is_none()
@@ -1030,13 +1045,19 @@ fn cleanup(
     };
     if root_live {
         // The root's PID+birth is matched and its own child group remains owned.
-        signal_owned(pid, root_start.as_deref().unwrap_or_default(), signal, true);
+        signal_owned(
+            pid,
+            root_start.as_deref().unwrap_or_default(),
+            signal,
+            true,
+            &state.owned.births,
+        );
     }
     // Signalled owned descendants, confirmed gone before cleanup reports them absent.
     let mut signalled: Vec<(i32, (i32, i32, String))> = Vec::new();
     for (&child, old) in &state.owned.descendants {
         if before.get(&child).is_some_and(|entry| entry.2 == old.2) {
-            signal_owned(child, &old.2, signal, false);
+            signal_owned(child, &old.2, signal, false, &state.owned.births);
             signalled.push((child, old.clone()));
         }
     }
@@ -1061,7 +1082,7 @@ fn cleanup(
         let pids: Vec<i32> = signalled.iter().map(|(child, _)| *child).collect();
         wait_exit(&pids, deadline);
     }
-    let after = snapshot(None, &known_owned(&state.owned))?;
+    let after = snapshot(None, &known_owned(&state.owned), &mut state.owned.births)?;
     retain_owned(&mut state.owned, &after);
     if handle.exit.get().is_none()
         && after
@@ -1069,11 +1090,17 @@ fn cleanup(
             .is_some_and(|entry| Some(entry.2.as_str()) == root_start.as_deref())
     {
         // The root identity was re-verified against the fresh table.
-        signal_owned(pid, root_start.as_deref().unwrap_or_default(), libc::SIGKILL, true);
+        signal_owned(
+            pid,
+            root_start.as_deref().unwrap_or_default(),
+            libc::SIGKILL,
+            true,
+            &state.owned.births,
+        );
     }
     for (&child, old) in &state.owned.descendants {
         if after.get(&child).is_some_and(|entry| entry.2 == old.2) {
-            signal_owned(child, &old.2, libc::SIGKILL, false);
+            signal_owned(child, &old.2, libc::SIGKILL, false, &state.owned.births);
             signalled.push((child, old.clone()));
         }
     }
@@ -1087,7 +1114,7 @@ fn cleanup(
     signalled.dedup_by_key(|(child, _)| *child);
     let pids: Vec<i32> = signalled.iter().map(|(child, _)| *child).collect();
     let still_running = wait_exit(&pids, deadline);
-    let final_table = snapshot(None, &known_owned(&state.owned))?;
+    let final_table = snapshot(None, &known_owned(&state.owned), &mut state.owned.births)?;
     retain_owned(&mut state.owned, &final_table);
     Ok(survivors_after_cleanup(
         &state.owned.descendants,
@@ -1201,7 +1228,7 @@ fn ownership_snapshot(handle: &SessionHandle, state: &mut State, wire: &Wire) {
     let known = known_owned(&state.owned);
     #[cfg(target_os = "linux")]
     let pid = state.owned.pid;
-    let Ok(table) = snapshot(None, &known) else {
+    let Ok(table) = snapshot(None, &known, &mut state.owned.births) else {
         return;
     };
     #[cfg(target_os = "linux")]
