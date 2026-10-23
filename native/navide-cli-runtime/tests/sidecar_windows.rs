@@ -78,6 +78,7 @@ struct Sidecar {
     child: Child,
     stdin: Option<ChildStdin>,
     frames: mpsc::Receiver<frame::Frame>,
+    trace: std::cell::RefCell<Vec<String>>,
     next_id: u64,
     dir: PathBuf,
     ready: Value,
@@ -140,6 +141,7 @@ fn start(name: &str) -> Sidecar {
         stdin: child.stdin.take(),
         child,
         frames,
+        trace: std::cell::RefCell::new(Vec::new()),
         next_id: 0,
         dir,
         ready,
@@ -170,8 +172,14 @@ impl Sidecar {
             let left = deadline.saturating_duration_since(Instant::now());
             match self.frames.recv_timeout(left) {
                 Ok(frame) if wanted(&frame) => return frame,
-                Ok(_) => {}
-                Err(error) => panic!("waiting for {what}: {error}"),
+                Ok(other) => self.trace.borrow_mut().push(format!(
+                    "{:?} code={} id={} {}",
+                    other.frame_type, other.code, other.correlation_id, other.meta
+                )),
+                Err(error) => panic!(
+                    "waiting for {what}: {error}; unmatched frames: {:#?}",
+                    self.trace.borrow()
+                ),
             }
         }
     }
