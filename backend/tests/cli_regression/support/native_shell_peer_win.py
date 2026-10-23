@@ -142,8 +142,12 @@ def main() -> int:
             emit("FINAL_TAIL café 世界")
             return 7
         else:
-            # `marker` is the last argument this instance was started with: W10 gives each session its own.
-            emit("ACK " + json.dumps({"pid": os.getpid(), "text": line, "marker": sys.argv[-1]}, ensure_ascii=False))
+            # W10 starts each session with its own `marker=<value>` argument; the echo then names it. Other
+            # callers pass none and keep the plain two-key echo they match on.
+            ack = {"pid": os.getpid(), "text": line}
+            if sys.argv[-1].startswith("marker="):
+                ack["marker"] = sys.argv[-1].removeprefix("marker=")
+            emit("ACK " + json.dumps(ack, ensure_ascii=False))
 
 
 if __name__ == "__main__":

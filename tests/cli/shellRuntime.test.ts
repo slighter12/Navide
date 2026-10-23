@@ -403,9 +403,9 @@ it.runIf(process.platform === 'win32')('uses one actual native runtime for kill 
       const everyMarker = [0, 1, 2].flatMap((round) => [0, 1, 2, 3].map((slot) => markerOf(round, slot)))
       for (let round = 0; round < 3; round++) {
         const sessions = await Promise.all([0, 1, 2, 3].map((slot) =>
-          open(`cycle-${round}-${slot}`, [...(endpoint.command as string[]), markerOf(round, slot)], root)))
+          open(`cycle-${round}-${slot}`, [...(endpoint.command as string[]), `marker=${markerOf(round, slot)}`], root)))
         expect(new Set(sessions.map((s) => s.ready.pid)).size).toBe(4)
-        sessions.forEach((s, slot) => expect(s.ready.argv.at(-1), `round ${round} slot ${slot} READY marker`).toBe(markerOf(round, slot)))
+        sessions.forEach((s, slot) => expect(s.ready.argv.at(-1), `round ${round} slot ${slot} READY marker`).toBe(`marker=${markerOf(round, slot)}`))
         await Promise.all(sessions.map((s, slot) => input(s.tid, `mark-${round}-${slot}\r`)))
         await Promise.all(sessions.map((s, slot) => until(
           () => (output.get(s.tid) ?? '').includes(`"text": "mark-${round}-${slot}"`), `round ${round} slot ${slot}: its own bytes`)))
