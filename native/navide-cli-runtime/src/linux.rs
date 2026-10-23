@@ -55,6 +55,28 @@ impl Births {
         alive
     }
 
+    /// Final verification: record every live member of the root's former process group, or of its session when
+    /// the runtime made the root a session leader (`setsid`), that this session never admitted. The root may
+    /// have exited, or been reaped, before the group fallback ran, so a child born after the last snapshot would
+    /// otherwise appear nowhere. Members are only recorded, never signalled: cleanup reports them as unresolved
+    /// and `cleanup_complete` stays false. A scan that cannot finish is an error, so cleanup fails closed.
+    ///
+    /// Reusing the numeric id cannot make this unsafe. A PGID or SID is reusable only after its old group or
+    /// session is empty, so a live process under the id is either a member we never admitted or a stranger that
+    /// took the id after we were done. The stranger is only listed, which makes the result conservatively
+    /// incomplete; no signal ever follows from this scan.
+    pub(super) fn record_unadmitted_former_group(&self, root: i32) -> io::Result<()> {
+        let all = scan(Instant::now() + Duration::from_millis(super::SNAPSHOT_MS))?;
+        for (&member, seen) in &all {
+            let former = seen.group == root || seen.session == root;
+            if !former || matches!(seen.state, b'Z' | b'X') || self.admitted(member, seen) {
+                continue;
+            }
+            self.refuse(member, seen);
+        }
+        Ok(())
+    }
+
     fn ticks(&self, pid: i32, start: &str) -> Option<u64> {
         self.0
             .get(&pid)
@@ -94,6 +116,7 @@ impl Births {
 struct Process {
     parent: i32,
     group: i32,
+    session: i32,
     birth_ticks: u64,
     state: u8,
 }
@@ -135,6 +158,7 @@ fn parse_stat(pid: i32, bytes: &[u8]) -> io::Result<Process> {
         state: fields[0].as_bytes()[0],
         parent: parse(1)?,
         group: parse(2)?,
+        session: parse(3)?,
         birth_ticks,
     })
 }
