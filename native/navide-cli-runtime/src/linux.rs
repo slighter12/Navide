@@ -66,7 +66,20 @@ impl Births {
     /// took the id after we were done. The stranger is only listed, which makes the result conservatively
     /// incomplete; no signal ever follows from this scan.
     pub(super) fn record_unadmitted_former_group(&self, root: i32) -> io::Result<()> {
-        let all = scan(Instant::now() + Duration::from_millis(super::SNAPSHOT_MS))?;
+        let (all, unreadable) =
+            scan_all(Instant::now() + Duration::from_millis(super::SNAPSHOT_MS))?;
+        for pid in unreadable {
+            // The stat file failed with something other than "gone", so its group is unknown. The group and
+            // session calls do not depend on /proc: an entry that may belong to the root's group or session
+            // (or whose ids cannot be read either) leaves the answer open, so cleanup fails closed.
+            if let Some((group, session)) = group_ids(pid)? {
+                if group == root || session == root {
+                    return Err(io::Error::other(format!(
+                        "unreadable proc entry {pid} may belong to the former group of {root}"
+                    )));
+                }
+            }
+        }
         for (&member, seen) in &all {
             let former = seen.group == root || seen.session == root;
             if !former || matches!(seen.state, b'Z' | b'X') || self.admitted(member, seen) {
@@ -163,7 +176,17 @@ fn parse_stat(pid: i32, bytes: &[u8]) -> io::Result<Process> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test seam: reading this pid's stat fails with `EACCES`, as a hidden or denied `/proc` entry would.
+    pub(super) static DENIED_STAT: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+}
+
 fn process(pid: i32) -> io::Result<Option<Process>> {
+    #[cfg(test)]
+    if DENIED_STAT.with(|denied| denied.get()) == Some(pid) {
+        return Err(io::Error::from_raw_os_error(libc::EACCES));
+    }
     match std::fs::read(format!("/proc/{pid}/stat")) {
         Ok(bytes) => parse_stat(pid, &bytes).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -221,8 +244,28 @@ fn legacy_start(birth_ticks: u64, boot: u64, ticks: u64) -> io::Result<String> {
     ))
 }
 
+/// The process group and session of `pid` from the kernel, independent of /proc; `None` when it is gone.
+fn group_ids(pid: i32) -> io::Result<Option<(i32, i32)>> {
+    // SAFETY: plain syscalls taking a pid; errno is read right after.
+    let (group, session) = unsafe { (libc::getpgid(pid), libc::getsid(pid)) };
+    if group >= 0 && session >= 0 {
+        return Ok(Some((group, session)));
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(None);
+    }
+    Err(error)
+}
+
 fn scan(deadline: Instant) -> io::Result<HashMap<i32, Process>> {
+    scan_all(deadline).map(|(all, _)| all)
+}
+
+/// Every readable process, plus the pids whose stat could not be read for a reason other than "gone".
+fn scan_all(deadline: Instant) -> io::Result<(HashMap<i32, Process>, Vec<i32>)> {
     let mut all = HashMap::new();
+    let mut unreadable = Vec::new();
     for entry in std::fs::read_dir("/proc")? {
         if Instant::now() >= deadline {
             return Err(io::Error::new(
@@ -243,13 +286,17 @@ fn scan(deadline: Instant) -> io::Result<HashMap<i32, Process>> {
         }
         // An unrelated process may vanish or deny inspection. Retained owned
         // processes are read separately and their errors remain fatal.
-        if let Ok(Some(value)) = process(pid) {
-            if all.insert(pid, value).is_none() && all.len() > MAX_PIDS {
-                return Err(io::Error::other("owned node bound"));
+        match process(pid) {
+            Ok(Some(value)) => {
+                if all.insert(pid, value).is_none() && all.len() > MAX_PIDS {
+                    return Err(io::Error::other("owned node bound"));
+                }
             }
+            Ok(None) => {}
+            Err(_) => unreadable.push(pid),
         }
     }
-    Ok(all)
+    Ok((all, unreadable))
 }
 
 fn owned_scan(

@@ -256,10 +256,12 @@ struct Owned {
 
 #[cfg(target_os = "linux")]
 use linux::Births;
-/// macOS identifies a process by its full-resolution start time and keeps no separate ledger.
+/// macOS identifies a process by its full-resolution start time and keeps no birth ledger. It only remembers the
+/// live members of the root's former group that this session never admitted: pid -> (parent, group, start). They
+/// are reported, never signalled.
 #[cfg(target_os = "macos")]
 #[derive(Default)]
-struct Births(());
+struct Births(Mutex<HashMap<i32, (i32, i32, String)>>);
 
 #[derive(Default)]
 struct Registry {
@@ -1188,9 +1190,13 @@ fn survivors_after_cleanup(
     survivors
 }
 
-/// Final verification on Linux: the root's former process group (and session) is scanned for live members this
-/// session never admitted; `with_unresolved` then reports them. An error means the scan could not establish
-/// whether any remain, and the cleanup fails closed. macOS keeps its behaviour (no scan).
+/// Final verification: the root's former process group (on Linux also its session) is scanned for live members
+/// this session never admitted; `with_unresolved` then reports them. They are only recorded, never signalled.
+/// An error means the scan could not establish whether any remain, and the cleanup fails closed.
+///
+/// A numeric PGID or SID is reusable only after its old group or session is empty, so a live process found under
+/// it is either a member never admitted or a stranger that took the id afterwards; the stranger is only listed,
+/// which makes the receipt conservatively incomplete.
 fn record_former_group(owned: &Owned) -> io::Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -1198,22 +1204,38 @@ fn record_former_group(owned: &Owned) -> io::Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = owned;
+        let mut refused = owned.births.0.lock().unwrap();
+        for (pid, entry) in darwin::former_group(owned.pid)? {
+            if !owned
+                .descendants
+                .get(&pid)
+                .is_some_and(|old| old.2 == entry.2)
+            {
+                refused.insert(pid, entry);
+            }
+        }
         Ok(())
     }
 }
 
-/// Add the live group members the Linux pre-6.9 fallback refused to signal (never admitted by this session) to
-/// `survivors`, so cleanup does not report complete while they run. macOS has no such fallback.
+/// Why a member is listed without having been signalled. A member that exits after the final scan but before the
+/// receipt is published stays listed: the receipt is then conservatively incomplete, never falsely complete.
+const UNADMITTED: &str = "not admitted by this session, so reported and never signalled; the list is the state at the final scan and may include a member that exited since";
+
+/// Add the live members this session never admitted (the group fallback's refusals and the former-group scan) to
+/// `survivors`, so cleanup does not report complete while they run.
 fn with_unresolved(mut survivors: Vec<Value>, births: &Births) -> Vec<Value> {
     #[cfg(target_os = "linux")]
-    for (pid, entry) in births.refused_alive() {
+    let refused = births.refused_alive();
+    #[cfg(target_os = "macos")]
+    let refused = darwin::still_running(&births.0.lock().unwrap());
+    for (pid, entry) in refused {
         if !survivors.iter().any(|known| known["pid"] == pid) {
-            survivors.push(identity(pid, &entry));
+            let mut member = identity(pid, &entry);
+            member["note"] = json!(UNADMITTED);
+            survivors.push(member);
         }
     }
-    #[cfg(target_os = "macos")]
-    let _ = births;
     survivors
 }
 
@@ -2473,7 +2495,7 @@ mod survivor_tests {
 
 /// E5 round 5: the root can exit, or already be reaped, before the group fallback runs. A same-group child this
 /// session never admitted must still make the emitted `SESSION_CLEANED` incomplete and name it (design 5.5, 10.4).
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod root_exit_tests {
     use super::*;
     use std::os::unix::process::CommandExt;
@@ -2607,6 +2629,80 @@ mod root_exit_tests {
         reap(&mut root, &handle);
         emit(&handle, &wire, &mut state);
         assert_incomplete_and_names(&handle, &mut late);
+    }
+
+    /// Linux: the member is told apart from the root's group (own group) but shares its session.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_member_of_the_session_of_a_real_session_leader_root_is_named_and_unsignalled() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::process::Stdio;
+        // bash: monitor mode gives the background job its own process group (dash has no job control).
+        let mut command = Command::new("/bin/bash");
+        command
+            .args(["-c", "set -m; read go; sleep 30 & echo $!; wait"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        // SAFETY: setsid is async-signal-safe and runs in the forked child before exec.
+        unsafe {
+            command.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let mut root = command.spawn().unwrap();
+        let pid = root.id() as i32;
+        let (handle, wire, mut state) = session(pid);
+        writeln!(root.stdin.as_mut().unwrap()).unwrap();
+        let mut line = String::new();
+        BufReader::new(root.stdout.as_mut().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let late: i32 = line.trim().parse().unwrap();
+        reap(&mut root, &handle);
+        emit(&handle, &wire, &mut state);
+        let survivors = handle.survivors.lock().unwrap().clone();
+        let complete = handle.wait_finished(Duration::from_secs(1));
+        let stat = std::fs::read_to_string(format!("/proc/{late}/stat")).unwrap_or_default();
+        // SAFETY: the pid is a sleeper this test started.
+        unsafe { libc::kill(late, libc::SIGKILL) };
+        assert!(
+            !stat.is_empty() && !stat.contains(") Z "),
+            "cleanup signalled a member it never admitted: {stat}"
+        );
+        assert_eq!(complete, Some(false), "survivors: {survivors:?}");
+        assert!(survivors.iter().any(|entry| entry["pid"] == late));
+        // The child was in the root's session but not in the root's group, so only the session arm can name it.
+        let fields: Vec<&str> = stat
+            .split(") ")
+            .nth(1)
+            .unwrap_or_default()
+            .split(' ')
+            .collect();
+        assert_eq!(fields.get(3).copied(), Some(pid.to_string().as_str()));
+        assert_ne!(fields.get(2).copied(), Some(pid.to_string().as_str()));
+    }
+
+    /// Linux: an entry that cannot be read for a pid that could belong to the group is not skipped.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_unreadable_proc_entry_of_a_group_member_makes_the_receipt_incomplete() {
+        let mut root = sleeper_group_leader();
+        let pid = root.id() as i32;
+        let (handle, wire, mut state) = session(pid);
+        let mut late = late_member(pid);
+        reap(&mut root, &handle);
+        linux::DENIED_STAT.with(|denied| denied.set(Some(late.id() as i32)));
+        emit(&handle, &wire, &mut state);
+        linux::DENIED_STAT.with(|denied| denied.set(None));
+        let survivors = handle.survivors.lock().unwrap().clone();
+        let complete = handle.wait_finished(Duration::from_secs(1));
+        let alive = late.try_wait().unwrap().is_none();
+        late.kill().unwrap();
+        late.wait().unwrap();
+        assert!(alive, "cleanup signalled a member it could not read");
+        assert_eq!(complete, Some(false), "survivors: {survivors:?}");
+        assert!(survivors.iter().any(|entry| entry["error"].is_string()));
     }
 }
 

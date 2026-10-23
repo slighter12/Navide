@@ -332,6 +332,34 @@ pub(super) fn owned_not_gone(pid: i32, start: &str) -> bool {
     }
 }
 
+/// The live members of process group `root` (a former root's group stays listable after the root is gone). A
+/// member whose identity cannot be read for a reason other than "gone" is an error: fail closed.
+pub(super) fn former_group(root: i32) -> io::Result<Table> {
+    let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
+    let mut members = Table::new();
+    for pid in list(root, false, deadline)? {
+        if let Some(entry) = row(pid)? {
+            if !exited(pid) {
+                members.insert(pid, entry);
+            }
+        }
+    }
+    Ok(members)
+}
+
+/// The recorded members that still run as the same instance. One whose state cannot be read stays listed.
+pub(super) fn still_running(members: &std::collections::HashMap<i32, (i32, i32, String)>) -> Table {
+    members
+        .iter()
+        .filter(|(&pid, entry)| match row(pid) {
+            Ok(None) => false,
+            Ok(Some(live)) => live.2 == entry.2 && !exited(pid),
+            Err(_) => true,
+        })
+        .map(|(&pid, entry)| (pid, entry.clone()))
+        .collect()
+}
+
 /// Macro `SZOMB` of `<sys/proc.h>`: the process has exited and only awaits its parent's reap.
 const SZOMB: u32 = 5;
 
