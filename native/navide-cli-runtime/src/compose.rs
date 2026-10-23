@@ -496,4 +496,90 @@ mod tests {
         assert_eq!(admit("aider", "argv", false), Ok(()));
         assert!(matches!(admit("aider", "wrapped", false), Err(ComposeError::Composition(_))));
     }
+
+    // ---- G2 ticket 05, delta addendum 10: every vendor composes in Rust; the credential outer form.
+
+    const CREDENTIAL_VECTORS: &str = include_str!("../../../backend/tests/data/g2_credential_wrap_vectors.json");
+
+    fn strings(value: &Value) -> Vec<String> {
+        value.as_array().unwrap().iter().map(|item| item.as_str().unwrap().to_string()).collect()
+    }
+
+    fn credential(file: &Value, shell: &str, flags: &Value, line: &str) -> Value {
+        json!({"shape": "credential", "helper": file["helper"], "unset": file["unset"],
+               "inner": {"shape": "wrapped", "shell": shell, "flags": flags, "words": [{"lit": line}]}})
+    }
+
+    #[test]
+    fn the_credential_script_form_is_the_python_oracle_byte_for_byte() {
+        let file: Value = serde_json::from_str(CREDENTIAL_VECTORS).unwrap();
+        for case in file["script_cases"].as_array().unwrap() {
+            let launch = credential(&file, case["shell"].as_str().unwrap(), &case["flags"], case["line"].as_str().unwrap());
+            let result = composed(case["agent_key"].as_str().unwrap(), launch);
+            let expected = strings(&case["expected"]);
+            assert_eq!(result.program, expected[0], "{}", case["id"]);
+            assert_eq!(result.args, expected[1..], "{}", case["id"]);
+            assert_eq!(result.argv_source, "rust");
+            assert_eq!(result.argv0, attest(&expected[0]), "the attested program is the shell");
+        }
+    }
+
+    #[test]
+    fn the_credential_entrypoint_form_puts_the_resolved_program_after_the_helper() {
+        let file: Value = serde_json::from_str(CREDENTIAL_VECTORS).unwrap();
+        let launch = json!({"shape": "credential", "helper": file["helper"], "unset": file["unset"],
+            "entrypoint": "/x/bin/kilo",
+            "inner": {"shape": "direct", "form": "string",
+                      "words": [{"lit": "kilo"}, {"arg": "--port"}, {"arg": "4000"}, {"arg": "a b"}]}});
+        let result = composed("kilo", launch);
+        let helper = strings(&file["helper"]);
+        assert_eq!(result.program, helper[0]);
+        let mut expected: Vec<String> = helper[1..].to_vec();
+        expected.extend(["--entrypoint", "/x/bin/kilo", "--", "/x/bin/kilo", "--port", "4000", "a b"].map(String::from));
+        assert_eq!(result.args, expected);
+        assert_eq!(result.argv0, attest(&helper[0]), "the attested program is the helper interpreter");
+    }
+
+    #[test]
+    fn the_credential_form_refuses_what_python_would_not_wrap() {
+        let file: Value = serde_json::from_str(CREDENTIAL_VECTORS).unwrap();
+        // A valid launch is composed first, so these refusals are not just "unknown shape".
+        let good = &file["script_cases"][0];
+        composed("kilo", credential(&file, good["shell"].as_str().unwrap(), &good["flags"], good["line"].as_str().unwrap()));
+        for case in file["refused_cases"].as_array().unwrap() {
+            let launch = credential(&file, case["shell"].as_str().unwrap(), &case["flags"], case["line"].as_str().unwrap());
+            assert!(compose("kilo", &launch).is_err(), "{}", case["id"]);
+        }
+        let line = good["line"].as_str().unwrap();
+        let shell = good["shell"].as_str().unwrap();
+        assert!(compose("", &credential(&file, shell, &good["flags"], line)).is_err(), "the ordinary shell has no wrapper");
+        assert!(compose("claude", &credential(&file, shell, &good["flags"], line)).is_err(), "the line is not claude's");
+        let mut no_helper = credential(&file, shell, &good["flags"], line);
+        no_helper["helper"] = json!([]);
+        assert!(compose("kilo", &no_helper).is_err());
+        let mut stray = credential(&file, shell, &good["flags"], line);
+        stray["entrypoint"] = json!("/x/bin/kilo");
+        assert!(compose("kilo", &stray).is_err(), "an entrypoint belongs to the direct form only");
+        let missing = json!({"shape": "credential", "helper": file["helper"], "unset": file["unset"],
+            "inner": {"shape": "direct", "form": "string", "words": [{"lit": "kilo"}]}});
+        assert!(compose("kilo", &missing).is_err(), "the direct form needs its entrypoint");
+        let mut nul = credential(&file, shell, &good["flags"], line);
+        nul["helper"] = json!(["/x/py", "a\u{0}b"]);
+        assert!(matches!(compose("kilo", &nul), Err(ComposeError::Validate(_))));
+    }
+
+    #[test]
+    fn every_generated_vendor_composes_in_rust_on_posix_and_none_does_on_windows() {
+        assert!(!vendor_facts::VENDORS.is_empty());
+        for facts in vendor_facts::VENDORS.iter() {
+            for shape in ["wrapped", "direct", "credential"] {
+                assert_eq!(admit(facts.key, shape, false), Ok(()), "{} {shape} on POSIX", facts.key);
+                assert!(matches!(admit(facts.key, shape, true), Err(ComposeError::Composition(_))), "{} {shape} on Windows", facts.key);
+            }
+            assert!(matches!(admit(facts.key, "argv", false), Err(ComposeError::Composition(_))), "{} argv on POSIX", facts.key);
+        }
+        for alias in ["", "terminal"] {
+            assert!(matches!(admit(alias, "credential", false), Err(ComposeError::Composition(_))), "{alias:?} has no wrapper");
+        }
+    }
 }
