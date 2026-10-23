@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import shlex
 import sys
+import tempfile
 import uuid
 
 import pytest
@@ -47,21 +48,56 @@ def _binary_name(subject: str) -> str:
     return VENDORS[subject].install_dep.check_cmd[0]
 
 
+def _real_home() -> Path:
+    """The account home the way the product reads it: the passwd entry, not $HOME."""
+    try:
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, OSError):
+        return Path.home()
+
+
+def _user_name() -> str:
+    return _real_home().name
+
+
+def _variants(path: Path | str) -> set[str]:
+    """A path as spelled and as resolved (macOS /var is /private/var), without a trailing slash."""
+    spelled = str(path).rstrip("/")
+    return {spelled, str(Path(spelled).resolve())} - {""}
+
+
+def _temp_roots() -> set[str]:
+    roots = _variants(tempfile.gettempdir())
+    if os.environ.get("TMPDIR"):
+        roots |= _variants(os.environ["TMPDIR"])
+    return roots
+
+
 def _normaliser(root: Path):
-    replacements = sorted(
-        {
-            str(root): "<ROOT>",
-            str(root.resolve()): "<ROOT>",
-            str(Path(sys.executable).parent): "<VENV_BIN>",
-            str(Path(base_python_executable()).parent): "<PYTHON_BIN>",
-            str(REPO_ROOT): "<REPO>",
-        }.items(),
-        key=lambda item: -len(item[0]),
-    )
+    # The product resolves the real home from the passwd entry and ignores the
+    # fixture's HOME (mcp_server/pane_home.real_home), so account-home paths
+    # reach the child even from an isolated launch; they are redacted here.
+    table: dict[str, str] = {}
+    for label, paths in (
+        ("<ROOT>", _variants(root)),
+        ("<VENV_BIN>", _variants(Path(sys.executable).parent)),
+        ("<PYTHON_BIN>", _variants(Path(base_python_executable()).parent)),
+        ("<REPO>", _variants(REPO_ROOT)),
+        ("<TMP>", _temp_roots()),
+        ("<HOME>", _variants(_real_home())),
+    ):
+        for path in paths:
+            table[path] = label
+    replacements = sorted(table.items(), key=lambda item: -len(item[0]))
+    user = re.compile(rf"(?<=/){re.escape(_user_name())}(?=/|$)") if _user_name() else None
 
     def normalise(text: str) -> str:
         for needle, label in replacements:
-            text = text.replace(needle, label)
+            text = re.sub(rf"{re.escape(needle)}(?=/|$|[^0-9A-Za-z_.\-])", label, text)
+        if user:
+            text = user.sub("<USER>", text)
         text = _UUID.sub("<uuid>", text)
         text = _LONG_HEX.sub("<hex>", text)
         text = _PORT.sub(r"\1:<port>", text)
@@ -90,7 +126,9 @@ async def _observe(subject: str, form: str, root: Path) -> dict:
         root, _binary_name(subject),
         [base_python_executable(), "-u", str(PROBE), subject, str(destination)],
     )
-    command = [str(shim)] if form == "direct" else ["/bin/bash", "-lc", shlex.quote(str(shim))]
+    # The application submits a command line (a string), never a one-element
+    # list: wiring appends flags to the command text, which only a string takes.
+    command = shlex.quote(str(shim)) if form == "direct" else ["/bin/bash", "-lc", shlex.quote(str(shim))]
     backend = BackendProcess(root)
     normalise = _normaliser(root)
     refused = None
@@ -119,7 +157,7 @@ async def _observe(subject: str, form: str, root: Path) -> dict:
         "subject": subject,
         "shell_form": form,
         "platform": sys.platform,
-        "submitted_command": [normalise(part) for part in command],
+        "submitted_command": normalise(command) if isinstance(command, str) else [normalise(part) for part in command],
     }
     if shutdown_finding:
         snapshot["shutdown_finding"] = shutdown_finding
@@ -150,6 +188,9 @@ async def test_launch_snapshot(subject, form, tmp_path):
         assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
     rendered = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
     assert str(tmp_path) not in rendered, "an unnormalised temp path leaked into the snapshot"
+    leaks = [leak for leak in (*_variants(_real_home()), *_temp_roots()) if len(leak) > 1]
+    assert not [leak for leak in leaks if leak in rendered], "a real home or OS temp path leaked into the snapshot"
+    assert not re.search(rf"(?<=/){re.escape(_user_name())}(?=/|\W|$)", rendered), "the user name leaked into the snapshot"
     target = os.environ.get("NAVIDE_G2_SNAPSHOT_DIR")
     if target:
         directory = Path(target) / sys.platform
