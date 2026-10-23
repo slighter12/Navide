@@ -126,3 +126,10 @@ def test_text_the_wire_cannot_carry_is_refused_before_dispatch(value):
 
 def test_ordinary_text_is_accepted():
     cli_launch.check_text({"words": [{"lit": "café 世界"}]}, "/work", {"A": "b"})
+
+
+@pytest.mark.parametrize("final", [7, None, ["claude", 3], {"cmd": "claude"}])
+def test_a_final_command_of_an_unsupported_type_is_a_refusal_not_a_type_error(final):
+    with pytest.raises(cli_launch.LaunchRefused) as refused:
+        cli_launch.build_launch("claude", _wrapped("claude"), final)
+    assert refused.value.code == "COMPOSITION_UNREPRESENTABLE"

@@ -309,6 +309,8 @@ def _command_text(command: str | list[str]) -> tuple[str, str | list[str]]:
     """(form, text of the part the words describe). `wrapped` is the product shape `[shell, flag, line]`."""
     if isinstance(command, str):
         return "string", command
+    if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "command", "the command is not a string or a list of strings")
     if len(command) == 3 and command[1] in WRAPPED_FLAGS:
         return "wrapped", command[2]
     if not command:

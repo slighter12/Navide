@@ -32,6 +32,7 @@ from pydantic import ValidationError
 
 from . import (
     agent_messaging,
+    cli_launch,
     confirm_token,
     device_trust,
     executions_service,
@@ -8913,15 +8914,21 @@ async def _terminal_create_impl(
             str(payload.get("cwd") or ""),
             warnings=wiring_warnings,
         )
-        payload["command"] = await asyncio.to_thread(
-            app.plugin_wiring.apply_spawn_wiring,
-            app.plugin_host,
-            agent_key,
-            payload["command"],
-            str(payload.get("pane_id") or ""),
-            env,
-            str(payload.get("cwd") or ""),
-        )
+        try:
+            payload["command"] = await asyncio.to_thread(
+                app.plugin_wiring.apply_spawn_wiring,
+                app.plugin_host,
+                agent_key,
+                payload["command"],
+                str(payload.get("pane_id") or ""),
+                env,
+                str(payload.get("cwd") or ""),
+            )
+        except cli_launch.LaunchRefused as refused:
+            # Refused before the service was reached: it still owes the one failed-create receipt.
+            if isinstance(session.terminals, RustTerminalService):
+                session.terminals.receipt_refused_create(str(payload.get("pane_id") or ""), refused)
+            raise
     # Give the pane whatever its push channel needs (a port to serve on, a file
     # to watch) so a message can later reach it without being typed in. Last,
     # so the flags it adds cannot be displaced by MCP or skills wiring; a CLI

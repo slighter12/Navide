@@ -278,9 +278,27 @@ def apply_spawn_wiring(
     env_patch = env if env is not None else {}
     for plugin_id, transformer in host.spawn_transformers():
         try:
-            command = _call_transformer(
+            result = _call_transformer(
                 transformer, agent_key, command, port, pane_id, env_patch, cwd
             )
         except Exception as err:  # noqa: BLE001 - isolate broken plugins
             log.warning("plugin %s spawn transformer failed: %s", plugin_id, err)
+            continue
+        if not _is_command(result):
+            # A returned value that is not a command cannot be represented; dropping its effect
+            # silently would change what the child runs, so the launch is refused before CREATE.
+            from ..cli_launch import LaunchRefused
+
+            raise LaunchRefused(
+                "COMPOSITION_UNREPRESENTABLE", f"plugin:{plugin_id}",
+                f"plugin {plugin_id}: spawn transformer returned {type(result).__name__}, not a command",
+            )
+        command = result
     return command
+
+
+def _is_command(value: Any) -> bool:
+    """A command is a non-empty string or a non-empty list of strings."""
+    if isinstance(value, str):
+        return bool(value)
+    return isinstance(value, list) and bool(value) and all(isinstance(part, str) for part in value)
