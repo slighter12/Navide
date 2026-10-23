@@ -27,9 +27,14 @@ from .backend_process import BackendProcess
 from .cli_shim import base_python_executable, install_cli_shim
 
 # NAVIDE_T05_SIDECAR lets a differential run name another explicitly built sidecar image.
+WINDOWS = os.name == "nt"
 BINARY = Path(os.environ.get("NAVIDE_T05_SIDECAR") or
-              Path(__file__).resolve().parents[4] / "native/navide-cli-runtime/target/release/navide-cli-runtime")
-PEER = Path(__file__).with_name("native_shell_peer.py")
+              Path(__file__).resolve().parents[4] / "native/navide-cli-runtime/target/release"
+              / ("navide-cli-runtime.exe" if WINDOWS else "navide-cli-runtime"))
+PEER = Path(__file__).with_name("native_shell_peer_win.py" if WINDOWS else "native_shell_peer.py")
+RUNTIME_COPY = "runtime-under-test.exe" if WINDOWS else "runtime-under-test"
+#: Keeps the unrelated sleeper out of every process group the scenario signals or closes.
+SEPARATE_PROCESS = {"creationflags": 0x00000200} if WINDOWS else {"start_new_session": True}  # CREATE_NEW_PROCESS_GROUP
 
 
 def _reply(root: Path, seq: str, value) -> None:
@@ -64,6 +69,7 @@ class Watched:
     def __init__(self, backend: BackendProcess, log: Path):
         self.backend, self.log = backend, log
         self.identity = psutil.Process(backend.process.pid)
+        self.primary = backend.python_process()  # the interpreter itself (not a Windows venv launcher)
         self.owned = {self.identity.pid: self.identity}
         self.stopped = asyncio.Event()
         self.task = asyncio.create_task(self._run())
@@ -101,7 +107,7 @@ def _wire(backend: BackendProcess, watched: Watched, extra: dict | None = None) 
     shutil.copyfile(PEER, peer)
     command = [base_python_executable(), "-u", str(peer)]
     return {"url": backend.url, "command": command, "workspace": str(backend.root),
-            "backend": {"pid": watched.identity.pid, "created": watched.identity.create_time()}, **(extra or {})}
+            "backend": {"pid": watched.primary.pid, "created": watched.primary.create_time()}, **(extra or {})}
 
 
 def _publish(root: Path, name: str, value) -> None:
@@ -127,14 +133,17 @@ def _install_common(root: Path, backend: BackendProcess) -> dict:
     def sidecar() -> psutil.Process:
         ready = [r for r in _receipts(root) if r.get("event") == "ready"][-1]
         process = _verified(ready["pid"], ready["created"])
-        if process.ppid() != backend.process.pid:
+        if process.ppid() != backend.python_process().pid:
             raise RuntimeError("the recorded sidecar is not a child of this backend")
         return process
 
-    async def signal_sidecar(sig):
+    async def signal_sidecar(action):
         process = sidecar()
         record = {"pid": process.pid, "created": process.create_time()}
-        process.send_signal(sig)
+        if WINDOWS:  # no signals: freeze, thaw and terminate the process itself
+            {"stop": process.suspend, "cont": process.resume, "kill": process.kill}[action]()
+        else:
+            process.send_signal({"stop": signal.SIGSTOP, "cont": signal.SIGCONT, "kill": signal.SIGKILL}[action])
         return record
 
     async def identify(argument):
@@ -225,9 +234,9 @@ def _install_common(root: Path, backend: BackendProcess) -> dict:
 
     return {
         "journal-hold": journal_hold, "journal-release": journal_release, "tamper-journal": tamper_journal, "repair-journal": repair_journal, "journal-files": journal_files,
-        "sidecar-stop": lambda _a: signal_sidecar(signal.SIGSTOP),
-        "sidecar-cont": lambda _a: signal_sidecar(signal.SIGCONT),
-        "sidecar-kill": lambda _a: signal_sidecar(signal.SIGKILL),
+        "sidecar-stop": lambda _a: signal_sidecar("stop"),
+        "sidecar-cont": lambda _a: signal_sidecar("cont"),
+        "sidecar-kill": lambda _a: signal_sidecar("kill"),
         "identify": identify, "alive": alive, "descendants": descendants,
         "replace-runtime": replace_runtime,
         "create-send-release": create_send_release,
@@ -302,12 +311,12 @@ async def claude_scenario(root: Path):
 
 
 async def runtime_scenario(root: Path, gated: bool = False, refusal: bool = False):
-    runtime_bin = root / "runtime-under-test"
+    runtime_bin = root / RUNTIME_COPY
     shutil.copyfile(BINARY, runtime_bin)
     runtime_bin.chmod(0o755)
     unrelated = psutil.Popen([base_python_executable(), "-c", "import time; time.sleep(600)"],
                              stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
-                             stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+                             stderr=asyncio.subprocess.DEVNULL, **SEPARATE_PROCESS)
     other_root = root / "other"
     other_root.mkdir()
     backend = BackendProcess(root)

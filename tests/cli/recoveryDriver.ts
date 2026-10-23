@@ -9,6 +9,16 @@ import { redactDiagnostic } from './baselineArtifacts'
 // The disposable Python driver shared by the ticket-05 production-seam tests
 // (moved verbatim from runtimeRecovery.test.ts so a second file can use it).
 
+export const isWindows = process.platform === 'win32'
+/** The backend venv's interpreter that runs the disposable Python drivers. */
+export const pythonExecutable = resolve(process.env.UV_PROJECT_ENVIRONMENT ?? 'backend/.venv', isWindows ? 'Scripts/python.exe' : 'bin/python')
+/** UTF-8 for the driver's own file I/O: a Windows console-less Python otherwise reads receipts in the ANSI code page. */
+export const driverEnv: NodeJS.ProcessEnv = isWindows ? { ...process.env, PYTHONUTF8: '1' } : process.env
+/** A fresh temp directory under its long, canonical name (Windows temp paths come back as 8.3 short names). */
+export function makeTempRoot(prefix: string): string {
+  return (isWindows ? realpathSync.native : realpathSync)(mkdtempSync(join(tmpdir(), prefix)))
+}
+
 export async function until(predicate: () => boolean | Promise<boolean>, message: string, timeout = 15_000): Promise<void> {
   const deadline = Date.now() + timeout
   while (!(await predicate())) {
@@ -29,10 +39,9 @@ export interface Driver {
 }
 
 export async function withDriver(scenario: string, run: (driver: Driver) => Promise<void>): Promise<void> {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'navide-t05-')))
-  const python = resolve(process.env.UV_PROJECT_ENVIRONMENT ?? 'backend/.venv', 'bin/python')
-  const driver = spawn(python, ['-m', 'tests.cli_regression.support.runtime_recovery_driver', root, scenario], {
-    cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'],
+  const root = makeTempRoot('navide-t05-')
+  const driver = spawn(pythonExecutable, ['-m', 'tests.cli_regression.support.runtime_recovery_driver', root, scenario], {
+    cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'], env: driverEnv,
   })
   let log = ''
   let code: number | null | undefined

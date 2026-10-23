@@ -16,6 +16,16 @@ from .cli_shim import base_python_executable
 from .backend_process import BackendProcess
 
 
+def powershell_wrapped(command: list[str]) -> list[str]:
+    """A shell that runs the peer as a child, like the POSIX login-shell wrapper (PowerShell 7 passes embedded
+    quotes and backslashes to a native program intact)."""
+    shell = shutil.which("pwsh")
+    if shell is None:
+        raise SystemExit("PowerShell 7 (pwsh) is required for the wrapped shell fixture on Windows")
+    quoted = " ".join("'" + word.replace("'", "''") + "'" for word in command)
+    return [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", f"& {quoted}; exit $LASTEXITCODE"]
+
+
 async def main(root: Path, mode: str, fault: str = ""):
     backend = BackendProcess(root)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = mode
@@ -40,13 +50,14 @@ async def main(root: Path, mode: str, fault: str = ""):
         shutil.copyfile(source, target)
         target.chmod(0o600)
         backend.env["NAVIDE_CLI_RUNTIME_BIN"] = str(target)
+    windows = os.name == "nt"
     peer = root / "native_shell_peer.py"
-    shutil.copyfile(Path(__file__).with_name("native_shell_peer.py"), peer)
+    shutil.copyfile(Path(__file__).with_name("native_shell_peer_win.py" if windows else "native_shell_peer.py"), peer)
     arguments = ["café 世界 quote' \" \\ ; | &", "second argument"]
     command = [base_python_executable(), "-u", str(peer), *arguments]
     stopped = asyncio.Event()
     async with backend:
-        identity = psutil.Process(backend.process.pid)
+        identity = backend.python_process()
         owned = {identity.pid: identity}
 
         async def monitor():
@@ -62,7 +73,7 @@ async def main(root: Path, mode: str, fault: str = ""):
                             if process.is_running():
                                 records.append({"pid": process.pid, "created": process.create_time(),
                                                 "parent": process.ppid(), "executable": process.exe()})
-                        except psutil.NoSuchProcess:
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
                             pass
                     stream.write(json.dumps(records) + "\n")
                     stream.flush()
@@ -71,7 +82,7 @@ async def main(root: Path, mode: str, fault: str = ""):
         watcher = asyncio.create_task(monitor())
         pending = root / "wire.pending.json"
         pending.write_text(json.dumps({"url": backend.url, "command": command, "arguments": arguments,
-                                       "wrapped": ["/bin/bash", "-ilc", shlex.join(command)],
+                                       "wrapped": powershell_wrapped(command) if windows else ["/bin/bash", "-ilc", shlex.join(command)],
                                        "backend": {"pid": identity.pid, "created": identity.create_time()}}))
         pending.replace(root / "wire.json")
         try:
@@ -85,10 +96,13 @@ async def main(root: Path, mode: str, fault: str = ""):
         # asserts `code === 0`, so a principal trial whose receipts do not prove the real sidecar and the handoff fails.
         # (Item 5, the control-plane ledger, is recorded by the E4 matrix harness; there is no ledger receipt here.)
         from .trial_proof import load, prove
-        proof = prove(load(root))
+        proof = prove(load(root), windows=windows)
         (root / "trial-proof.json").write_text(json.dumps(proof, indent=1))
-        if not proof["ok"] or not proof["items"]["2"]["ck"]:
-            raise SystemExit("trial proof failed: " + "; ".join(proof["failures"] or ["no CK receipt: the handoff was not proven"]))
+        # POSIX proves the handoff with the per-create kernel checkpoint; Windows has none and proves it with the
+        # client-validated duplicate-handle receipt of every session (`prove` fails an owned session without one).
+        proven = proof["items"]["2"]["handoffs" if windows else "ck"]
+        if not proof["ok"] or not proven:
+            raise SystemExit("trial proof failed: " + "; ".join(proof["failures"] or ["no handoff receipt: the handoff was not proven"]))
 
 
 if __name__ == "__main__":

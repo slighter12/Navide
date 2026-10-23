@@ -101,6 +101,16 @@ class BackendProcess:
             raise
         return self
 
+    def python_process(self) -> psutil.Process:
+        """The process that runs the backend. On Windows a venv's python.exe is a launcher whose only child is the
+        real interpreter; that child (not the launcher) parents the sidecar and is the receipts' `owner_pid`."""
+        process = psutil.Process(self.process.pid)
+        if os.name == "nt":
+            children = process.children()
+            if len(children) == 1 and os.path.normcase(children[0].exe()) == os.path.normcase(base_python_executable()):
+                return children[0]
+        return process
+
     async def _dump_stacks(self) -> None:
         """Have a hung backend write every thread's stack into backend.log
         (NAVIDE_SHUTDOWN_DIAG), then give it a moment to finish writing."""
