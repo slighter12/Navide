@@ -41,7 +41,9 @@ NESTED_SETTINGS = json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command",
 NESTED_TOML = 'a = "b c" # it\'s\n[hooks.stop]\ncommand = "echo \'世界\' \\\\ ; | &"\n'
 RESUME_ID = "22222222-2222-4222-8222-222222222222"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
-BASELINE_FORM = {"wrapped": "posix-login-shell", "direct-string": "direct"}
+#: Variables this harness itself sets for the backend (runtime selection and a binary kept elsewhere).
+HARNESS_ENV = ("NAVIDE_ACR_EVAL_RUNTIME", "NAVIDE_CLI_RUNTIME_BIN")
+BASELINE_FORM ={"wrapped": "posix-login-shell", "direct-string": "direct"}
 
 #: (id, subject, form, user flags as submitted, extra create payload)
 ROWS = [
@@ -86,6 +88,8 @@ def _owned(root: Path) -> list[dict]:
 def _backend(root: Path) -> BackendProcess:
     backend = BackendProcess(root)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
+    if binary := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):  # a build kept outside native/*/target (Linux container)
+        backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
     backend.env["NAVIDE_SNAPSHOT_PASSWD_HOME"] = str(root / "home")
     backend.env["PYTHONPATH"] = os.pathsep.join([str(BOOT_DIR), backend.env["PYTHONPATH"]])
     return backend
@@ -182,6 +186,9 @@ async def test_row_child_observation_and_receipt(row, tmp_path):
         # The Phase A baselines predate the redaction of secret-named variables (ticket 01's rule).
         expected["child_env"] = {key: "<redacted>" if _SECRET_NAME.search(key) else value
                                  for key, value in expected["child_env"].items()}
+        for gone in HARNESS_ENV:
+            snapshot["child_env"].pop(gone, None)
+            expected["child_env"].pop(gone, None)
         for key in ("child_argv", "child_cwd", "child_env"):
             assert snapshot[key] == expected[key], f"{name}: {key} differs from the before-snapshot"
         if name == plain_name:
@@ -191,7 +198,7 @@ async def test_row_child_observation_and_receipt(row, tmp_path):
             for key in ("child_argv", "child_cwd"):
                 assert snapshot[key] == reference[key], f"{name}: {key} differs from ticket 01"
             # Ticket 01 ran the Python runtime; this harness selects the Rust one through this one variable.
-            ours = {k: v for k, v in snapshot["child_env"].items() if k != "NAVIDE_ACR_EVAL_RUNTIME"}
+            ours = {k: v for k, v in snapshot["child_env"].items() if k not in HARNESS_ENV}
             assert ours == reference["child_env"], f"{name}: child_env differs from ticket 01"
     assert len(owned) == 1, owned
     assert owned[0].get("argv_source") == "rust"
