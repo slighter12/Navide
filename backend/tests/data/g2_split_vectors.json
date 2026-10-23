@@ -1,0 +1,26 @@
+{
+  "rule": "POSIX shlex.split (comments off): the grammar of parse_command. Every vector is checked against Python's shlex.split in backend/tests/test_cli_launch_words.py and against the Rust splitter in compose.rs.",
+  "vectors": [
+    {"input": "", "words": []},
+    {"input": "   ", "words": []},
+    {"input": "claude", "words": ["claude"]},
+    {"input": "claude --model x", "words": ["claude", "--model", "x"]},
+    {"input": "a\tb\nc\rd", "words": ["a", "b", "c", "d"]},
+    {"input": "'a b' c", "words": ["a b", "c"]},
+    {"input": "\"a b\" c", "words": ["a b", "c"]},
+    {"input": "a\\ b", "words": ["a b"]},
+    {"input": "''", "words": [""]},
+    {"input": "a''b", "words": ["ab"]},
+    {"input": "\"a\\\"b\"", "words": ["a\"b"]},
+    {"input": "\"a\\\\b\"", "words": ["a\\b"]},
+    {"input": "\"a\\nb\"", "words": ["a\\nb"]},
+    {"input": "'a\\nb'", "words": ["a\\nb"]},
+    {"input": "x # not a comment", "words": ["x", "#", "not", "a", "comment"]},
+    {"input": "';|&'", "words": [";|&"]},
+    {"input": "'it'\"'\"'s'", "words": ["it's"]},
+    {"input": "café 世界", "words": ["café", "世界"]},
+    {"input": "'unterminated", "error": true},
+    {"input": "\"unterminated", "error": true},
+    {"input": "trailing\\", "error": true}
+  ]
+}

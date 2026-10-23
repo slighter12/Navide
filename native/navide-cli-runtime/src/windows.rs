@@ -9,6 +9,7 @@
 //!
 //! The request/registry bookkeeping mirrors `posix.rs` on purpose: that file stays untouched for
 //! macOS and Linux, and the shared part is a follow-up extraction once both platforms are proven.
+use crate::compose;
 use crate::frame::{self, code, Direction, Frame};
 use crate::session_pty_win::{CloseGate, GateReason, Identity, SessionPty};
 use crate::wire::Outbound;
@@ -356,6 +357,9 @@ struct CreateArgs {
     workspace: String,
     cwd: String,
     argv: Vec<String>,
+    /// Always `python` here: ticket 04 leaves Windows on the pre-composed shape until ticket 07 (delta 3.1).
+    argv_source: &'static str,
+    argv0: compose::Argv0,
     env: Vec<(String, String)>,
     rows: u16,
     cols: u16,
@@ -365,20 +369,28 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
     if !matches!(agent.as_str(), "" | "terminal") && !adapters::integrated(&agent) {
         return Err(io::Error::other("agent runtime not integrated"));
     }
-    let argv: Vec<String> = args["argv"]
+    if args.get("argv").is_some() || args.get("argv_source").is_some() || args.get("argv0").is_some() {
+        return Err(io::Error::other("invalid launch_shape: argv, argv_source and argv0 are not CREATE fields"));
+    }
+    let launch = args.get("launch").ok_or_else(|| io::Error::other("invalid launch_shape: launch is required"))?;
+    // The Windows transition row: only the pre-composed shape is admitted; structured shapes are refused.
+    compose::admit(&agent, launch.get("shape").and_then(Value::as_str).unwrap_or(""), true).map_err(|error| {
+        io::Error::other(format!("invalid composition: {error:?}"))
+    })?;
+    let argv: Vec<String> = launch["argv"]
         .as_array()
-        .ok_or_else(|| io::Error::other("invalid argv"))?
+        .ok_or_else(|| io::Error::other("invalid launch_shape: argv must be an array"))?
         .iter()
         .map(|v| {
             v.as_str()
                 .filter(|s| !s.contains('\0'))
                 .map(String::from)
-                .ok_or_else(|| io::Error::other("invalid argv"))
+                .ok_or_else(|| io::Error::other("invalid validate: argv holds a non-string or NUL"))
         })
         .collect::<io::Result<_>>()?;
-    if argv.is_empty() {
-        return Err(io::Error::other("invalid argv"));
-    }
+    let argv0 = compose::attest(
+        argv.first().filter(|program| !program.is_empty()).ok_or_else(|| io::Error::other("invalid launch_shape: argv is empty"))?,
+    );
     let mut env = Vec::new();
     for (key, value) in args["env"]
         .as_object()
@@ -400,6 +412,8 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
         workspace: text(args, "workspace_path")?.to_owned(),
         cwd: text(args, "cwd")?.to_owned(),
         argv,
+        argv_source: "python",
+        argv0,
         env,
         rows: dimension(args, "rows")?,
         cols: dimension(args, "cols")?,
@@ -407,11 +421,12 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
 }
 
 /// The `SESSION_OWNED` meta (5.2): the `pty` part comes from the session value's one producer.
-fn owned_meta(create: u64, handle: &SessionHandle, root: &Value) -> io::Result<Value> {
+fn owned_meta(create: u64, handle: &SessionHandle, root: &Value, parsed: &CreateArgs) -> io::Result<Value> {
     Ok(
         json!({"create_id":create,"session_id":handle.id,"session_generation":handle.generation,
         "pane_id":handle.pane,"workspace_path":handle.workspace,"root":root,
-        "pty":handle.pty.owned_record()?}),
+        "pty":handle.pty.owned_record()?,"argv_source":parsed.argv_source,
+        "argv0":{"len":parsed.argv0.len,"head":parsed.argv0.head,"tail":parsed.argv0.tail}}),
     )
 }
 
@@ -423,7 +438,8 @@ fn handoff_size_ok(create: u64, args: &CreateArgs) -> bool {
         "start_value":digits});
     let meta = json!({"create_id":create,"session_id":args.id,"session_generation":args.generation,
         "pane_id":args.pane,"workspace_path":args.workspace,"root":root,
-        "pty":{"input":u64::MAX,"output":u64::MAX}});
+        "pty":{"input":u64::MAX,"output":u64::MAX},"argv_source":args.argv_source,
+        "argv0":{"len":args.argv0.len,"head":args.argv0.head,"tail":args.argv0.tail}});
     let bytes = serde_json::to_vec(&meta)
         .map(|b| b.len())
         .unwrap_or(usize::MAX);
@@ -969,6 +985,12 @@ fn classify(request_code: u16, message: &str) -> (&'static str, &'static str) {
     };
     let stage = if message == "invalid handoff_size" {
         "handoff_size"
+    } else if message.starts_with("invalid launch_shape") {
+        "launch_shape"
+    } else if message.starts_with("invalid composition") {
+        "composition"
+    } else if message.starts_with("invalid validate") || message.starts_with("invalid env") {
+        "validate"
     } else if creating {
         "spawn"
     } else {
@@ -1018,7 +1040,7 @@ fn create(req: &Request, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result<Va
         registry.sessions.insert(parsed.id.clone(), handle.clone());
         cancelled
     };
-    let owned_event = owned_meta(req.id, &handle, &root);
+    let owned_event = owned_meta(req.id, &handle, &root, &parsed);
     let (thread_handle, thread_wire, thread_sessions) =
         (handle.clone(), wire.clone(), sessions.clone());
     let thread_started = thread::Builder::new()
@@ -1253,7 +1275,7 @@ fn stdout_line(value: &Value) -> io::Result<()> {
 }
 
 fn fatal_line(error_code: &str, message: &str) {
-    let _ = stdout_line(&json!({"event":"fatal","protocol":"navide-acr","wire":1,
+    let _ = stdout_line(&json!({"event":"fatal","protocol":"navide-acr","wire":frame::WIRE_VERSION,
         "error":{"code":error_code,"message":message,"stage":"initialize"}}));
 }
 
@@ -1710,6 +1732,8 @@ mod tests {
             workspace: "w".into(),
             cwd: ".".into(),
             argv: vec!["x".into()],
+            argv_source: "python",
+            argv0: compose::attest("x"),
             env: vec![],
             rows: 24,
             cols: 80,
