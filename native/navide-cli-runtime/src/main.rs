@@ -1,5 +1,6 @@
 //! The Navide CLI runtime sidecar. stdout carries the one `ready` (or `fatal`) line; everything after
 //! the handshake is binary frames on the control socket (E1 wire v1).
+mod compose;
 mod frame;
 #[cfg(unix)]
 mod posix;
