@@ -421,8 +421,9 @@ impl Sender for SocketSender {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
+    #![cfg(unix)]
     use super::*;
     use std::os::fd::AsRawFd;
 
