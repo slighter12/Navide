@@ -9,7 +9,7 @@ use crate::session_pty::{SessionPty, SlaveEnd, FD_FORK_LOCK};
 use crate::wire::{Outbound, SocketSender};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +20,9 @@ use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 #[path = "darwin.rs"]
 mod darwin;
+#[cfg(target_os = "linux")]
+#[path = "linux.rs"]
+mod linux;
 
 #[path = "adapters.rs"]
 mod adapters;
@@ -405,24 +408,25 @@ fn retain_owned(owned: &mut Owned, table: &Table) {
             .filter(|(child, _)| **child != pid)
             .map(|(&child, entry)| (child, entry.clone())),
     );
-    #[cfg(not(target_os = "macos"))]
-    if table.contains_key(&pid) {
-        owned.descendants.extend(descendants(table, pid));
-    }
+    #[cfg(target_os = "linux")]
+    owned.descendants.extend(
+        table
+            .iter()
+            .filter(|(child, _)| **child != pid)
+            .map(|(&child, entry)| (child, entry.clone())),
+    );
 }
 
 /// Event-driven wait for owned (possibly non-child) processes to exit; returns those still
-/// running at `deadline`. macOS: kqueue `NOTE_EXIT`. Other platforms: the E5 primitive
-/// (`pidfd_open` / job completion port) is not integrated, so they report everything remaining.
+/// running at `deadline`. macOS uses kqueue `NOTE_EXIT`; Linux uses pidfds.
 fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
     #[cfg(target_os = "macos")]
     {
         darwin::wait_exit(pids, deadline)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
-        let _ = deadline;
-        pids.to_vec()
+        linux::wait_exit(pids, deadline)
     }
 }
 
@@ -430,28 +434,11 @@ fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
 fn snapshot(initial_child: Option<i32>, known: &Table) -> io::Result<Table> {
     darwin::snapshot(initial_child, known)
 }
-#[cfg(not(target_os = "macos"))]
-fn snapshot(_initial_child: Option<i32>, _known: &Table) -> io::Result<Table> {
-    let mut command = Command::new("/bin/ps");
-    command
-        .args(["-axo", "pid,ppid,pgid,lstart"])
-        .env("LC_ALL", "C");
-    let bytes = bounded_command(command)?;
-    let mut table = Table::new();
-    for line in String::from_utf8_lossy(&bytes).lines().skip(1) {
-        let words: Vec<_> = line.split_whitespace().collect();
-        if words.len() < 8 {
-            continue;
-        }
-        if let (Ok(pid), Ok(ppid), Ok(pgid)) =
-            (words[0].parse(), words[1].parse(), words[2].parse())
-        {
-            table.insert(pid, (ppid, pgid, words[3..].join(" ")));
-        }
-    }
-    Ok(table)
+#[cfg(target_os = "linux")]
+fn snapshot(initial_child: Option<i32>, known: &Table) -> io::Result<Table> {
+    linux::snapshot(initial_child, known)
 }
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(all(test, target_os = "macos"))]
 fn descendants(table: &Table, pid: i32) -> Table {
     let mut result = Table::new();
     let mut pending = vec![pid];
@@ -469,88 +456,6 @@ fn descendants(table: &Table, pid: i32) -> Table {
 /// `limits.snapshot_ms`: the bound on one ownership snapshot (the pre-existing 5 s literal, now named and
 /// advertised; E1 13.3 rows 12-13).
 const SNAPSHOT_MS: u64 = 5000;
-/// Ceiling on a snapshot command's stdout (the pre-existing 4 MiB).
-const SNAPSHOT_OUTPUT_MAX: u64 = 4 * 1024 * 1024;
-
-/// Run a short command and collect its stdout under `SNAPSHOT_MS` (E1 13.3 row 13): a waiter thread blocks in
-/// `waitid(WNOWAIT)` (it observes the exit WITHOUT reaping), sets `exited` under a lock, then reaps with
-/// `child.wait()` and reports on a channel; the caller blocks in `recv_timeout`. On expiry the caller takes the same
-/// lock and signals the pid only if `exited` is still false: until the waiter has set it the child has not been
-/// reaped, so its pid cannot have been reused, and the waiter cannot reap before the caller released the lock
-/// (closes the window review 3 N-5 named). Joins both threads. No polling interval. Compiled on every platform;
-/// the non-macOS snapshot is its caller.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn bounded_command(command: Command) -> io::Result<Vec<u8>> {
-    bounded_command_within(command, Duration::from_millis(SNAPSHOT_MS))
-}
-
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn bounded_command_within(mut command: Command, limit: Duration) -> io::Result<Vec<u8>> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let pid = child.id() as i32;
-    let stdout = child.stdout.take().unwrap();
-    let reader = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout
-            .take(SNAPSHOT_OUTPUT_MAX + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > SNAPSHOT_OUTPUT_MAX {
-            return Err(io::Error::other("snapshot exceeds bound"));
-        }
-        Ok(bytes)
-    });
-    let (status_tx, status_rx) = mpsc::channel();
-    let exited = Arc::new(Mutex::new(false));
-    let waiter_exited = exited.clone();
-    let waiter = thread::spawn(move || {
-        loop {
-            // SAFETY: zeroed siginfo_t is a valid out value; P_PID with our own child's pid; WNOWAIT leaves it unreaped.
-            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-            let rc = unsafe {
-                libc::waitid(
-                    libc::P_PID,
-                    pid as libc::id_t,
-                    &mut info,
-                    libc::WEXITED | libc::WNOWAIT,
-                )
-            };
-            if rc == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
-                break;
-            }
-        }
-        *waiter_exited.lock().unwrap() = true; // from here the caller must not signal the pid
-        let _ = status_tx.send(child.wait());
-    });
-    let status = match status_rx.recv_timeout(limit) {
-        Ok(status) => status?,
-        Err(_) => {
-            {
-                let already_exited = exited.lock().unwrap();
-                if !*already_exited {
-                    // SAFETY: `pid` is our own direct child and the waiter has not marked it exited, so it is still
-                    // unreaped (it cannot be reaped before the waiter sets the flag, which needs this lock).
-                    unsafe {
-                        libc::kill(pid, libc::SIGKILL);
-                    }
-                }
-            }
-            let _ = waiter.join();
-            let _ = reader.join();
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "snapshot timeout"));
-        }
-    };
-    let _ = waiter.join();
-    let bytes = reader
-        .join()
-        .map_err(|_| io::Error::other("snapshot reader failed"))??;
-    if !status.success() {
-        return Err(io::Error::other("snapshot command failed"));
-    }
-    Ok(bytes)
-}
 
 /// Append one identity record and fsync it. The line is a single `write`, so an
 /// abrupt death of this process leaves either the whole line or none of it.
@@ -1286,12 +1191,12 @@ fn finish(
 
 fn ownership_snapshot(handle: &SessionHandle, state: &mut State, wire: &Wire) {
     let known = known_owned(&state.owned);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     let pid = state.owned.pid;
     let Ok(table) = snapshot(None, &known) else {
         return;
     };
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
         if !table
             .get(&pid)
@@ -1299,7 +1204,7 @@ fn ownership_snapshot(handle: &SessionHandle, state: &mut State, wire: &Wire) {
         {
             return; // Keep the last good tree when death races the snapshot.
         }
-        state.owned.descendants = descendants(&table, pid);
+        retain_owned(&mut state.owned, &table);
     }
     #[cfg(target_os = "macos")]
     retain_owned(&mut state.owned, &table);
@@ -2410,52 +2315,6 @@ pub fn run() -> io::Result<()> {
         written?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod bounded_command_tests {
-    use super::*;
-
-    /// E1 13.3 row 13, with real children (also on macOS, where the production snapshot does not use it).
-    #[test]
-    fn a_command_that_finishes_returns_its_output_without_waiting_for_the_bound() {
-        let started = Instant::now();
-        let mut command = Command::new("/bin/echo");
-        command.arg("snapshot-ok");
-        let bytes = bounded_command_within(command, Duration::from_secs(30)).unwrap();
-        assert_eq!(bytes, b"snapshot-ok\n");
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "woken by the exit, not by the bound"
-        );
-    }
-
-    #[test]
-    fn a_command_that_overruns_the_bound_is_killed_by_pid_and_reported_as_a_timeout() {
-        let mut command = Command::new("/bin/sleep");
-        command.arg("60");
-        let started = Instant::now();
-        let error = bounded_command_within(command, Duration::from_millis(300)).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "{:?}",
-            started.elapsed()
-        );
-    }
-
-    #[test]
-    fn a_failing_command_and_an_oversized_output_are_errors() {
-        let mut failing = Command::new("/usr/bin/false");
-        failing.arg("x");
-        assert!(bounded_command_within(failing, Duration::from_secs(30)).is_err());
-        let mut flood = Command::new("/usr/bin/yes");
-        flood.arg("0123456789");
-        assert!(
-            bounded_command_within(flood, Duration::from_secs(30)).is_err(),
-            "stdout over the 4 MiB bound"
-        );
-    }
 }
 
 #[cfg(test)]

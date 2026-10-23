@@ -198,6 +198,7 @@ fn recvmsg(sock: RawFd, buffer: &mut [u8]) -> (usize, Option<RawFd>) {
     (n as usize, fd)
 }
 
+#[cfg(target_os = "macos")]
 fn slave_name(master: RawFd) -> String {
     let mut name = [0 as libc::c_char; 128];
     assert_eq!(
@@ -207,6 +208,16 @@ fn slave_name(master: RawFd) -> String {
     unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }
         .to_string_lossy()
         .into_owned()
+}
+
+#[cfg(target_os = "linux")]
+fn slave_name(master: RawFd) -> String {
+    let mut number: libc::c_uint = 0;
+    assert_eq!(
+        unsafe { libc::ioctl(master, libc::TIOCGPTN as _, &mut number) },
+        0
+    );
+    format!("/dev/pts/{number}")
 }
 
 fn create_meta(dir: &std::path::Path, argv: &[&str], session: &str) -> Value {

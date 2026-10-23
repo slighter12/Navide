@@ -1,0 +1,97 @@
+name: E5 Linux Agent CLI Runtime
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e5-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/e5-cargo-target
+      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/e5-venv
+      NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}/e5-cargo-target/release/navide-cli-runtime
+      NAVIDE_T05_SIDECAR: ${{ runner.temp }}/e5-cargo-target/release/navide-cli-runtime
+    steps:
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: Install locked test dependencies
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+
+      - name: Build and test the Linux sidecar
+        id: build
+        run: |
+          cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml
+          cargo build --locked --release --manifest-path native/navide-cli-runtime/Cargo.toml
+          test -x "$NAVIDE_CLI_RUNTIME_BIN"
+          file "$NAVIDE_CLI_RUNTIME_BIN" | grep -q 'ELF 64-bit'
+
+      - name: Run the two required production WebSocket cases
+        id: principal
+        run: |
+          mkdir -p test-results/ci
+          bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts \
+            -t 'uses one actual native runtime|sidecar death with sessions and a pending request' \
+            --reporter=json --outputFile=test-results/ci/e5-linux-results.json
+
+      - name: Require both cases to be collected and pass
+        if: always() && steps.principal.outcome == 'success'
+        run: |
+          jq -e '
+            [.testResults[].assertionResults[] |
+              select(.fullName == "uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits" or
+                     .fullName == "sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime")
+            ] as $required |
+            ($required | length) == 2 and ($required | all(.status == "passed"))
+          ' test-results/ci/e5-linux-results.json
+
+      - name: Write redacted outcome log
+        if: always()
+        run: |
+          mkdir -p test-results/ci
+          if test -f test-results/ci/e5-linux-results.json; then
+            jq -r '
+              "runtime=navide-cli-runtime platform=linux",
+              ([.testResults[].assertionResults[] |
+                select(.fullName == "uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits" or
+                       .fullName == "sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime")] as $required |
+                if ($required | length) != 2 then "stage=collection status=failed"
+                else $required[] | "case=\(.fullName) status=\(.status) stage=principal-seam" end)
+            ' test-results/ci/e5-linux-results.json > test-results/ci/e5-linux-redacted.log
+          else
+            printf 'runtime=navide-cli-runtime platform=linux stage=setup-or-collection status=failed\n' > test-results/ci/e5-linux-redacted.log
+          fi
+
+      - name: Upload redacted outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e5-linux-redacted-outcomes
+          path: test-results/ci/e5-linux-redacted.log
+          if-no-files-found: error
+          retention-days: 7

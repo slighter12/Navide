@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 import sys
 import shlex
@@ -18,6 +19,8 @@ from .backend_process import BackendProcess
 async def main(root: Path, mode: str, fault: str = ""):
     backend = BackendProcess(root)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = mode
+    if binary := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):
+        backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
     if fault == "fences":
         backend.env["NAVIDE_CONTROL_FENCE_GATE"] = "1"
     if fault in {"startup", "protocol"}:

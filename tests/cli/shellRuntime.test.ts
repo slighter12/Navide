@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { expect, it } from 'vitest'
 import { createWsClient, type TerminalOutputFrame } from '../../src/shared/wsClient'
 
-const python = resolve('backend/.venv/bin/python')
+const python = resolve(process.env.UV_PROJECT_ENVIRONMENT ?? 'backend/.venv', 'bin/python')
 async function until(predicate: () => boolean, message: string, timeout = 15_000): Promise<void> {
   const deadline = Date.now() + timeout
   while (!predicate()) {
@@ -45,7 +45,7 @@ async function withBackend(fault: string, run: (root: string, endpoint: any) => 
   }
 }
 
-it.runIf(process.platform === 'darwin')('uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits', async () => {
+it.runIf(process.platform === 'darwin' || process.platform === 'linux')('uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits', async () => {
   await withBackend('', async (root, endpoint) => {
     let connections = 0
     const client = createWsClient({ onStatus: (status) => { if (status === 'connected') connections++ } })

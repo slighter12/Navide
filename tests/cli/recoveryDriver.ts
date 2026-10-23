@@ -30,7 +30,8 @@ export interface Driver {
 
 export async function withDriver(scenario: string, run: (driver: Driver) => Promise<void>): Promise<void> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'navide-t05-')))
-  const driver = spawn(resolve('backend/.venv/bin/python'), ['-m', 'tests.cli_regression.support.runtime_recovery_driver', root, scenario], {
+  const python = resolve(process.env.UV_PROJECT_ENVIRONMENT ?? 'backend/.venv', 'bin/python')
+  const driver = spawn(python, ['-m', 'tests.cli_regression.support.runtime_recovery_driver', root, scenario], {
     cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'],
   })
   let log = ''

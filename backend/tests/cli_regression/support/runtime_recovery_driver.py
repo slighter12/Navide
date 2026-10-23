@@ -319,6 +319,7 @@ async def runtime_scenario(root: Path, gated: bool = False, refusal: bool = Fals
         backend.env["NAVIDE_RETIREMENT_REFUSAL_GATE"] = "1"
     other = BackendProcess(other_root, artifact_prefix="other-")
     other.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
+    other.env["NAVIDE_CLI_RUNTIME_BIN"] = str(runtime_bin)
     try:
         async with backend, other:
             watched = Watched(backend, root / "process-identities.jsonl")
