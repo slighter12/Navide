@@ -45,7 +45,7 @@ fn start_with(name: &str, args: &[&str], journal: Option<PathBuf>) -> Sidecar {
     command
         .args([
             "--wire",
-            "1",
+            "2",
             "--runtime-generation",
             GENERATION,
             "--owner-pid",
@@ -223,7 +223,8 @@ fn slave_name(master: RawFd) -> String {
 
 fn create_meta(dir: &std::path::Path, argv: &[&str], session: &str) -> Value {
     json!({"session_id":session,"session_generation":"ffeeddccbbaa99887766554433221100",
-        "pane_id":"pane-1","workspace_path":dir,"cwd":dir,"argv":argv,
+        "pane_id":"pane-1","workspace_path":dir,"cwd":dir,
+        "launch":{"shape":"direct","form":"list","elements":argv,"words":[]},
         "env":{"PATH":"/usr/bin:/bin","TERM":"xterm"},"rows":24,"cols":80,"agent_key":""})
 }
 
@@ -235,7 +236,7 @@ fn ready_is_the_only_stdout_line_and_advertises_the_frozen_limits() {
     let ready = sidecar.line();
     assert_eq!(ready["event"], "ready");
     assert_eq!(ready["protocol"], "navide-acr");
-    assert_eq!(ready["wire"], 1);
+    assert_eq!(ready["wire"], 2);
     assert_eq!(ready["runtime"], "navide-cli-runtime");
     assert_eq!(ready["runtime_generation"], GENERATION);
     assert_eq!(ready["pid"].as_u64().unwrap(), sidecar.child.id() as u64);
@@ -317,26 +318,26 @@ fn an_incompatible_wire_unknown_arguments_and_a_missing_journal_fail_startup_wit
     ];
     let (fatal, status) = failed_start(
         &[&common[..], &["--ownership-journal", "/tmp/j"]].concat(),
-        Some("2"),
+        Some("1"), // a wire-1 request of a wire-2 sidecar is refused, with no downgrade
     );
     assert_eq!(fatal["event"], "fatal");
     assert_eq!(fatal["error"]["code"], "INCOMPATIBLE_WIRE");
     assert!(!status.success());
     let (fatal, status) = failed_start(
         &[&common[..], &["--ownership-journal", "/tmp/j", "--bogus"]].concat(),
-        Some("1"),
+        Some("2"),
     );
     assert_eq!(fatal["error"]["code"], "STARTUP_FAILED");
     assert!(!status.success());
-    let (fatal, _) = failed_start(&common, Some("1"));
+    let (fatal, _) = failed_start(&common, Some("2"));
     assert_eq!(
         fatal["error"]["code"], "STARTUP_FAILED",
-        "the journal is mandatory in wire v1"
+        "the journal is mandatory in wire v2"
     );
     let (fatal, _) = failed_start(
         &[
             "--wire",
-            "1",
+            "2",
             "--runtime-generation",
             "short",
             "--owner-pid",

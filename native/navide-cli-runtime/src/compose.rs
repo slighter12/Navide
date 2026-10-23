@@ -2,9 +2,13 @@
 //! of a wire-2 CREATE into the program and arguments of the child, and decides which shapes a
 //! subject may use.
 //!
-//! Phase A: the interface and its failing seam tests only. Nothing is implemented yet.
+//! Every handwritten piece here has a documented interface reason (delta section 7): the POSIX
+//! word quoting, the `shlex.split` grammar and the wrapper assembly. No crate is used for them.
 #![allow(dead_code)]
 use serde_json::Value;
+
+#[path = "vendor_facts.rs"]
+mod vendor_facts;
 
 /// What the sidecar will spawn, and who composed it (the `argv_source` receipt field).
 #[derive(Debug, PartialEq, Eq)]
@@ -37,17 +41,254 @@ pub enum ComposeError {
     Validate(String),
     /// The shape is not admitted for this subject on this platform.
     Composition(String),
-    NotImplemented,
+}
+
+const ATTEST_BYTES: usize = 128;
+
+fn shape(message: &str) -> ComposeError {
+    ComposeError::Shape(message.to_string())
+}
+
+fn text<'a>(value: &'a Value, what: &str) -> Result<&'a str, ComposeError> {
+    let text = value.as_str().ok_or_else(|| shape(&format!("{what} must be a string")))?;
+    if text.contains('\0') {
+        return Err(ComposeError::Validate(format!("{what} contains NUL")));
+    }
+    Ok(text)
+}
+
+/// POSIX `shlex.quote`: the one explicit shell interface of the wrapped line (delta 2.5).
+fn quote(arg: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
+    if arg.is_empty() {
+        "''".to_string()
+    } else if arg.chars().all(safe) {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\"'\"'"))
+    }
+}
+
+/// POSIX `shlex.split` (no comments, whitespace splits): the grammar of Python's `parse_command`.
+fn split(line: &str) -> Result<Vec<String>, ComposeError> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' | '\t' | '\r' | '\n' => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            '\\' => {
+                current.push(chars.next().ok_or_else(|| {
+                    ComposeError::Compose("no escaped character".to_string())
+                })?);
+                in_word = true;
+            }
+            '\'' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(inner) => current.push(inner),
+                        None => return Err(ComposeError::Compose("no closing quotation".to_string())),
+                    }
+                }
+            }
+            '"' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some(escaped @ ('"' | '\\')) => current.push(escaped),
+                            Some(other) => {
+                                current.push('\\');
+                                current.push(other);
+                            }
+                            None => {
+                                return Err(ComposeError::Compose("no closing quotation".to_string()))
+                            }
+                        },
+                        Some(inner) => current.push(inner),
+                        None => return Err(ComposeError::Compose("no closing quotation".to_string())),
+                    }
+                }
+            }
+            other => {
+                current.push(other);
+                in_word = true;
+            }
+        }
+    }
+    if in_word {
+        words.push(current);
+    }
+    Ok(words)
+}
+
+fn declared(
+    agent_key: &str,
+    option: &str,
+) -> Result<&'static vendor_facts::VendorFacts, ComposeError> {
+    let refuse = |why: &str| ComposeError::Option(format!("{option}: {why}"));
+    let facts = vendor_facts::find(agent_key).ok_or_else(|| refuse("the subject declares no options"))?;
+    let status = match option {
+        "model" => facts.capabilities.model,
+        "effort" => facts.capabilities.effort,
+        "skip_permissions" => facts.capabilities.skip_permissions,
+        "resume" => facts.capabilities.resume_by_id,
+        "session_id" => facts.capabilities.session_id_at_launch,
+        "login" => facts.capabilities.login,
+        _ => return Err(refuse("unknown option")),
+    };
+    if status != vendor_facts::Status::Integrated {
+        return Err(refuse("not integrated for this subject"));
+    }
+    Ok(facts)
+}
+
+/// The text of one `opt` word (with its leading space), spelled from the generated facts.
+fn spell(agent_key: &str, option: &str, value: Option<&str>) -> Result<String, ComposeError> {
+    let facts = declared(agent_key, option)?;
+    let need = || value.ok_or_else(|| ComposeError::Option(format!("{option}: a value is required")));
+    let missing = || ComposeError::Option(format!("{option}: no flag declared"));
+    Ok(match option {
+        "model" => format!(" {} {}", facts.model_flag.ok_or_else(missing)?, quote(need()?)),
+        "effort" => {
+            let value = need()?;
+            if !facts.known_efforts.is_some_and(|known| known.contains(&value)) {
+                return Err(ComposeError::Option(format!("effort: {value:?} is not a declared effort")));
+            }
+            format!(" {} {}", facts.effort_flag.ok_or_else(missing)?, quote(value))
+        }
+        "skip_permissions" => format!(" {}", facts.permission_flag.ok_or_else(missing)?),
+        "resume" => format!(" {}", facts.resume_args.ok_or_else(missing)?.replace("{id}", &quote(need()?))),
+        "session_id" => format!(" {} {}", facts.session_id_flag.ok_or_else(missing)?, quote(need()?)),
+        "login" => format!(" {}", facts.login_args.ok_or_else(missing)?),
+        _ => unreachable!("declared() rejects unknown options"),
+    })
+}
+
+/// Render the ordered words of a launch to shell text (delta 2.3).
+fn render(agent_key: &str, words: &Value) -> Result<String, ComposeError> {
+    let mut out = String::new();
+    for word in words.as_array().ok_or_else(|| shape("words must be an array"))? {
+        let object = word.as_object().ok_or_else(|| shape("a word must be an object"))?;
+        if let Some(lit) = object.get("lit") {
+            out.push_str(text(lit, "lit")?);
+        } else if let Some(exe) = object.get("exe") {
+            out.push_str(&quote(text(exe, "exe")?));
+        } else if let Some(arg) = object.get("arg") {
+            out.push(' ');
+            out.push_str(&quote(text(arg, "arg")?));
+        } else if let Some(option) = object.get("opt") {
+            let value = match object.get("value") {
+                Some(value) => Some(text(value, "opt value")?),
+                None => None,
+            };
+            out.push_str(&spell(agent_key, text(option, "opt")?, value)?);
+        } else {
+            return Err(shape("a word is lit, exe, arg or opt"));
+        }
+    }
+    Ok(out)
+}
+
+/// The longest prefix of at most `ATTEST_BYTES` bytes that ends on a character boundary.
+fn head_of(path: &str) -> &str {
+    let mut cut = path.len().min(ATTEST_BYTES);
+    while !path.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    &path[..cut]
+}
+
+/// The longest suffix of at most `ATTEST_BYTES` bytes that starts on a character boundary.
+fn tail_of(path: &str) -> &str {
+    let mut cut = path.len().saturating_sub(ATTEST_BYTES);
+    while !path.is_char_boundary(cut) {
+        cut += 1;
+    }
+    &path[cut..]
+}
+
+/// The bounded attestation of `program` (delta section 4).
+pub fn attest(program: &str) -> Argv0 {
+    Argv0 { len: program.len(), head: head_of(program).to_string(), tail: tail_of(program).to_string() }
+}
+
+fn finish(argv: Vec<String>) -> Result<Composed, ComposeError> {
+    let mut parts = argv.into_iter();
+    let program = parts.next().filter(|program| !program.is_empty());
+    let program = program.ok_or_else(|| ComposeError::Compose("no program".to_string()))?;
+    let argv0 = attest(&program);
+    Ok(Composed { program, args: parts.collect(), argv_source: "rust", argv0 })
 }
 
 /// Compose a structured launch for `agent_key`.
-pub fn compose(_agent_key: &str, _launch: &Value) -> Result<Composed, ComposeError> {
-    Err(ComposeError::NotImplemented)
+pub fn compose(agent_key: &str, launch: &Value) -> Result<Composed, ComposeError> {
+    let object = launch.as_object().ok_or_else(|| shape("launch must be an object"))?;
+    let words = object.get("words").cloned().unwrap_or(Value::Array(vec![]));
+    match object.get("shape").and_then(Value::as_str) {
+        Some("wrapped") => {
+            let shell = text(object.get("shell").ok_or_else(|| shape("wrapped needs a shell"))?, "shell")?;
+            let mut argv = vec![shell.to_string()];
+            for flag in object.get("flags").and_then(Value::as_array).ok_or_else(|| shape("wrapped needs flags"))? {
+                argv.push(text(flag, "flag")?.to_string());
+            }
+            argv.push(render(agent_key, &words)?);
+            finish(argv)
+        }
+        Some("direct") => match object.get("form").and_then(Value::as_str) {
+            Some("string") => finish(split(&render(agent_key, &words)?)?),
+            Some("list") => {
+                let elements = object.get("elements").and_then(Value::as_array);
+                let mut argv = Vec::new();
+                for element in elements.ok_or_else(|| shape("direct list needs elements"))? {
+                    argv.push(text(element, "element")?.to_string());
+                }
+                let appended = render(agent_key, &words)?;
+                argv.last_mut().ok_or_else(|| ComposeError::Compose("no program".to_string()))?.push_str(&appended);
+                finish(argv)
+            }
+            _ => Err(shape("direct needs a form of string or list")),
+        },
+        Some("argv") => Err(shape("argv is not composed by the sidecar")),
+        _ => Err(shape("unknown or missing shape")),
+    }
 }
 
-/// May `agent_key` use `shape` on this platform? `windows` selects the ticket 04 transition row.
-pub fn admit(_agent_key: &str, _shape: &str, _windows: bool) -> Result<(), ComposeError> {
-    Err(ComposeError::NotImplemented)
+/// May `agent_key` use `shape` on this platform? `windows` selects the ticket 04 transition row
+/// (delta 3.1): Windows takes the pre-composed `argv` shape only, until ticket 07.
+pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeError> {
+    let composition = match vendor_facts::find(agent_key) {
+        Some(facts) => facts.composition,
+        None if vendor_facts::SUBJECT_ALIASES.contains(&agent_key) => vendor_facts::SUBJECT_COMPOSITION,
+        // Harness build only: a subject the declarations do not know (the graceful-shutdown test
+        // declaration of adapters.rs) is composed in Rust, so fault tests can use test subjects.
+        #[cfg(feature = "fault-hooks")]
+        None => vendor_facts::SUBJECT_COMPOSITION,
+        #[cfg(not(feature = "fault-hooks"))]
+        None => return Err(ComposeError::Composition(format!("unknown subject {agent_key:?}"))),
+    };
+    let allowed = if windows {
+        shape == "argv"
+    } else {
+        match composition {
+            vendor_facts::Composition::Rust => matches!(shape, "wrapped" | "direct"),
+            vendor_facts::Composition::Python => shape == "argv",
+        }
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(ComposeError::Composition(format!("shape {shape:?} is not admitted for {agent_key:?} here")))
+    }
 }
 
 #[cfg(test)]
@@ -95,6 +336,23 @@ mod tests {
             let result = composed("claude", wrapped(json!([{"lit": "x"}, {"arg": input}])));
             let expected = format!("x {}", vector["quoted"].as_str().unwrap());
             assert_eq!(result.args[1], expected, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn splitting_matches_the_shared_shlex_split_vectors() {
+        let file: Value =
+            serde_json::from_str(include_str!("../../../backend/tests/data/g2_split_vectors.json")).unwrap();
+        for vector in file["vectors"].as_array().unwrap() {
+            let input = vector["input"].as_str().unwrap();
+            let result = split(input);
+            if vector.get("error").is_some() {
+                assert!(result.is_err(), "input {input:?}");
+            } else {
+                let expected: Vec<String> =
+                    vector["words"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string()).collect();
+                assert_eq!(result.unwrap(), expected, "input {input:?}");
+            }
         }
     }
 

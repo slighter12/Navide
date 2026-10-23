@@ -4,6 +4,7 @@
 //! the stream. What stays here is the create (gated, journalled), the handle transfer, the window
 //! size, signals and reaping by recorded identity, and the three independent lifecycle facts
 //! (root exit, stream end, verified cleanup).
+use crate::compose;
 use crate::frame::{self, code, Direction, Frame};
 use crate::session_pty::{SessionPty, SlaveEnd, FD_FORK_LOCK};
 use crate::wire::{Outbound, SocketSender};
@@ -635,28 +636,64 @@ struct CreateArgs {
     cwd: String,
     agent: String,
     argv: Vec<String>,
+    /// Who composed `argv` (`rust` or `python`) and the bounded attestation of its program, both
+    /// reported on `SESSION_OWNED` (G2 delta section 4).
+    argv_source: &'static str,
+    argv0: compose::Argv0,
     rows: u16,
     cols: u16,
 }
+
+/// A composition refusal as the internal error `classify` turns into `BAD_REQUEST` with its stage.
+fn refused(error: compose::ComposeError) -> io::Error {
+    use compose::ComposeError::*;
+    let (stage, why) = match error {
+        Shape(why) => ("launch_shape", why),
+        Option(why) => ("option", why),
+        Compose(why) => ("compose", why),
+        Validate(why) => ("validate", why),
+        Composition(why) => ("composition", why),
+    };
+    io::Error::other(format!("invalid {stage}: {why}"))
+}
+
+/// The child's argv from the wire-2 `launch` object (delta section 2). The pre-composed `argv` shape is
+/// only what a subject that composes in Python is admitted to use; every other subject is composed here.
+fn launch_argv(agent: &str, args: &Value) -> io::Result<(Vec<String>, &'static str, compose::Argv0)> {
+    if args.get("argv").is_some() || args.get("argv_source").is_some() || args.get("argv0").is_some() {
+        return Err(io::Error::other("invalid launch_shape: argv, argv_source and argv0 are not CREATE fields"));
+    }
+    let launch = args.get("launch").ok_or_else(|| io::Error::other("invalid launch_shape: launch is required"))?;
+    let shape = launch.get("shape").and_then(Value::as_str).unwrap_or("");
+    compose::admit(agent, shape, false).map_err(refused)?;
+    if shape == "argv" {
+        let argv: Vec<String> = launch["argv"]
+            .as_array()
+            .ok_or_else(|| io::Error::other("invalid launch_shape: argv must be an array"))?
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .filter(|s| !s.contains('\0'))
+                    .map(String::from)
+                    .ok_or_else(|| io::Error::other("invalid validate: argv holds a non-string or NUL"))
+            })
+            .collect::<io::Result<_>>()?;
+        let program = argv.first().filter(|p| !p.is_empty()).ok_or_else(|| io::Error::other("invalid launch_shape: argv is empty"))?;
+        let attested = compose::attest(program);
+        return Ok((argv, "python", attested));
+    }
+    let composed = compose::compose(agent, launch).map_err(refused)?;
+    let mut argv = vec![composed.program];
+    argv.extend(composed.args);
+    Ok((argv, composed.argv_source, composed.argv0))
+}
+
 fn create_args(args: &Value) -> io::Result<CreateArgs> {
     let agent = args["agent_key"].as_str().unwrap_or("").to_owned();
     if !matches!(agent.as_str(), "" | "terminal") && !adapters::integrated(&agent) {
         return Err(io::Error::other("agent runtime not integrated"));
     }
-    let argv: Vec<String> = args["argv"]
-        .as_array()
-        .ok_or_else(|| io::Error::other("invalid argv"))?
-        .iter()
-        .map(|v| {
-            v.as_str()
-                .filter(|s| !s.contains('\0'))
-                .map(String::from)
-                .ok_or_else(|| io::Error::other("invalid argv"))
-        })
-        .collect::<io::Result<_>>()?;
-    if argv.is_empty() {
-        return Err(io::Error::other("invalid argv"));
-    }
+    let (argv, argv_source, argv0) = launch_argv(&agent, args)?;
     Ok(CreateArgs {
         id: text(args, "session_id")?.to_owned(),
         generation: text(args, "session_generation")?.to_owned(),
@@ -665,16 +702,23 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
         cwd: text(args, "cwd")?.to_owned(),
         agent,
         argv,
+        argv_source,
+        argv0,
         rows: dimension(args, "rows")?,
         cols: dimension(args, "cols")?,
     })
 }
 
 /// The `SESSION_OWNED` meta (5.2) for a session whose root is `root`.
-fn owned_meta(create: u64, handle: &SessionHandle, root: &Value) -> Value {
+fn owned_meta(create: u64, handle: &SessionHandle, root: &Value, parsed: &CreateArgs) -> Value {
     json!({"create_id":create,"session_id":handle.id,"session_generation":handle.generation,
         "pane_id":handle.pane,"workspace_path":handle.workspace,"root":root,
-        "pty":handle.pty.owned_record()})
+        "pty":handle.pty.owned_record(),"argv_source":parsed.argv_source,
+        "argv0":argv0_json(&parsed.argv0)})
+}
+
+fn argv0_json(argv0: &compose::Argv0) -> Value {
+    json!({"len":argv0.len,"head":argv0.head,"tail":argv0.tail})
 }
 
 /// 5.1.3: before any PTY or process exists, the worst-case encoded `SESSION_OWNED` of this
@@ -685,7 +729,8 @@ fn handoff_size_ok(create: u64, args: &CreateArgs) -> bool {
         "start_value":"x".repeat(40)});
     let meta = json!({"create_id":create,"session_id":args.id,"session_generation":args.generation,
         "pane_id":args.pane,"workspace_path":args.workspace,"root":root,
-        "pty":{"tty":"x".repeat(TTY_NAME_MAX)}});
+        "pty":{"tty":"x".repeat(TTY_NAME_MAX)},"argv_source":args.argv_source,
+        "argv0":argv0_json(&args.argv0)});
     let bytes = serde_json::to_vec(&meta)
         .map(|b| b.len())
         .unwrap_or(usize::MAX);
@@ -782,6 +827,10 @@ fn post_effect_failure(verified: bool, what: &str, error: &io::Error) -> io::Err
 
 fn spawn(args: &Value, wire: &Wire, request: u64, sessions: &Sessions) -> io::Result<Spawned> {
     let parsed = create_args(args)?;
+    // Python checked the directory before it sent CREATE; it can vanish in between (delta 2.7).
+    if !std::path::Path::new(&parsed.cwd).is_dir() {
+        return Err(io::Error::other("cwd is not a directory at the spawn boundary"));
+    }
     let (pty, slave) = SessionPty::open(parsed.rows, parsed.cols)?;
     // Uniqueness of the slave name among this generation's live sessions (5.2, 6.4).
     if !sessions.lock().unwrap().ttys.insert(pty.tty().to_owned()) {
@@ -1634,8 +1683,22 @@ fn classify(request_code: u16, message: &str) -> (&'static str, &'static str) {
         _ if creating => "SPAWN_FAILED",
         _ => "IO_FAILED",
     };
+    let composition_stage = match message.strip_prefix("invalid ").and_then(|rest| rest.split(':').next()) {
+        Some("launch_shape") => Some("launch_shape"),
+        Some("option") => Some("option"),
+        Some("compose") => Some("compose"),
+        Some("validate") => Some("validate"),
+        Some("composition") => Some("composition"),
+        _ => None,
+    };
     let stage = if message == "invalid handoff_size" {
         "handoff_size"
+    } else if let Some(stage) = composition_stage {
+        stage
+    } else if message.starts_with("invalid env") {
+        "validate"
+    } else if message.starts_with("cwd ") {
+        "cwd"
     } else if creating {
         "spawn"
     } else {
@@ -1688,7 +1751,7 @@ fn create(req: &Request, sessions: &Sessions, wire: &Arc<Wire>) -> io::Result<Va
         registry.sessions.insert(parsed.id.clone(), handle.clone());
         cancelled
     };
-    let owned_event = owned_meta(req.id, &handle, &root);
+    let owned_event = owned_meta(req.id, &handle, &root, &parsed);
     let (thread_handle, thread_wire, thread_sessions) =
         (handle.clone(), wire.clone(), sessions.clone());
     #[cfg(feature = "fault-hooks")]
@@ -2119,7 +2182,7 @@ fn stdout_line(value: &Value) -> io::Result<()> {
 }
 
 fn fatal_line(error_code: &str, message: &str) {
-    let _ = stdout_line(&json!({"event":"fatal","protocol":"navide-acr","wire":1,
+    let _ = stdout_line(&json!({"event":"fatal","protocol":"navide-acr","wire":frame::WIRE_VERSION,
         "error":{"code":error_code,"message":message,"stage":"initialize"}}));
 }
 
@@ -2959,6 +3022,8 @@ mod lifecycle_tests {
             cwd: "/".into(),
             agent: String::new(),
             argv: vec!["x".into()],
+            argv_source: "rust",
+            argv0: compose::attest(&"/x".repeat(300)),
             rows: 24,
             cols: 80,
         };
@@ -2971,7 +3036,7 @@ mod lifecycle_tests {
         let ok = |extra: &[&str]| {
             let mut args: Vec<String> = [
                 "--wire",
-                "1",
+                "2",
                 "--runtime-generation",
                 "00112233445566778899aabbccddeeff",
                 "--owner-pid",
@@ -2988,7 +3053,7 @@ mod lifecycle_tests {
         };
         assert!(ok(&[]).is_ok());
         assert_eq!(ok(&["--bogus"]).err().map(|e| e.0), Some("STARTUP_FAILED"));
-        let mut wrong = vec!["--wire", "2"];
+        let mut wrong = vec!["--wire", "1"]; // a wire-1 request of a wire-2 sidecar is refused (delta 1)
         wrong.extend([
             "--runtime-generation",
             "00112233445566778899aabbccddeeff",
@@ -3005,7 +3070,7 @@ mod lifecycle_tests {
             Some("INCOMPATIBLE_WIRE")
         );
         assert_eq!(
-            parse_args(&["--wire".to_string(), "1".to_string()])
+            parse_args(&["--wire".to_string(), "2".to_string()])
                 .err()
                 .map(|e| e.0),
             Some("STARTUP_FAILED")

@@ -5,7 +5,7 @@
 use serde_json::Value;
 
 pub const HEADER_LEN: usize = 32;
-pub const WIRE_VERSION: u8 = 1;
+pub const WIRE_VERSION: u8 = 2;
 pub const FLAG_HAS_FD: u16 = 1;
 
 /// Python -> sidecar limits (section 2.1).
@@ -385,7 +385,7 @@ mod tests {
         assert_eq!(
             bytes,
             [
-                0x4E, 0x43, 0x01, 0x01, 0x00, 0x06, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3, 4,
+                0x4E, 0x43, 0x02, 0x01, 0x00, 0x06, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3, 4,
                 5, 6, 7, 8, 0, 0, 0, 2, 0, 0, 0, 0, 0x7B, 0x7D
             ]
         );
