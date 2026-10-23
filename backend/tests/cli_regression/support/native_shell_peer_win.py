@@ -153,6 +153,22 @@ def main() -> int:
         if line == "burst":
             worker = threading.Thread(target=burst)
             worker.start()
+        elif line == "ctrlc-self":
+            # Diagnostic only (sent by the test after a missed interrupt): does CTRL_C_EVENT raised on this
+            # console reach this process, and what state is it in?
+            kernel32.GenerateConsoleCtrlEvent(0, 0)
+            fired = False
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not fired:
+                try:
+                    interrupts.get(timeout=0.05)
+                    fired = True
+                except queue.Empty:
+                    pass
+            mode = wintypes.DWORD()
+            kernel32.GetConsoleMode(kernel32.GetStdHandle(STD_INPUT_HANDLE), ctypes.byref(mode))
+            emit("CTRLC_SELF " + json.dumps({"fired": fired, "handler": repr(signal.getsignal(signal.SIGINT)),
+                                             "inputMode": mode.value, "ignoredAtStart": ignored}))
         elif line == "size":
             emit("SIZE " + json.dumps(dimensions()))
         elif line == "split":
