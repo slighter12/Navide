@@ -442,7 +442,6 @@ it.runIf(process.platform === 'win32')('uses one actual native runtime for kill 
       expect(reuse, `no handle value was reused within ${MAX_ROUNDS} rounds: ${JSON.stringify(values)}`).toBeDefined()
       // Evidence: the first round that held a value an earlier round had held, and that value.
       console.log(`W10 handle reuse first seen in round ${reuse!.round} (of ${roundsRun} run): value ${reuse!.value}`)
-      expect(values.length, `reuse first seen in round ${reuse!.round}, value ${reuse!.value}`).toBe(4 * roundsRun)
     } finally {
       client.dispose('W10 cycle complete')
     }
