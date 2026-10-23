@@ -59,7 +59,7 @@ def test_golden_vectors_encode_byte_for_byte_and_decode():
 
 def test_section_2_6_worked_example():
     assert frames.encode_raw(FrameType.REQUEST, code.PING, 0, 1, 0x0102030405060708, b"{}", b"").hex() == (
-        "4e430101000600000000000000000001" "0102030405060708" "0000000200000000" "7b7d")
+        "4e430201000600000000000000000001" "0102030405060708" "0000000200000000" "7b7d")
 
 
 def test_runtime_tag_is_first_eight_bytes_big_endian():

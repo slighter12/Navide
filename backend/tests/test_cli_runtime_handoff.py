@@ -153,7 +153,7 @@ async def test_h1_healthy_handshake_records_the_real_hashed_binary(rig):
     await service._ensure_started()
     ready = next(r for r in rig.receipts() if r["event"] == "ready")
     assert ready["executableSha256"] == sha256(rig.binary) == service._runtime_identity["executableSha256"]
-    assert (ready["protocol"], ready["wire"], ready["handoff"], ready["ownership_gate"]) == ("navide-acr", 1, "scm_rights", True)
+    assert (ready["protocol"], ready["wire"], ready["handoff"], ready["ownership_gate"]) == ("navide-acr", 2, "scm_rights", True)
     assert ready["pid"] == service._runtime.pid == ready["pid"] and ready["owner_pid"] == os.getpid()
     assert service._limits["cleanup_ms"] == 8000 and service._ready_ok
     ping = await service._request("ping")
@@ -190,7 +190,7 @@ async def test_h4_incompatible_wire_is_a_protocol_mismatch_and_the_sidecar_is_en
 
 def ready_for(service, **changes) -> dict:
     """A well-formed ready record for the service's current spawn (mutated by `changes`)."""
-    ready = {"event": "ready", "protocol": "navide-acr", "wire": 1, "version": "0.1.0",
+    ready = {"event": "ready", "protocol": "navide-acr", "wire": 2, "version": "0.1.0",
              "runtime": "navide-cli-runtime", "runtime_generation": service._runtime_generation,
              "pid": service._runtime.pid, "owner_pid": os.getpid(), "platform": "macos", "arch": "aarch64",
              "pty_backend": "posix", "handoff": "scm_rights", "ownership_gate": True,
@@ -206,7 +206,7 @@ async def test_h5_h7_ready_with_a_wrong_field_or_a_g1_candidate_protocol_is_a_mi
     limits = lambda **c: {**ready_for(service)["limits"], **c}  # noqa: E731
     bad = [
         {"runtime_generation": "0" * 32}, {"pid": service._runtime.pid + 1}, {"owner_pid": os.getpid() + 1},
-        {"handoff": "duplicate_handle"}, {"ownership_gate": False}, {"version": ""}, {"wire": 2},
+        {"handoff": "duplicate_handle"}, {"ownership_gate": False}, {"version": ""}, {"wire": 1},
         {"protocol": 1}, {"runtime": "other"}, {"wire": True},  # a G1-candidate sidecar answers protocol 1, no wire
         {"limits": limits(max_frame_r2p=wire_ceiling() + 1)}, {"limits": limits(request_ms=15_001)},
         {"limits": {k: v for k, v in limits().items() if k != "cleanup_ms"}}, {"limits": limits(cleanup_ms="8000")},
@@ -283,7 +283,7 @@ async def test_h8_bytes_after_ready_on_stdout_are_a_protocol_error(rig, monkeypa
     stub.write_text(f"""#!{sys.executable}
 import json, os, sys, time
 generation = sys.argv[sys.argv.index("--runtime-generation") + 1]
-ready = {{"event": "ready", "protocol": "navide-acr", "wire": 1, "version": "0", "runtime": "navide-cli-runtime",
+ready = {{"event": "ready", "protocol": "navide-acr", "wire": 2, "version": "0", "runtime": "navide-cli-runtime",
          "runtime_generation": generation, "pid": os.getpid(), "owner_pid": os.getppid(), "handoff": "scm_rights",
          "ownership_gate": True, "limits": {json.dumps(dict(cli_runtime._LIMIT_CEILINGS, ownership_snapshot_ms=dict(cli_runtime._SNAPSHOT_CEILINGS)))}}}
 sys.stdout.write(json.dumps(ready) + "\\n"); sys.stdout.flush()
@@ -339,7 +339,7 @@ async def test_p1_an_oversized_handoff_is_refused_before_any_process_exists(rig)
     await service._ensure_started()
     before = len(psutil.Process(service._runtime.pid).children())
     args = {"session_id": "s-big", "session_generation": "a" * 32, "pane_id": "p", "workspace_path": "/w" * 2100,
-            "argv": ["/bin/cat"], "cwd": str(rig.workspace), "env": {"PATH": "/usr/bin:/bin"}, "cols": 80, "rows": 24,
+            "launch": {"shape": "direct", "form": "list", "elements": ["/bin/cat"], "words": []}, "cwd": str(rig.workspace), "env": {"PATH": "/usr/bin:/bin"}, "cols": 80, "rows": 24,
             "agent_key": "terminal"}
     with pytest.raises(cli_runtime._RuntimeRefused, match=r"BAD_REQUEST at handoff_size"):
         await service._request("create", args)

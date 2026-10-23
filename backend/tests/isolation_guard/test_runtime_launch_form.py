@@ -27,7 +27,7 @@ def good(fd: int = 9) -> list[str]:
 
 
 def test_the_exact_form_is_matched_and_yields_the_control_descriptor():
-    assert good(9) == [RUNTIME, '--wire', '1', '--runtime-generation', GENERATION, '--owner-pid', '4242',
+    assert good(9) == [RUNTIME, '--wire', '2', '--runtime-generation', GENERATION, '--owner-pid', '4242',
                        '--ownership-journal', str(JOURNAL), '--control-fd', '9']
     assert match_runtime_launch(good(9), RUNTIME, PID, DATA) == 9
     assert match_runtime_launch(tuple(good(12)), RUNTIME, PID, DATA) == 12
@@ -35,7 +35,7 @@ def test_the_exact_form_is_matched_and_yields_the_control_descriptor():
 
 @pytest.mark.parametrize('label,mutate', [
     ('the old --protocol form', lambda a: [a[0], '--protocol', '1', *a[3:7]]),
-    ('a different wire version', lambda a: [*a[:2], '2', *a[3:]]),
+    ('a different wire version', lambda a: [*a[:2], '1', *a[3:]]),
     ('another executable', lambda a: ['/elsewhere/runtime', *a[1:]]),
     ('a non-hex generation', lambda a: [*a[:4], 'z' * 32, *a[5:]]),
     ('a short generation', lambda a: [*a[:4], 'ab' * 8, *a[5:]]),
@@ -49,7 +49,7 @@ def test_the_exact_form_is_matched_and_yields_the_control_descriptor():
     ('a descriptor with a sign', lambda a: [*a[:10], '+9']),
     ('a descriptor with leading zeros', lambda a: [*a[:10], '09']),
     ('a non-ascii digit', lambda a: [*a[:10], '\u0669']),
-    ('swapped flags', lambda a: [a[0], '--runtime-generation', a[4], '--wire', '1', *a[5:]]),
+    ('swapped flags', lambda a: [a[0], '--runtime-generation', a[4], '--wire', '2', *a[5:]]),
 ])
 def test_every_deviation_is_refused_with_no_blanket_allowance(label, mutate):
     assert match_runtime_launch(mutate(good(9)), RUNTIME, PID, DATA) is None, label

@@ -1579,3 +1579,35 @@ async def test_b6_an_unresolved_panel_settlement_refuses_and_retires_no_record(r
         for tid in list(service._sessions):
             with contextlib.suppress(Exception):
                 await service.kill(tid, force=True)
+
+
+async def test_a_sidecar_refusal_keeps_the_session_id_and_the_sidecars_own_stage(rig, monkeypatch):
+    """A refusal by the sidecar happens after the session id was allocated, so its `create_failed` receipt
+    names that id and the sidecar's stage; a Python pre-CREATE refusal has neither. Substituted: the
+    launch Python would build, replaced by one that names an option the shell does not declare."""
+    from agent_team_backend import cli_launch
+    monkeypatch.setattr(cli_launch, "build_launch", lambda *_a, **_k: {
+        "shape": "direct", "form": "string", "words": [{"lit": "true"}, {"opt": "model", "value": "x"}]})
+    service = rig.service()
+    with pytest.raises(RuntimeError):
+        await rig.shell(service, "pane-refused", command="true")
+    failed = [r for r in rig.receipts() if r["event"] == "create_failed"]
+    assert len(failed) == 1, failed
+    assert isinstance(failed[0]["session_id"], str) and failed[0]["session_id"]
+    assert failed[0]["stage"] == "option" and failed[0]["effect"] == "none"
+    assert not [r for r in rig.receipts() if r["event"] == "owned"]
+
+
+async def test_an_attestation_that_does_not_match_the_program_sent_is_a_failed_binding_check_that_kills_the_root(rig, monkeypatch):
+    """Substituted: Python's belief about the program it sent, so that the real sidecar's honest attestation
+    no longer matches it. The real verification then rejects the handoff like any failed binding check."""
+    monkeypatch.setattr(RustTerminalService, "_expected_program", staticmethod(lambda _launch: "/not/the/program"))
+    registered: list = []
+    monkeypatch.setattr(pty_registry, "register_owned", lambda *args, **_k: registered.append(args))
+    service = rig.service()
+    with pytest.raises(RuntimeError):
+        await rig.shell(service, "pane-bad-attestation")
+    rejected = [r for r in rig.receipts() if r["event"] == "handoff_rejected"]
+    assert len(rejected) == 1 and rejected[0]["check"] == "argv0", rejected
+    assert [args[1] for args in registered] == [[""]], "only the identity is registered; no unverified program text is persisted"
+    assert registered and not psutil.pid_exists(registered[0][0]), "the rejected root was killed"

@@ -8882,6 +8882,9 @@ async def _terminal_create_impl(
     # Lines the pane prints at startup when this machine cannot wire it (see
     # wire_command): the only other trace is a backend log the user never sees.
     wiring_warnings: list[str] = []
+    # The command as submitted (after the binary, alias and login rewrites) is what the Rust runtime
+    # tokenises; whatever the injectors below append is described separately (cli_launch.build_launch).
+    base_command = payload["command"]
     # Keyed on the sign-in SUBCOMMAND, not on `login_profile_id` (which a live
     # login does not carry) nor on `is_login` (which a REPL-launching vendor
     # also sets): a subcommand rejects the top-level flags wired below —
@@ -9056,7 +9059,8 @@ async def _terminal_create_impl(
             output_log_file=payload.get("output_log_file") or "",
             **({"spawn_command": spawn_command} if spawn_command is not None else {}),
             **({"cancelled": lambda: transaction["cancelled"] or session.dead,
-                "cancel_record": transaction} if native else {}),
+                "cancel_record": transaction, "base_command": base_command,
+                "login_subcommand": login_subcommand} if native else {}),
         )
         if native:
             try:

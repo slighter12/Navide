@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 HEADER_LEN = 32
-WIRE_VERSION = 1
+WIRE_VERSION = 2
 FLAG_HAS_FD = 1
 
 #: Python -> sidecar limits (2.1).
