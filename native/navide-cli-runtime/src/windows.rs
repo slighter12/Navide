@@ -606,14 +606,34 @@ fn retain_members(handle: &SessionHandle, owned: &mut Owned) -> Vec<Identity> {
 }
 
 /// Kill the whole tree by identity and confirm the job is empty; what is left is a survivor.
-fn end_tree(handle: &SessionHandle, owned: &mut Owned) -> io::Result<Vec<Value>> {
+fn end_tree(
+    handle: &SessionHandle,
+    owned: &mut Owned,
+    deadline: Instant,
+) -> io::Result<Vec<Value>> {
     retain_members(handle, owned);
-    let _ = handle.pty.terminate_tree();
+    end_tree_by(
+        deadline,
+        || {
+            let _ = handle.pty.terminate_tree();
+        },
+        |bound| handle.pty.wait_tree_empty(bound),
+        || Ok(handle.pty.members()?.iter().map(Identity::record).collect()),
+    )
+}
+
+fn end_tree_by(
+    _deadline: Instant,
+    terminate: impl FnOnce(),
+    wait_empty: impl FnOnce(Duration) -> io::Result<bool>,
+    members: impl FnOnce() -> io::Result<Vec<Value>>,
+) -> io::Result<Vec<Value>> {
+    terminate();
     let bound = Duration::from_millis(KILL_ESCALATION_MS + REAP_CONFIRM_MS);
-    if handle.pty.wait_tree_empty(bound)? {
+    if wait_empty(bound)? {
         return Ok(Vec::new());
     }
-    Ok(handle.pty.members()?.iter().map(Identity::record).collect())
+    members()
 }
 
 /// `ClosePseudoConsole` on its own thread, only after the pre-close gate (7.3). `deadline` is the one
@@ -668,7 +688,7 @@ fn natural_cleanup(handle: &SessionHandle, state: &mut State) -> Outcome {
     let deadline = *state
         .gate_deadline
         .get_or_insert_with(|| Instant::now() + Duration::from_millis(cleanup_ms()));
-    match end_tree(handle, &mut state.owned) {
+    match end_tree(handle, &mut state.owned, deadline) {
         Ok(survivors) => outcome.survivors = survivors,
         Err(error) => outcome.failure = Some(error.to_string()),
     }
@@ -700,7 +720,7 @@ fn kill_cleanup(
         return outcome;
     }
     send_exited(handle, state, wire);
-    match end_tree(handle, &mut state.owned) {
+    match end_tree(handle, &mut state.owned, deadline) {
         Ok(survivors) => outcome.survivors = survivors,
         Err(error) => outcome.failure = Some(error.to_string()),
     }
@@ -833,7 +853,8 @@ fn session_thread(
                     // 7.3: nobody serviced the pipe in time. The console stays open (closing it
                     // could hang) and dies with this process; the tree is ended and reported.
                     let mut outcome = Outcome::default();
-                    match end_tree(&handle, &mut state.owned) {
+                    let deadline = state.gate_deadline.unwrap_or(now);
+                    match end_tree(&handle, &mut state.owned, deadline) {
                         Ok(survivors) => outcome.survivors = survivors,
                         Err(error) => outcome.failure = Some(error.to_string()),
                     }
@@ -1491,6 +1512,59 @@ mod tests {
             },
         );
         assert_eq!(result, Ok(()));
+    }
+
+    /// A tree that never empties: the wait takes whatever bound it is given (capped), like the real job wait.
+    fn stubborn_tree(deadline: Instant) -> (io::Result<Vec<Value>>, Duration) {
+        let started = Instant::now();
+        let result = end_tree_by(
+            deadline,
+            || {},
+            |bound| {
+                std::thread::sleep(bound.min(Duration::from_secs(5)));
+                Ok(false)
+            },
+            || Ok(vec![json!({"pid": 7})]),
+        );
+        (result, started.elapsed())
+    }
+
+    /// E5 final review 4 finding 2: tree termination is bounded by the one cleanup deadline.
+    #[test]
+    fn tree_termination_never_outlives_the_cleanup_deadline() {
+        let bound = Duration::from_millis(300);
+        let (result, took) = stubborn_tree(Instant::now() + bound);
+        assert_eq!(
+            result.unwrap().len(),
+            1,
+            "an unemptied tree must be reported"
+        );
+        assert!(
+            took < bound + Duration::from_millis(400),
+            "tree cleanup took {took:?} for a {bound:?} deadline"
+        );
+    }
+
+    /// The no-gate branch ends the tree after its deadline already passed: nothing more may be waited.
+    #[test]
+    fn tree_termination_after_the_deadline_waits_for_nothing() {
+        let (result, took) = stubborn_tree(Instant::now());
+        assert_eq!(result.unwrap().len(), 1);
+        assert!(
+            took < Duration::from_millis(300),
+            "waited {took:?} past the deadline"
+        );
+    }
+
+    #[test]
+    fn a_tree_that_empties_inside_the_deadline_reports_no_survivors() {
+        let result = end_tree_by(
+            Instant::now() + Duration::from_secs(5),
+            || {},
+            |_| Ok(true),
+            || panic!("an emptied tree lists no members"),
+        );
+        assert!(result.unwrap().is_empty());
     }
 
     #[test]
