@@ -34,7 +34,7 @@ use windows_sys::Win32::System::Threading::{
     InitializeProcThreadAttributeList, OpenProcess, ResumeThread, TerminateProcess,
     UpdateProcThreadAttribute, WaitForSingleObject, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
     EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTUPINFOEXW,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 use windows_sys::Win32::System::IO::{CreateIoCompletionPort, GetQueuedCompletionStatus};
 
@@ -228,6 +228,9 @@ impl SessionPty {
         let directory = wide(OsStr::new(cwd));
         let mut startup = STARTUPINFOEXW::default();
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+        // Null std handles: without this a redirected parent hands its own stdio to the child
+        // instead of the pseudoconsole.
+        startup.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
         startup.lpAttributeList = attributes.as_ptr();
         let mut process = PROCESS_INFORMATION::default();
         // SAFETY: every pointer stays valid for the call; the attribute list holds the live console.
