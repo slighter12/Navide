@@ -1120,11 +1120,14 @@ fn cleanup(
     let still_running = wait_exit(&pids, deadline);
     let final_table = snapshot(None, &known_owned(&state.owned), &mut state.owned.births)?;
     retain_owned(&mut state.owned, &final_table);
-    Ok(survivors_after_cleanup(
-        &state.owned.descendants,
-        &final_table,
-        &signalled,
-        &still_running,
+    Ok(with_unresolved(
+        survivors_after_cleanup(
+            &state.owned.descendants,
+            &final_table,
+            &signalled,
+            &still_running,
+        ),
+        &state.owned.births,
     ))
 }
 
@@ -1167,6 +1170,20 @@ fn survivors_after_cleanup(
             survivors.push(identity(*child, old));
         }
     }
+    survivors
+}
+
+/// Add the live group members the Linux pre-6.9 fallback refused to signal (never admitted by this session) to
+/// `survivors`, so cleanup does not report complete while they run. macOS has no such fallback.
+fn with_unresolved(mut survivors: Vec<Value>, births: &Births) -> Vec<Value> {
+    #[cfg(target_os = "linux")]
+    for (pid, entry) in births.refused_alive() {
+        if !survivors.iter().any(|known| known["pid"] == pid) {
+            survivors.push(identity(pid, &entry));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let _ = births;
     survivors
 }
 
