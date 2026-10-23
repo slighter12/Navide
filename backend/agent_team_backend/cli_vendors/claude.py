@@ -34,7 +34,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import osplat
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
-from ._claude_facts import CLAUDE
+from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -1285,7 +1285,9 @@ async def fetch_claude_account_dir(config_dir: Path) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(rf"^{re.escape(CLAUDE.command)}\s+(?:\S+\s+)*{re.escape(CLAUDE.resume_flag)}\s+(\S+)")
+CLAUDE = FACTS["claude"]
+_RESUME_RE = re.compile(
+    rf"^{re.escape(CLAUDE.command)}\s+(?:\S+\s+)*{re.escape(CLAUDE.resume_args.removesuffix(' {id}'))}\s+(\S+)")
 
 
 def _resume_id_from_command(command) -> str:
@@ -1434,9 +1436,9 @@ SPEC = VendorSpec(
     # search across other accounts when this pane has an isolated config dir.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("CLAUDE_CONFIG_DIR") or ctx.home / ".claude"),),
     data_dir_env_vars=("CLAUDE_CONFIG_DIR",),
-    supports_model=True,
-    supports_effort=True,
-    known_efforts=CLAUDE.known_efforts,
+    supports_model=CLAUDE.model_flag is not None,
+    supports_effort=CLAUDE.effort_flag is not None,
+    known_efforts=CLAUDE.known_efforts or (),
     skills_supported=True,
     # --add-dir adds another project directory, and Claude Code discovers a
     # project's skills below .claude/skills — so the view has to carry that
@@ -1593,6 +1595,6 @@ SPEC = VendorSpec(
     # (previous prompts shown when scrolling up) disappears. 3s is the room the
     # handler needs for a read-modify-write of that file, and the master stays
     # open across it because a HUP mid-write is the same lost entry.
-    shutdown=ShutdownSpec(graceful=CLAUDE.graceful, grace_s=CLAUDE.grace_s,
-                          defer_master_close=CLAUDE.defer_master_close),
+    shutdown=ShutdownSpec(graceful=CLAUDE.shutdown.graceful, grace_s=CLAUDE.shutdown.grace_s,
+                          defer_master_close=CLAUDE.shutdown.defer_master_close),
 )

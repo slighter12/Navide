@@ -28,8 +28,6 @@ mod linux;
 mod adapters;
 #[path = "claude.rs"]
 mod claude;
-#[path = "claude_facts.rs"]
-mod claude_facts;
 #[path = "codex.rs"]
 mod codex;
 #[cfg(all(test, target_os = "macos"))]
@@ -38,6 +36,8 @@ mod initial_retention_test;
 #[cfg(target_os = "macos")]
 #[path = "opencode.rs"]
 mod opencode;
+#[path = "vendor_facts.rs"]
+mod vendor_facts;
 
 // ---- named bounds (E1 13.1: every bound has a named source) -------------------------------
 /// Bound for observing the root's exit status after a SIGKILL (cleanup's root reap).

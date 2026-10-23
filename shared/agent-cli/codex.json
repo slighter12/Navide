@@ -1,0 +1,21 @@
+{
+  "key": "codex",
+  "command": "codex",
+  "model_flag": "--model",
+  "effort_flag": null,
+  "known_efforts": null,
+  "permission_flag": "--dangerously-bypass-approvals-and-sandbox",
+  "resume_args": "resume {id}",
+  "session_id_flag": null,
+  "login_args": "login",
+  "supports_session_resume": true,
+  "shutdown": null,
+  "capabilities": {
+    "model": "integrated",
+    "effort": "not-yet-integrated",
+    "skip_permissions": "integrated",
+    "resume_by_id": "integrated",
+    "session_id_at_launch": "unknown",
+    "login": "integrated"
+  }
+}

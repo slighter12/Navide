@@ -1,0 +1,21 @@
+{
+  "key": "mcode",
+  "command": "mcode",
+  "model_flag": null,
+  "effort_flag": null,
+  "known_efforts": null,
+  "permission_flag": null,
+  "resume_args": null,
+  "session_id_flag": null,
+  "login_args": "login",
+  "supports_session_resume": false,
+  "shutdown": null,
+  "capabilities": {
+    "model": "vendor-unsupported",
+    "effort": "vendor-unsupported",
+    "skip_permissions": "vendor-unsupported",
+    "resume_by_id": "not-yet-integrated",
+    "session_id_at_launch": "unknown",
+    "login": "integrated"
+  }
+}

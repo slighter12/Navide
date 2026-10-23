@@ -1,0 +1,21 @@
+{
+  "key": "goose",
+  "command": "goose",
+  "model_flag": null,
+  "effort_flag": null,
+  "known_efforts": null,
+  "permission_flag": null,
+  "resume_args": "session -r --session-id {id}",
+  "session_id_flag": null,
+  "login_args": null,
+  "supports_session_resume": true,
+  "shutdown": null,
+  "capabilities": {
+    "model": "unknown",
+    "effort": "unknown",
+    "skip_permissions": "vendor-unsupported",
+    "resume_by_id": "integrated",
+    "session_id_at_launch": "vendor-unsupported",
+    "login": "unknown"
+  }
+}

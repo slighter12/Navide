@@ -1,0 +1,21 @@
+{
+  "key": "pi",
+  "command": "pi",
+  "model_flag": "--model",
+  "effort_flag": "--thinking",
+  "known_efforts": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+  "permission_flag": null,
+  "resume_args": "--session-id {id}",
+  "session_id_flag": null,
+  "login_args": null,
+  "supports_session_resume": true,
+  "shutdown": null,
+  "capabilities": {
+    "model": "integrated",
+    "effort": "integrated",
+    "skip_permissions": "vendor-unsupported",
+    "resume_by_id": "integrated",
+    "session_id_at_launch": "not-yet-integrated",
+    "login": "unknown"
+  }
+}

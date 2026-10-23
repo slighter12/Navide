@@ -1,0 +1,21 @@
+{
+  "key": "antigravity",
+  "command": "agy",
+  "model_flag": "--model",
+  "effort_flag": "--effort",
+  "known_efforts": ["low", "medium", "high"],
+  "permission_flag": "--dangerously-skip-permissions",
+  "resume_args": "--conversation {id}",
+  "session_id_flag": null,
+  "login_args": null,
+  "supports_session_resume": true,
+  "shutdown": null,
+  "capabilities": {
+    "model": "integrated",
+    "effort": "integrated",
+    "skip_permissions": "integrated",
+    "resume_by_id": "integrated",
+    "session_id_at_launch": "unknown",
+    "login": "unknown"
+  }
+}

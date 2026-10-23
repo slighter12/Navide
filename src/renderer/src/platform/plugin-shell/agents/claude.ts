@@ -1,21 +1,23 @@
 /** Claude Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { CLAUDE } from './_claudeFacts'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.claude
 
 export const SPEC = {
   agentKey: 'claude',
   label: 'Claude Code (Anthropic)',
-  defaultCommand: CLAUDE.command,
+  defaultCommand: FACT.command,
   // `--effort` warns and falls back to the default on an unknown value
   // (exit 0), so an unchecked typo would run at the wrong effort and look
   // like it worked — hence knownEfforts. `ultracode` is deliberately absent:
   // it is a Claude Code orchestration mode, not a model effort level.
-  modelArgs: (m) => `${CLAUDE.model_flag} ${m}`,
-  effortArgs: (e) => `${CLAUDE.effort_flag} ${e}`,
-  knownEfforts: CLAUDE.known_efforts,
-  skipPermissionFlag: CLAUDE.permission_flag,
-  resumeArgs: (id) => `${CLAUDE.resume_flag} ${id}`,
+  modelArgs: (m) => `${FACT.model_flag} ${m}`,
+  effortArgs: (e) => `${FACT.effort_flag} ${e}`,
+  knownEfforts: FACT.known_efforts,
+  skipPermissionFlag: FACT.permission_flag,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   supportsRebuild: true,
   verifiedTurnText: true,
   bracketedPaste: true,
@@ -42,7 +44,7 @@ export const SPEC = {
   // into a custom command — Claude only accepts a UUID here, so a strict match
   // is the deterministic parse and anything else yields no pin.
   pinsSessionIdAtLaunch: {
-    flag: CLAUDE.session_id_flag,
+    flag: FACT.session_id_flag,
     handwritten:
       /--session-id[=\s]+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?![0-9a-fA-F-])/,
   },

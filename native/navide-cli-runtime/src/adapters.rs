@@ -31,7 +31,6 @@ pub struct ShutdownSpec {
 /// The declared shutdown of the adapter registered for `agent_key`, if it declares one. An
 /// ordinary shell (`""`/`"terminal"`) and every vendor without a declaration have none.
 pub fn shutdown(agent_key: &str) -> Option<ShutdownSpec> {
-    use super::claude_facts as claude;
     #[cfg(feature = "fault-hooks")]
     if agent_key == FAULT_GRACEFUL {
         return Some(ShutdownSpec {
@@ -40,23 +39,21 @@ pub fn shutdown(agent_key: &str) -> Option<ShutdownSpec> {
             defer_master_close: true,
         });
     }
-    match agent_key {
-        key if key == claude::KEY => Some(ShutdownSpec {
-            graceful: claude::GRACEFUL,
-            grace_ms: claude::GRACE_MS,
-            defer_master_close: claude::DEFER_MASTER_CLOSE,
-        }),
-        _ => None,
-    }
+    super::vendor_facts::find(agent_key)
+        .and_then(|facts| facts.shutdown)
+        .map(|declared| ShutdownSpec {
+            graceful: declared.graceful,
+            grace_ms: declared.grace_ms,
+            defer_master_close: declared.defer_master_close,
+        })
 }
 
 /// The largest graceful grace any registered adapter declares (derives `cleanup_ms`).
 pub fn max_grace_ms() -> u64 {
-    use super::claude_facts as claude;
-    // The registered adapters, named by their own declarations (never a key literal in this shared function).
-    [claude::KEY]
+    // Every declared vendor, by its own declaration (never a key literal in this shared function).
+    super::vendor_facts::VENDORS
         .iter()
-        .filter_map(|key| shutdown(key))
+        .filter_map(|facts| shutdown(facts.key))
         .filter(|spec| spec.graceful)
         .map(|spec| spec.grace_ms)
         .max()

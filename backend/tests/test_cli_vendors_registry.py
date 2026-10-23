@@ -16,7 +16,6 @@ import ast
 import inspect
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -51,7 +50,7 @@ NON_VENDOR_AGENT_KEYS = {"terminal"}
 # platform seam from a vendor cannot form a cycle.
 ALLOWED_LOCAL_IMPORTS = {
     "base", "_protocols", "applog", "log_readers.base", "osplat", "skills_store",
-    "usage_common", "_claude_facts",
+    "usage_common", "_vendor_facts",
 }
 VENDOR_IMPORT_EXEMPTIONS = {"kilo": {"opencode"}}
 # psutil is a leaf (codex reads CODEX_HOME off running processes to keep a
@@ -61,18 +60,12 @@ ALLOWED_THIRD_PARTY = {"httpx", "psutil", "yaml"}
 
 def _frontend_declared_source(path: Path) -> str:
     source = path.read_text(encoding="utf-8")
-    if path.stem == "claude":
-        assert "from './_claudeFacts'" in source
-        generated = (FRONTEND_AGENTS_DIR / "_claudeFacts.ts").read_text(encoding="utf-8")
-        facts = json.loads(generated.partition("export const CLAUDE = ")[2].removesuffix(" as const\n"))
-        source = re.sub(r"CLAUDE\.(\w+)", lambda match: repr(facts[match[1]]), source)
+    if "from './_vendorFacts'" in source:
+        generated = (FRONTEND_AGENTS_DIR / "_vendorFacts.ts").read_text(encoding="utf-8")
+        table = json.loads(generated.partition("export const VENDOR_FACTS = ")[2].partition(" as const\n")[0])
+        facts = table[path.stem]
+        source = re.sub(r"FACT\.(\w+)", lambda match: repr(facts[match[1]]), source)
     return source
-
-
-def test_generated_claude_facts_are_current() -> None:
-    result = subprocess.run([sys.executable, str(REPO_ROOT / "scripts/generate-claude-facts.py"), "--check"],
-                            capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_registry_matches_expected_vendor_set() -> None:

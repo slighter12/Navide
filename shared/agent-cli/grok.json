@@ -1,0 +1,21 @@
+{
+  "key": "grok",
+  "command": "grok",
+  "model_flag": "--model",
+  "effort_flag": null,
+  "known_efforts": null,
+  "permission_flag": null,
+  "resume_args": "-r {id}",
+  "session_id_flag": "--session-id",
+  "login_args": "login",
+  "supports_session_resume": true,
+  "shutdown": null,
+  "capabilities": {
+    "model": "integrated",
+    "effort": "vendor-unsupported",
+    "skip_permissions": "not-yet-integrated",
+    "resume_by_id": "integrated",
+    "session_id_at_launch": "integrated",
+    "login": "integrated"
+  }
+}

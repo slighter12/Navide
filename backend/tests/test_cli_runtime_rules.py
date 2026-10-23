@@ -31,7 +31,7 @@ PY_SRC = ROOT / "backend/agent_team_backend"
 PRODUCT = ROOT / "native/navide-cli-runtime/target/release/navide-cli-runtime"
 HARNESS = ROOT / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime"
 
-VENDOR_MODULES = {"claude.rs", "claude_facts.rs", "codex.rs", "opencode.rs", "adapters.rs"}
+VENDOR_MODULES = {"claude.rs", "vendor_facts.rs", "codex.rs", "opencode.rs", "adapters.rs"}
 PY_RUNTIME = ["cli_runtime.py", "cli_runtime_frames.py", "cli_runtime_handoff.py", "cli_runtime_observation.py"]
 PY_VENDOR = ["cli_runtime_claude.py", "cli_runtime_adapters.py"]
 
@@ -115,7 +115,7 @@ def test_the_observation_waits_are_named_bounds_on_blocked_executor_calls():
 # -------------------------------------------------------------------------------------- vendor locality
 
 def test_shared_rust_code_never_compares_a_vendor_key():
-    pattern = re.compile(r"agent_key\s*==|claude_facts::KEY|\"claude\"|\"codex\"|\"opencode\"")
+    pattern = re.compile(r"agent_key\s*==|vendor_facts::[A-Z_]*KEY|\"claude\"|\"codex\"|\"opencode\"")
     offenders = []
     for path in rust_files():
         if path.name in VENDOR_MODULES:
