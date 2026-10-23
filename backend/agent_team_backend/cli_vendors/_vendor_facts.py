@@ -171,7 +171,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'kilo': VendorFacts(
         key='kilo',
-        composition='python',
+        composition='rust',
         command='kilo',
         model_flag='--model',
         effort_flag=None,
@@ -231,7 +231,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'opencode': VendorFacts(
         key='opencode',
-        composition='python',
+        composition='rust',
         command='opencode',
         model_flag='--model',
         effort_flag=None,
