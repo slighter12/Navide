@@ -692,6 +692,9 @@ mod tests {
         }
         let line = good["line"].as_str().unwrap();
         let shell = good["shell"].as_str().unwrap();
+        // The flag must be the SOLE flag: `-l -c` fails on count alone, apart from the `-x` set vector.
+        let two = credential(&file, shell, &json!(["-l", "-c"]), line);
+        assert!(matches!(compose("kilo", &two), Err(ComposeError::Credential(_))), "two flags");
         assert!(compose("", &credential(&file, shell, &good["flags"], line)).is_err(), "the ordinary shell has no wrapper");
         assert!(compose("claude", &credential(&file, shell, &good["flags"], line)).is_err(), "the line is not claude's");
         let mut no_helper = credential(&file, shell, &good["flags"], line);

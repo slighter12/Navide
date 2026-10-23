@@ -142,3 +142,37 @@ def test_the_wrapper_arguments_survive_the_credential_shape_exactly():
     launch = cli_launch.build_launch("kilo", base, final, credential=plan)
     assert cli_launch.render(launch["inner"]["words"], "kilo") == line
     assert shlex.split(line)[0] == "/x/bin/kilo"
+
+
+def test_two_shell_flags_are_not_a_sole_flag():
+    """`simple_command_args` admits `-c`, `-lc` and `-ilc` only as the SOLE flag, so `-l -c` is declined by
+    its own rule, independently of the `-x` vector (which fails the flag set, not the count)."""
+    command = ["/bin/bash", "-l", "-c", "/x/bin/kilo"]
+    assert credential_launch.wrap_command(command, KILO, HELPER) is None
+    assert credential_launch.wrap_plan(command, KILO, HELPER) is None
+
+
+def _attested(path: str) -> dict:
+    head, tail = cli_launch._cut(path)
+    return {"len": len(path.encode()), "head": head, "tail": tail}
+
+
+@pytest.mark.parametrize("form", ["script", "entrypoint"])
+def test_the_credential_launch_attests_the_program_it_really_executes(form):
+    """Script form: the inner shell. Entrypoint form: the helper's interpreter (HELPER[0])."""
+    from agent_team_backend.cli_runtime import RustTerminalService
+    if form == "script":
+        base = final = ["/bin/bash", "-lc", "/x/bin/kilo"]
+        plan = credential_launch.wrap_plan(final, KILO, HELPER)
+        executed, other = "/bin/bash", HELPER[0]
+    else:
+        base = final = "/x/bin/kilo"
+        plan = {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": "/x/bin/kilo"}
+        executed, other = HELPER[0], "/x/bin/kilo"
+    launch = cli_launch.build_launch("kilo", base, final, credential=plan)
+    expected = RustTerminalService._expected_program(launch)
+    assert expected == executed
+    assert cli_launch.verify_argv0_attestation(_attested(executed), wrapped_shell=expected) == executed
+    with pytest.raises(cli_launch.LaunchRefused) as refused:
+        cli_launch.verify_argv0_attestation(_attested(other), wrapped_shell=expected)
+    assert refused.value.code == "ATTESTATION_INVALID"
