@@ -700,7 +700,8 @@ impl Attributes {
                 list,
                 0,
                 PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
-                (&console as *const HPCON).cast(),
+                // The attribute value IS the HPCON (documented), not a pointer to it.
+                console as *const c_void,
                 size_of::<HPCON>(),
                 null_mut(),
                 null(),
