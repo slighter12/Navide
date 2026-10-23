@@ -136,7 +136,7 @@ def owned_world(tmp_path, monkeypatch, *, tty_master=True):
     service._data_dir = tmp_path
     sid = "session-under-test"
     args = {"session_id": sid, "session_generation": "a" * 32, "pane_id": "pane-x", "workspace_path": "/work/space",
-            "argv": ["/bin/cat"], "cwd": "/work/space"}
+            "launch": {"shape": "argv", "argv": ["/bin/cat"]}, "cwd": "/work/space"}
     service._launches[sid] = args
     service._owned[sid] = asyncio.get_running_loop().create_future()
     service._dispatched[sid] = {"generation": GENERATION, "identity": None, "request_id": 7}
@@ -154,7 +154,8 @@ def owned_world(tmp_path, monkeypatch, *, tty_master=True):
     meta = {"create_id": 7, "session_id": sid, "session_generation": "a" * 32, "pane_id": "pane-x",
             "workspace_path": "/work/space", "root": {"pid": 4242, "pgid": 4242, "start_kind": "posix-lstart",
                                                       "start_value": "Mon Jan  1 00:00:00 2026"},
-            "pty": {"tty": slave_name_of(master)}}
+            "pty": {"tty": slave_name_of(master)},
+            "argv_source": "python", "argv0": {"len": 8, "head": "/bin/cat", "tail": "/bin/cat"}}
     return service, sid, meta, master, slave, persisted
 
 
@@ -392,7 +393,7 @@ def test_b6_the_sidecar_enforces_its_inbound_byte_budget_against_a_non_conformin
         def sender():
             for index in range(6):
                 meta = {"session_id": f"s-{index}", "session_generation": f"{index:032d}", "pane_id": f"p{index}",
-                        "workspace_path": str(tmp_path), "argv": ["/usr/bin/true"], "cwd": str(tmp_path),
+                        "workspace_path": str(tmp_path), "launch": {"shape": "direct", "form": "list", "elements": ["/usr/bin/true"], "words": []}, "cwd": str(tmp_path),
                         "env": {"PATH": "/usr/bin:/bin", "PAD": "x" * 3_000_000}, "cols": 80, "rows": 24, "agent_key": ""}
                 ids.append(peer.send(code.CREATE, meta))
 

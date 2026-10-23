@@ -65,7 +65,7 @@ def test_s4_cancel_before_the_gate_is_prevented_and_the_target_never_runs(tmp_pa
         ran = tmp_path / "i-ran"
         sid, generation = "s-prevent", "a" * 32
         meta = {"session_id": sid, "session_generation": generation, "pane_id": "p", "workspace_path": str(tmp_path),
-                "argv": [sys.executable, "-c", f"open({str(ran)!r}, 'w').close()"], "cwd": str(tmp_path),
+                "launch": {"shape": "direct", "form": "list", "elements": [sys.executable, "-c", f"open({str(ran)!r}, 'w').close()"], "words": []}, "cwd": str(tmp_path),
                 "env": {"PATH": "/usr/bin:/bin"}, "cols": 80, "rows": 24, "agent_key": ""}
         create = peer.send(code.CREATE, meta)
         time.sleep(0.3)  # the create worker is now blocked opening the FIFO (a functional hold, not a measurement)
@@ -89,7 +89,7 @@ def test_s4_cancel_of_a_published_session_is_cleanup_started_then_settled_after_
         def create_raw(name):
             sid, generation = f"s-{name}", name[0] * 32
             meta = {"session_id": sid, "session_generation": generation, "pane_id": f"p-{name}", "workspace_path": str(tmp_path),
-                    "argv": argv, "cwd": str(tmp_path), "env": {"PATH": "/usr/bin:/bin"}, "cols": 80, "rows": 24, "agent_key": ""}
+                    "launch": {"shape": "direct", "form": "list", "elements": list(argv), "words": []}, "cwd": str(tmp_path), "env": {"PATH": "/usr/bin:/bin"}, "cols": 80, "rows": 24, "agent_key": ""}
             request = peer.send(code.CREATE, meta)
             peer.result(request)
             return request, sid, generation

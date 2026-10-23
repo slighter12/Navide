@@ -22,7 +22,7 @@ fd = int(args[args.index("--control-fd") + 1])
 mode = os.environ["NAVIDE_STUB_MODE"]
 tag = wire.runtime_tag(generation)
 limits = json.loads(os.environ["NAVIDE_STUB_LIMITS"])
-ready = {"event": "ready", "protocol": "navide-acr", "wire": 1, "version": "stub", "runtime": "navide-cli-runtime",
+ready = {"event": "ready", "protocol": "navide-acr", "wire": 2, "version": "stub", "runtime": "navide-cli-runtime",
          "runtime_generation": generation, "pid": os.getpid(), "owner_pid": os.getppid(), "handoff": "scm_rights",
          "ownership_gate": True, "limits": limits}
 sys.stdout.write(json.dumps(ready) + "\n")

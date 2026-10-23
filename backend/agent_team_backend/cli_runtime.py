@@ -22,7 +22,7 @@ from uuid import uuid4
 
 import psutil
 
-from . import osplat, pty_registry
+from . import cli_launch, osplat, pty_registry
 from .applog import in_data_dir
 from . import cli_runtime_frames as wire
 from .cli_runtime_frames import ChannelEof, Direction, FrameType, ProtocolError, code
@@ -214,6 +214,7 @@ class RustTerminalService(TerminalService):
         self._retained: dict[str, RuntimeSession] = {}
         self._owned: dict[str, asyncio.Future] = {}
         self._launches: dict[str, dict] = {}
+        self._argv0_heads: dict[str, str] = {}  # sid -> the verified bounded head of the executed program
         self._lost: str | None = None
         self._stopping = False
         self._ownership_pages: dict[str, list[dict]] = {}
@@ -564,6 +565,7 @@ class RustTerminalService(TerminalService):
         for sid in [sid for sid, s in self._retained.items() if s.hidden]:
             self._retained.pop(sid, None)
         self._launches.clear()
+        self._argv0_heads.clear()
         self._owned.clear()
         if not complete:
             self._lost = f"CLEANUP_FAILED: runtime loss cleanup incomplete ({cause[:200]})"
@@ -978,6 +980,12 @@ class RustTerminalService(TerminalService):
                 slot.tty = check_master(fd, pty.get("tty"), self._claimed_ttys)
             except HandoffRejected as rejected:
                 failure = rejected
+        if failure is None:
+            try:
+                self._argv0_heads[sid] = cli_launch.verify_argv0_attestation(
+                    meta.get("argv0"), wrapped_shell=self._expected_program(launch["launch"]))
+            except cli_launch.LaunchRefused as refused:
+                failure = HandoffRejected("argv0", str(refused))
         if failure is not None:
             rejected = failure
             # Fail closed: close our duplicate, kill the root named in this frame by identity, no
@@ -1001,8 +1009,17 @@ class RustTerminalService(TerminalService):
                            "validated": True, "session_id": sid, "session_generation": meta.get("session_generation"),
                            "owned_frame_bytes": frame.wire_size})
         self._receipt({"event": "owned", "runtime_generation": self._runtime_generation,
-                       **{k: v for k, v in meta.items() if k != "pty"}})
+                       **{k: v for k, v in meta.items() if k not in ("pty", "argv0")}})
         self._task(self._persist_owned({"session_id": sid, "session_generation": meta["session_generation"], "root": root}))
+
+    @staticmethod
+    def _expected_program(launch: dict) -> str | None:
+        """The program path Python itself sent, when it can know it; direct shapes are Rust's to resolve."""
+        if launch["shape"] == "wrapped":
+            return launch["shell"]
+        if launch["shape"] == "argv" and not WINDOWS:
+            return launch["argv"][0]
+        return None
 
     async def _kill_rejected(self, session: RuntimeSession) -> None:
         with suppress(Exception):
@@ -1043,7 +1060,7 @@ class RustTerminalService(TerminalService):
                 # it is tracked so a retired generation can undo a late entry.
                 persist = asyncio.ensure_future(asyncio.to_thread(in_data_dir(
                     self._data_dir, pty_registry.register_owned,
-                    root["pid"], launch["argv"], root["start_value"], self._runtime_generation,
+                    root["pid"], [self._argv0_heads.pop(sid, "")], root["start_value"], self._runtime_generation,
                     sid, record["session_generation"])))
                 self._persisting[persist] = (root["pid"], self._runtime_generation)
                 persist.add_done_callback(self._persisted)
@@ -1269,7 +1286,7 @@ class RustTerminalService(TerminalService):
                 # Refused before anything was dispatched (a fence, a missing cwd, a cancel before the send):
                 # still exactly one structured failed-create receipt (E2 3 item 2).
                 self._receipt({"event": "create_failed", "session_id": None, "pane_id": kwargs.get("pane_id"),
-                               "session_generation": None, "error": type(failure).__name__, "code": None, "stage": "pre-dispatch",
+                               "session_generation": None, "error": type(failure).__name__, "code": getattr(failure, "code", None), "stage": "pre-dispatch",
                                "effect": "none", "message": str(failure)[:200], "root": None})
             raise
 
@@ -1310,9 +1327,19 @@ class RustTerminalService(TerminalService):
             env[detached_servers.MARK_ENV] = pane_mark
             metadata["pane_mark"] = pane_mark
         env = prepare_native_launch(argv, cwd=cwd, env=env)
+        subject = kwargs.get("agent_key") or ""
+        composition = cli_launch.admit_composition(
+            subject, platform="windows" if WINDOWS else "posix",
+            managed_credential_path=bool(kwargs.get("spawn_command")))
+        if composition == "rust":
+            launch = cli_launch.build_launch(subject, kwargs.get("base_command", kwargs["command"]), kwargs["command"],
+                                             login=bool(kwargs.get("login_subcommand")))
+        else:
+            launch = cli_launch.argv_launch(argv)
+        cli_launch.check_text(launch, cwd, env)
         sid, generation = str(uuid4()), secrets.token_hex(16)
         args = {"session_id": sid, "session_generation": generation, "pane_id": kwargs["pane_id"],
-                "workspace_path": cwd, "argv": argv, "cwd": cwd, "env": env, "cols": cols, "rows": rows,
+                "workspace_path": cwd, "launch": launch, "cwd": cwd, "env": env, "cols": cols, "rows": rows,
                 "agent_key": kwargs.get("agent_key") or ""}
         self._launches[sid] = args
         self._owned[sid] = self._loop.create_future()
@@ -1481,6 +1508,7 @@ class RustTerminalService(TerminalService):
             else:
                 future = self._owned.pop(sid, None)
                 self._launches.pop(sid, None)
+                self._argv0_heads.pop(sid, None)
                 if future and future.done() and not future.cancelled():
                     future.exception()
                 if dispatched:
@@ -1617,6 +1645,7 @@ class RustTerminalService(TerminalService):
                 native["settled"].set()
             self._forget_request(dispatched.get("request_id", 0), sid if prevented else None)
             self._launches.pop(sid, None)
+            self._argv0_heads.pop(sid, None)
             future = self._owned.pop(sid, None)
             if future and future.done() and not future.cancelled():
                 future.exception()

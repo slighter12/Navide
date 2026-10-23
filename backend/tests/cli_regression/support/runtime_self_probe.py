@@ -214,7 +214,7 @@ def protocol_controls(root):
         if label == 'fatal':
             base = base + ['--unknown-startup-argument', '1']
         elif label == 'protocol':
-            base[base.index('--wire') + 1] = '2'  # a wire version this sidecar does not speak
+            base[base.index('--wire') + 1] = '1'  # a wire version this sidecar does not speak
         flags = []
         actor = subprocess.Popen(base + flags, cwd=root,
             env={'HOME': str(root / 'home'), 'PATH': '/usr/bin:/bin', 'TMPDIR': str(root / 'tmp')},
@@ -235,7 +235,7 @@ def protocol_controls(root):
             else:
                 assert first['event'] == 'ready' and first['pid'] == actor.pid and first['owner_pid'] == parent
                 assert first['runtime_generation'] == generation
-                assert (first['protocol'], first['wire']) == ('navide-acr', 1)
+                assert (first['protocol'], first['wire']) == ('navide-acr', 2)
                 assert first['self_process']['argv'] == base
                 assert first['self_process']['birth_seconds'] + first['self_process']['birth_microseconds'] / 1_000_000 == born
                 if label in ('shutdown', 'stale'):

@@ -30,7 +30,7 @@ import pytest
 from tests.cli_regression.support.backend_process import BackendProcess
 from tests.cli_regression.support.cli_shim import base_python_executable, install_cli_shim
 from tests.cli_regression.test_launch_snapshots import (
-    BOOT_DIR, PROBE, _binary_name, _normalise_argv, _normaliser, _snapshot_leaks,
+    BOOT_DIR, PROBE, _SECRET_NAME, _binary_name, _normalise_argv, _normaliser, _snapshot_leaks,
 )
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cli_regression,
@@ -135,7 +135,8 @@ async def _observe(row: tuple, root: Path) -> tuple[dict, list[str], list[dict]]
         "subject": subject, "shell_form": BASELINE_FORM[form], "platform": sys.platform,
         "child_argv": _normalise_argv(normalise, observed["argv"]),
         "child_cwd": normalise(observed["cwd"]),
-        "child_env": {key: normalise(value) for key, value in sorted(observed["env"].items())},
+        "child_env": {key: "<redacted>" if _SECRET_NAME.search(key) else normalise(value)
+                      for key, value in sorted(observed["env"].items())},
     }
     return snapshot, observed["argv"], _owned(root)
 
@@ -178,14 +179,20 @@ async def test_row_child_observation_and_receipt(row, tmp_path):
         before = Path(os.environ["NAVIDE_G2_BASELINE_DIR"]) / sys.platform / f"{name}.json"
         assert before.is_file(), f"no before-snapshot for {name} on {sys.platform}"
         expected = json.loads(before.read_text(encoding="utf-8"))
+        # The Phase A baselines predate the redaction of secret-named variables (ticket 01's rule).
+        expected["child_env"] = {key: "<redacted>" if _SECRET_NAME.search(key) else value
+                                 for key, value in expected["child_env"].items()}
         for key in ("child_argv", "child_cwd", "child_env"):
             assert snapshot[key] == expected[key], f"{name}: {key} differs from the before-snapshot"
         if name == plain_name:
             ticket01 = Path(os.environ["NAVIDE_G2_TICKET01_DIR"]) / sys.platform / f"{subject}.{BASELINE_FORM[form]}.json"
             assert ticket01.is_file(), f"no ticket 01 snapshot {ticket01.name}"
             reference = json.loads(ticket01.read_text(encoding="utf-8"))
-            for key in ("child_argv", "child_cwd", "child_env"):
+            for key in ("child_argv", "child_cwd"):
                 assert snapshot[key] == reference[key], f"{name}: {key} differs from ticket 01"
+            # Ticket 01 ran the Python runtime; this harness selects the Rust one through this one variable.
+            ours = {k: v for k, v in snapshot["child_env"].items() if k != "NAVIDE_ACR_EVAL_RUNTIME"}
+            assert ours == reference["child_env"], f"{name}: child_env differs from ticket 01"
     assert len(owned) == 1, owned
     assert owned[0].get("argv_source") == "rust"
     assert "argv0" not in owned[0], "the attested argv0 feeds the registry only, not the receipt"

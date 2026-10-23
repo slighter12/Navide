@@ -1,4 +1,4 @@
-"""A raw wire-v1 peer for the real sidecar binary (supplemental tests only).
+"""A raw wire peer for the real sidecar binary (supplemental tests only).
 
 It speaks the E1 frames over a real socketpair using the production frame codec and the
 frame-scoped receiver, so a test can drive the sidecar below `RustTerminalService` (observation,
@@ -21,7 +21,7 @@ import uuid
 
 import psutil
 
-from agent_team_backend import cli_runtime_frames as wire
+from agent_team_backend import cli_launch, cli_runtime_frames as wire
 from agent_team_backend.cli_runtime_frames import Direction, FrameType, code
 
 from .isolation import isolated_environment
@@ -51,7 +51,7 @@ class FramePeer:
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         self.journal = root / "journal.jsonl"
         self.process = subprocess.Popen(
-            [str(binary), "--wire", "1", "--runtime-generation", self.generation, "--owner-pid", str(os.getpid()),
+            [str(binary), "--wire", str(wire.WIRE_VERSION), "--runtime-generation", self.generation, "--owner-pid", str(os.getpid()),
              "--ownership-journal", str(self.journal), "--control-fd", str(child.fileno()), *extra_args],
             env=isolated_environment(root), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             pass_fds=(child.fileno(),))
@@ -137,8 +137,16 @@ class FramePeer:
 
     def create(self, argv: list[str], *, agent_key: str = "", pane: str | None = None) -> tuple[str, str]:
         sid, generation = str(uuid.uuid4()), uuid.uuid4().hex
+        # The sidecar admits the structured shapes for a subject composed in Rust and `argv` for the rest.
+        # A direct list with no words runs the elements exactly as given.
+        try:
+            rust = cli_launch.admit_composition(agent_key, platform="posix", managed_credential_path=False) == "rust"
+        except cli_launch.LaunchRefused:
+            rust = True  # a subject only the fault-hooks harness build declares
+        launch = ({"shape": "direct", "form": "list", "elements": list(argv), "words": []} if rust
+                  else cli_launch.argv_launch(argv))
         meta = {"session_id": sid, "session_generation": generation, "pane_id": pane or sid,
-                "workspace_path": str(self.root), "argv": argv, "cwd": str(self.root),
+                "workspace_path": str(self.root), "launch": launch, "cwd": str(self.root),
                 "env": isolated_environment(self.root), "cols": 100, "rows": 30, "agent_key": agent_key}
         self.result(self.send(code.CREATE, meta))
         return sid, generation

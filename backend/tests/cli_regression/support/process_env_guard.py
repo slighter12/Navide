@@ -11,9 +11,9 @@ from pathlib import Path
 
 _GUARD = None
 
-#: E1 wire v1 launch of the sidecar (ticket E3): `[runtime, --wire 1, --runtime-generation <hex32>, --owner-pid <pid>,
+#: Wire v2 launch of the sidecar (ticket E3): `[runtime, --wire 2, --runtime-generation <hex32>, --owner-pid <pid>,
 #: --ownership-journal <data>/runtime-ownership/<gen>.jsonl, --control-fd <n>]`, with `pass_fds == (n,)`.
-WIRE_VERSION = '1'
+WIRE_VERSION = '2'
 
 
 def runtime_launch(runtime: str, generation: str, owner_pid: int, journal: Path, control_fd: int) -> list[str]:

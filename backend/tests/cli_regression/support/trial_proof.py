@@ -41,7 +41,7 @@ def prove(records: list[dict], *, sidecar_pid: int | None = None, python_pty_spa
             fail(1, "the ready receipt names no executable file that still exists")
         elif hashlib.sha256(executable.read_bytes()).hexdigest() != r.get("executableSha256"):
             fail(1, "executableSha256 differs from the hash recomputed from the executable file")
-        if (r.get("protocol"), r.get("wire"), r.get("handoff")) != ("navide-acr", 1, "duplicate_handle" if windows else "scm_rights"):
+        if (r.get("protocol"), r.get("wire"), r.get("handoff")) != ("navide-acr", 2, "duplicate_handle" if windows else "scm_rights"):
             fail(1, "wire/protocol identity")
         if sidecar_pid is not None and r.get("pid") != sidecar_pid:
             fail(1, "ready pid is not the sampled sidecar")

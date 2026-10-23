@@ -120,7 +120,7 @@ def _runtime_self_row(root, ready, metadata):
     self_row = ready.get('self_process')
     if ready.get('self_process_error') or not isinstance(self_row, dict):
         raise PermissionError('missing native SELF evidence')
-    if (ready.get('event') != 'ready' or ready.get('protocol') != 'navide-acr' or ready.get('wire') != 1
+    if (ready.get('event') != 'ready' or ready.get('protocol') != 'navide-acr' or ready.get('wire') != 2
             or ready.get('pid') != metadata['pid'] or ready.get('owner_pid') != metadata['parent']
             or self_row.get('pid') != metadata['pid'] or self_row.get('parent') != metadata['parent']
             or self_row.get('executable') != metadata['exe']
