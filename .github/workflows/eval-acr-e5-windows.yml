@@ -1,0 +1,123 @@
+name: E5 Windows Agent CLI Runtime Gates
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e5-windows-gates:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Set evaluation paths
+        shell: pwsh
+        run: |
+          "CARGO_TARGET_DIR=$env:RUNNER_TEMP\e5-cargo-target" >> $env:GITHUB_ENV
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: Test Windows Rust crate
+        id: rust_test
+        continue-on-error: true
+        shell: pwsh
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml
+
+      - name: Build product sidecar
+        id: product_build
+        continue-on-error: true
+        shell: pwsh
+        run: cargo build --locked --release --manifest-path native/navide-cli-runtime/Cargo.toml --bin navide-cli-runtime
+
+      - name: Build real-kernel gate probe
+        id: probe_build
+        continue-on-error: true
+        shell: pwsh
+        run: cargo build --locked --release --manifest-path native/navide-cli-runtime/Cargo.toml --features windows-gates --bin e5-windows-probe
+
+      - name: G-W1 Popen process handle transfers a pipe
+        id: w1
+        if: always() && steps.probe_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -I -B native/navide-cli-runtime/tests/support/e5_windows_gates.py --gate w1 --probe "$env:CARGO_TARGET_DIR\release\e5-windows-probe.exe"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: G-W2 pipe type direction and identity checks
+        id: w2
+        if: always() && steps.probe_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -I -B native/navide-cli-runtime/tests/support/e5_windows_gates.py --gate w2 --probe "$env:CARGO_TARGET_DIR\release\e5-windows-probe.exe"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: G-W3 ConPTY with cross-process pipe duplicates
+        id: w3
+        if: always() && steps.probe_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python -I -B native/navide-cli-runtime/tests/support/e5_windows_gates.py --gate w3 --probe "$env:CARGO_TARGET_DIR\release\e5-windows-probe.exe"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Write redacted gate outcomes
+        if: always()
+        shell: pwsh
+        env:
+          RUST_TEST: ${{ steps.rust_test.outcome }}
+          PRODUCT_BUILD: ${{ steps.product_build.outcome }}
+          PROBE_BUILD: ${{ steps.probe_build.outcome }}
+          GATE_W1: ${{ steps.w1.outcome }}
+          GATE_W2: ${{ steps.w2.outcome }}
+          GATE_W3: ${{ steps.w3.outcome }}
+        run: |
+          $build = [System.Environment]::OSVersion.Version.Build
+          New-Item -ItemType Directory -Force test-results/ci | Out-Null
+          $rows = @(
+            "runtime=navide-cli-runtime platform=windows build=$build case=crate-unit status=$env:RUST_TEST stage=rust-test",
+            "runtime=navide-cli-runtime platform=windows build=$build case=product-build status=$env:PRODUCT_BUILD stage=build",
+            "runtime=navide-cli-runtime platform=windows build=$build case=probe-build status=$env:PROBE_BUILD stage=build",
+            "runtime=navide-cli-runtime platform=windows build=$build case=G-W1 status=$env:GATE_W1 stage=duplicate-handle",
+            "runtime=navide-cli-runtime platform=windows build=$build case=G-W2 status=$env:GATE_W2 stage=pipe-binding",
+            "runtime=navide-cli-runtime platform=windows build=$build case=G-W3 status=$env:GATE_W3 stage=conpty-handoff"
+          )
+          $rows | Set-Content test-results/ci/e5-windows-gates.log
+
+      - name: Upload redacted gate outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e5-windows-gate-outcomes
+          path: test-results/ci/e5-windows-gates.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require every Windows gate
+        if: always()
+        shell: pwsh
+        env:
+          RUST_TEST: ${{ steps.rust_test.outcome }}
+          PRODUCT_BUILD: ${{ steps.product_build.outcome }}
+          PROBE_BUILD: ${{ steps.probe_build.outcome }}
+          GATE_W1: ${{ steps.w1.outcome }}
+          GATE_W2: ${{ steps.w2.outcome }}
+          GATE_W3: ${{ steps.w3.outcome }}
+        run: |
+          foreach ($outcome in @($env:RUST_TEST, $env:PRODUCT_BUILD, $env:PROBE_BUILD, $env:GATE_W1, $env:GATE_W2, $env:GATE_W3)) {
+            if ($outcome -ne 'success') { exit 1 }
+          }
