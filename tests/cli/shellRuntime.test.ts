@@ -400,8 +400,16 @@ it.runIf(process.platform === 'win32')('uses one actual native runtime for kill 
       // (argv) and every echo (`marker`) must name it, so a session handed another session's complete handle
       // pair shows the other marker even though its own input would still come back.
       const markerOf = (round: number, slot: number) => `slot-${round}-${slot}-marker`
-      const everyMarker = [0, 1, 2].flatMap((round) => [0, 1, 2, 3].map((slot) => markerOf(round, slot)))
-      for (let round = 0; round < 3; round++) {
+      // Handle reuse is the kernel's choice, so the cycles continue until a value from an earlier round is seen again,
+      // bounded at MAX_ROUNDS; the test fails only when no reuse appears within the bound.
+      const MAX_ROUNDS = 8
+      const everyMarker = Array.from({ length: MAX_ROUNDS }, (_, round) => [0, 1, 2, 3].map((slot) => markerOf(round, slot))).flat()
+      const receipts = () => readFileSync(join(root, 'runtime-receipts.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+        .filter((entry) => entry.event === 'handle_attached')
+      let roundsRun = 0
+      let reuse: { round: number, value: number } | undefined
+      for (let round = 0; round < MAX_ROUNDS && !reuse; round++) {
+        roundsRun = round + 1
         const sessions = await Promise.all([0, 1, 2, 3].map((slot) =>
           open(`cycle-${round}-${slot}`, [...(endpoint.command as string[]), `marker=${markerOf(round, slot)}`], root)))
         expect(new Set(sessions.map((s) => s.ready.pid)).size).toBe(4)
@@ -419,16 +427,24 @@ it.runIf(process.platform === 'win32')('uses one actual native runtime for kill 
         })
         await Promise.all(sessions.map((s) => kill(s.tid)))
         await until(() => sessions.every((s) => !pidAlive(s.ready.pid)), `round ${round}: a killed session's program is still alive`, 60_000)
+        // A value this round's sessions hold that an earlier round's sessions already held is a reused handle
+        // (within one round every session is live at once, so its values are distinct).
+        const soFar: number[][] = receipts().map((entry) => entry.handles)
+        const earlier = new Set(soFar.slice(0, 4 * round).flat())
+        const repeated = soFar.slice(4 * round).flat().find((value) => earlier.has(value))
+        if (repeated !== undefined) reuse = { round, value: repeated }
       }
       // The pipe handle values the client duplicated for every session: the cycles must really have reused them.
-      const attached = readFileSync(join(root, 'runtime-receipts.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
-        .filter((entry) => entry.event === 'handle_attached')
-      expect(attached, 'one handle receipt per created session').toHaveLength(12)
+      const attached = receipts()
+      expect(attached, `one handle receipt per created session over ${roundsRun} rounds`).toHaveLength(4 * roundsRun)
       const values: number[] = attached.flatMap((entry) => entry.handles)
       expect(values.every((value) => Number.isInteger(value) && value > 0), JSON.stringify(values)).toBe(true)
-      expect(new Set(values).size, `no handle value was reused across the cycles: ${JSON.stringify(values)}`).toBeLessThan(values.length)
+      expect(reuse, `no handle value was reused within ${MAX_ROUNDS} rounds: ${JSON.stringify(values)}`).toBeDefined()
+      // Evidence: the first round that held a value an earlier round had held, and that value.
+      console.log(`W10 handle reuse first seen in round ${reuse!.round} (of ${roundsRun} run): value ${reuse!.value}`)
+      expect(values.length, `reuse first seen in round ${reuse!.round}, value ${reuse!.value}`).toBe(4 * roundsRun)
     } finally {
       client.dispose('W10 cycle complete')
     }
   })
-}, 300_000)
+}, 600_000)
