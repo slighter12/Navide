@@ -16,14 +16,11 @@ from .cli_shim import base_python_executable
 from .backend_process import BackendProcess
 
 
-def powershell_wrapped(command: list[str]) -> list[str]:
-    """A shell that runs the peer as a child, like the POSIX login-shell wrapper (PowerShell 7 passes embedded
-    quotes and backslashes to a native program intact)."""
-    shell = shutil.which("pwsh")
-    if shell is None:
-        raise SystemExit("PowerShell 7 (pwsh) is required for the wrapped shell fixture on Windows")
-    quoted = " ".join("'" + word.replace("'", "''") + "'" for word in command)
-    return [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", f"& {quoted}; exit $LASTEXITCODE"]
+def launcher_wrapped(root: Path, command: list[str]) -> list[str]:
+    """A wrapper that runs the peer as a child and waits for it, like the POSIX `bash -ilc` wrapper."""
+    launcher = root / "wrapper_launcher_win.py"
+    shutil.copyfile(Path(__file__).with_name("wrapper_launcher_win.py"), launcher)
+    return [base_python_executable(), "-u", str(launcher), *command]
 
 
 async def main(root: Path, mode: str, fault: str = ""):
@@ -82,7 +79,7 @@ async def main(root: Path, mode: str, fault: str = ""):
         watcher = asyncio.create_task(monitor())
         pending = root / "wire.pending.json"
         pending.write_text(json.dumps({"url": backend.url, "command": command, "arguments": arguments,
-                                       "wrapped": powershell_wrapped(command) if windows else ["/bin/bash", "-ilc", shlex.join(command)],
+                                       "wrapped": launcher_wrapped(root, command) if windows else ["/bin/bash", "-ilc", shlex.join(command)],
                                        "backend": {"pid": identity.pid, "created": identity.create_time()}}))
         pending.replace(root / "wire.json")
         try:
