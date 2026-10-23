@@ -1433,7 +1433,9 @@ class RustTerminalService(TerminalService):
                 session.tty, slot.fd = slot.tty, None
             session.handle.start_reading(self._loop, lambda s=session: self._on_readable(s))
             self._receipt({"event": "handle_attached", "session_id": sid,
-                           "session_generation": generation, "handle": type(session.handle).__name__})
+                           "session_generation": generation, "handle": type(session.handle).__name__,
+                           # The duplicated pipe handle values (Windows), so W10 can see them reused across sessions.
+                           **({"handles": [slot.input_handle, slot.output_handle]} if WINDOWS else {})})
             self._task(self._adopt(session))
             session.published = True
             self._sessions[sid] = session

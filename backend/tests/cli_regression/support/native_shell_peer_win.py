@@ -142,7 +142,8 @@ def main() -> int:
             emit("FINAL_TAIL café 世界")
             return 7
         else:
-            emit("ACK " + json.dumps({"pid": os.getpid(), "text": line}, ensure_ascii=False))
+            # `marker` is the last argument this instance was started with: W10 gives each session its own.
+            emit("ACK " + json.dumps({"pid": os.getpid(), "text": line, "marker": sys.argv[-1]}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

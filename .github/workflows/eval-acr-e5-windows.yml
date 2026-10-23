@@ -323,6 +323,13 @@ jobs:
             exit 1
           }
 
+      - name: Require the two wrapper cases and the W10 cycle to be collected and pass
+        id: ts_cases
+        if: always() && steps.ts_seam.outcome == 'success'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File tests/cli/e5-windows-ts-guard.ps1 -Results test-results/ci/e5-windows-ts-results.json -Names "uses one actual native runtime through the product's pwsh wrapper: descendant cleanup, interrupt and exit|uses one actual native runtime through the product's cmd wrapper: descendant cleanup, interrupt and exit|uses one actual native runtime for kill and recreate cycles with concurrent creates that keep every session isolated"
+
       - name: Negative control - a missing runtime binary fails both TypeScript cases
         id: ts_negative
         if: always() && steps.js_env.outcome == 'success' && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'

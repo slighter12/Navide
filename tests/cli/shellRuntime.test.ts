@@ -396,21 +396,37 @@ it.runIf(process.platform === 'win32')('uses one actual native runtime for kill 
   await withBackend('', async (root, endpoint) => {
     const { client, output, open, input, kill } = await windowsClient(endpoint)
     try {
+      // Each requested session carries its own immutable marker as the peer's last argument: the READY line
+      // (argv) and every echo (`marker`) must name it, so a session handed another session's complete handle
+      // pair shows the other marker even though its own input would still come back.
+      const markerOf = (round: number, slot: number) => `slot-${round}-${slot}-marker`
+      const everyMarker = [0, 1, 2].flatMap((round) => [0, 1, 2, 3].map((slot) => markerOf(round, slot)))
       for (let round = 0; round < 3; round++) {
-        const sessions = await Promise.all([0, 1, 2, 3].map((slot) => open(`cycle-${round}-${slot}`, endpoint.command, root)))
+        const sessions = await Promise.all([0, 1, 2, 3].map((slot) =>
+          open(`cycle-${round}-${slot}`, [...(endpoint.command as string[]), markerOf(round, slot)], root)))
         expect(new Set(sessions.map((s) => s.ready.pid)).size).toBe(4)
+        sessions.forEach((s, slot) => expect(s.ready.argv.at(-1), `round ${round} slot ${slot} READY marker`).toBe(markerOf(round, slot)))
         await Promise.all(sessions.map((s, slot) => input(s.tid, `mark-${round}-${slot}\r`)))
         await Promise.all(sessions.map((s, slot) => until(
           () => (output.get(s.tid) ?? '').includes(`"text": "mark-${round}-${slot}"`), `round ${round} slot ${slot}: its own bytes`)))
         sessions.forEach((s, slot) => {
           const text = output.get(s.tid)!
           expect(text.split('NATIVE_READY ').length - 1, `round ${round} slot ${slot} READY count`).toBe(1)
+          expect(text, `round ${round} slot ${slot} echo marker`).toContain(`"text": "mark-${round}-${slot}", "marker": "${markerOf(round, slot)}"`)
+          for (const marker of everyMarker) if (marker !== markerOf(round, slot)) expect(text, `round ${round} slot ${slot} saw ${marker}`).not.toContain(marker)
           for (let other = 0; other < 4; other++) if (other !== slot) expect(text).not.toContain(`mark-${round}-${other}`)
           expect(text).not.toContain(`mark-${round - 1}-`)
         })
         await Promise.all(sessions.map((s) => kill(s.tid)))
         await until(() => sessions.every((s) => !pidAlive(s.ready.pid)), `round ${round}: a killed session's program is still alive`, 60_000)
       }
+      // The pipe handle values the client duplicated for every session: the cycles must really have reused them.
+      const attached = readFileSync(join(root, 'runtime-receipts.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+        .filter((entry) => entry.event === 'handle_attached')
+      expect(attached, 'one handle receipt per created session').toHaveLength(12)
+      const values: number[] = attached.flatMap((entry) => entry.handles)
+      expect(values.every((value) => Number.isInteger(value) && value > 0), JSON.stringify(values)).toBe(true)
+      expect(new Set(values).size, `no handle value was reused across the cycles: ${JSON.stringify(values)}`).toBeLessThan(values.length)
     } finally {
       client.dispose('W10 cycle complete')
     }
