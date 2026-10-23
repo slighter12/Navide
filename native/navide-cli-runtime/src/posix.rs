@@ -1020,6 +1020,14 @@ fn send_exited(handle: &SessionHandle, state: &mut State, wire: &Wire) {
     state.exited_sent = true;
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs once, right after `cleanup`'s first snapshot, so a test can place the root's exit
+    /// (and a late same-group child) between that snapshot and the signal.
+    static AFTER_FIRST_SNAPSHOT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// Signal recorded identities, wait event-driven, escalate, verify (13.1 kill policy). `hangup`
 /// is true for a kill: unless the adapter defers it, the sidecar's master closes right after the
 /// first signal and `SESSION_HANGUP` tells Python (5.5 R-e).
@@ -1032,10 +1040,16 @@ fn cleanup(
 ) -> io::Result<Vec<Value>> {
     let pid = state.owned.pid;
     if handle.exit.get().is_some() && state.owned.descendants.is_empty() {
-        return Ok(Vec::new());
+        // Nothing recorded to signal, but a member born since the last snapshot may still run in the root's group.
+        record_former_group(&state.owned)?;
+        return Ok(with_unresolved(Vec::new(), &state.owned.births));
     }
     let before = snapshot(None, &known_owned(&state.owned), &mut state.owned.births)?;
     retain_owned(&mut state.owned, &before);
+    #[cfg(test)]
+    if let Some(hook) = AFTER_FIRST_SNAPSHOT.with(|cell| cell.borrow_mut().take()) {
+        hook();
+    }
     let root_start = state.owned.root["start_value"].as_str().map(String::from);
     let root_live = handle.exit.get().is_none()
         && before
@@ -1120,6 +1134,7 @@ fn cleanup(
     let still_running = wait_exit(&pids, deadline);
     let final_table = snapshot(None, &known_owned(&state.owned), &mut state.owned.births)?;
     retain_owned(&mut state.owned, &final_table);
+    record_former_group(&state.owned)?;
     Ok(with_unresolved(
         survivors_after_cleanup(
             &state.owned.descendants,
@@ -1171,6 +1186,21 @@ fn survivors_after_cleanup(
         }
     }
     survivors
+}
+
+/// Final verification on Linux: the root's former process group (and session) is scanned for live members this
+/// session never admitted; `with_unresolved` then reports them. An error means the scan could not establish
+/// whether any remain, and the cleanup fails closed. macOS keeps its behaviour (no scan).
+fn record_former_group(owned: &Owned) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        owned.births.record_unadmitted_former_group(owned.pid)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = owned;
+        Ok(())
+    }
 }
 
 /// Add the live group members the Linux pre-6.9 fallback refused to signal (never admitted by this session) to
@@ -2438,6 +2468,145 @@ mod survivor_tests {
         );
         keep.kill().unwrap();
         keep.wait().unwrap();
+    }
+}
+
+/// E5 round 5: the root can exit, or already be reaped, before the group fallback runs. A same-group child this
+/// session never admitted must still make the emitted `SESSION_CLEANED` incomplete and name it (design 5.5, 10.4).
+#[cfg(all(test, target_os = "linux"))]
+mod root_exit_tests {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+
+    fn session(root: i32) -> (Arc<SessionHandle>, Wire, State) {
+        let mut births = Births::default();
+        let table = snapshot(Some(root), &Table::new(), &mut births).unwrap();
+        let start = table[&root].2.clone();
+        let mut owned = Owned {
+            pid: root,
+            root: json!({ "start_value": start }),
+            descendants: Table::new(),
+            births,
+        };
+        retain_owned(&mut owned, &table);
+        let (pty, slave) = SessionPty::open(24, 80).unwrap();
+        drop(slave);
+        let (tx, _rx) = mpsc::channel();
+        let handle = Arc::new(SessionHandle {
+            id: "s".into(),
+            generation: "g".into(),
+            pane: "p".into(),
+            workspace: "/w".into(),
+            agent_key: "terminal".into(),
+            spec: None,
+            pty: Arc::new(pty),
+            tx,
+            exit: Arc::new(ExitCell::new()),
+            done: (Mutex::new(None), Condvar::new()),
+            adopted: AtomicBool::new(false),
+            started: Instant::now(),
+            survivors: Mutex::new(Vec::new()),
+        });
+        let wire = Wire {
+            generation: "g".into(),
+            journal: std::path::PathBuf::new(),
+            owner_pid: 0,
+            out: Outbound::new(1),
+            observe_tx: Mutex::new(None),
+            inbound: InboundBudget::new(1024),
+        };
+        let state = State {
+            owned,
+            closing: Some(true),
+            exited_sent: false,
+            eof: false,
+            eof_deadline: None,
+            next_snapshot: Instant::now(),
+        };
+        (handle, wire, state)
+    }
+
+    fn sleeper_group_leader() -> std::process::Child {
+        Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap()
+    }
+
+    /// A child born into the root's group after the session last looked.
+    fn late_member(root: i32) -> std::process::Child {
+        Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(root)
+            .spawn()
+            .unwrap()
+    }
+
+    fn reap(root: &mut std::process::Child, handle: &SessionHandle) {
+        root.kill().unwrap();
+        let status = root.wait().unwrap();
+        handle.exit.set(ExitInfo {
+            code: status.code(),
+            signal: std::os::unix::process::ExitStatusExt::signal(&status),
+        });
+    }
+
+    fn emit(handle: &Arc<SessionHandle>, wire: &Wire, state: &mut State) {
+        let outcome = cleanup(handle, state, wire, true, false);
+        finish(
+            handle,
+            wire,
+            &Arc::new(Mutex::new(Registry::default())),
+            outcome,
+        );
+    }
+
+    fn assert_incomplete_and_names(handle: &SessionHandle, late: &mut std::process::Child) {
+        let survivors = handle.survivors.lock().unwrap().clone();
+        let complete = handle.wait_finished(Duration::from_secs(1));
+        let alive = late.try_wait().unwrap().is_none();
+        late.kill().unwrap();
+        late.wait().unwrap();
+        assert!(alive, "cleanup signalled a member it never admitted");
+        assert_eq!(complete, Some(false), "survivors: {survivors:?}");
+        assert!(
+            survivors
+                .iter()
+                .any(|entry| entry["pid"] == late.id() as i32),
+            "the live unadmitted member {} is not named: {survivors:?}",
+            late.id()
+        );
+    }
+
+    #[test]
+    fn a_member_born_after_the_snapshot_survives_a_root_that_exits_before_the_group_signal() {
+        let mut root = sleeper_group_leader();
+        let pid = root.id() as i32;
+        let (handle, wire, mut state) = session(pid);
+        let born = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let hook_handle = handle.clone();
+        let hook_born = born.clone();
+        AFTER_FIRST_SNAPSHOT.with(|cell| {
+            *cell.borrow_mut() = Some(Box::new(move || {
+                *hook_born.borrow_mut() = Some(late_member(pid));
+                reap(&mut root, &hook_handle);
+            }));
+        });
+        emit(&handle, &wire, &mut state);
+        let mut late = born.borrow_mut().take().expect("the seam never ran");
+        assert_incomplete_and_names(&handle, &mut late);
+    }
+
+    #[test]
+    fn a_member_in_the_group_of_an_already_reaped_root_with_no_descendants_is_named() {
+        let mut root = sleeper_group_leader();
+        let pid = root.id() as i32;
+        let (handle, wire, mut state) = session(pid);
+        let mut late = late_member(pid);
+        reap(&mut root, &handle);
+        emit(&handle, &wire, &mut state);
+        assert_incomplete_and_names(&handle, &mut late);
     }
 }
 
