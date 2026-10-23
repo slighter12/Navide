@@ -28,20 +28,26 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 kernel32.GetStdHandle.restype = wintypes.HANDLE
 kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
 kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+kernel32.SetConsoleCtrlHandler.argtypes = [ctypes.c_void_p, wintypes.BOOL]
 kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
 
 STD_INPUT_HANDLE = -10
+ENABLE_PROCESSED_INPUT = 0x0001
 ENABLE_ECHO_INPUT = 0x0004
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
 def console_input_without_echo() -> bool:
-    """Turn the console's input echo off (the POSIX peer clears ECHO). True when stdin is a console."""
+    """Turn the console's input echo off (the POSIX peer clears ECHO) and keep Ctrl+C processing on.
+    True when stdin is a console."""
+    # A parent chain that ignores Ctrl+C (CTRL_C ignore is inherited across CreateProcess) must not silence this
+    # program: the POSIX peer likewise installs its own SIGINT handler.
+    kernel32.SetConsoleCtrlHandler(None, False)
     handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
     mode = wintypes.DWORD()
     if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
         return False
-    return bool(kernel32.SetConsoleMode(handle, mode.value & ~ENABLE_ECHO_INPUT))
+    return bool(kernel32.SetConsoleMode(handle, (mode.value & ~ENABLE_ECHO_INPUT) | ENABLE_PROCESSED_INPUT))
 
 
 def in_console_process_list() -> bool:
