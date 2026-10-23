@@ -418,12 +418,20 @@ fn retain_owned(owned: &mut Owned, table: &Table) {
             .map(|(&child, entry)| (child, entry.clone())),
     );
     #[cfg(target_os = "linux")]
-    owned.descendants.extend(
-        table
-            .iter()
-            .filter(|(child, _)| **child != pid)
-            .map(|(&child, entry)| (child, entry.clone())),
-    );
+    {
+        owned.descendants.extend(
+            table
+                .iter()
+                .filter(|(child, _)| **child != pid)
+                .map(|(&child, entry)| (child, entry.clone())),
+        );
+        // The table is a verified snapshot: a retained identity it does not list is absent, dead or
+        // replaced. Live detached descendants are seeds of the snapshot, so they stay listed and kept.
+        owned
+            .descendants
+            .retain(|child, _| table.contains_key(child));
+        owned.births.retain_live(pid, table);
+    }
 }
 
 /// Event-driven wait for owned (possibly non-child) processes to exit; returns those still
@@ -560,11 +568,7 @@ struct GateContext<'a> {
     sessions: &'a Sessions,
     request: u64,
 }
-fn gate_owner(
-    report_r: i32,
-    gate_w: i32,
-    ctx: &GateContext,
-) -> io::Result<(Table, Value, Births)> {
+fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Table, Value, Births)> {
     let GateContext {
         journal,
         wire,
