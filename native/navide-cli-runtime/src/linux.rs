@@ -167,6 +167,8 @@ fn process(pid: i32) -> io::Result<Option<Process>> {
     match std::fs::read(format!("/proc/{pid}/stat")) {
         Ok(bytes) => parse_stat(pid, &bytes).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        // A task that exits while its stat is being read answers ESRCH, not ENOENT: it is just as gone.
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(None),
         Err(error) => Err(error),
     }
 }
