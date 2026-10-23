@@ -12,6 +12,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const GENERATION: &str = "00112233445566778899aabbccddeeff";
@@ -22,7 +24,15 @@ struct Sidecar {
     stdout: BufReader<ChildStdout>,
     next_id: u64,
     dir: PathBuf,
+    /// Set on drop; the watchdog thread (below) stops waiting once it is.
+    finished: Arc<AtomicBool>,
 }
+
+/// A hard bound on every test that talks to a sidecar: `recvmsg` and `read_line` block with no
+/// deadline of their own, so a sidecar that never answers would hang the test past the clock checks
+/// in `recv_until`. After this long the watchdog kills the sidecar, which ends both blocking calls
+/// (EOF on the socket and on stdout) and fails the test where it waits.
+const WATCHDOG: Duration = Duration::from_secs(30);
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("navide-sidecar-{name}-{}", std::process::id()));
@@ -62,12 +72,27 @@ fn start_with(name: &str, args: &[&str], journal: Option<PathBuf>) -> Sidecar {
     let mut child = command.spawn().unwrap();
     unsafe { libc::close(pair[1]) };
     let stdout = BufReader::new(child.stdout.take().unwrap());
+    let finished = Arc::new(AtomicBool::new(false));
+    let (pid, flag) = (child.id() as libc::pid_t, finished.clone());
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + WATCHDOG;
+        while Instant::now() < deadline {
+            if flag.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !flag.load(Ordering::SeqCst) {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    });
     Sidecar {
         child,
         sock: pair[0],
         stdout,
         next_id: 0,
         dir,
+        finished,
     }
 }
 
@@ -161,6 +186,7 @@ impl Sidecar {
 
 impl Drop for Sidecar {
     fn drop(&mut self) {
+        self.finished.store(true, Ordering::SeqCst);
         let _ = self.child.kill();
         let _ = self.child.wait();
         unsafe { libc::close(self.sock) };
@@ -539,8 +565,26 @@ fn an_agent_that_is_neither_a_vendor_nor_a_shell_is_still_refused() {
     let dir = sidecar.dir.clone();
     sidecar.send(code::CREATE, vendor_create_meta(&dir, "no-such-vendor", "session-unknown"));
     let (refused, _) = sidecar.recv_until(|f| f.frame_type == FrameType::Error);
+    // The composition table refuses it before any spawn (compose::admit -> Composition).
+    assert_eq!(refused.meta["code"], "BAD_REQUEST", "{}", refused.meta);
+    assert_eq!(refused.meta["stage"], "composition", "{}", refused.meta);
     assert_eq!(refused.meta["effect"], "none");
-    assert!(refused.meta["code"].is_string());
+}
+
+#[test]
+fn a_shape_this_build_does_not_know_is_refused_by_the_composition_table() {
+    // What an older wire-2 sidecar answers to the `credential` shape (delta 10.1): a bounded refusal
+    // before any spawn, never a silent reinterpretation. Here the unknown shape stands for it.
+    let mut sidecar = start("unknown-shape");
+    sidecar.line();
+    let dir = sidecar.dir.clone();
+    let mut meta = vendor_create_meta(&dir, "", "session-shape");
+    meta["launch"] = json!({"shape": "no-such-shape", "words": []});
+    sidecar.send(code::CREATE, meta);
+    let (refused, _) = sidecar.recv_until(|f| f.frame_type == FrameType::Error);
+    assert_eq!(refused.meta["code"], "BAD_REQUEST", "{}", refused.meta);
+    assert_eq!(refused.meta["stage"], "composition", "{}", refused.meta);
+    assert_eq!(refused.meta["effect"], "none");
 }
 
 #[test]

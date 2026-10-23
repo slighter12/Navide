@@ -95,11 +95,16 @@ def _backend(root: Path) -> BackendProcess:
 
 
 def _recording_shell(root: Path) -> Path:
-    """An executable named `bash` that records `[flag, script]` and then runs the real /bin/bash."""
+    """An executable named `bash` that records `[shell, flag, script]` (its own path as started, `$0`, then
+    its arguments) and then runs the real /bin/bash with the same arguments."""
     directory = root / "outer-shell"
     directory.mkdir()
-    return install_cli_shim(directory, "bash",
-                            [base_python_executable(), "-u", str(RECORDER), str(root / "outer.json"), "/bin/bash"])
+    shell = directory / "bash"
+    shell.write_text("#!/bin/sh\nexec " + shlex.join([base_python_executable(), "-u", str(RECORDER),
+                                                      str(root / "outer.json"), "/bin/bash"]) + ' "$0" "$@"\n',
+                     encoding="utf-8")
+    shell.chmod(0o700)
+    return shell
 
 
 async def _observe(row: tuple, root: Path) -> tuple[dict, list[dict], str | None]:
@@ -137,7 +142,7 @@ async def _observe(row: tuple, root: Path) -> tuple[dict, list[dict], str | None
         snapshot["outer_argv"] = _normalise_argv(normalise, outer)
     receipts_path = root / "runtime-receipts.jsonl"
     owned = _owned(root) if receipts_path.exists() else []
-    return snapshot, owned, (outer[-1] if outer else None)
+    return snapshot, owned, outer
 
 
 def _expected_argv(row: tuple, normalise_user) -> list[str]:
@@ -147,24 +152,27 @@ def _expected_argv(row: tuple, normalise_user) -> list[str]:
     return normalise_user(shlex.split(flags)) + list(PLAIN_ARGV[vendor][sys.platform]["wrapped"])
 
 
-def _assert_outer_script(vendor: str, script: str, snapshot: dict, root: Path) -> None:
-    """The script the runtime executed is the Python oracle's, byte for byte, for the helper Python built
-    and the line the runtime composed (which the child's own argv ties back to the submitted command)."""
+def _assert_outer_argv(vendor: str, outer: list[str], snapshot: dict, root: Path) -> None:
+    """The full outer argv the runtime executed, `[shell, flag, script]`, is the Python oracle's, element
+    for element, for the helper Python built and the line the runtime composed (which the child's own
+    argv ties back to the submitted command)."""
+    assert len(outer) == 3 and outer[0] == str(root / "outer-shell" / "bash") and outer[1] == "-lc", outer[:2]
+    script = outer[2]
     prefix = script.split(" --shell-check -- ", 1)[0].rsplit("then if ", 1)[1]
     helper = shlex.split(prefix)
     assert helper[0] == sys.executable and helper[helper.index("--vendor") + 1] == vendor, helper[:2]
     line = script.split("; exec ", 1)[1].split("; else _navide_credential_status", 1)[0]
     assert _normalise_argv(_normaliser(root), shlex.split(line)[1:]) == snapshot["child_argv"], line
-    oracle = credential_launch.wrap_command(["/bin/bash", "-lc", line], SimpleNamespace(key=vendor), helper)
+    oracle = credential_launch.wrap_command([outer[0], "-lc", line], SimpleNamespace(key=vendor), helper)
     assert oracle is not None
-    assert script == oracle[-1], "the executed wrapper script differs from credential_launch.wrap_command"
+    assert outer == oracle, "the executed outer argv differs from credential_launch.wrap_command"
 
 
 @pytest.mark.parametrize("row", ROWS, ids=[row[0] for row in ROWS])
 async def test_row_child_observation_and_receipt(row, tmp_path):
     name, vendor, form, flags, extra = row
     root = tmp_path / "row"
-    snapshot, owned, script = await _observe(row, root)
+    snapshot, owned, outer = await _observe(row, root)
     assert snapshot["child_cwd"] == "<ROOT>/pane-cwd"
     assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
     assert not _snapshot_leaks(snapshot)
@@ -174,8 +182,8 @@ async def test_row_child_observation_and_receipt(row, tmp_path):
         (target / f"{name}.json").write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     expected = _expected_argv(row, lambda words: _normalise_argv(_normaliser(root), words))
     assert snapshot["child_argv"] == expected, snapshot["child_argv"]
-    if script is not None:
-        _assert_outer_script(vendor, script, snapshot, root)
+    if outer is not None:
+        _assert_outer_argv(vendor, outer, snapshot, root)
     if not PYTHON_RUNTIME:
         log = root / "create-meta.jsonl"
         sizes = [json.loads(line)["meta_bytes"] for line in log.read_text().splitlines()] if log.exists() else []

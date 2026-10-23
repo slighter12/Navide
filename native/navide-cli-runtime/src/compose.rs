@@ -563,9 +563,53 @@ mod tests {
         let missing = json!({"shape": "credential", "helper": file["helper"], "unset": file["unset"],
             "inner": {"shape": "direct", "form": "string", "words": [{"lit": "kilo"}]}});
         assert!(compose("kilo", &missing).is_err(), "the direct form needs its entrypoint");
+        // NUL in every field the credential shape adds, nested inner included.
+        let entry = json!({"shape": "credential", "helper": file["helper"], "unset": file["unset"],
+            "entrypoint": "/x/bin/kilo",
+            "inner": {"shape": "direct", "form": "string", "words": [{"lit": "kilo"}]}});
+        composed("kilo", entry.clone());
+        for (path, replacement) in [
+            ("helper", json!(["/x/py", "a\u{0}b"])),
+            ("unset", json!(["A\u{0}B", "C"])),
+            ("entrypoint", json!("/x/bin/ki\u{0}lo")),
+        ] {
+            let mut nul = entry.clone();
+            nul[path] = replacement;
+            assert!(matches!(compose("kilo", &nul), Err(ComposeError::Validate(_))), "{path}");
+        }
+        let mut nul = entry.clone();
+        nul["inner"]["words"] = json!([{"lit": "kilo"}, {"arg": "a\u{0}b"}]);
+        assert!(matches!(compose("kilo", &nul), Err(ComposeError::Validate(_))), "inner word");
         let mut nul = credential(&file, shell, &good["flags"], line);
-        nul["helper"] = json!(["/x/py", "a\u{0}b"]);
-        assert!(matches!(compose("kilo", &nul), Err(ComposeError::Validate(_))));
+        nul["inner"]["shell"] = json!("/bin/ba\u{0}sh");
+        assert!(matches!(compose("kilo", &nul), Err(ComposeError::Validate(_))), "inner shell");
+    }
+
+    #[test]
+    fn a_direct_string_with_glob_or_tilde_characters_is_composed_not_refused() {
+        // Only the list/script form declines `~*?[]{}!` (credential_launch.py 42); the entrypoint form of a
+        // resolved direct string accepts them, as wrap_command does. Metacharacters and a foreign program
+        // are refused in both.
+        let file: Value = serde_json::from_str(CREDENTIAL_VECTORS).unwrap();
+        let helper = strings(&file["helper"]);
+        for case in file["string_cases"].as_array().unwrap() {
+            let command = case["command"].as_str().unwrap();
+            let launch = json!({"shape": "credential", "helper": file["helper"], "unset": file["unset"],
+                "entrypoint": "/x/bin/kilo",
+                "inner": {"shape": "direct", "form": "string", "words": [{"lit": command}]}});
+            let result = composed(case["agent_key"].as_str().unwrap(), launch);
+            let expected: Vec<String> =
+                strings(&case["expected"]).iter().map(|item| item.replace("{PROGRAM}", "/x/bin/kilo")).collect();
+            assert_eq!(result.program, helper[0], "{}", case["id"]);
+            assert_eq!(result.args, expected[1..], "{}", case["id"]);
+        }
+        for case in file["string_refused_cases"].as_array().unwrap() {
+            let launch = json!({"shape": "credential", "helper": file["helper"], "unset": file["unset"],
+                "entrypoint": "/x/bin/kilo",
+                "inner": {"shape": "direct", "form": "string",
+                          "words": [{"lit": case["command"].as_str().unwrap()}]}});
+            assert!(compose("kilo", &launch).is_err(), "{}", case["id"]);
+        }
     }
 
     #[test]

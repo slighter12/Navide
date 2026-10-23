@@ -50,7 +50,9 @@ if _meta_log:
                     out = real(frame, *args, **kwargs)
                     if frame.frame_type is module.FrameType.REQUEST and frame.code == module.code.CREATE:
                         with open(_meta_log, "a", encoding="utf-8") as handle:
-                            handle.write(json.dumps({"meta_bytes": len(out) - module.HEADER_LEN - len(frame.blob)}) + "\n")
+                            handle.write(json.dumps({"meta_bytes": len(out) - module.HEADER_LEN - len(frame.blob),
+                                                     "agent_key": frame.meta.get("agent_key"),
+                                                     "launch": frame.meta.get("launch")}) + "\n")  # never the env
                     return out
 
                 module.encode = encode

@@ -56,6 +56,32 @@ def test_wrap_plan_for_a_string_command_carries_the_resolved_program(tmp_path):
     assert credential_launch.wrap_plan("other --port 4000", KILO, HELPER, env=env) is None
 
 
+def _program(tmp_path):
+    program = tmp_path / "kilo"
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+    program.chmod(0o700)
+    return program
+
+
+@pytest.mark.parametrize("case", VECTORS["string_cases"], ids=lambda case: case["id"])
+def test_a_direct_string_is_wrapped_even_with_glob_or_tilde_characters(case, tmp_path):
+    """Only the list form declines `~*?[]{}!` (credential_launch.py 42); a resolved direct string does not,
+    so the Rust runtime must not refuse it either."""
+    program, env = _program(tmp_path), {"PATH": str(tmp_path)}
+    expected = [item.replace("{PROGRAM}", str(program)) for item in case["expected"]]
+    assert credential_launch.wrap_command(case["command"], KILO, HELPER, env=env) == expected
+    assert credential_launch.wrap_plan(case["command"], KILO, HELPER, env=env) == {
+        "helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": str(program)}
+
+
+@pytest.mark.parametrize("case", VECTORS["string_refused_cases"], ids=lambda case: case["id"])
+def test_a_direct_string_is_declined_exactly_when_wrap_command_declines_it(case, tmp_path):
+    _program(tmp_path)
+    env = {"PATH": str(tmp_path)}
+    assert credential_launch.wrap_command(case["command"], KILO, HELPER, env=env) is None
+    assert credential_launch.wrap_plan(case["command"], KILO, HELPER, env=env) is None
+
+
 def test_build_launch_wraps_the_ordinary_launch_in_the_credential_shape():
     plan = {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": None}
     base = ["/bin/bash", "-lc", "/x/bin/kilo --model fixture-model"]
@@ -75,6 +101,31 @@ def test_build_launch_for_a_string_command_names_the_entrypoint():
     assert launch["shape"] == "credential" and launch["entrypoint"] == "/x/bin/kilo"
     assert launch["inner"] == {"shape": "direct", "form": "string",
                                "words": [{"lit": "/x/bin/kilo"}, {"arg": "--port"}, {"arg": "4000"}]}
+
+
+@pytest.mark.parametrize("field", ["helper", "unset", "entrypoint", "inner"])
+@pytest.mark.parametrize("bad", ["a\0b", "lone\ud800surrogate"], ids=["nul", "surrogate"])
+def test_text_the_runtime_cannot_carry_is_refused_in_every_new_credential_field(field, bad):
+    """Delta 2.7 covers the fields the credential shape adds: refused before dispatch (`pre-dispatch`)."""
+    plan = {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": "/x/bin/kilo"}
+    launch = cli_launch.build_launch("kilo", "/x/bin/kilo", "/x/bin/kilo --port 4000", credential=plan)
+    cli_launch.check_text(launch)  # the clean launch passes
+    if field == "inner":
+        launch["inner"]["words"].append({"arg": bad})
+    elif field == "unset":
+        launch["unset"] = [bad]
+    elif field == "helper":
+        launch["helper"] = [*HELPER, bad]
+    else:
+        launch["entrypoint"] = bad
+    with pytest.raises(cli_launch.LaunchRefused) as refused:
+        cli_launch.check_text(launch)
+    assert refused.value.code == "CREATE_INVALID_TEXT" and refused.value.stage == "pre-dispatch"
+
+
+def test_the_unset_names_are_exactly_the_two_helper_variables():
+    plan = credential_launch.wrap_plan(["/bin/bash", "-lc", "/x/bin/kilo"], KILO, HELPER)
+    assert plan["unset"] == [PORT_ENV, TOKEN_ENV]
 
 
 def test_a_managed_credential_launch_of_a_rust_subject_is_admitted():
