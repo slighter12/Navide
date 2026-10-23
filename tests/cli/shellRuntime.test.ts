@@ -123,7 +123,7 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         await input(tid, 'size\r')
         await until(() => (output.get(tid) ?? '').includes('SIZE [120, 40]'), 'actual dimensions')
         expect((await client.send('terminal.interrupt', { terminal_session_id: tid })).ok).toBe(true)
-        await until(() => (output.get(tid) ?? '').includes('INTERRUPTED'), 'controlling tty interrupt')
+        await until(() => (output.get(tid) ?? '').includes('INTERRUPTED'), `controlling tty interrupt (peer ${peers.findIndex((peer) => peer.tid === tid)})`)
       }))
       client.reconnectNow('actual transport loss')
       await until(() => connections === 2, 'new authenticated connection')
