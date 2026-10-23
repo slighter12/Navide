@@ -307,8 +307,11 @@ it.runIf(controllerBound)('native Codex production-client delayed identification
         expect(nativeProcess.image.sha256).toBe(runtime.executableSha256)
         expect(nativeProcess.image.sha256).toBe(guard.files.runtime.sha256)
         markGate(stage, 'runtime-argv')
-        expect(nativeProcess.argv).toEqual([guard.files.runtime.path, '--protocol', '1', '--runtime-generation',
-          runtime.runtime_generation, '--owner-pid', String(backendProcess.pid)])
+        // Sidecar argv (cli_runtime.py `_start`): `--wire 2 --runtime-generation G --owner-pid P --ownership-journal J --control-fd N`.
+        expect(nativeProcess.argv.slice(0, 7)).toEqual([guard.files.runtime.path, '--wire', '2', '--runtime-generation', runtime.runtime_generation, '--owner-pid', String(backendProcess.pid)])
+        expect(nativeProcess.argv.slice(7, 8)).toEqual(['--ownership-journal'])
+        expect(nativeProcess.argv.slice(9, 10)).toEqual(['--control-fd'])
+        expect(nativeProcess.argv).toHaveLength(11)
         markGate(stage, 'producer-parent')
         expect(process.parent).toBe(nativeProcess.pid)
         markGate(stage, 'pty-root-pid')
@@ -525,7 +528,8 @@ it.runIf(controllerBound)('native OpenCode production-client WAL SQLite and resu
           expect(runtime).toMatchObject({ parent: backend.pid, exe: guard.files.runtime.path })
           expect(runtime.image.sha256).toBe(ready.executableSha256)
           expect(runtime.image.sha256).toBe(guard.files.runtime.sha256)
-          expect(runtime.argv).toEqual([guard.files.runtime.path, '--protocol', '1', '--runtime-generation', ready.runtime_generation, '--owner-pid', String(backend.pid)])
+          expect(runtime.argv.slice(0, 7)).toEqual([guard.files.runtime.path, '--wire', '2', '--runtime-generation', ready.runtime_generation, '--owner-pid', String(backend.pid)])
+          expect([runtime.argv[7], runtime.argv[9], runtime.argv.length]).toEqual(['--ownership-journal', '--control-fd', 11])
           markGate(stage, 'shell-resolution')
           const shell = JSON.parse(readFileSync(join(root, `shell-resolution-${owned.root.pid}.json`), 'utf8'))
           markGate(stage, 'managed-lineage-read')
