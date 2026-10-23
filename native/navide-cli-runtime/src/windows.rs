@@ -703,8 +703,7 @@ fn natural_cleanup(handle: &SessionHandle, state: &mut State) -> Outcome {
 /// The one absolute bound of a cleanup. A cleanup already running keeps the deadline it started with;
 /// only a cleanup that has not begun starts a fresh `cleanup` budget.
 fn cleanup_deadline(running: Option<Instant>, now: Instant, cleanup: Duration) -> Instant {
-    let _ = running;
-    now + cleanup
+    running.unwrap_or(now + cleanup)
 }
 
 /// Wait for the root's exit after its termination was issued, within what is left of `deadline`. On a
@@ -715,10 +714,10 @@ fn confirm_root_exit(
     root: impl FnOnce() -> Value,
     outcome: &mut Outcome,
 ) -> bool {
-    let _ = root;
     if wait(ROOT_REAP.min(deadline.saturating_duration_since(Instant::now()))) {
         return true;
     }
+    outcome.unverifiable.push(root());
     outcome.failure = Some("root reap timeout".into());
     false
 }
