@@ -1,11 +1,14 @@
 /** OpenCode — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.opencode
 
 export const SPEC = {
   agentKey: 'opencode',
   label: 'OpenCode (Anomaly)',
-  defaultCommand: 'opencode',
+  defaultCommand: FACT.command,
   // The root command really does consume `--model` — it is declared on the
   // root command, threaded into the TUI and parsed there. An earlier audit
   // recorded this as silently swallowed; that was wrong. What it saw was
@@ -15,7 +18,7 @@ export const SPEC = {
   // `opencode models` lists what that resolves to. Effort is not a flag here
   // either — it is part of the model id (`-high`, `-fast`) or a config
   // variant.
-  modelArgs: (m) => `--model ${m}`,
+  modelArgs: (m) => `${FACT.model_flag} ${m}`,
   // No skipPermissionFlag: the opencode TUI has no permission-bypass flag —
   // only the `opencode run` subcommand does, as `--dangerously-skip-permissions`
   // (still listed under `opencode run --help` on 1.15.12).
@@ -28,7 +31,7 @@ export const SPEC = {
   // and exits 1, while bare `opencode models` exits 0 — so a YOLO-mode pane
   // spawned `opencode --auto ...`, never reached the TUI, and died on startup.
   // id is `ses_`-prefixed.
-  resumeArgs: (id) => `--session ${id}`,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   needsSessionMarker: true,
   resumeCommandPattern: /^opencode\s+(?:--session|-s)\s+\S+/,
   supportsRebuild: true,

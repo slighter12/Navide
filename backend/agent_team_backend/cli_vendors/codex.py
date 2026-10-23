@@ -32,6 +32,7 @@ import tomllib
 import psutil
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, McpWiring, SkillsWiring, VendorRuntimeContext, VendorSpec, command_text
 from ..applog import app_data_dir
 from ..skills_store import SkillsStore
@@ -1884,9 +1885,11 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".codex", "hooks.json"), "Codex hook", section=("hooks",), native_consent="hook-trust"),
 ))
 
+FACT = FACTS["codex"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="codex",
+    key=FACT.key,
     # Built-in OpenAI API and ChatGPT service defaults (verified 2026-09-21):
     # https://learn.chatgpt.com/docs/config-file/config-sample
     # https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs
@@ -1897,7 +1900,7 @@ SPEC = VendorSpec(
     # CODEX_HOME is assigned per pane, including resumes in an existing home.
     data_dirs=_risk_data_dirs,
     data_dir_env_vars=("CODEX_HOME", "CODEX_SQLITE_HOME"),
-    supports_model=True,
+    supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: codex resolves its skills from $CODEX_HOME/skills.
     skills_supported=True,
     skills_wiring=SkillsWiring(
@@ -1917,7 +1920,7 @@ SPEC = VendorSpec(
         flag_token_env_value='mcp_servers.{name}.bearer_token_env_var="{env}"',
         already_wired="mcp_servers.{name}",
     ),
-    login_command_args="login",
+    login_command_args=FACT.login_args,
     live_file=(".codex", "auth.json"),
     slot_file="auth.json",
     login_home_secret_file=("auth.json",),

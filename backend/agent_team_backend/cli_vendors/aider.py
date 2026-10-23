@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, dotenv_extract, dotenv_merge
+from ._vendor_facts import FACTS
 from ..log_readers.base import (
     ActivityEvent,
     IncrementalParseResult,
@@ -649,8 +650,10 @@ def identity_from_secret(secret):
     return {"email": None, "signedIn": signed_in}
 
 
+FACT = FACTS["aider"]
+
 SPEC = VendorSpec(
-    key="aider",
+    key=FACT.key,
     # Provider/model selection is open-ended; no verified default host set.
     expected_hosts=(),
     # History is a configurable workspace FILE, not a dedicated data root.
@@ -663,7 +666,7 @@ SPEC = VendorSpec(
     # `--chat-history-file <path> --restore-chat-history`, so there is nothing
     # for a caller to name. cli_open_agent refuses `session_id` on this key
     # rather than opening a pane that restores something else.
-    supports_session_resume=False,
+    supports_session_resume=FACT.supports_session_resume,
     # Multi-account = one provider API key per profile, parked in and
     # restored to ``~/.aider/oauth-keys.env`` (see AIDER_KEYS_FILE_REL).
     # "manual": there is no conversation to resume — the pane is relaunched

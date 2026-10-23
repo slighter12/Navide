@@ -47,6 +47,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from .base import Dep, ExtensionsSpec, PlatformInstall, VendorSpec, command_text
+from ._vendor_facts import FACTS
 from ..osplat import platform_id as _platform_id
 from ..usage_common import _epoch_to_iso
 from ..log_readers.base import (
@@ -387,8 +388,10 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
 
 # ---- vendor spec -----------------------------------------------------------
 
+FACT = FACTS["goose"]
+
 SPEC = VendorSpec(
-    key="goose",
+    key=FACT.key,
     label="Goose (AAIF)",
     # Plugins live in ~/.agents/plugins and extensions in config.yaml's
     # `extensions:` map (source, 1.55.0); neither layout has been checked

@@ -80,6 +80,7 @@ from ..log_readers.base import (
     user_prompt_text,
 )
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -829,14 +830,16 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".cursor", "hooks.json"), "Cursor hook", section=("hooks",)),
 ))
 
+FACT = FACTS["cursor"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="cursor",
+    key=FACT.key,
     # The web quota endpoint is not evidence of the CLI's inference hosts.
     expected_hosts=(),
     # Verified CLI conversation store; exclude the IDE's other .cursor data.
     data_dirs=lambda ctx: (ctx.path(ctx.home / ".cursor" / "chats"),),
-    supports_model=True,
+    supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15 (docs): .cursor/skills and .agents/skills in the
     # project, ~/.cursor/skills globally, and no relocation variable at all —
     # the same corner its MCP wiring is in, so the workspace file is again the

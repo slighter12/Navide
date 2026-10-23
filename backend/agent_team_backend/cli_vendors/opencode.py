@@ -53,6 +53,7 @@ from pathlib import Path
 import re
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -1081,15 +1082,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("npm-list", (".config", "opencode", "opencode.jsonc"), "opencode plugin", section=("plugin",)),
 ))
 
+FACT = FACTS["opencode"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="opencode",
+    key=FACT.key,
     # Arbitrary provider config; a selected quota provider is not a CLI host set.
     expected_hosts=(),
     # Same XDG database/auth root as _data_dir("opencode").
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("XDG_DATA_HOME") or ctx.home / ".local" / "share") / "opencode",),
     data_dir_env_vars=("XDG_DATA_HOME",),
-    supports_model=True,
+    supports_model=FACT.model_flag is not None,
     skills_supported=True,
     # skills.paths registers extra roots; opencode deep-merges this document
     # over the user's own config, so their skills keep loading.
@@ -1143,7 +1146,7 @@ SPEC = VendorSpec(
     # `opencode auth login [url]` (verified against `opencode auth --help`,
     # 1.15.12) opens the provider picker, then the chosen provider's own
     # OAuth or key prompt — a flow a PTY pane carries.
-    login_command_args="auth login",
+    login_command_args=FACT.login_args,
     # Multi-account: ``auth.json`` is a provider map, so a profile binds to
     # ONE provider entry (``scopes``) and a switch rewrites that entry only.
     # The data dir follows XDG_DATA_HOME alone — no dedicated variable to

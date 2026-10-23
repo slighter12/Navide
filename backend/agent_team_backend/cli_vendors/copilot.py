@@ -113,6 +113,7 @@ import time
 
 from .. import osplat
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -1456,17 +1457,19 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks-dir", (".copilot", "hooks"), "Copilot hook"),
 ))
 
+FACT = FACTS["copilot"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="copilot",
+    key=FACT.key,
     # Enterprise hosts/model routing have no verified default CLI host set here.
     expected_hosts=(),
     # Same root as copilot_root, using the captured child environment.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("COPILOT_HOME") or ctx.home / ".copilot"),),
     data_dir_env_vars=("COPILOT_HOME",),
-    supports_model=True,
-    supports_effort=True,
-    known_efforts=('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'),
+    supports_model=FACT.model_flag is not None,
+    supports_effort=FACT.effort_flag is not None,
+    known_efforts=FACT.known_efforts or (),
     # Verified 2026-08-15: `copilot skill list` under a relocated COPILOT_HOME
     # lists exactly the skills below <home>/skills.
     skills_supported=True,
@@ -1486,7 +1489,7 @@ SPEC = VendorSpec(
     # what a login pane carries; the device-code flow it falls back to for
     # SSH/headless is auto-detected, so neither --web-flow nor --device-code
     # is forced here. Verified against `copilot login --help`, 2026-09-18.
-    login_command_args="login",
+    login_command_args=FACT.login_args,
     # Multi-account: the CLI keeps EVERY login it has done (config.json
     # ``loggedInUsers``, one keyring item each under service "copilot-cli",
     # account "<host>:<login>") and ``lastLoggedInUser`` selects the one in

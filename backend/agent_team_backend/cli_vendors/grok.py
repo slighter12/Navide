@@ -59,6 +59,7 @@ from uuid import UUID
 
 from .. import osplat
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, simple_command_args
 from ..usage_common import _num, _snapshot, _window
 from ..log_readers.base import (
@@ -795,15 +796,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("plugin-dirs", (".grok", "installed-plugins"), "Grok plugin"),
 ))
 
+FACT = FACTS["grok"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="grok",
+    key=FACT.key,
     # auth.x.ai proves login routing only; grok-build service hosts unverified.
     expected_hosts=(),
     # GrokLogReader._home layout, including GROK_HOME and the HOME shim.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("GROK_HOME") or ctx.home / ".grok"),),
     data_dir_env_vars=("GROK_HOME",),
-    supports_model=True,
+    supports_model=FACT.model_flag is not None,
     # ~/.agents/skills is still a scanned tier on the official CLI (docs
     # 08-skills.md lists .agents/skills alongside .grok/skills at every level),
     # and there is still no variable that relocates the skills root on its own
@@ -840,7 +843,7 @@ SPEC = VendorSpec(
     # `grok login` defaults to the browser OAuth flow at auth.x.ai, which a PTY
     # pane can carry: the CLI opens the browser and waits. `--device-auth` is
     # the headless alternative and is not what a desktop pane needs.
-    login_command_args="login",
+    login_command_args=FACT.login_args,
     live_file=(".grok", "auth.json"),
     slot_file="auth.json",
     login_home_secret_file=("home", ".grok", "auth.json"),

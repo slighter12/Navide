@@ -1,6 +1,9 @@
 /** Grok CLI — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.grok
 
 // Grok Build's folder-trust prompt (1.0.62), read off a pane (issue #402):
 //   Do you trust the contents of this directory?
@@ -34,9 +37,9 @@ function uuid7(): string {
 export const SPEC = {
   agentKey: 'grok',
   label: 'Grok Build (SpaceXAI)',
-  defaultCommand: 'grok',
+  defaultCommand: FACT.command,
   // `reasoning_effort` exists only in grok's API payload, not as a flag.
-  modelArgs: (m) => `--model ${m}`,
+  modelArgs: (m) => `${FACT.model_flag} ${m}`,
   // no skipPermissionFlag: this CLI does have `--always-approve` and
   // `--permission-mode` (verified in `grok --help`, 1.0.30), but wiring either
   // one in is a change to how panes run, not part of reading its logs — so the
@@ -46,7 +49,7 @@ export const SPEC = {
   // permission bypass.
   // `-r` resumes; `-s`/`--session-id` NAMES A NEW session and errors on an
   // existing id, so the two are not interchangeable. Ids are UUIDv7.
-  resumeArgs: (id) => `-r ${id}`,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   // No turnEndInferredFromSilence: the official CLI writes an explicit
   // `turn_completed` record into updates.jsonl and the reader emits its
   // turn_complete straight off it. The community grok-cli this replaced wrote
@@ -57,7 +60,7 @@ export const SPEC = {
   // marker instead, which Grok answered as a real prompt — a whole turn of the
   // user's quota before any task arrived (issue #402).
   pinsSessionIdAtLaunch: {
-    flag: '--session-id',
+    flag: FACT.session_id_flag,
     handwritten:
       /--session-id[=\s]+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?![0-9a-fA-F-])/,
     generateId: uuid7,

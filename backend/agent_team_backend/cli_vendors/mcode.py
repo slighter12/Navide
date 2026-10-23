@@ -97,6 +97,7 @@ import time
 from pathlib import Path
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, VendorSpec
 
 MCODE_BUILD_ENV = "prod"
@@ -321,9 +322,11 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("plugin-dirs", (".minimax", "plugins"), "MiniMax Code plugin"),
 ))
 
+FACT = FACTS["mcode"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="mcode",
+    key=FACT.key,
     # Region/environment auth routing is known; service hosts are not verified.
     expected_hosts=(),
     # Relocation and legacy fallback verified against mcode 0.4.12 above.
@@ -336,7 +339,7 @@ SPEC = VendorSpec(
     # docstring for the SQLite schema it would read). Declared False so the
     # default True does not advertise a resume that would find no id —
     # unlike aider, this is a missing reader, not a missing concept.
-    supports_session_resume=False,
+    supports_session_resume=FACT.supports_session_resume,
     # Relocates the entire data root — config, auth, session SQLite. The CLI
     # also honours MAVIS_DATA_DIR as a legacy fallback. Navide strips rather
     # than injects these variables, so both names must be guarded or the
@@ -345,7 +348,7 @@ SPEC = VendorSpec(
     # `mcode login` (add `--region global` for a non-mainland account, which
     # is a choice the user makes in the CLI's own flow, not something Navide
     # can pick for them).
-    login_command_args="login",
+    login_command_args=FACT.login_args,
     # Multi-account: see the module docstring. One record of
     # ``<data-dir>/auth/auth.json`` per region scope, with the namespace's
     # ``auth-state.json`` derived to match. MINIMAX_DATA_DIR relocates the

@@ -32,6 +32,7 @@ import sys
 import time
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -834,16 +835,18 @@ _EXTENSIONS = ExtensionsSpec(
     note="agy has plugins (`agy plugin list`), but where it keeps them is not verified yet.",
 )
 
+FACT = FACTS["antigravity"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="antigravity",
+    key=FACT.key,
     # Quota/OAuth constants above do not establish CLI service expectations.
     expected_hosts=(),
     # Conversation root from AntigravityLogReader; honor the pane HOME shim.
     data_dirs=lambda ctx: (ctx.path(ctx.home / ".gemini" / "antigravity-cli"),),
-    supports_model=True,
-    supports_effort=True,
-    known_efforts=('low', 'medium', 'high'),
+    supports_model=FACT.model_flag is not None,
+    supports_effort=FACT.effort_flag is not None,
+    known_efforts=FACT.known_efforts or (),
     # Verified 2026-08-15: `gemini skills list` reports locations under
     # ~/.gemini/skills — not the ~/.gemini/antigravity-cli/skills that other
     # shared configs assume. Rides the HOME shim its MCP wiring builds.
