@@ -24,6 +24,21 @@ impl Births {
             .map(|(_, ticks)| *ticks)
     }
 
+    /// Whether this session already admitted exactly this instance of `pid` (same exact birth ticks).
+    fn admitted(&self, pid: i32, seen: &Process) -> bool {
+        self.0
+            .get(&pid)
+            .is_some_and(|(_, ticks)| *ticks == seen.birth_ticks)
+    }
+
+    /// Drop the evidence of every pid a verified snapshot no longer lists (absent, dead or replaced), so a
+    /// long-lived session's ledger follows its live processes. The root's entry stays: it is one record and
+    /// it keeps a same-second replacement of the root pid from being taken for the root.
+    pub(super) fn retain_live(&mut self, root: i32, snapshot: &Table) {
+        self.0
+            .retain(|pid, _| *pid == root || snapshot.contains_key(pid));
+    }
+
     /// Record the first instance seen at `pid` with this start string. A later process with the same
     /// string but other ticks is a replacement: it never overwrites, and the caller drops it.
     fn admit(&mut self, pid: i32, start: &str, ticks: u64) -> bool {
@@ -376,8 +391,9 @@ fn signal_with(
         }
     }
     // Pre-6.9 kernel: a numeric group kill is not bound to the instance verified above, so each live
-    // group member is signalled through its own pidfd instead. A member that cannot be bound stays unresolved.
-    signal_group_members(live.group, signal)
+    // group member is signalled through its own pidfd instead. A member that cannot be bound, or that this
+    // session never admitted, stays unresolved.
+    signal_group_members(live.group, signal, births)
 }
 
 fn send_pidfd(fd: i32, signal: i32, flags: libc::c_uint) -> bool {
@@ -395,13 +411,19 @@ fn send_pidfd(fd: i32, signal: i32, flags: libc::c_uint) -> bool {
 
 /// Signal every live member of process group `group` through that member's own pidfd. The member's group
 /// is read after the pidfd is bound and the pidfd must still be alive, so a recycled pid is never signalled.
-fn signal_group_members(group: i32, signal: i32) -> bool {
+/// A member is also signalled only when this session's ledger already holds its exact birth ticks: if the
+/// verified leader's group ended and the numeric group id was reused, the new members were never admitted
+/// and are left alone.
+fn signal_group_members(group: i32, signal: i32, births: &Births) -> bool {
     let Ok(all) = scan(Instant::now() + Duration::from_millis(super::SNAPSHOT_MS)) else {
         return false;
     };
     let mut delivered = false;
     for (&member, seen) in &all {
-        if seen.group != group || matches!(seen.state, b'Z' | b'X') {
+        if seen.group != group
+            || matches!(seen.state, b'Z' | b'X')
+            || !births.admitted(member, seen)
+        {
             continue;
         }
         // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor or -1.
@@ -570,11 +592,17 @@ mod tests {
         let (mut child, pid, start, ticks, _) = sleeper();
         let stale = ledger(pid, &start, ticks + 1); // the recorded instance is not the one at this pid
         assert!(!signal(pid, &start, libc::SIGKILL, false, &stale));
-        assert!(child.try_wait().unwrap().is_none(), "the replacement was signalled");
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "the replacement was signalled"
+        );
         let own = ledger(pid, &start, ticks);
         assert!(signal(pid, &start, libc::SIGKILL, false, &own));
         let status = child.wait().unwrap();
-        assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(libc::SIGKILL));
+        assert_eq!(
+            std::os::unix::process::ExitStatusExt::signal(&status),
+            Some(libc::SIGKILL)
+        );
     }
 
     /// Old session A recorded ticks for a retained descendant; a new session B then admits a root that now
@@ -585,11 +613,17 @@ mod tests {
         let session_a = ledger(pid, &start, ticks + 1);
         let admitted = snapshot(Some(pid), &Table::new(), &mut session_b).unwrap();
         assert!(admitted.contains_key(&pid));
-        assert!(!signal(pid, &start, libc::SIGKILL, false, &session_a), "A's cleanup signalled B's process");
+        assert!(
+            !signal(pid, &start, libc::SIGKILL, false, &session_a),
+            "A's cleanup signalled B's process"
+        );
         assert!(child.try_wait().unwrap().is_none());
         let seeds: Table = [(pid, (1, pid, start.clone()))].into_iter().collect();
         let mut session_a = session_a;
-        assert!(snapshot(None, &seeds, &mut session_a).unwrap().is_empty(), "A re-admitted B's process");
+        assert!(
+            snapshot(None, &seeds, &mut session_a).unwrap().is_empty(),
+            "A re-admitted B's process"
+        );
         assert!(signal(pid, &start, libc::SIGKILL, false, &session_b));
         child.wait().unwrap();
     }
@@ -597,11 +631,20 @@ mod tests {
     #[test]
     fn a_wrong_start_string_or_an_exited_process_is_never_signalled() {
         let (mut child, pid, start, _, births) = sleeper();
-        assert!(!signal(pid, "Thu Jan  1 00:00:00 1970", libc::SIGKILL, false, &births));
+        assert!(!signal(
+            pid,
+            "Thu Jan  1 00:00:00 1970",
+            libc::SIGKILL,
+            false,
+            &births
+        ));
         assert!(child.try_wait().unwrap().is_none());
         child.kill().unwrap();
         child.wait().unwrap();
-        assert!(!signal(pid, &start, libc::SIGKILL, false, &births), "a gone pid has nothing to signal");
+        assert!(
+            !signal(pid, &start, libc::SIGKILL, false, &births),
+            "a gone pid has nothing to signal"
+        );
     }
 
     #[test]
@@ -636,7 +679,11 @@ mod tests {
         };
         assert!(table.len() >= 3, "the group never formed");
         let start = table.get(&pid).unwrap().2.clone();
-        let other_group = Command::new("/bin/sleep").arg("30").process_group(0).spawn().unwrap();
+        let other_group = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
         let bystander = other_group.id() as i32;
         std::mem::forget(other_group); // reaped by init when the test process exits
         (child, pid, start, births, bystander)
@@ -645,9 +692,19 @@ mod tests {
     #[test]
     fn the_pre_6_9_group_fallback_signals_each_member_by_pidfd_and_nothing_else() {
         let (mut leader, pid, start, births, bystander) = group_of_three();
-        assert!(signal_with(pid, &start, libc::SIGKILL, true, &births, false));
+        assert!(signal_with(
+            pid,
+            &start,
+            libc::SIGKILL,
+            true,
+            &births,
+            false
+        ));
         let status = leader.wait().unwrap();
-        assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(libc::SIGKILL));
+        assert_eq!(
+            std::os::unix::process::ExitStatusExt::signal(&status),
+            Some(libc::SIGKILL)
+        );
         assert!(
             wait_exit(&[bystander], Instant::now() + Duration::from_millis(200)) == vec![bystander],
             "a process outside the verified group was signalled"
@@ -656,12 +713,125 @@ mod tests {
         unsafe { libc::kill(bystander, libc::SIGKILL) };
     }
 
+    /// A session whose shell keeps spawning and reaping children must not accumulate one ledger entry per
+    /// pid it ever saw, while a live detached descendant it retained stays owned and signallable.
+    #[test]
+    fn a_long_lived_session_keeps_a_bounded_ledger_and_still_signals_a_retained_descendant() {
+        use super::super::{known_owned, retain_owned, Owned};
+        let mut root = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "setsid sleep 60 & i=0; while [ $i -lt 30 ]; do sleep 0.05; i=$((i+1)); done",
+            ])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = root.id() as i32;
+        let mut births = Births::default();
+        let first = snapshot(Some(pid), &Table::new(), &mut births).unwrap();
+        let start = first.get(&pid).unwrap().2.clone();
+        let mut owned = Owned {
+            pid,
+            root: serde_json::json!({ "start_value": start }),
+            descendants: Table::new(),
+            births,
+        };
+        retain_owned(&mut owned, &first);
+        let mut seen: HashSet<i32> = first.keys().copied().collect();
+        let mut peak = 0;
+        let mut reaped = false;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut after_exit = 0;
+        while Instant::now() < deadline && after_exit < 5 {
+            if !reaped && root.try_wait().unwrap().is_some() {
+                reaped = true;
+            }
+            if reaped {
+                after_exit += 1;
+            }
+            let table = snapshot(None, &known_owned(&owned), &mut owned.births).unwrap();
+            seen.extend(table.keys().copied());
+            retain_owned(&mut owned, &table);
+            peak = peak.max(owned.births.0.len() + owned.descendants.len());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            seen.len() >= 10,
+            "the churn never happened: {} pids seen",
+            seen.len()
+        );
+        assert!(
+            peak <= 8,
+            "the ledger grew with the churn: peak {peak} for {} pids",
+            seen.len()
+        );
+        assert!(
+            owned.births.0.len() <= 3 && owned.descendants.len() <= 2,
+            "dead identities were kept: {} births, {} descendants",
+            owned.births.0.len(),
+            owned.descendants.len()
+        );
+        let (&kept, entry) = owned
+            .descendants
+            .iter()
+            .next()
+            .expect("the live detached descendant was dropped");
+        assert!(signal(kept, &entry.2, libc::SIGKILL, false, &owned.births));
+        assert!(wait_exit(&[kept], Instant::now() + Duration::from_secs(2)).is_empty());
+        // SAFETY: the group is this test's own shell group.
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+        let _ = root.wait();
+    }
+
+    /// The fallback scan sees every live member of the numeric group, including ones this session never
+    /// admitted (what a reused PGID looks like: members that exist but that no snapshot of this session
+    /// recorded). Only the admitted leader may be signalled; the unadmitted members stay untouched.
+    #[test]
+    fn the_pre_6_9_group_fallback_never_signals_a_member_this_session_did_not_admit() {
+        let (mut leader, pid, start, _, bystander) = group_of_three();
+        let admitted_only_leader = ledger(pid, &start, process(pid).unwrap().unwrap().birth_ticks);
+        let others: Vec<i32> = scan(Instant::now() + Duration::from_secs(2))
+            .unwrap()
+            .into_iter()
+            .filter(|(member, seen)| *member != pid && seen.group == pid)
+            .map(|(member, _)| member)
+            .collect();
+        assert!(others.len() >= 2, "the group never formed");
+        assert!(signal_with(
+            pid,
+            &start,
+            libc::SIGKILL,
+            true,
+            &admitted_only_leader,
+            false
+        ));
+        leader.wait().unwrap();
+        for member in &others {
+            assert!(
+                wait_exit(&[*member], Instant::now() + Duration::from_millis(300)) == vec![*member],
+                "member {member} was signalled although this session never admitted it"
+            );
+        }
+        // SAFETY: the unadmitted members and the bystander are this test's own sleepers.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+            libc::kill(bystander, libc::SIGKILL);
+        }
+    }
+
     #[test]
     fn the_pre_6_9_group_fallback_never_signals_by_number_once_the_leader_is_gone() {
         let (mut leader, pid, start, births, bystander) = group_of_three();
         leader.kill().unwrap();
         leader.wait().unwrap(); // the leader is reaped before the signal: nothing left to bind
-        assert!(!signal_with(pid, &start, libc::SIGKILL, true, &births, false));
+        assert!(!signal_with(
+            pid,
+            &start,
+            libc::SIGKILL,
+            true,
+            &births,
+            false
+        ));
         // SAFETY: the bystander is this test's own process.
         unsafe { libc::kill(bystander, libc::SIGKILL) };
         // SAFETY: the orphaned members are this test's own sleepers.
