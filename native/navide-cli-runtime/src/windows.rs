@@ -550,6 +550,8 @@ struct State {
     exited_sent: bool,
     eof: bool,
     eof_deadline: Option<Instant>,
+    /// Set when the root exited on its own: how long Python has to service or close the pipe (7.3).
+    gate_deadline: Option<Instant>,
     next_snapshot: Instant,
 }
 
@@ -755,11 +757,18 @@ fn session_thread(
         exited_sent: false,
         eof: false,
         eof_deadline: None,
+        gate_deadline: None,
         next_snapshot: Instant::now() + snapshot_cadence(handle.started),
     };
     loop {
         let mut wake = state.next_snapshot;
         if let Some(deadline) = state.eof_deadline {
+            wake = wake.min(deadline);
+        }
+        if let Some(deadline) = state
+            .gate_deadline
+            .filter(|_| handle.gate.reason().is_none())
+        {
             wake = wake.min(deadline);
         }
         match mailbox.recv_timeout(wake.saturating_duration_since(Instant::now())) {
@@ -769,6 +778,10 @@ fn session_thread(
                 if handle.exit.get().is_some() && handle.gate.reason().is_some() {
                     let outcome = natural_cleanup(&handle, &mut state);
                     return finish(&handle, &wire, &sessions, outcome);
+                }
+                if handle.exit.get().is_some() && state.gate_deadline.is_none() {
+                    state.gate_deadline =
+                        Some(Instant::now() + Duration::from_millis(cleanup_ms()));
                 }
             }
             Ok(Msg::Kill(force)) => {
@@ -794,6 +807,21 @@ fn session_thread(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
+                if state.gate_deadline.is_some_and(|deadline| now >= deadline)
+                    && handle.gate.reason().is_none()
+                {
+                    // 7.3: nobody serviced the pipe in time. The console stays open (closing it
+                    // could hang) and dies with this process; the tree is ended and reported.
+                    let mut outcome = Outcome::default();
+                    match end_tree(&handle, &mut state.owned) {
+                        Ok(survivors) => outcome.survivors = survivors,
+                        Err(error) => outcome.failure = Some(error.to_string()),
+                    }
+                    outcome.failure.get_or_insert_with(|| {
+                        "pre-close gate not satisfied within cleanup_ms".into()
+                    });
+                    return finish(&handle, &wire, &sessions, outcome);
+                }
                 if state.eof_deadline.is_some_and(|deadline| now >= deadline) {
                     state.eof_deadline = None;
                     if handle.exit.get().is_none() {

@@ -168,6 +168,20 @@ jobs:
           if ($code -ne 0) { exit 1 }
           if ($out -notmatch 'test result: ok\. 1 passed') { Write-Host "case not collected: $env:CASE"; exit 1 }
 
+      - name: Unserviced natural exit reports incomplete cleanup
+        id: unserviced
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CASE: an_unserviced_natural_exit_is_reported_incomplete_within_the_cleanup_bound
+        run: |
+          $out = cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --test sidecar_windows $env:CASE -- --exact --nocapture 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) { exit 1 }
+          if ($out -notmatch 'test result: ok\. 1 passed') { Write-Host "case not collected: $env:CASE"; exit 1 }
+
       - name: Write redacted outcomes
         if: always()
         shell: pwsh
@@ -184,6 +198,7 @@ jobs:
           CASE_W10: ${{ steps.w10.outcome }}
           GATE_W5: ${{ steps.gw5.outcome }}
           LOSS: ${{ steps.loss.outcome }}
+          UNSERVICED: ${{ steps.unserviced.outcome }}
         run: |
           $build = [System.Environment]::OSVersion.Version.Build
           $rows = @(
@@ -198,7 +213,8 @@ jobs:
             "runtime=rust-sidecar platform=windows build=$build case=G-W4 status=$env:GATE_W4 stage=close-under-saturation",
             "runtime=rust-sidecar platform=windows build=$build case=W10 status=$env:CASE_W10 stage=isolation",
             "runtime=rust-sidecar platform=windows build=$build case=G-W5 status=$env:GATE_W5 stage=scale-and-cancel",
-            "runtime=rust-sidecar platform=windows build=$build case=uniform-loss status=$env:LOSS stage=stdin-eof"
+            "runtime=rust-sidecar platform=windows build=$build case=uniform-loss status=$env:LOSS stage=stdin-eof",
+            "runtime=rust-sidecar platform=windows build=$build case=unserviced-exit status=$env:UNSERVICED stage=cleanup-bound"
           )
           $rows | Set-Content test-results/ci/e5-windows-outcomes.log
 

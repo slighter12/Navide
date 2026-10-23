@@ -734,3 +734,35 @@ fn closing_stdin_ends_every_session_and_the_sidecar() {
         json!({"status":"pass","stage":"exited"}),
     );
 }
+
+/// 7.3: a root that exits by itself while nobody services or closes the pipe is reported as
+/// `SESSION_CLEANED {cleanup_complete:false}` within `cleanup_ms`, never silently held open.
+#[test]
+fn an_unserviced_natural_exit_is_reported_incomplete_within_the_cleanup_bound() {
+    let mut sidecar = start("unserviced");
+    let mut session = sidecar.open(
+        "u1",
+        vec![
+            comspec(),
+            "/d".into(),
+            "/q".into(),
+            "/c".into(),
+            "exit 0".into(),
+        ],
+    );
+    sidecar.session_event(code::SESSION_EXITED, "u1");
+    let started = Instant::now();
+    let cleaned = sidecar.session_event(code::SESSION_CLEANED, "u1").meta;
+    assert_eq!(cleaned["cleanup_complete"], false, "{cleaned}");
+    assert_eq!(cleaned["root_reaped"], true);
+    assert!(
+        started.elapsed() < Duration::from_millis(8000) + Duration::from_secs(4),
+        "reported after {:?}",
+        started.elapsed()
+    );
+    // The pump may still be blocked on the open console: cancel it, as a service loop would.
+    let pump = session.pump.take().unwrap();
+    // SAFETY: the pump's own thread handle, valid until joined.
+    unsafe { CancelSynchronousIo(pump.as_raw_handle()) };
+    pump.join().unwrap();
+}
