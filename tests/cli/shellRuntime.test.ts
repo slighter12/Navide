@@ -104,6 +104,11 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         for (let line = 0; line < 128; line++) {
           const expected = `BURST ${String(line).padStart(4, '0')} ${'x'.repeat(2048)}`
           const position = output.get(tid)!.indexOf(expected)
+          if (position <= previous) {
+            // Show the stream around the line's first row, so a terminal that re-flows long lines is diagnosable.
+            const at = output.get(tid)!.indexOf(`BURST ${String(line).padStart(4, '0')} `)
+            expect.fail(`burst line ${line} is not contiguous (position ${position}, previous ${previous}); stream at its start: ${JSON.stringify(output.get(tid)!.slice(Math.max(0, at - 30), at + 450))}`)
+          }
           expect(position).toBeGreaterThan(previous)
           expect(output.get(tid)!.indexOf(expected, position + 1)).toBe(-1)
           previous = position
