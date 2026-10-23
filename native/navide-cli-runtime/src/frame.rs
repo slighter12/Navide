@@ -137,7 +137,9 @@ pub fn runtime_tag(generation: &str) -> Option<u64> {
 
 /// Is (type, code) a member of the wire-v1 table, valid in this direction on this platform?
 fn code_valid(frame_type: FrameType, code: u16, direction: Direction) -> Result<(), Violation> {
-    let request_code = (code::CREATE..=code::TTY_EOF).contains(&code);
+    // TTY_SERVICING exists on Windows only; on POSIX it stays a protocol error.
+    let request_code = (code::CREATE..=code::TTY_EOF).contains(&code)
+        || (cfg!(windows) && code == code::TTY_SERVICING);
     match (direction, frame_type) {
         (Direction::PythonToRust, FrameType::Request)
         | (Direction::RustToPython, FrameType::Response | FrameType::Error) => {
