@@ -28,6 +28,7 @@ from . import cli_runtime_frames as wire
 from .cli_runtime_frames import ChannelEof, Direction, FrameType, ProtocolError, code
 from . import cli_runtime_receipts as evaluation
 from .cli_runtime_handoff import HandoffRejected, HandoffSlot, MasterHandle, check_master
+from . import cli_runtime_windows as winrt
 from .ipc import make_event
 from .terminals import _BUF_CAP, TerminalService, _clean_for_log, _forget_live_log, _register_live_log
 
@@ -45,6 +46,7 @@ LOSS_FLUSH_S = 2.0         # loss: one overall bound on the baseline output sett
 #: Reported in the `handoff_received` receipt only (no decision is taken on it here; the one platform decision of the
 #: handoff, `TIOCPTYGNAME` vs `TIOCGPTN`, lives in `cli_runtime_handoff.slave_name_of`).
 RECEIPT_PLATFORM = sys.platform
+WINDOWS = sys.platform == "win32"
 EXPIRED_IDS = 1024         # ids of expired requests remembered for one tolerated late answer (E1 v8 10.1, 14)
 LAUNCH_BLOCK_S = 30.0      # launch coordination policy, not a runtime bound
 HANDSHAKE_TEARDOWN_S = 2.0 # a rejected handshake: the sidecar is asked to end, then killed after this
@@ -62,7 +64,7 @@ _LIMIT_CEILINGS = {
 _SNAPSHOT_CEILINGS = {"young": 5_000, "steady": 30_000, "young_window_ms": 30_000}
 _OPS = {"create": code.CREATE, "adopt": code.ADOPT, "resize": code.RESIZE, "kill": code.KILL,
         "cancel": code.CANCEL, "ping": code.PING, "shutdown": code.SHUTDOWN,
-        "observe": code.OBSERVE, "tty_eof": code.TTY_EOF}
+        "observe": code.OBSERVE, "tty_eof": code.TTY_EOF, "tty_servicing": code.TTY_SERVICING}
 # Set by create_async around its create request: told the request id and answer
 # future the moment the request is on the wire, so an abandoned create is traceable.
 _ON_DISPATCH: ContextVar = ContextVar("cli_runtime_on_dispatch", default=None)
@@ -196,7 +198,8 @@ class RustTerminalService(TerminalService):
         self._receiver: wire.FrameReceiver | None = None
         self._stdout_task: asyncio.Task | None = None
         # sid -> the claimed master of a session not yet published (or never to be), I2.
-        self._slots: dict[str, HandoffSlot] = {}
+        self._slots: dict[str, HandoffSlot | winrt.WindowsMaster] = {}
+        self._feed: winrt.StdoutFeed | None = None
         # slave names held by live or pending sessions of this generation (6.4 check 3).
         self._claimed_ttys: set[str] = set()
         # sid -> the binding check that failed for a received master.
@@ -321,6 +324,9 @@ class RustTerminalService(TerminalService):
             with suppress(OSError):
                 self._sock.close()
             self._sock = None
+        if WINDOWS and self._runtime is not None and self._runtime.stdin is not None:
+            with suppress(Exception):
+                self._runtime.stdin.close()  # the sidecar sees the channel closed (uniform loss)
         self._stage("handles_closed")
         if self._runtime is not None and self._runtime.returncode is None:
             with suppress(ProcessLookupError):
@@ -556,10 +562,14 @@ class RustTerminalService(TerminalService):
             except OSError as error:
                 self._runtime_generation = ""
                 raise RuntimeError(f"START_FAILED at ownership journal: {error.strerror}") from error
-            parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            if WINDOWS:
+                parent = child = None  # the control channel is the sidecar's stdin and stdout
+            else:
+                parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
             argv = [str(path), "--wire", str(wire.WIRE_VERSION), "--runtime-generation", self._runtime_generation,
-                    "--owner-pid", str(os.getpid()), "--ownership-journal", str(journal),
-                    "--control-fd", str(child.fileno())]
+                    "--owner-pid", str(os.getpid()), "--ownership-journal", str(journal)]
+            if child is not None:
+                argv.extend(["--control-fd", str(child.fileno())])
             fault = os.environ.get("NAVIDE_ACR_FAULT")
             if fault == "startup":
                 argv.append("--fail-startup")
@@ -569,15 +579,18 @@ class RustTerminalService(TerminalService):
             try:
                 self._runtime = await asyncio.create_subprocess_exec(
                     *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE, limit=READY_MAX_LINE, pass_fds=(child.fileno(),),
+                    stderr=asyncio.subprocess.PIPE, limit=READY_MAX_LINE,
+                    **({} if child is None else {"pass_fds": (child.fileno(),)}),
                 )
             except OSError as error:
-                parent.close()
-                child.close()
+                for end in (parent, child):
+                    if end is not None:
+                        end.close()
                 self._lost = f"START_FAILED at exec: {error.strerror}"
                 raise RuntimeError(self._lost) from error
             # Python must hold only its own end, or it could never observe the sidecar's death.
-            child.close()
+            if child is not None:
+                child.close()
             process = psutil.Process(self._runtime.pid)
             self._runtime_identity = {"pid": process.pid, "created": process.create_time(),
                                       "executable": process.exe(), "executableSha256": hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -586,18 +599,24 @@ class RustTerminalService(TerminalService):
                 ready = await self._read_ready()
                 self._receipt({**ready, **self._runtime_identity})
                 self._ownership_gate = True  # verified in `_verify_ready`
-                parent.setblocking(False)
-                self._sock = parent
                 # The reader runs before the first request is sent (3.3).
                 tag = wire.runtime_tag(self._runtime_generation)
-                self._receiver = wire.FrameReceiver(wire.socket_recv(parent), Direction.RUST_TO_PYTHON, tag, self._on_frame)
-                self._loop.add_reader(parent.fileno(), self._on_socket_readable)
-                self._stdout_task = self._task(self._watch_stdout())
+                if WINDOWS:
+                    self._feed = winrt.StdoutFeed()
+                    self._receiver = wire.FrameReceiver(self._feed.recv, Direction.RUST_TO_PYTHON, tag, self._on_frame)
+                    self._stdout_task = self._task(self._pump_stdout())
+                else:
+                    parent.setblocking(False)
+                    self._sock = parent
+                    self._receiver = wire.FrameReceiver(wire.socket_recv(parent), Direction.RUST_TO_PYTHON, tag, self._on_frame)
+                    self._loop.add_reader(parent.fileno(), self._on_socket_readable)
+                    self._stdout_task = self._task(self._watch_stdout())
                 self._ready_ok = True
             except BaseException as error:
                 # Expected teardown after a rejected handshake must not turn
                 # its causal failure into a later protocol-EOF failure.
-                parent.close()
+                if parent is not None:
+                    parent.close()
                 self._stopping = True
                 self._lost = str(error) or "READY_TIMEOUT at handshake"
                 if self._runtime.returncode is None:
@@ -641,7 +660,8 @@ class RustTerminalService(TerminalService):
         mismatch = RuntimeError("PROTOCOL_MISMATCH at handshake")
         expected = (("protocol", "navide-acr"), ("wire", wire.WIRE_VERSION), ("runtime", "navide-cli-runtime"),
                     ("runtime_generation", self._runtime_generation), ("pid", self._runtime.pid),
-                    ("owner_pid", os.getpid()), ("handoff", "scm_rights"), ("ownership_gate", True))
+                    ("owner_pid", os.getpid()), ("handoff", "duplicate_handle" if WINDOWS else "scm_rights"),
+                    ("ownership_gate", True))
         for key, value in expected:
             if ready.get(key) != value or type(ready.get(key)) is not type(value):
                 raise mismatch
@@ -673,6 +693,30 @@ class RustTerminalService(TerminalService):
         if await self._runtime.stdout.read(1):
             self._lose("PROTOCOL_ERROR: stdout carried bytes after ready")
 
+    async def _pump_stdout(self) -> None:
+        """Windows: the sidecar's stdout carries every frame after `ready`; feed the receiver."""
+        feed = self._feed
+        while True:
+            data = await self._runtime.stdout.read(65536)
+            if data:
+                feed.buffer.extend(data)
+            else:
+                feed.eof = True
+            while (feed.buffer or feed.eof) and not self._lost:
+                self._on_socket_readable()
+                if feed.eof and not feed.buffer:
+                    break
+                if not feed.buffer:
+                    break
+                await asyncio.sleep(0)  # the receiver's per-call budget ended: let the loop breathe
+            if feed.eof or self._lost:
+                return
+
+    async def _send_windows(self, encoded: bytes) -> None:
+        stdin = self._runtime.stdin
+        stdin.write(encoded)
+        await stdin.drain()
+
     def _on_socket_readable(self) -> None:
         try:
             self._receiver.on_readable()
@@ -701,7 +745,10 @@ class RustTerminalService(TerminalService):
             return
         sid = meta.get("session_id")
         if event == code.SESSION_OWNED:
-            self._on_owned(frame, fd)
+            if WINDOWS:
+                self._on_owned_windows(frame)
+            else:
+                self._on_owned(frame, fd)
             return
         session = self._retained.get(sid)
         if session is None or meta.get("session_generation") != session.generation:
@@ -823,7 +870,15 @@ class RustTerminalService(TerminalService):
             raise RuntimeError("PROTOCOL_ERROR: observation exceeds the advertised bounds")
         self._observations.setdefault(frame.correlation_id, []).append(frame.blob)
 
-    def _on_owned(self, frame: wire.Frame, fd: int) -> None:
+    def _runtime_process_handle(self) -> int:
+        """The sidecar's process handle, the source of every `DuplicateHandle` pull (never an OpenProcess by pid)."""
+        popen = self._runtime._transport.get_extra_info("subprocess")
+        return int(popen._handle)
+
+    def _on_owned_windows(self, frame: wire.Frame) -> None:
+        self._on_owned(frame, None)
+
+    def _on_owned(self, frame: wire.Frame, fd: int | None) -> None:
         """`SESSION_OWNED`: validate it against the launch it claims to answer, claim the descriptor into a
         HandoffSlot, run the binding checks (6.4) and register the provisional session, all before the
         next await (I2, I3). Nothing is claimed or persisted for an event that does not match."""
@@ -831,8 +886,9 @@ class RustTerminalService(TerminalService):
         sid = meta.get("session_id")
 
         def reject(reason: str):
-            with suppress(OSError):
-                os.close(fd)
+            if fd is not None:
+                with suppress(OSError):
+                    os.close(fd)
             raise RuntimeError(f"PROTOCOL_ERROR: SESSION_OWNED {reason}")
 
         launch = self._launches.get(sid) if isinstance(sid, str) else None
@@ -848,23 +904,47 @@ class RustTerminalService(TerminalService):
         root, pty = meta.get("root"), meta.get("pty")
         if (not isinstance(root, dict) or any(type(root.get(k)) is not int or root[k] <= 0 for k in ("pid", "pgid"))
                 or not isinstance(root.get("start_kind"), str) or not isinstance(root.get("start_value"), str)
-                or not root["start_value"] or not isinstance(pty, dict) or not isinstance(pty.get("tty"), str)):
+                or not root["start_value"] or not isinstance(pty, dict)
+                or (not WINDOWS and not isinstance(pty.get("tty"), str))
+                or (WINDOWS and any(type(pty.get(k)) is not int or pty[k] <= 0 for k in ("input", "output")))):
             reject("is malformed")
-        slot = HandoffSlot(str(sid), fd)
-        self._slots[sid] = slot
-        os.set_blocking(fd, False)
+        if WINDOWS:
+            # The registry and the orphan sweep compare psutil's creation time; the sidecar names the same
+            # instant as a FILETIME. Reconcile the two once, here, or refuse the session (fail closed).
+            reconciled = winrt.registry_start(root["pid"], root["start_value"])
+            if not reconciled:
+                reject("names a root whose creation time cannot be reconciled")
+            root = {**root, "start_value": reconciled}
+        failure: HandoffRejected | None = None
+        if WINDOWS:
+            try:
+                ends = winrt.pull_pipe_ends(self._runtime_process_handle(), pty["input"], pty["output"])
+            except winrt.PullRejected as rejected:
+                failure = HandoffRejected(rejected.check, rejected.detail)
+            else:
+                slot = winrt.WindowsMaster(str(sid), *ends)
+                slot.tty = f"conpty:{sid}"  # a ConPTY has no device name; unique per session
+                self._slots[sid] = slot
+        else:
+            slot = HandoffSlot(str(sid), fd)
+            self._slots[sid] = slot
+            os.set_blocking(fd, False)
         build = self._provisional.get(sid)
         if sid not in self._retained and build is not None:
             self._retained[sid] = build(root)
         entry = self._dispatched.get(sid)
         if entry is not None:
             entry["identity"] = {"pid": root["pid"], "lstart": root.get("start_value")}
-        if self._receipt_root:  # the per-create kernel checkpoint, inline, before any later step can run
+        if self._receipt_root and not WINDOWS:  # the per-create kernel checkpoint, inline, before any later step can run
             self._receipt(evaluation.checkpoint(fd, str(sid), launch["pane_id"], launch["session_generation"],
                                                 str(pty.get("tty")), root))
-        try:
-            slot.tty = check_master(fd, pty.get("tty"), self._claimed_ttys)
-        except HandoffRejected as rejected:
+        if not WINDOWS:
+            try:
+                slot.tty = check_master(fd, pty.get("tty"), self._claimed_ttys)
+            except HandoffRejected as rejected:
+                failure = rejected
+        if failure is not None:
+            rejected = failure
             # Fail closed: close our duplicate, kill the root named in this frame by identity, no
             # ADOPT. Nothing was read from or written to any descriptor.
             self._handoff_failed[sid] = rejected
@@ -877,8 +957,12 @@ class RustTerminalService(TerminalService):
             self._claimed_ttys.add(slot.tty)
             # E1 v8 8 item 4: read the master from now on (bounded), so a CLI that finishes before the
             # create is published keeps its output, and an unpublished session being killed can exit.
-            slot.start_reading(self._loop, _BUF_CAP)
-            self._receipt({"event": "handoff_received", "kind": "scm_rights", "platform": RECEIPT_PLATFORM,
+            if WINDOWS:
+                slot.cap = _BUF_CAP
+                slot.start_pump(self._loop)
+            else:
+                slot.start_reading(self._loop, _BUF_CAP)
+            self._receipt({"event": "handoff_received", "kind": "duplicate_handle" if WINDOWS else "scm_rights", "platform": RECEIPT_PLATFORM,
                            "validated": True, "session_id": sid, "session_generation": meta.get("session_generation"),
                            "owned_frame_bytes": frame.wire_size})
         self._receipt({"event": "owned", "runtime_generation": self._runtime_generation,
@@ -894,7 +978,9 @@ class RustTerminalService(TerminalService):
         slot = self._slots.pop(sid, None)
         if slot is None:
             return
-        if slot.fd is not None:
+        if WINDOWS:
+            slot.close()
+        elif slot.fd is not None:
             slot.stop_reading()
             fd, slot.fd = slot.fd, None
             with suppress(OSError):
@@ -1025,7 +1111,8 @@ class RustTerminalService(TerminalService):
                     # E1 framing: a frame goes out whole or the channel is lost. A caller's
                     # cancellation never cuts the write (only a retirement does, closing the
                     # channel with it); the next sender waits for it under the send lock.
-                    send = self._sending = asyncio.ensure_future(self._loop.sock_sendall(self._sock, encoded))
+                    send = self._sending = asyncio.ensure_future(
+                        self._send_windows(encoded) if WINDOWS else self._loop.sock_sendall(self._sock, encoded))
 
                     def sent(task: asyncio.Task) -> None:
                         if self._sending is task:
@@ -1298,14 +1385,19 @@ class RustTerminalService(TerminalService):
             # reader attaches here, not before: until now the CLI's output waited in the kernel
             # buffer and nothing escaped routing (E1 8 item 4).
             slot = self._slots.pop(sid, None)
-            if slot is None or slot.fd is None:
+            if slot is None or (WINDOWS and slot.closed) or (not WINDOWS and slot.fd is None):
                 raise RuntimeError("HANDOFF_FAILED: no descriptor was received for this session")
-            slot.stop_reading()
-            session.handle = MasterHandle(slot.fd, session.proc)
-            session.tty, slot.fd = slot.tty, None
+            if WINDOWS:
+                slot.proc = session.proc
+                session.handle = slot  # the pump keeps running; the Terminal Stream attaches to it
+                session.tty = slot.tty
+            else:
+                slot.stop_reading()
+                session.handle = MasterHandle(slot.fd, session.proc)
+                session.tty, slot.fd = slot.tty, None
             session.handle.start_reading(self._loop, lambda s=session: self._on_readable(s))
             self._receipt({"event": "handle_attached", "session_id": sid,
-                           "session_generation": generation, "handle": "MasterHandle"})
+                           "session_generation": generation, "handle": type(session.handle).__name__})
             self._task(self._adopt(session))
             session.published = True
             self._sessions[sid] = session
@@ -1360,6 +1452,10 @@ class RustTerminalService(TerminalService):
         """ADOPT (5.3): a lifecycle marker; Python does not wait for it before presenting."""
         with suppress(Exception):
             await self._request("adopt", {}, session)
+        if WINDOWS:
+            # 7.3: the pump is reading continuously, so the console may close once the root exits.
+            with suppress(Exception):
+                await self._request("tty_servicing", {}, session)
 
     def _launch_keys(self, kwargs: dict) -> set[str]:
         """What an unresolved earlier launch must not overlap: the pane, and the
