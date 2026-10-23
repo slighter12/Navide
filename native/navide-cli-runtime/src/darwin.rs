@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 const MAX_BYTES: usize = 4 * 1024 * 1024;
 // SDK sys/proc_info.h; libc exposes functions but not these selectors.
 const PGRP_ONLY: u32 = 2;
+const PROC_ALL_PIDS: u32 = 1;
 
 fn legacy_start(seconds: u64, micros: u64) -> io::Result<String> {
     if seconds == 0 || micros >= 1_000_000 {
@@ -347,6 +348,76 @@ pub(super) fn former_group(root: i32) -> io::Result<Table> {
     Ok(members)
 }
 
+/// Every pid `proc_listpids(PROC_ALL_PIDS)` reports, growing the buffer until the answer fits.
+fn list_all(deadline: Instant) -> io::Result<Vec<i32>> {
+    let mut count = 1024;
+    loop {
+        if count * size_of::<i32>() > MAX_BYTES || Instant::now() >= deadline {
+            return Err(io::Error::other("owned enumeration bound"));
+        }
+        let mut pids = vec![0_i32; count];
+        // SAFETY: initialized contiguous buffer bounded to 4MiB/c_int; proc_listpids returns BYTES.
+        let received = unsafe {
+            *libc::__error() = 0;
+            libc::proc_listpids(
+                PROC_ALL_PIDS,
+                0,
+                pids.as_mut_ptr().cast(),
+                (count * size_of::<i32>()) as i32,
+            )
+        };
+        let error = unsafe { *libc::__error() };
+        if received < 0 || (received == 0 && error != 0) {
+            return Err(io::Error::from_raw_os_error(error));
+        }
+        if !(received as usize).is_multiple_of(size_of::<i32>()) {
+            return Err(io::Error::other("short owned enumeration"));
+        }
+        let used = received as usize / size_of::<i32>();
+        if used >= count {
+            count *= 2;
+            continue; // Full buffer is not proof of complete discovery.
+        }
+        pids.truncate(used);
+        pids.retain(|pid| *pid > 0); // The kernel pads the answer with pid 0 entries.
+        return Ok(pids);
+    }
+}
+
+/// The session id of `pid`; `None` when it is gone. Reads an identifier only, never signals.
+fn session_of(pid: i32) -> io::Result<Option<i32>> {
+    // SAFETY: getsid only reads the kernel's session id for `pid`.
+    let (session, error) = unsafe {
+        *libc::__error() = 0;
+        (libc::getsid(pid), *libc::__error())
+    };
+    if session >= 0 {
+        return Ok(Some(session));
+    }
+    if error == libc::ESRCH {
+        return Ok(None);
+    }
+    Err(io::Error::from_raw_os_error(error))
+}
+
+/// The live members of session `root` (a former session leader's session stays queryable after it is gone). A
+/// member whose session or identity cannot be read for a reason other than "gone" is an error: fail closed.
+pub(super) fn former_session(root: i32) -> io::Result<Table> {
+    let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
+    let mut members = Table::new();
+    for pid in list_all(deadline)? {
+        if session_of(pid)? != Some(root) {
+            continue;
+        }
+        if let Some(entry) = row(pid)? {
+            if !exited(pid) {
+                members.insert(pid, entry);
+            }
+        }
+    }
+    Ok(members)
+}
+
 /// The recorded members that still run as the same instance. One whose state cannot be read stays listed.
 pub(super) fn still_running(members: &std::collections::HashMap<i32, (i32, i32, String)>) -> Table {
     members
@@ -558,6 +629,74 @@ mod tests {
         if let Err(error) = result {
             std::panic::resume_unwind(error)
         }
+    }
+
+    /// Evidence for `session_of`: getsid answers for self, for a process in another session, and ESRCH for none.
+    #[test]
+    fn getsid_reports_foreign_sessions_without_permission_errors_and_esrch_for_gone() {
+        let mut leader = std::process::Command::new("/bin/sleep");
+        leader.arg("30");
+        // SAFETY: setsid is async-signal-safe and runs in the forked child before exec.
+        unsafe {
+            leader.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let mut child = leader.spawn().unwrap();
+        let pid = child.id() as i32;
+        let own = unsafe { libc::getsid(0) };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert!(own > 0);
+            assert_eq!(session_of(unsafe { libc::getpid() }).unwrap(), Some(own));
+            // The child leads its own session, which is not ours.
+            assert_ne!(pid, own);
+            assert_eq!(session_of(pid).unwrap(), Some(pid));
+            assert!(list_all(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .contains(&pid));
+        }));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        if let Err(error) = result {
+            std::panic::resume_unwind(error)
+        }
+        // A reaped pid is gone.
+        assert_eq!(session_of(pid).unwrap(), None);
+    }
+
+    #[test]
+    fn former_session_lists_a_member_of_a_gone_leaders_session_and_not_outsiders() {
+        let mut leader = std::process::Command::new("/bin/bash");
+        leader.args(["-c", "set -m; sleep 30 & echo $!; wait"]);
+        leader.stdout(std::process::Stdio::piped());
+        // SAFETY: setsid is async-signal-safe and runs in the forked child before exec.
+        unsafe {
+            leader.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let mut root = leader.spawn().unwrap();
+        let root_pid = root.id() as i32;
+        let mut line = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(root.stdout.as_mut().unwrap()),
+            &mut line,
+        )
+        .unwrap();
+        let member: i32 = line.trim().parse().unwrap();
+        root.kill().unwrap();
+        root.wait().unwrap();
+        let found = former_session(root_pid);
+        let ours = former_session(unsafe { libc::getsid(0) });
+        // SAFETY: the pid is a sleeper this test started.
+        unsafe { libc::kill(member, libc::SIGKILL) };
+        let found = found.unwrap();
+        assert!(found.contains_key(&member), "{found:?}");
+        assert!(!found.contains_key(&root_pid));
+        assert!(!found.contains_key(&(unsafe { libc::getpid() })));
+        assert!(ours.unwrap().contains_key(&(unsafe { libc::getpid() })));
     }
 
     #[test]
