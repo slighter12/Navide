@@ -1205,7 +1205,9 @@ fn record_former_group(owned: &Owned) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
         let mut refused = owned.births.0.lock().unwrap();
-        for (pid, entry) in darwin::former_group(owned.pid)? {
+        let mut members = darwin::former_group(owned.pid)?;
+        members.extend(darwin::former_session(owned.pid)?);
+        for (pid, entry) in members {
             if !owned
                 .descendants
                 .get(&pid)
@@ -2631,8 +2633,7 @@ mod root_exit_tests {
         assert_incomplete_and_names(&handle, &mut late);
     }
 
-    /// Linux: the member is told apart from the root's group (own group) but shares its session.
-    #[cfg(target_os = "linux")]
+    /// The member is told apart from the root's group (own group) but shares its session.
     #[test]
     fn a_member_of_the_session_of_a_real_session_leader_root_is_named_and_unsignalled() {
         use std::io::{BufRead, BufReader, Write};
@@ -2663,24 +2664,42 @@ mod root_exit_tests {
         emit(&handle, &wire, &mut state);
         let survivors = handle.survivors.lock().unwrap().clone();
         let complete = handle.wait_finished(Duration::from_secs(1));
+        #[cfg(target_os = "linux")]
         let stat = std::fs::read_to_string(format!("/proc/{late}/stat")).unwrap_or_default();
+        // SAFETY: signal 0 only checks existence of a sleeper this test started.
+        #[cfg(target_os = "macos")]
+        let unsignalled = unsafe { libc::kill(late, 0) } == 0;
+        // SAFETY: identifier queries only, on a sleeper this test started.
+        #[cfg(target_os = "macos")]
+        let layout = unsafe { (libc::getpgid(late), libc::getsid(late)) };
         // SAFETY: the pid is a sleeper this test started.
         unsafe { libc::kill(late, libc::SIGKILL) };
+        #[cfg(target_os = "linux")]
         assert!(
             !stat.is_empty() && !stat.contains(") Z "),
             "cleanup signalled a member it never admitted: {stat}"
         );
+        #[cfg(target_os = "macos")]
+        assert!(unsignalled, "cleanup signalled a member it never admitted");
         assert_eq!(complete, Some(false), "survivors: {survivors:?}");
         assert!(survivors.iter().any(|entry| entry["pid"] == late));
         // The child was in the root's session but not in the root's group, so only the session arm can name it.
-        let fields: Vec<&str> = stat
-            .split(") ")
-            .nth(1)
-            .unwrap_or_default()
-            .split(' ')
-            .collect();
-        assert_eq!(fields.get(3).copied(), Some(pid.to_string().as_str()));
-        assert_ne!(fields.get(2).copied(), Some(pid.to_string().as_str()));
+        #[cfg(target_os = "linux")]
+        {
+            let fields: Vec<&str> = stat
+                .split(") ")
+                .nth(1)
+                .unwrap_or_default()
+                .split(' ')
+                .collect();
+            assert_eq!(fields.get(3).copied(), Some(pid.to_string().as_str()));
+            assert_ne!(fields.get(2).copied(), Some(pid.to_string().as_str()));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(layout.1, pid, "the child must share the root's session");
+            assert_ne!(layout.0, pid, "the child must not share the root's group");
+        }
     }
 
     /// Linux: an entry that cannot be read for a pid that could belong to the group is not skipped.
