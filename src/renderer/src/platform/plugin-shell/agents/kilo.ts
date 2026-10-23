@@ -1,11 +1,14 @@
 /** Kilo Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.kilo
 
 export const SPEC = {
   agentKey: 'kilo',
   label: 'Kilo Code CLI',
-  defaultCommand: 'kilo',
+  defaultCommand: FACT.command,
   // A fork of opencode, confirmed in its source (Kilo-Org/kilocode, MIT): the
   // root command declares `-m, --model` itself (cli/cmd/tui.ts:148) and the
   // value reaches the TUI (tui.ts:503) which parses and applies it
@@ -23,13 +26,13 @@ export const SPEC = {
   // `--variant` (its effort equivalent) exists only on `kilo run`; the root
   // command's option list has no such entry, and even `--mini` hardcodes
   // `variant: undefined` (cli/cmd/run.ts:1225).
-  modelArgs: (m) => `--model ${m}`,
+  modelArgs: (m) => `${FACT.model_flag} ${m}`,
   // `--auto` ("auto-approve permissions that are not explicitly denied
   // (dangerous!)") is listed on both the root TUI command and `kilo run`
   // (verified on 7.4.21).
-  skipPermissionFlag: '--auto',
+  skipPermissionFlag: FACT.permission_flag,
   // id is `ses_`-prefixed (OpenCode fork).
-  resumeArgs: (id) => `--session ${id}`,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   needsSessionMarker: true,
   resumeCommandPattern: /^kilo\s+(?:--session|-s)\s+\S+/,
   supportsRebuild: true,

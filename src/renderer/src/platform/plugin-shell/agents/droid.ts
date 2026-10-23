@@ -1,11 +1,14 @@
 /** Droid (Factory) — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.droid
 
 export const SPEC = {
   agentKey: 'droid',
   label: 'Droid CLI (Factory)',
-  defaultCommand: 'droid',
+  defaultCommand: FACT.command,
   // No model or effort flag: `droid --help` (the interactive command Navide
   // spawns) declares neither, and its `-r` means --resume there while
   // meaning --reasoning-effort under `droid exec`. Passing effort through
@@ -17,9 +20,9 @@ export const SPEC = {
   // unknown flags (verified: a deliberately bogus flag still starts the TUI),
   // so "it did not error" proves nothing here. `--auto high` is the documented
   // unattended level and is what YOLO mode appends.
-  skipPermissionFlag: '--auto high',
+  skipPermissionFlag: FACT.permission_flag,
   // `-r, --resume [sessionId]` — the id is the session file's stem.
-  resumeArgs: (id) => `--resume ${id}`,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   supportsRebuild: true,
   // Measured on a real PTY (0.204.0): droid emits `ESC[?2004h` during startup,
   // before it even finishes authenticating, and keeps it on.

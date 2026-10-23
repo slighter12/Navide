@@ -39,6 +39,7 @@ from ..log_readers.base import (
 )
 from ..log_readers.base import encode_claude_cwd
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -972,14 +973,16 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".qwen", "settings.json"), "Qwen hook", section=("hooks",)),
 ))
 
+FACT = FACTS["qwen"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="qwen",
+    key=FACT.key,
     # OpenAI-compatible/custom providers; quota hosts cover another interface.
     expected_hosts=(),
     data_dirs=_risk_data_dirs,
     data_dir_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),
-    supports_model=True,
+    supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: QWEN_HOME *is* the .qwen directory (its
     # resolveQwenHome falls back to ~/.qwen), so skills sit one level in.
     skills_supported=True,

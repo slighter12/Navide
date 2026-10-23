@@ -45,6 +45,7 @@ from pathlib import Path
 import re
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -858,16 +859,18 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("npm-list", (".pi", "agent", "settings.json"), "Pi package", section=("packages",)),
 ))
 
+FACT = FACTS["pi"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="pi",
+    key=FACT.key,
     # Open-ended provider/model config; OpenRouter quota is not a CLI host set.
     expected_hosts=(),
     data_dirs=_risk_data_dirs,
     data_dir_env_vars=("PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"),
-    supports_model=True,
-    supports_effort=True,
-    known_efforts=('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'),
+    supports_model=FACT.model_flag is not None,
+    supports_effort=FACT.effort_flag is not None,
+    known_efforts=FACT.known_efforts or (),
     skills_supported=True,
     # --skill takes one skill (file or directory) and is repeated; it adds to
     # discovery rather than replacing it (--no-skills is the opt-out).

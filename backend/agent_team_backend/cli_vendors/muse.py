@@ -132,6 +132,7 @@ from ..log_readers.base import (
     user_prompt_text,
 )
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -759,17 +760,19 @@ _EXTENSIONS = ExtensionsSpec(sources=(
         section=("plugins",), native_consent="capability-approve"),
 ))
 
+FACT = FACTS["muse"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="muse",
+    key=FACT.key,
     # Login/usage observations do not establish Muse's CLI service host set.
     expected_hosts=(),
     # Same dedicated XDG root as muse_data_root, with the pane's HOME shim.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("XDG_DATA_HOME", "").strip() or ctx.home / ".local" / "share") / "muse",),
     data_dir_env_vars=("XDG_DATA_HOME",),
-    supports_model=True,
-    supports_effort=True,
-    known_efforts=('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'),
+    supports_model=FACT.model_flag is not None,
+    supports_effort=FACT.effort_flag is not None,
+    known_efforts=FACT.known_efforts or (),
     # Verified 2026-08-15: `muse skills list --source user` reports skills
     # from ~/.claude/skills and ~/.agents/skills. Only HOME relocates those,
     # so this is the one vendor whose shim exists for skills alone.
@@ -784,7 +787,7 @@ SPEC = VendorSpec(
     # code in the browser — a flow a PTY pane can carry. Note META_API_KEY
     # still takes priority over the account login if it is set in the
     # environment. Verified against `muse login --help`, 2026-09-18.
-    login_command_args="login",
+    login_command_args=FACT.login_args,
     # Quota exhaustion text from the 1.3.0 binary's error/goal-status strings
     # ("usage limit reached" is a distinct class from "rate limited") and the
     # quota_hit session failure entry. Source-read only.

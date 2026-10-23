@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -333,9 +334,11 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("npm-list", (".config", "kilo", "kilo.jsonc"), "Kilo plugin", section=("plugin",)),
 ))
 
+FACT = FACTS["kilo"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="kilo",
+    key=FACT.key,
     # OpenCode fork with arbitrary providers; quota base is not a CLI host set.
     expected_hosts=(),
     # Same XDG database/auth root as KiloLogReader and _kilo_auth_file.
@@ -345,7 +348,7 @@ SPEC = VendorSpec(
     # --model and applies it at the highest priority. No effort flag —
     # --variant exists only on `kilo run`. Details in agents/kilo.ts, which
     # owns the flags themselves.
-    supports_model=True,
+    supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: kilo's bundle carries no SKILL.md handling at all.
     skills_supported=False,
     label="Kilo Code CLI",
@@ -378,7 +381,7 @@ SPEC = VendorSpec(
         password_env="KILO_SERVER_PASSWORD",
         username="kilo",
     ),
-    login_command_args="auth login",
+    login_command_args=FACT.login_args,
     # Multi-account (credential swap): the vault parks and restores this exact
     # file — `kilo auth list` prints the path itself, and it is the same tuple
     # the quota reader already resolves against.

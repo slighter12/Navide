@@ -1,11 +1,14 @@
 /** MiniMax Code (mcode) — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.mcode
 
 export const SPEC = {
   agentKey: 'mcode',
   label: 'MiniMax Code',
-  defaultCommand: 'mcode',
+  defaultCommand: FACT.command,
   // Every optional capability below is deliberately absent, verified against
   // mcode 0.4.12 rather than inferred from the docs — the published reference
   // lists `--model`, `--effort`, `--permission` and `--resume` together with

@@ -1,18 +1,21 @@
 /** Codex — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.codex
 
 export const SPEC = {
   agentKey: 'codex',
   label: 'Codex CLI (OpenAI)',
-  defaultCommand: 'codex',
+  defaultCommand: FACT.command,
   // No effort flag: codex takes it as a config override
   // (`-c model_reasoning_effort=<value>`), a different injection shape than
   // every other vendor. Declaring none refuses `effort` rather than guessing.
-  modelArgs: (m) => `--model ${m}`,
-  skipPermissionFlag: '--dangerously-bypass-approvals-and-sandbox',
+  modelArgs: (m) => `${FACT.model_flag} ${m}`,
+  skipPermissionFlag: FACT.permission_flag,
   // Subcommand, NOT a --flag.
-  resumeArgs: (id) => `resume ${id}`,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   // SessionStart or the pane's own rollout binds the ID after real work starts.
   // An idle pane must not submit a synthetic prompt just to discover its ID.
   needsSessionMarker: false,

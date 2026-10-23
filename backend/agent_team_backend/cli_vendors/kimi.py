@@ -24,6 +24,7 @@ from pathlib import Path
 import re
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, command_text
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
 from ..log_readers.base import (
@@ -619,15 +620,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".kimi-code", "config.toml"), "Kimi hook", section=("hooks",)),
 ))
 
+FACT = FACTS["kimi"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="kimi",
+    key=FACT.key,
     # Configurable provider/base URL; no verified default CLI host set here.
     expected_hosts=(),
     # Same runtime root as _kimi_home.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("KIMI_CODE_HOME") or ctx.home / ".kimi-code"),),
     data_dir_env_vars=("KIMI_CODE_HOME",),
-    supports_model=True,
+    supports_model=FACT.model_flag is not None,
     skills_supported=True,
     # --skills-dir is repeatable but replaces auto-discovery outright, so the
     # roots kimi would have found itself are passed back alongside ours.
@@ -651,7 +654,7 @@ SPEC = VendorSpec(
         config_dir_env="KIMI_CODE_HOME",
         config_file=("mcp.json",),
     ),
-    login_command_args="login",
+    login_command_args=FACT.login_args,
     live_file=(".kimi-code", "credentials", "kimi-code.json"),
     slot_file="kimi-code.json",
     login_home_secret_file=("credentials", "kimi-code.json"),

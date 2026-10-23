@@ -48,6 +48,7 @@ import re
 from pathlib import Path
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, command_text
 from ..osplat import platform_id as _platform_id
 from ..log_readers.base import (
@@ -538,9 +539,11 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".factory", "settings.json"), "Droid hook", section=("hooks",)),
 ))
 
+FACT = FACTS["droid"]
+
 SPEC = VendorSpec(
     extensions=_EXTENSIONS,
-    key="droid",
+    key=FACT.key,
     # Factory/custom model service destinations have not been verified here.
     expected_hosts=(),
     # FACTORY_HOME_OVERRIDE relocates the whole tree (droid_sessions_root).

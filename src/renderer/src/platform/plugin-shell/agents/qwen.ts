@@ -1,16 +1,19 @@
 /** Qwen Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.qwen
 
 export const SPEC = {
   agentKey: 'qwen',
   label: 'Qwen Code (Alibaba Cloud)',
-  defaultCommand: 'qwen',
+  defaultCommand: FACT.command,
   // Effort is settings-only (model.reasoningEffort) plus the in-session
   // /effort command; no launch flag.
-  modelArgs: (m) => `--model ${m}`,
-  skipPermissionFlag: '--yolo',
-  resumeArgs: (id) => `--resume ${id}`,
+  modelArgs: (m) => `${FACT.model_flag} ${m}`,
+  skipPermissionFlag: FACT.permission_flag,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   needsSessionMarker: true,
   turnEndInferredFromSilence: true,
   supportsRebuild: true,

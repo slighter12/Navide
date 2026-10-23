@@ -1,22 +1,25 @@
 /** Pi — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
+import { VENDOR_FACTS, fillId } from './_vendorFacts'
+
+const FACT = VENDOR_FACTS.pi
 
 export const SPEC = {
   agentKey: 'pi',
   label: 'Pi',
-  defaultCommand: 'pi',
+  defaultCommand: FACT.command,
   // Like claude, pi warns and continues on an unknown level rather than
   // failing, so the vocabulary is checked before launch. pi also accepts
   // `provider/id:<thinking>` in --model; the flag is used instead so the two
   // arguments stay independent.
-  modelArgs: (m) => `--model ${m}`,
-  effortArgs: (e) => `--thinking ${e}`,
-  knownEfforts: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+  modelArgs: (m) => `${FACT.model_flag} ${m}`,
+  effortArgs: (e) => `${FACT.effort_flag} ${e}`,
+  knownEfforts: FACT.known_efforts,
   // no skipPermissionFlag: pi has no permission system at all
   // (bash/edit tools execute directly, nothing to bypass)
   // Creates a NEW session when the id doesn't exist, resumes when it does.
-  resumeArgs: (id) => `--session-id ${id}`,
+  resumeArgs: (id) => fillId(FACT.resume_args, id),
   needsSessionMarker: true,
   turnEndInferredFromSilence: true,
   resumeCommandPattern: /^pi\s+--session-id\s+\S+/,
