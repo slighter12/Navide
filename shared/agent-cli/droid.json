@@ -1,0 +1,21 @@
+{
+  "key": "droid",
+  "command": "droid",
+  "model_flag": null,
+  "effort_flag": null,
+  "known_efforts": null,
+  "permission_flag": "--auto high",
+  "resume_args": "--resume {id}",
+  "session_id_flag": null,
+  "login_args": null,
+  "supports_session_resume": true,
+  "shutdown": null,
+  "capabilities": {
+    "model": "vendor-unsupported",
+    "effort": "vendor-unsupported",
+    "skip_permissions": "integrated",
+    "resume_by_id": "integrated",
+    "session_id_at_launch": "unknown",
+    "login": "unknown"
+  }
+}

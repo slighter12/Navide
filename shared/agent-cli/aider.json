@@ -1,0 +1,21 @@
+{
+  "key": "aider",
+  "command": "aider",
+  "model_flag": null,
+  "effort_flag": null,
+  "known_efforts": null,
+  "permission_flag": "--yes-always",
+  "resume_args": null,
+  "session_id_flag": null,
+  "login_args": null,
+  "supports_session_resume": false,
+  "shutdown": null,
+  "capabilities": {
+    "model": "not-yet-integrated",
+    "effort": "unknown",
+    "skip_permissions": "integrated",
+    "resume_by_id": "vendor-unsupported",
+    "session_id_at_launch": "vendor-unsupported",
+    "login": "unknown"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "key": "muse",
+  "command": "muse",
+  "model_flag": "--model",
+  "effort_flag": "--reasoning-effort",
+  "known_efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+  "permission_flag": "--disable-approval",
+  "resume_args": "resume {id}",
+  "session_id_flag": null,
+  "login_args": "login",
+  "supports_session_resume": true,
+  "shutdown": null,
+  "capabilities": {
+    "model": "integrated",
+    "effort": "integrated",
+    "skip_permissions": "integrated",
+    "resume_by_id": "integrated",
+    "session_id_at_launch": "vendor-unsupported",
+    "login": "integrated"
+  }
+}

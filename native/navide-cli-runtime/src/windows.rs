@@ -27,8 +27,8 @@ use windows_sys::Win32::System::IO::CancelSynchronousIo;
 
 #[path = "adapters.rs"]
 mod adapters;
-#[path = "claude_facts.rs"]
-mod claude_facts;
+#[path = "vendor_facts.rs"]
+mod vendor_facts;
 
 // ---- named bounds (E1 13.1: every bound has a named source) -------------------------------
 /// Bound for observing the root's exit status after the job was terminated.
