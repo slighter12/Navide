@@ -88,7 +88,7 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         if (isWindows) {
           // Status-only record of what the product's launch chain handed the console child (read by the workflow).
           mkdirSync(resolve('test-results/ci'), { recursive: true })
-          appendFileSync(resolve('test-results/ci/e5-windows-ctrlc.log'), `peer=${index} wrapped=${index % 2 === 1} ctrlCIgnoredAtStart=${ready.ctrlCIgnoredAtStart}\n`)
+          appendFileSync(resolve('test-results/ci/e5-windows-ctrlc.log'), `peer=${index} wrapped=${index % 2 === 1} ctrlCIgnoredAtStart=${ready.ctrlCIgnoredAtStart} inputModeAtStart=${ready.inputModeAtStart}\n`)
         }
         peers.push({ tid, pid: ready.pid, workspace })
         expect(ready.pid).toBeGreaterThan(0)
@@ -101,10 +101,12 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         await until(() => (output.get(tid) ?? '').includes('SPLIT café 世界'), 'split UTF-8')
         expect(output.get(tid)).not.toContain('\uFFFD')
         await input(tid, 'burst\r')
-        await until(() => (output.get(tid) ?? '').includes('BURST 0000 '), 'first burst')
+        // Four ConPTYs each re-render a 256 KB burst row by row: a bound that suits a POSIX pty is too short there.
+        const burstWait = isWindows ? 120_000 : 15_000
+        await until(() => (output.get(tid) ?? '').includes('BURST 0000 '), 'first burst', burstWait)
         await input(tid, 'during-burst-世界\r')
-        await until(() => (output.get(tid) ?? '').includes('"text": "during-burst-世界"'), 'input while bursting')
-        await until(() => (output.get(tid) ?? '').includes('BURST_DONE'), 'complete burst')
+        await until(() => (output.get(tid) ?? '').includes('"text": "during-burst-世界"'), 'input while bursting', burstWait)
+        await until(() => (output.get(tid) ?? '').includes('BURST_DONE'), 'complete burst', burstWait)
         let previous = -1
         // A ConPTY re-renders long lines as screen rows: it cuts a wrapped line with CR LF and cursor-position
         // sequences. Those are layout, not content, so they are removed before the exact-bytes comparison

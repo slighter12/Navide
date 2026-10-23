@@ -28,11 +28,9 @@ kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 kernel32.GetStdHandle.restype = wintypes.HANDLE
 kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
 kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-kernel32.SetConsoleCtrlHandler.argtypes = [ctypes.c_void_p, wintypes.BOOL]
 kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
 
 STD_INPUT_HANDLE = -10
-ENABLE_PROCESSED_INPUT = 0x0001
 ENABLE_ECHO_INPUT = 0x0004
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
@@ -63,17 +61,15 @@ def ctrl_c_ignored_at_start() -> bool | None:
         return None
 
 
-def console_input_without_echo() -> bool:
-    """Turn the console's input echo off (the POSIX peer clears ECHO) and keep Ctrl+C processing on.
-    True when stdin is a console."""
-    # A parent chain that ignores Ctrl+C (CTRL_C ignore is inherited across CreateProcess) must not silence this
-    # program: the POSIX peer likewise installs its own SIGINT handler.
-    kernel32.SetConsoleCtrlHandler(None, False)
+def console_input_without_echo() -> tuple[bool, int | None]:
+    """Turn the console's input echo off (the POSIX peer clears ECHO) and nothing else: Ctrl+C handling is left
+    exactly as the launch chain delivered it, so a chain that breaks it fails the interrupt case instead of
+    being worked around. Returns (stdin is a console, the input mode found at start)."""
     handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
     mode = wintypes.DWORD()
     if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-        return False
-    return bool(kernel32.SetConsoleMode(handle, (mode.value & ~ENABLE_ECHO_INPUT) | ENABLE_PROCESSED_INPUT))
+        return False, None
+    return bool(kernel32.SetConsoleMode(handle, mode.value & ~ENABLE_ECHO_INPUT)), mode.value
 
 
 def in_console_process_list() -> bool:
@@ -87,7 +83,7 @@ def main() -> int:
     if sys.argv[1:] == ["--probe-ctrl-c"]:
         print(json.dumps({"ctrlCIgnoredAtStart": ignored}))
         return 0
-    ctty = console_input_without_echo()
+    ctty, input_mode = console_input_without_echo()
     lock = threading.Lock()
     interrupts = queue.SimpleQueue()
     last_interrupt = [0.0]
@@ -114,6 +110,7 @@ def main() -> int:
                                  ("API_KEY", "AUTH_TOKEN", "ACCESS_TOKEN", "SECRET_KEY"))),
         "isatty": sys.stdin.isatty(), "ctty": ctty, "foreground": ctty and in_console_process_list(),
         "dimensions": dimensions(), "ctrlCIgnoredAtStart": ignored,
+        "inputModeAtStart": input_mode,
     }, ensure_ascii=False))
     if ready_file := os.environ.get("NAVIDE_PEER_READY_FILE"):
         Path(ready_file).write_text(str(os.getpid()))  # the handler is installed from here on
