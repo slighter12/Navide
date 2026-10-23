@@ -201,6 +201,7 @@ class RustTerminalService(TerminalService):
         self._slots: dict[str, HandoffSlot | winrt.WindowsMaster] = {}
         self._closing_masters: dict[str, list] = {}  # Windows: per generation, workers cancelled and still to join
         self._close_deadline: dict[str, float] = {}
+        self._close_incomplete: set[str] = set()  # sessions already reported by `handle_close_incomplete`
         self._feed: winrt.StdoutFeed | None = None
         # slave names held by live or pending sessions of this generation (6.4 check 3).
         self._claimed_ttys: set[str] = set()
@@ -504,8 +505,10 @@ class RustTerminalService(TerminalService):
                     return
                 stuck = await asyncio.to_thread(winrt.close_together, masters, deadline) if masters else []
                 for master in stuck:  # left open to process exit; the fence stays closed (E1 7.3)
-                    self._receipt({"event": "handle_close_incomplete", "session_id": master.session_id,
-                                   "platform": RECEIPT_PLATFORM, "path": "loss"})
+                    if master.session_id not in self._close_incomplete:  # the stream path may have said so
+                        self._close_incomplete.add(master.session_id)
+                        self._receipt({"event": "handle_close_incomplete", "session_id": master.session_id,
+                                       "platform": RECEIPT_PLATFORM, "path": "loss"})
                 handles_incomplete = len(stuck)
                 self._stage("workers_joined", workers=len(masters), incomplete=len(stuck))
 
@@ -1758,6 +1761,7 @@ class RustTerminalService(TerminalService):
         if closed is False:
             # A worker did not join: the read end is NOT closed, so `TTY_EOF` would announce a gate that
             # does not hold (7.3). Report it and retire the generation; loss owns the session from here.
+            self._close_incomplete.add(session.id)
             self._receipt({"event": "handle_close_incomplete", "session_id": session.id,
                            "platform": RECEIPT_PLATFORM, "path": "stream"})
             self._lose("HANDLE_CLOSE_INCOMPLETE: a pump or writer did not end within THREAD_CLOSE_S")
