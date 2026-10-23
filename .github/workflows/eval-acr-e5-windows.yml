@@ -12,7 +12,7 @@ permissions:
 jobs:
   e5-windows-gates:
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 70
     env:
       E5_RECEIPT_DIR: ${{ github.workspace }}\test-results\ci
     steps:
@@ -237,6 +237,68 @@ jobs:
           if ($code -ne 0) { exit 1 }
           if ($out -notmatch '1 passed') { Write-Host "case not collected or skipped: $env:CASE"; exit 1 }
 
+      # ---- the two required cases through the production TypeScript WebSocket client ----------
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install the frontend test dependencies
+        id: js_env
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Run the two required production WebSocket cases
+        id: ts_seam
+        if: always() && steps.js_env.outcome == 'success' && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}\e5-cargo-target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ runner.temp }}\e5-cargo-target\release\navide-cli-runtime.exe
+        run: |
+          bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request' --reporter=json --outputFile=test-results/ci/e5-windows-ts-results.json
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Require both TypeScript cases to be collected and pass
+        id: ts_guard
+        if: always() && steps.ts_seam.outcome == 'success'
+        shell: pwsh
+        run: |
+          $names = @(
+            'uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits',
+            'sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime')
+          $results = Get-Content test-results/ci/e5-windows-ts-results.json -Raw | ConvertFrom-Json
+          $required = @($results.testResults.assertionResults | Where-Object { $names -contains $_.fullName })
+          if ($required.Count -ne 2 -or @($required | Where-Object { $_.status -ne 'passed' }).Count -ne 0) {
+            Write-Host "required cases collected: $($required.Count); statuses: $(($required | ForEach-Object { $_.status }) -join ',')"
+            exit 1
+          }
+
+      - name: Negative control - a missing runtime binary fails both TypeScript cases
+        id: ts_negative
+        if: always() && steps.js_env.outcome == 'success' && steps.py_env.outcome == 'success' && steps.product_build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}\e5-cargo-target\release\no-such-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ runner.temp }}\e5-cargo-target\release\no-such-runtime.exe
+        run: |
+          bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request' --reporter=json --outputFile=test-results/ci/e5-windows-ts-negative.json
+          $names = @(
+            'uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits',
+            'sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime')
+          $results = Get-Content test-results/ci/e5-windows-ts-negative.json -Raw | ConvertFrom-Json
+          $required = @($results.testResults.assertionResults | Where-Object { $names -contains $_.fullName })
+          if ($required.Count -ne 2 -or @($required | Where-Object { $_.status -ne 'failed' }).Count -ne 0) {
+            Write-Host "negative control: collected $($required.Count); statuses: $(($required | ForEach-Object { $_.status }) -join ',')"
+            exit 1
+          }
+
       - name: Write redacted outcomes
         if: always()
         shell: pwsh
@@ -258,8 +320,24 @@ jobs:
           PY_CONCURRENT: ${{ steps.py_concurrent.outcome }}
           PY_RECOVERY: ${{ steps.py_recovery.outcome }}
           PY_MISSING: ${{ steps.py_missing.outcome }}
+          JS_ENV: ${{ steps.js_env.outcome }}
+          TS_SEAM: ${{ steps.ts_seam.outcome }}
+          TS_GUARD: ${{ steps.ts_guard.outcome }}
+          TS_NEGATIVE: ${{ steps.ts_negative.outcome }}
         run: |
           $build = [System.Environment]::OSVersion.Version.Build
+          $seam = @{
+            'shell' = 'uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits'
+            'recovery' = 'sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime'
+          }
+          $seamRows = foreach ($key in 'shell', 'recovery') {
+            $status = 'not-run'
+            if (Test-Path test-results/ci/e5-windows-ts-results.json) {
+              $found = @((Get-Content test-results/ci/e5-windows-ts-results.json -Raw | ConvertFrom-Json).testResults.assertionResults | Where-Object { $_.fullName -eq $seam[$key] })
+              $status = if ($found.Count -eq 1) { $found[0].status } else { 'not-collected' }
+            }
+            "runtime=navide-cli-runtime platform=windows build=$build case=ts-$key status=$status stage=principal-seam"
+          }
           $rows = @(
             "runtime=navide-cli-runtime platform=windows build=$build case=probe-build status=$env:PROBE_BUILD stage=build",
             "runtime=navide-cli-runtime platform=windows build=$build case=G-W1 status=$env:GATE_W1 stage=duplicate-handle",
@@ -277,7 +355,12 @@ jobs:
             "runtime=python-client platform=windows build=$build case=py-env status=$env:PY_ENV stage=install",
             "runtime=python-client platform=windows build=$build case=py-concurrent-w10 status=$env:PY_CONCURRENT stage=production-client",
             "runtime=python-client platform=windows build=$build case=py-sidecar-death status=$env:PY_RECOVERY stage=recovery",
-            "runtime=python-client platform=windows build=$build case=py-missing-binary status=$env:PY_MISSING stage=negative-control"
+            "runtime=python-client platform=windows build=$build case=py-missing-binary status=$env:PY_MISSING stage=negative-control",
+            "runtime=frontend platform=windows build=$build case=js-env status=$env:JS_ENV stage=install"
+          ) + @($seamRows) + @(
+            "runtime=navide-cli-runtime platform=windows build=$build case=ts-seam-run status=$env:TS_SEAM stage=principal-seam",
+            "runtime=navide-cli-runtime platform=windows build=$build case=ts-seam-guard status=$env:TS_GUARD stage=collection",
+            "runtime=navide-cli-runtime platform=windows build=$build case=ts-missing-binary status=$env:TS_NEGATIVE stage=negative-control"
           )
           $rows | Set-Content test-results/ci/e5-windows-outcomes.log
 

@@ -12,10 +12,11 @@ import { SPEC } from '../../src/renderer/src/platform/plugin-shell/agents/claude
 import { modelArgsFor } from '../../src/renderer/src/platform/plugin-shell/lib/cliModel'
 
 // Ticket 05 principal seam: production TS WS client -> authenticated Python
-// handlers and stores -> the actual sidecar -> native POSIX PTY. A Python driver
-// owns the disposable backend(s) and performs OS-level fault injection on its
-// OWN processes only (each verified by pid + creation time); it never reads or
-// signals anything else. Windows native execution is pending E5.
+// handlers and stores -> the actual sidecar -> native POSIX PTY or Windows ConPTY.
+// A Python driver owns the disposable backend(s) and performs OS-level fault
+// injection on its OWN processes only (each verified by pid + creation time); it
+// never reads or signals anything else. On Windows the sidecar is frozen and
+// killed through the process itself (no signals).
 
 interface Pane { tid: string; ready: any }
 class Client {
@@ -73,7 +74,7 @@ async function waitDescendantSnapshot(driver: Driver): Promise<void> {
     'descendant snapshot persisted', 40_000)
 }
 
-it.runIf(process.platform === 'darwin' || process.platform === 'linux')('sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime', async () => {
+it.runIf(process.platform === 'darwin' || process.platform === 'linux' || process.platform === 'win32')('sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime', async () => {
   await withDriver('runtime', async (driver) => {
     const wire = driver.wire
     const main = new Client(wire.url)

@@ -20,9 +20,11 @@ def load(root: Path) -> list[dict]:
 
 
 def prove(records: list[dict], *, sidecar_pid: int | None = None, python_pty_spawns: int = 0,
-          driver_sessions: set[str] | None = None, ledger: dict | None = None) -> dict:
+          driver_sessions: set[str] | None = None, ledger: dict | None = None, windows: bool = False) -> dict:
     """Returns {"ok", "failures": [..], "items": {1: .., 2: .., 3: .., 4: .., 5: ..}}. `driver_sessions` is the set of
-    session ids the driver created (accounting for item 2); `None` skips the orphan check against the driver."""
+    session ids the driver created (accounting for item 2); `None` skips the orphan check against the driver.
+    `windows` selects the Windows handoff (a duplicated ConPTY handle pair, validated by the client) in place of
+    the POSIX one (SCM_RIGHTS plus the kernel checkpoint): Windows has no per-create CK receipt."""
     failures: list[str] = []
 
     def fail(item: int, text: str) -> None:
@@ -39,7 +41,7 @@ def prove(records: list[dict], *, sidecar_pid: int | None = None, python_pty_spa
             fail(1, "the ready receipt names no executable file that still exists")
         elif hashlib.sha256(executable.read_bytes()).hexdigest() != r.get("executableSha256"):
             fail(1, "executableSha256 differs from the hash recomputed from the executable file")
-        if (r.get("protocol"), r.get("wire"), r.get("handoff")) != ("navide-acr", 1, "scm_rights"):
+        if (r.get("protocol"), r.get("wire"), r.get("handoff")) != ("navide-acr", 1, "duplicate_handle" if windows else "scm_rights"):
             fail(1, "wire/protocol identity")
         if sidecar_pid is not None and r.get("pid") != sidecar_pid:
             fail(1, "ready pid is not the sampled sidecar")
@@ -61,10 +63,17 @@ def prove(records: list[dict], *, sidecar_pid: int | None = None, python_pty_spa
             for key in ("pass_a", "pass_b", "pass_c"):
                 if not r.get(key):
                     fail(2, f"CK {key} failed (slave names {'equal' if r.get('pass_a') else 'differ'}, root_alive={r.get('root_alive')})")
-    handed = {r["session_id"] for r in records if r["event"] == "handoff_received" and r.get("validated") is True and r.get("kind") == "scm_rights"}
+    kind = "duplicate_handle" if windows else "scm_rights"
+    handed = {r["session_id"] for r in records if r["event"] == "handoff_received" and r.get("validated") is True and r.get("kind") == kind}
     for sid in by_session:
         if sid not in handed:
             fail(2, "a CK without a validated handoff_received for its session")
+    if windows:
+        if cks:
+            fail(2, "a CK receipt on Windows, where no kernel checkpoint exists")
+        for sid in {r["session_id"] for r in records if r["event"] == "owned"}:
+            if sid not in handed:
+                fail(2, "an owned session without a validated duplicate-handle handoff")
     if driver_sessions is not None:
         accounted = set(by_session) | {r["session_id"] for r in failed if r["session_id"]}
         for sid in driver_sessions - accounted:
@@ -104,4 +113,4 @@ def prove(records: list[dict], *, sidecar_pid: int | None = None, python_pty_spa
                 if name not in known:
                     fail(5, f"{direction} frame type {name} is not in the frozen E1 set")
     return {"ok": not failures, "failures": failures,
-            "items": {"1": len(ready), "2": {"ck": len(cks), "failed_creates": len(failed)}, "3": {"owned": len(owned), "cleaned": len(cleaned)}}}
+            "items": {"1": len(ready), "2": {"ck": len(cks), **({"handoffs": len(handed)} if windows else {}), "failed_creates": len(failed)}, "3": {"owned": len(owned), "cleaned": len(cleaned)}}}

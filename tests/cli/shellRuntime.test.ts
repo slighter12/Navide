@@ -1,12 +1,11 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, copyFileSync, rmSync, realpathSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, copyFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { expect, it } from 'vitest'
 import { createWsClient, type TerminalOutputFrame } from '../../src/shared/wsClient'
+import { driverEnv, makeTempRoot, pythonExecutable } from './recoveryDriver'
 
-const python = resolve(process.env.UV_PROJECT_ENVIRONMENT ?? 'backend/.venv', 'bin/python')
 async function until(predicate: () => boolean, message: string, timeout = 15_000): Promise<void> {
   const deadline = Date.now() + timeout
   while (!predicate()) {
@@ -16,9 +15,9 @@ async function until(predicate: () => boolean, message: string, timeout = 15_000
 }
 
 async function withBackend(fault: string, run: (root: string, endpoint: any) => Promise<void>): Promise<void> {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'navide-rust-shell-')))
-  const driver = spawn(python, ['-m', 'tests.cli_regression.support.shell_runtime_driver', root, 'rust-shell', fault], {
-    cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'],
+  const root = makeTempRoot('navide-rust-shell-')
+  const driver = spawn(pythonExecutable, ['-m', 'tests.cli_regression.support.shell_runtime_driver', root, 'rust-shell', fault], {
+    cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'], env: driverEnv,
   })
   let log = ''
   let code: number | null | undefined
@@ -45,7 +44,7 @@ async function withBackend(fault: string, run: (root: string, endpoint: any) => 
   }
 }
 
-it.runIf(process.platform === 'darwin' || process.platform === 'linux')('uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits', async () => {
+it.runIf(process.platform === 'darwin' || process.platform === 'linux' || process.platform === 'win32')('uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits', async () => {
   await withBackend('', async (root, endpoint) => {
     let connections = 0
     const client = createWsClient({ onStatus: (status) => { if (status === 'connected') connections++ } })
