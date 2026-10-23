@@ -1,6 +1,6 @@
 {
   "key": "opencode",
-  "composition": "python",
+  "composition": "rust",
   "command": "opencode",
   "model_flag": "--model",
   "effort_flag": null,

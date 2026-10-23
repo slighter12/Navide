@@ -177,7 +177,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "kilo",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "kilo",
         model_flag: Some("--model"),
         effort_flag: None,
@@ -233,7 +233,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "opencode",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "opencode",
         model_flag: Some("--model"),
         effort_flag: None,
