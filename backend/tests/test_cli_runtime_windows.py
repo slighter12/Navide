@@ -70,13 +70,19 @@ def rig(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     sink = Sink()
-    service = RustTerminalService(sink)
 
     class Rig:
-        pass
+        _service = None
+
+        @property
+        def service(self):
+            # Built on first use, inside the running test loop: the service binds the loop it is created in.
+            if self._service is None:
+                self._service = RustTerminalService(sink)
+            return self._service
 
     made = Rig()
-    made.sink, made.service, made.env, made.workspace = sink, service, env, workspace
+    made.sink, made.env, made.workspace = sink, env, workspace
     yield made
 
 
@@ -89,6 +95,8 @@ async def start(rig, pane: str):
 
 
 async def stop(rig):
+    if rig._service is None:
+        return
     runtime = rig.service._runtime
     if runtime is not None and runtime.returncode is None:
         runtime.kill()
