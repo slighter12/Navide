@@ -5,7 +5,10 @@ mod frame;
 mod posix;
 #[cfg(unix)]
 mod session_pty;
-#[cfg(unix)]
+#[cfg(windows)]
+mod session_pty_win;
+#[cfg(windows)]
+mod windows;
 mod wire;
 
 fn main() {
@@ -14,7 +17,12 @@ fn main() {
         eprintln!("cli runtime: {error}");
         std::process::exit(1);
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    if let Err(error) = windows::run() {
+        eprintln!("cli runtime: {error}");
+        std::process::exit(1);
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         eprintln!("cli runtime: UNSUPPORTED_PLATFORM (native adapter not integrated)");
         std::process::exit(1);

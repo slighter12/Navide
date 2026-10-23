@@ -4,14 +4,20 @@
 //! queue is full, nothing is ever dropped. `SESSION_OWNED` is the only frame that carries a
 //! descriptor; it travels as `Payload::Owned`, which holds the session's `SessionPty` so the
 //! writer lends the master to the send itself (no raw descriptor sits in the queue).
-use crate::frame::{self, code, Frame, FrameType, FLAG_HAS_FD, MAX_FRAME_R2P, MAX_HAS_FD_FRAME};
+use crate::frame::{self, Frame, FrameType, MAX_FRAME_R2P};
+#[cfg(unix)]
+use crate::frame::{code, FLAG_HAS_FD, MAX_HAS_FD_FRAME};
+#[cfg(unix)]
 use crate::session_pty::SessionPty;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::io;
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+#[cfg(unix)]
+use std::sync::Arc;
+use std::sync::{Condvar, Mutex};
 
 pub const MAX_OUTBOUND_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_OUTBOUND_FRAMES: usize = 256;
@@ -35,6 +41,7 @@ pub enum Payload {
         fault: SendFault,
     },
     /// A `SESSION_OWNED` frame and the session PTY whose master travels with it.
+    #[cfg(unix)]
     Owned {
         bytes: Vec<u8>,
         pty: Arc<SessionPty>,
@@ -43,7 +50,9 @@ pub enum Payload {
 impl Payload {
     fn len(&self) -> usize {
         match self {
-            Self::Plain(bytes) | Self::Owned { bytes, .. } => bytes.len(),
+            Self::Plain(bytes) => bytes.len(),
+            #[cfg(unix)]
+            Self::Owned { bytes, .. } => bytes.len(),
             #[cfg(feature = "fault-hooks")]
             Self::OwnedFault { bytes, .. } => bytes.len(),
         }
@@ -83,6 +92,7 @@ impl Outbound {
 
     /// The channel is gone (a send failed or the peer closed): later sends are discarded.
     #[cfg(any(test, feature = "fault-hooks"))]
+    #[cfg_attr(windows, allow(dead_code))]
     pub fn is_lost(&self) -> bool {
         self.lost.load(Ordering::SeqCst)
     }
@@ -141,6 +151,7 @@ impl Outbound {
         self.push(Payload::Plain(bytes));
     }
 
+    #[cfg_attr(windows, allow(dead_code))] // observation answers are POSIX-only for now
     pub fn respond_with_blob(&self, request_code: u16, cid: u64, meta: Value, blob: Vec<u8>) {
         let bytes = self.frame(FrameType::Response, request_code, 0, cid, meta, blob);
         self.push(Payload::Plain(bytes));
@@ -170,6 +181,7 @@ impl Outbound {
 
     /// Queue `SESSION_OWNED` with the session's master. The worst-case size is checked before
     /// the spawn (5.1.3); this guards the actual frame as well.
+    #[cfg(unix)]
     pub fn session_owned(&self, meta: Value, pty: Arc<SessionPty>) -> io::Result<()> {
         let bytes = self.frame(
             FrameType::Event,
@@ -212,24 +224,50 @@ impl Outbound {
         self.changed.notify_all();
     }
 
+    /// The next queued payload, blocking; `None` once finished and drained.
+    fn next_payload(&self) -> Option<Payload> {
+        let mut queue = self.queue.lock().unwrap();
+        loop {
+            if let Some(payload) = queue.items.pop_front() {
+                queue.bytes -= payload.len();
+                self.changed.notify_all();
+                return Some(payload);
+            }
+            if queue.done {
+                return None;
+            }
+            queue = self.changed.wait(queue).unwrap();
+        }
+    }
+
+    /// The channel is lost: nothing more is sent, later pushes are discarded.
+    fn lose(&self) {
+        self.lost.store(true, Ordering::SeqCst);
+        let mut queue = self.queue.lock().unwrap();
+        queue.done = true;
+        queue.items.clear();
+        queue.bytes = 0;
+        self.changed.notify_all();
+    }
+
+    /// Writer thread body for a channel that carries no handle (Windows: the sidecar's stdout).
+    #[cfg(windows)]
+    pub fn run_writer_plain(&self, out: &mut dyn io::Write) -> io::Result<()> {
+        while let Some(payload) = self.next_payload() {
+            let Payload::Plain(bytes) = payload;
+            if let Err(error) = out.write_all(&bytes).and_then(|()| out.flush()) {
+                self.lose();
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
     /// Writer thread body. Returns when finished, or with the error that made the channel lost.
+    #[cfg(unix)]
     pub fn run_writer(&self, sender: &mut dyn Sender) -> io::Result<()> {
         loop {
-            let payload = {
-                let mut queue = self.queue.lock().unwrap();
-                loop {
-                    if let Some(payload) = queue.items.pop_front() {
-                        queue.bytes -= payload.len();
-                        self.changed.notify_all();
-                        break Some(payload);
-                    }
-                    if queue.done {
-                        break None;
-                    }
-                    queue = self.changed.wait(queue).unwrap();
-                }
-            };
-            let Some(payload) = payload else {
+            let Some(payload) = self.next_payload() else {
                 return Ok(());
             };
             let outcome = match &payload {
@@ -250,12 +288,7 @@ impl Outbound {
                     .and_then(|sent| sent),
             };
             if let Err(error) = outcome {
-                self.lost.store(true, Ordering::SeqCst);
-                let mut queue = self.queue.lock().unwrap();
-                queue.done = true;
-                queue.items.clear();
-                queue.bytes = 0;
-                self.changed.notify_all();
+                self.lose();
                 return Err(error);
             }
         }
@@ -263,6 +296,8 @@ impl Outbound {
 }
 
 /// The transport the writer uses; the production one is a socket, the tests inject faults.
+/// (POSIX only: Windows frames carry no handle, E1 7, and use `run_writer_plain`.)
+#[cfg(unix)]
 pub trait Sender {
     /// First send of a frame, with one descriptor attached (`SCM_RIGHTS`) when given.
     fn send_first(&mut self, data: &[u8], descriptor: Option<RawFd>) -> io::Result<usize>;
@@ -275,6 +310,7 @@ pub trait Sender {
 /// twice. Zero progress, or a failure other than `EINTR` before the first byte, means nothing was
 /// transferred: it is an error and the rest of the frame is NOT sent (no byte would carry the
 /// descriptor).
+#[cfg(unix)]
 pub fn write_frame(
     sender: &mut dyn Sender,
     bytes: &[u8],
@@ -327,13 +363,15 @@ impl Sender for Faulty<'_> {
 }
 
 /// The production sender: the blocking control socket.
+#[cfg(unix)]
 pub struct SocketSender(pub RawFd);
 
 #[cfg(target_os = "linux")]
 const SEND_FLAGS: libc::c_int = libc::MSG_NOSIGNAL;
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 const SEND_FLAGS: libc::c_int = 0; // SO_NOSIGPIPE is set on the socket at startup (macOS)
 
+#[cfg(unix)]
 impl Sender for SocketSender {
     fn send_first(&mut self, data: &[u8], descriptor: Option<RawFd>) -> io::Result<usize> {
         let mut iov = libc::iovec {
@@ -383,7 +421,7 @@ impl Sender for SocketSender {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::fd::AsRawFd;
