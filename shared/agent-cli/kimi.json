@@ -1,6 +1,6 @@
 {
   "key": "kimi",
-  "composition": "python",
+  "composition": "rust",
   "command": "kimi",
   "model_flag": "--model",
   "effort_flag": null,

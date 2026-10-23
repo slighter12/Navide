@@ -1,6 +1,6 @@
 {
   "key": "droid",
-  "composition": "python",
+  "composition": "rust",
   "command": "droid",
   "model_flag": null,
   "effort_flag": null,

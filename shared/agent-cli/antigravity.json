@@ -1,6 +1,6 @@
 {
   "key": "antigravity",
-  "composition": "python",
+  "composition": "rust",
   "command": "agy",
   "model_flag": "--model",
   "effort_flag": "--effort",

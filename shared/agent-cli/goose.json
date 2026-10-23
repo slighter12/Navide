@@ -1,6 +1,6 @@
 {
   "key": "goose",
-  "composition": "python",
+  "composition": "rust",
   "command": "goose",
   "model_flag": null,
   "effort_flag": null,

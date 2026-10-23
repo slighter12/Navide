@@ -1,6 +1,6 @@
 {
   "key": "aider",
-  "composition": "python",
+  "composition": "rust",
   "command": "aider",
   "model_flag": null,
   "effort_flag": null,

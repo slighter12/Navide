@@ -51,7 +51,7 @@ pub struct VendorFacts {
 pub const VENDORS: &[VendorFacts] = &[
     VendorFacts {
         key: "aider",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "aider",
         model_flag: None,
         effort_flag: None,
@@ -65,7 +65,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "antigravity",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "agy",
         model_flag: Some("--model"),
         effort_flag: Some("--effort"),
@@ -121,7 +121,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "cursor",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "agent",
         model_flag: Some("--model"),
         effort_flag: None,
@@ -135,7 +135,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "droid",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "droid",
         model_flag: None,
         effort_flag: None,
@@ -149,7 +149,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "goose",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "goose",
         model_flag: None,
         effort_flag: None,
@@ -163,7 +163,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "grok",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "grok",
         model_flag: Some("--model"),
         effort_flag: None,
@@ -191,7 +191,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "kimi",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "kimi",
         model_flag: Some("--model"),
         effort_flag: None,
@@ -205,7 +205,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "mcode",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "mcode",
         model_flag: None,
         effort_flag: None,
@@ -219,7 +219,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "muse",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "muse",
         model_flag: Some("--model"),
         effort_flag: Some("--reasoning-effort"),
@@ -247,7 +247,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "pi",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "pi",
         model_flag: Some("--model"),
         effort_flag: Some("--thinking"),

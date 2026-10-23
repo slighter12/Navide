@@ -1,6 +1,6 @@
 {
   "key": "pi",
-  "composition": "python",
+  "composition": "rust",
   "command": "pi",
   "model_flag": "--model",
   "effort_flag": "--thinking",
