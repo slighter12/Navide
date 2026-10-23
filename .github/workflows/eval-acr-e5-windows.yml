@@ -264,6 +264,22 @@ jobs:
           bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request' --reporter=json --outputFile=test-results/ci/e5-windows-ts-results.json
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+      - name: Show the TypeScript case failures (endpoint tokens redacted)
+        if: always() && steps.ts_seam.outcome == 'failure'
+        shell: pwsh
+        run: |
+          $results = Get-Content test-results/ci/e5-windows-ts-results.json -Raw | ConvertFrom-Json
+          foreach ($file in @($results.testResults)) {
+            if ($file.message) { Write-Host ("---- suite: " + ([string]$file.message -replace 't=[A-Za-z0-9_\-]+', 't=REDACTED')) }
+            foreach ($case in @($file.assertionResults)) {
+              foreach ($message in @($case.failureMessages)) {
+                $text = [string]$message -replace 't=[A-Za-z0-9_\-]+', 't=REDACTED'
+                Write-Host "---- $($case.title) [$($case.status)]"
+                Write-Host $text.Substring(0, [Math]::Min(8000, $text.Length))
+              }
+            }
+          }
+
       - name: Require both TypeScript cases to be collected and pass
         id: ts_guard
         if: always() && steps.ts_seam.outcome == 'success'
@@ -298,6 +314,8 @@ jobs:
             Write-Host "negative control: collected $($required.Count); statuses: $(($required | ForEach-Object { $_.status }) -join ',')"
             exit 1
           }
+          # vitest exited non-zero by design; the checks above are the verdict.
+          exit 0
 
       - name: Write redacted outcomes
         if: always()
