@@ -1,65 +1,159 @@
 """G2 ticket 04: Claude and ordinary-shell launches are composed by the Rust runtime.
 
-Principal seam: authenticated WebSocket -> Python handlers -> sidecar -> native PTY. The child's
-observed argv, cwd and environment must stay what they were, and the owned receipt must say who
-composed the argv. Before the composition move the field is absent, so these tests fail.
+Principal seam: authenticated WebSocket -> Python handlers -> sidecar -> native PTY, with the
+recorder of ticket 01 standing in for the CLI. Every row submits the command the way the frontend
+does (the CLI name plus the flags the user chose) and adds nothing that an injector adds, so the
+MCP, settings and push flags in the child's argv can only come from the composition under test.
+
+Environment:
+  NAVIDE_G2_BASELINE_DIR  a ticket 01 snapshot directory for this host (same skill fixture state);
+                          the plain rows are then compared with it, normalised the same way.
+  NAVIDE_G2_SNAPSHOT_DIR  also write each row's normalised observation there.
 """
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
+import uuid
 
 import pytest
 
 from tests.cli_regression.support.backend_process import BackendProcess
 from tests.cli_regression.support.cli_shim import base_python_executable, install_cli_shim
-from tests.test_cli_runtime_claude import receipts, reference_backend
+from tests.cli_regression.test_launch_snapshots import (
+    BOOT_DIR, PROBE, _binary_name, _normalise_argv, _normaliser, _snapshot_leaks,
+)
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cli_regression,
-              pytest.mark.skipif(sys.platform != "darwin", reason="native macOS reference evidence")]
+              pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="POSIX composition only")]
 
-PROBE = Path(__file__).parent / "cli_regression/support/launch_snapshot_probe.py"
+NESTED_SETTINGS = json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command",
+                                                            "command": "echo '世界' \\\" ; | & café"}]}]}})
+RESUME_ID = "22222222-2222-4222-8222-222222222222"
+SESSION_ID = "11111111-1111-4111-8111-111111111111"
 
-
-def owned_receipt(root: Path) -> dict:
-    owned = [record for record in receipts(root) if record.get("event") == "owned"]
-    assert len(owned) == 1, owned
-    return owned[0]
-
-
-async def test_claude_owned_receipt_says_rust_composed_the_argv(tmp_path):
-    backend, command = reference_backend(tmp_path)
-    workspace = tmp_path / "workspace café 世界 ' quote"
-    workspace.mkdir()
-    settings = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo '世界' \\\" ; | &"}]}]}}
-    sid = "11111111-1111-4111-8111-111111111111"
-    command[-1] += f" --model fixture-model --effort high --session-id {sid} --settings {shlex.quote(json.dumps(settings))}"
-    async with backend, backend.connect() as ws:
-        created = await backend.create(ws, pane_id="composition-claude", agent_key="claude", command=command,
-                                       cwd=str(workspace), metadata={"explicit_session_id": sid})
-        await backend.expect_output(ws, created["terminal_session_id"], "CLAUDE_REFERENCE_READY")
-        child = json.loads(next(tmp_path.glob("claude-child-*.json")).read_text())
-        assert json.loads(child["argv"][child["argv"].index("--settings") + 1]) == settings
-        assert child["cwd"] == str(workspace)
-        assert owned_receipt(tmp_path).get("argv_source") == "rust"
+#: (id, subject, form, user flags as submitted, extra create payload)
+ROWS = [
+    ("claude-plain", "claude", "wrapped", "", {}),
+    ("terminal-plain", "terminal", "wrapped", "", {}),
+    ("claude-model-effort", "claude", "wrapped", "--model fixture-model --effort high", {}),
+    ("claude-resume", "claude", "wrapped", f"--resume {RESUME_ID}", {}),
+    ("claude-session-id", "claude", "wrapped", f"--session-id {SESSION_ID}", {}),
+    ("claude-nested-settings", "claude", "wrapped", f"--settings {shlex.quote(NESTED_SETTINGS)}", {}),
+    ("claude-login", "claude", "wrapped", "", {"is_login": True}),
+    ("claude-direct-string", "claude", "direct-string", "--model fixture-model", {}),
+    ("terminal-direct-string", "terminal", "direct-string", "", {}),
+]
+BASELINE_FILES = {"wrapped": "posix-login-shell", "direct-string": "direct"}
 
 
-async def test_shell_owned_receipt_says_rust_composed_the_argv(tmp_path):
-    backend = BackendProcess(tmp_path)
+def _receipts(root: Path) -> list[dict]:
+    path = root / "runtime-receipts.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def _owned(root: Path) -> list[dict]:
+    return [record for record in _receipts(root) if record.get("event") == "owned"]
+
+
+def _backend(root: Path) -> BackendProcess:
+    backend = BackendProcess(root)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
-    destination = tmp_path / "launch.json"
-    shim = install_cli_shim(tmp_path, "terminal-probe",
-                            [base_python_executable(), "-u", str(PROBE), "terminal", str(destination)])
-    workspace = tmp_path / "pane cwd café"
+    backend.env["NAVIDE_SNAPSHOT_PASSWD_HOME"] = str(root / "home")
+    backend.env["PYTHONPATH"] = os.pathsep.join([str(BOOT_DIR), backend.env["PYTHONPATH"]])
+    return backend
+
+
+def _shim(root: Path, subject: str) -> Path:
+    return install_cli_shim(root, _binary_name(subject),
+                            [base_python_executable(), "-u", str(PROBE), subject, str(root / "launch.json")])
+
+
+def _submitted(shim: Path, flags: str, form: str):
+    text = f"{shlex.quote(str(shim))} {flags}".strip()
+    return ["/bin/bash", "-lc", text] if form == "wrapped" else text
+
+
+def _contiguous_once(haystack: list[str], needle: list[str]) -> bool:
+    spans = [i for i in range(len(haystack) - len(needle) + 1) if haystack[i:i + len(needle)] == needle]
+    return len(spans) == 1
+
+
+@pytest.mark.parametrize("row", ROWS, ids=[row[0] for row in ROWS])
+async def test_row_child_observation_and_receipt(row, tmp_path):
+    name, subject, form, flags, extra = row
+    workspace = tmp_path / "pane-cwd"
     workspace.mkdir()
-    async with backend, backend.connect() as ws:
-        created = await backend.create(ws, pane_id="composition-shell", agent_key="terminal", cwd=str(workspace),
-                                       command=["/bin/bash", "-lc", shlex.quote(str(shim))],
-                                       env={"REGRESSION_MARKER": "ordinary-setting"})
-        await backend.expect_output(ws, created["terminal_session_id"], "LAUNCH_SNAPSHOT_READY")
-        observed = json.loads(destination.read_text(encoding="utf-8"))
-        assert observed["cwd"] == str(workspace)
-        assert observed["env"]["REGRESSION_MARKER"] == "ordinary-setting"
-        assert owned_receipt(tmp_path).get("argv_source") == "rust"
+    shim = _shim(tmp_path, subject)
+    normalise = _normaliser(tmp_path)
+    backend = _backend(tmp_path)
+    async with backend, backend.connect() as socket:
+        payload = {"pane_id": f"composition-{name}", "agent_key": subject, "cwd": str(workspace),
+                   "command": _submitted(shim, flags, form), "cols": 100, "rows": 30,
+                   "create_generation": str(uuid.uuid4()), "env": {"REGRESSION_MARKER": "ordinary-setting"}, **extra}
+        response = await backend.request(socket, "terminal.create", payload, ok=False)
+        assert response.get("ok"), response.get("error")
+        await backend.expect_output(socket, response["payload"]["terminal_session_id"], "LAUNCH_SNAPSHOT_READY")
+    observed = json.loads((tmp_path / "launch.json").read_text(encoding="utf-8"))
+    snapshot = {
+        "subject": subject, "shell_form": BASELINE_FILES[form], "platform": sys.platform,
+        "child_argv": _normalise_argv(normalise, observed["argv"]),
+        "child_cwd": normalise(observed["cwd"]),
+        "child_env": {key: normalise(value) for key, value in sorted(observed["env"].items())},
+    }
+    assert snapshot["child_cwd"] == "<ROOT>/pane-cwd"
+    assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
+    # Each user flag reaches the child once and in order, whoever spelled it.
+    if flags and not extra.get("is_login"):
+        assert _contiguous_once(observed["argv"], shlex.split(flags)), observed["argv"]
+    if extra.get("is_login"):
+        assert observed["argv"][:2] == ["auth", "login"], observed["argv"]
+    if name in ("claude-plain", "terminal-plain", "claude-direct-string", "terminal-direct-string") and flags == "":
+        baseline_dir = os.environ.get("NAVIDE_G2_BASELINE_DIR")
+        if baseline_dir:
+            expected = json.loads((Path(baseline_dir) / sys.platform / f"{subject}.{BASELINE_FILES[form]}.json")
+                                  .read_text(encoding="utf-8"))
+            for key in ("child_argv", "child_cwd", "child_env"):
+                assert snapshot[key] == expected[key], key
+    target = os.environ.get("NAVIDE_G2_SNAPSHOT_DIR")
+    if target:
+        directory = Path(target) / sys.platform
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{name}.json").write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    assert not _snapshot_leaks(snapshot)
+    owned = _owned(tmp_path)
+    assert len(owned) == 1, owned
+    assert owned[0].get("argv_source") == "rust"
+    assert "argv0" not in owned[0], "the attested argv0 feeds the registry only, not the receipt"
+
+
+async def test_direct_list_is_an_explicit_expected_refusal_for_an_injecting_vendor(tmp_path):
+    """Delta 2.2: the list form keeps appending injected flags to its last element, which no program
+    answers to, so the launch is refused and no child is observed."""
+    workspace = tmp_path / "pane-cwd"
+    workspace.mkdir()
+    shim = _shim(tmp_path, "claude")
+    backend = _backend(tmp_path)
+    async with backend, backend.connect() as socket:
+        response = await backend.request(socket, "terminal.create", {
+            "pane_id": "composition-direct-list", "agent_key": "claude", "cwd": str(workspace),
+            "command": [str(shim)], "cols": 100, "rows": 30, "create_generation": str(uuid.uuid4())}, ok=False)
+    assert not response.get("ok")
+    assert not (tmp_path / "launch.json").exists()
+    assert all(record.get("argv_source") != "python" for record in _owned(tmp_path))
+
+
+async def test_policy_refusal_never_reaches_the_sidecar_spawn(tmp_path):
+    shim = _shim(tmp_path, "claude")
+    backend = _backend(tmp_path)
+    async with backend, backend.connect() as socket:
+        response = await backend.request(socket, "terminal.create", {
+            "pane_id": "composition-refused", "agent_key": "claude", "cwd": str(tmp_path / "does-not-exist"),
+            "command": _submitted(shim, "", "wrapped"), "cols": 100, "rows": 30,
+            "create_generation": str(uuid.uuid4())}, ok=False)
+    assert not response.get("ok")
+    assert _owned(tmp_path) == []
+    assert not (tmp_path / "launch.json").exists()

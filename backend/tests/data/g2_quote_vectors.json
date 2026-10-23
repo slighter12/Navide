@@ -1,0 +1,18 @@
+{
+  "rule": "POSIX shlex.quote: empty -> '', unchanged when every char is in [A-Za-z0-9_@%+=:,./-], otherwise single-quoted with ' written as '\"'\"'",
+  "vectors": [
+    {"input": "", "quoted": "''"},
+    {"input": "plain", "quoted": "plain"},
+    {"input": "a-b_c.d/e:f=g@h%i+j,k", "quoted": "a-b_c.d/e:f=g@h%i+j,k"},
+    {"input": "a b", "quoted": "'a b'"},
+    {"input": "it's", "quoted": "'it'\"'\"'s'"},
+    {"input": "say \"hi\"", "quoted": "'say \"hi\"'"},
+    {"input": "back\\slash", "quoted": "'back\\slash'"},
+    {"input": "$HOME", "quoted": "'$HOME'"},
+    {"input": "a;b|c&d", "quoted": "'a;b|c&d'"},
+    {"input": "line\nbreak", "quoted": "'line\nbreak'"},
+    {"input": "café 世界", "quoted": "'café 世界'"},
+    {"input": "{\"a\":\"it's \\\"x\\\"\"}", "quoted": "'{\"a\":\"it'\"'\"'s \\\"x\\\"\"}'"},
+    {"input": "a = \"b c\" # it's", "quoted": "'a = \"b c\" # it'\"'\"'s'"}
+  ]
+}
