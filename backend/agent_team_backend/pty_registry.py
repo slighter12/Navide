@@ -323,7 +323,7 @@ def _read_journal(path: Path) -> "tuple[int | None, list[dict]]":
     records: list[dict] = []
     owner: int | None = None
     # Never block on, or follow, anything that is not a plain file (a FIFO would hang here).
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise ValueError("ownership journal is not a regular file")
@@ -360,6 +360,24 @@ class JournalIdentityConflict(ValueError):
         self.pids = pids
 
 
+def _registry_identities(records: "list[dict]") -> "list[dict]":
+    """A Windows sidecar journals the root's creation time as a FILETIME; the registry stores psutil's
+    creation time (see `osplat`). Translate once at ingestion. A root that no longer exists (or whose
+    time does not match) cannot be a live orphan, so its record is dropped, never guessed."""
+    if not any(r.get("start_kind") == "windows-filetime" for r in records):
+        return records
+    from . import cli_runtime_windows
+    converted = []
+    for record in records:
+        if record.get("start_kind") == "windows-filetime":
+            lstart = cli_runtime_windows.registry_start(record["pid"], record["start_value"])
+            if not lstart:
+                continue
+            record = {**record, "start_value": lstart, "start_kind": "windows-psutil"}
+        converted.append(record)
+    return converted
+
+
 def ingest_journal(path: Path, owner: int | None = None) -> list[dict]:
     """Make every identity a sidecar journalled durable in the registry (existing rows
     win, but are marked as journal-named), so the ordinary identity-verified paths can
@@ -369,6 +387,7 @@ def ingest_journal(path: Path, owner: int | None = None) -> list[dict]:
         _owner, records = _read_journal(path)
     except FileNotFoundError:
         return []  # the sidecar never spawned anything
+    records = _registry_identities(records)
     with _lock:
         db = _get_db()
         entries = db.kv_get(_KV_KEY) or {}
