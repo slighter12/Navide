@@ -13,12 +13,17 @@ jobs:
   e5-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/e5-cargo-target
-      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/e5-venv
-      NAVIDE_CLI_RUNTIME_BIN: ${{ runner.temp }}/e5-cargo-target/release/navide-cli-runtime
-      NAVIDE_T05_SIDECAR: ${{ runner.temp }}/e5-cargo-target/release/navide-cli-runtime
     steps:
+      # The runner context is not available in job-level env, so the paths are set here.
+      - name: Set evaluation paths
+        run: |
+          {
+            echo "CARGO_TARGET_DIR=$RUNNER_TEMP/e5-cargo-target"
+            echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/e5-venv"
+            echo "NAVIDE_CLI_RUNTIME_BIN=$RUNNER_TEMP/e5-cargo-target/release/navide-cli-runtime"
+            echo "NAVIDE_T05_SIDECAR=$RUNNER_TEMP/e5-cargo-target/release/navide-cli-runtime"
+          } >> "$GITHUB_ENV"
+
       - name: Check out evaluation branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
