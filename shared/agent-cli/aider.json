@@ -1,5 +1,6 @@
 {
   "key": "aider",
+  "composition": "python",
   "command": "aider",
   "model_flag": null,
   "effort_flag": null,

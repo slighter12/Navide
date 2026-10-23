@@ -1,5 +1,6 @@
 {
   "key": "qwen",
+  "composition": "python",
   "command": "qwen",
   "model_flag": "--model",
   "effort_flag": null,

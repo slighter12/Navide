@@ -1,5 +1,6 @@
 {
   "key": "grok",
+  "composition": "python",
   "command": "grok",
   "model_flag": "--model",
   "effort_flag": null,

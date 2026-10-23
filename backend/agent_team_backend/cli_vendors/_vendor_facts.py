@@ -19,6 +19,7 @@ class CapabilityStatus(NamedTuple):
 
 class VendorFacts(NamedTuple):
     key: str
+    composition: str
     command: str
     model_flag: str | None
     effort_flag: str | None
@@ -35,6 +36,7 @@ class VendorFacts(NamedTuple):
 FACTS: dict[str, VendorFacts] = {
     'aider': VendorFacts(
         key='aider',
+        composition='python',
         command='aider',
         model_flag=None,
         effort_flag=None,
@@ -49,6 +51,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'antigravity': VendorFacts(
         key='antigravity',
+        composition='python',
         command='agy',
         model_flag='--model',
         effort_flag='--effort',
@@ -63,6 +66,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'claude': VendorFacts(
         key='claude',
+        composition='rust',
         command='claude',
         model_flag='--model',
         effort_flag='--effort',
@@ -77,6 +81,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'codex': VendorFacts(
         key='codex',
+        composition='python',
         command='codex',
         model_flag='--model',
         effort_flag=None,
@@ -91,6 +96,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'copilot': VendorFacts(
         key='copilot',
+        composition='python',
         command='copilot',
         model_flag='--model',
         effort_flag='--reasoning-effort',
@@ -105,6 +111,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'cursor': VendorFacts(
         key='cursor',
+        composition='python',
         command='agent',
         model_flag='--model',
         effort_flag=None,
@@ -119,6 +126,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'droid': VendorFacts(
         key='droid',
+        composition='python',
         command='droid',
         model_flag=None,
         effort_flag=None,
@@ -133,6 +141,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'goose': VendorFacts(
         key='goose',
+        composition='python',
         command='goose',
         model_flag=None,
         effort_flag=None,
@@ -147,6 +156,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'grok': VendorFacts(
         key='grok',
+        composition='python',
         command='grok',
         model_flag='--model',
         effort_flag=None,
@@ -161,6 +171,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'kilo': VendorFacts(
         key='kilo',
+        composition='python',
         command='kilo',
         model_flag='--model',
         effort_flag=None,
@@ -175,6 +186,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'kimi': VendorFacts(
         key='kimi',
+        composition='python',
         command='kimi',
         model_flag='--model',
         effort_flag=None,
@@ -189,6 +201,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'mcode': VendorFacts(
         key='mcode',
+        composition='python',
         command='mcode',
         model_flag=None,
         effort_flag=None,
@@ -203,6 +216,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'muse': VendorFacts(
         key='muse',
+        composition='python',
         command='muse',
         model_flag='--model',
         effort_flag='--reasoning-effort',
@@ -217,6 +231,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'opencode': VendorFacts(
         key='opencode',
+        composition='python',
         command='opencode',
         model_flag='--model',
         effort_flag=None,
@@ -231,6 +246,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'pi': VendorFacts(
         key='pi',
+        composition='python',
         command='pi',
         model_flag='--model',
         effort_flag='--thinking',
@@ -245,6 +261,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'qwen': VendorFacts(
         key='qwen',
+        composition='python',
         command='qwen',
         model_flag='--model',
         effort_flag=None,
@@ -258,3 +275,6 @@ FACTS: dict[str, VendorFacts] = {
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
     ),
 }
+
+#: Non-vendor subjects (the ordinary shell) and how their launch is composed.
+SUBJECT_COMPOSITION: dict[str, str] = {'': 'rust', 'terminal': 'rust'}

@@ -1,5 +1,6 @@
 {
   "key": "kilo",
+  "composition": "python",
   "command": "kilo",
   "model_flag": "--model",
   "effort_flag": null,

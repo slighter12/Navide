@@ -25,13 +25,18 @@ GENERATOR = ROOT / "scripts" / "generate-agent-cli-facts.py"
 STATUSES = {"integrated", "vendor-unsupported", "not-yet-integrated", "unknown"}
 CAPABILITIES = {"model", "effort", "skip_permissions", "resume_by_id", "session_id_at_launch", "login"}
 REQUIRED = {
-    "key", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
+    "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
     "session_id_flag", "login_args", "supports_session_resume", "shutdown", "capabilities",
 }
 
 
 def declarations() -> dict[str, dict]:
     return {path.stem: json.loads(path.read_text()) for path in sorted(DECLARATIONS.glob("*.json"))}
+
+
+def copy_declarations(tmp_path: Path) -> None:
+    shutil.copytree(DECLARATIONS, tmp_path / "shared" / "agent-cli")
+    shutil.copy(DECLARATIONS.parent / "agent-cli-subjects.json", tmp_path / "shared" / "agent-cli-subjects.json")
 
 
 def load_generator():
@@ -88,7 +93,7 @@ def test_generated_files_are_current() -> None:
 
 def test_a_hand_edited_generated_file_fails_the_check(tmp_path: Path) -> None:
     generator = load_generator()
-    shutil.copytree(DECLARATIONS, tmp_path / "shared" / "agent-cli")
+    copy_declarations(tmp_path)
     generator.write_all(tmp_path)
     assert run_generator("--check", "--root", str(tmp_path)).returncode == 0
     for relative in generator.output_paths():
@@ -103,7 +108,7 @@ def test_a_hand_edited_generated_file_fails_the_check(tmp_path: Path) -> None:
 
 def test_a_changed_declaration_fails_the_check_until_regenerated(tmp_path: Path) -> None:
     generator = load_generator()
-    shutil.copytree(DECLARATIONS, tmp_path / "shared" / "agent-cli")
+    copy_declarations(tmp_path)
     generator.write_all(tmp_path)
     codex = tmp_path / "shared" / "agent-cli" / "codex.json"
     facts = json.loads(codex.read_text())

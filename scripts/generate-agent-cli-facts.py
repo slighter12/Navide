@@ -13,6 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DECLARATIONS = Path("shared/agent-cli")
+SUBJECTS = Path("shared/agent-cli-subjects.json")
+COMPOSITIONS = ("rust", "python")
 PYTHON_OUTPUT = Path("backend/agent_team_backend/cli_vendors/_vendor_facts.py")
 TYPESCRIPT_OUTPUT = Path("src/renderer/src/platform/plugin-shell/agents/_vendorFacts.ts")
 RUST_OUTPUT = Path("native/navide-cli-runtime/src/vendor_facts.rs")
@@ -21,10 +23,10 @@ HEADER = "Generated from shared/agent-cli/*.json by scripts/generate-agent-cli-f
 STATUSES = ("integrated", "vendor-unsupported", "not-yet-integrated", "unknown")
 CAPABILITIES = ("model", "effort", "skip_permissions", "resume_by_id", "session_id_at_launch", "login")
 FIELDS = (
-    "key", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
+    "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
     "session_id_flag", "login_args", "supports_session_resume", "shutdown", "capabilities",
 )
-TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilities", "supports_session_resume"})
+TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilities", "supports_session_resume", "composition"})
 
 
 def output_paths() -> tuple[Path, ...]:
@@ -43,13 +45,25 @@ def load(root: Path) -> list[dict]:
             raise SystemExit(f"{path.name}: capabilities must name {CAPABILITIES} with a status from {STATUSES}")
         if item["resume_args"] is not None and "{id}" not in item["resume_args"]:
             raise SystemExit(f"{path.name}: resume_args must contain {{id}}")
+        if item["composition"] not in COMPOSITIONS:
+            raise SystemExit(f"{path.name}: composition must be one of {COMPOSITIONS}")
         facts.append(item)
     if not facts:
         raise SystemExit(f"no declarations under {DECLARATIONS}")
     return facts
 
 
-def python_source(facts: list[dict]) -> str:
+def load_subjects(root: Path) -> dict:
+    """The non-vendor subjects (the ordinary shell) and how their launch is composed."""
+    item = json.loads((root / SUBJECTS).read_text())
+    if set(item) != {"aliases", "composition"} or item["composition"] not in COMPOSITIONS:
+        raise SystemExit(f"{SUBJECTS.name}: expected aliases and a composition in {COMPOSITIONS}")
+    if not item["aliases"] or len(set(item["aliases"])) != len(item["aliases"]):
+        raise SystemExit(f"{SUBJECTS.name}: aliases must be a non-empty list without repeats")
+    return item
+
+
+def python_source(facts: list[dict], subjects: dict) -> str:
     lines = [
         f'"""{HEADER}"""',
         "from typing import NamedTuple",
@@ -67,6 +81,7 @@ def python_source(facts: list[dict]) -> str:
         "",
         "class VendorFacts(NamedTuple):",
         "    key: str",
+        "    composition: str",
         "    command: str",
         "    model_flag: str | None",
         "    effort_flag: str | None",
@@ -98,6 +113,8 @@ def python_source(facts: list[dict]) -> str:
                 lines.append(f"        {name}={value!r},")
         lines.append("    ),")
     lines.append("}")
+    lines += ["", "#: Non-vendor subjects (the ordinary shell) and how their launch is composed.",
+              f"SUBJECT_COMPOSITION: dict[str, str] = {{{', '.join(f'{a!r}: {subjects['composition']!r}' for a in subjects['aliases'])}}}"]
     return "\n".join(lines) + "\n"
 
 
@@ -112,7 +129,11 @@ def rust_string(value: str) -> str:
     return json.dumps(value)
 
 
-def rust_source(facts: list[dict]) -> str:
+def rust_option(value: str | None) -> str:
+    return "None" if value is None else f"Some({rust_string(value)})"
+
+
+def rust_source(facts: list[dict], subjects: dict) -> str:
     variants = {"integrated": "Integrated", "vendor-unsupported": "VendorUnsupported",
                 "not-yet-integrated": "NotYetIntegrated", "unknown": "Unknown"}
     lines = [
@@ -137,9 +158,23 @@ def rust_source(facts: list[dict]) -> str:
         "}",
         "",
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
+        "pub enum Composition {",
+        "    Rust,",
+        "    Python,",
+        "}",
+        "",
+        "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub struct VendorFacts {",
         "    pub key: &'static str,",
+        "    pub composition: Composition,",
         "    pub command: &'static str,",
+        "    pub model_flag: Option<&'static str>,",
+        "    pub effort_flag: Option<&'static str>,",
+        "    pub known_efforts: Option<&'static [&'static str]>,",
+        "    pub permission_flag: Option<&'static str>,",
+        "    pub resume_args: Option<&'static str>,",
+        "    pub session_id_flag: Option<&'static str>,",
+        "    pub login_args: Option<&'static str>,",
         "    pub shutdown: Option<Shutdown>,",
         "    pub capabilities: Capabilities,",
         "}",
@@ -158,27 +193,42 @@ def rust_source(facts: list[dict]) -> str:
         lines += [
             "    VendorFacts {",
             f"        key: {rust_string(item['key'])},",
+            f"        composition: Composition::{item['composition'].capitalize()},",
             f"        command: {rust_string(item['command'])},",
+            f"        model_flag: {rust_option(item['model_flag'])},",
+            f"        effort_flag: {rust_option(item['effort_flag'])},",
+            "        known_efforts: " + ("None" if item["known_efforts"] is None else
+                                        "Some(&[" + ", ".join(rust_string(v) for v in item["known_efforts"]) + "])") + ",",
+            f"        permission_flag: {rust_option(item['permission_flag'])},",
+            f"        resume_args: {rust_option(item['resume_args'])},",
+            f"        session_id_flag: {rust_option(item['session_id_flag'])},",
+            f"        login_args: {rust_option(item['login_args'])},",
             f"        shutdown: {shutdown_text},",
             f"        capabilities: Capabilities {{ {capabilities} }},",
             "    },",
         ]
+    aliases = ", ".join(rust_string(alias) for alias in subjects["aliases"])
     lines += [
         "];",
         "",
         "pub fn find(key: &str) -> Option<&'static VendorFacts> {",
         "    VENDORS.iter().find(|facts| facts.key == key)",
         "}",
+        "",
+        "/// Non-vendor subjects (the ordinary shell): how their launch is composed.",
+        f"pub const SUBJECT_ALIASES: &[&str] = &[{aliases}];",
+        f"pub const SUBJECT_COMPOSITION: Composition = Composition::{subjects['composition'].capitalize()};",
     ]
     return "\n".join(lines) + "\n"
 
 
 def outputs(root: Path = ROOT) -> dict[Path, str]:
     facts = load(root)
+    subjects = load_subjects(root)
     return {
-        PYTHON_OUTPUT: python_source(facts),
+        PYTHON_OUTPUT: python_source(facts, subjects),
         TYPESCRIPT_OUTPUT: typescript_source(facts),
-        RUST_OUTPUT: rust_source(facts),
+        RUST_OUTPUT: rust_source(facts, subjects),
     }
 
 

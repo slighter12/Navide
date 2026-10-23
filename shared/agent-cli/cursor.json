@@ -1,5 +1,6 @@
 {
   "key": "cursor",
+  "composition": "python",
   "command": "agent",
   "model_flag": "--model",
   "effort_flag": null,
