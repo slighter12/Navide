@@ -153,8 +153,7 @@ impl SessionPty {
         let (job, port) = match new_job() {
             Ok(pair) => pair,
             Err(error) => {
-                // SAFETY: the console was just created and is not used elsewhere.
-                unsafe { ClosePseudoConsole(console) };
+                close_detached(console);
                 return Err(error);
             }
         };
@@ -449,10 +448,21 @@ impl Drop for SessionPty {
         state.caller_input = None;
         state.caller_output = None;
         if let Some(console) = state.console.take() {
-            // SAFETY: taken out of the value, closed once. The originals above are already closed.
-            unsafe { ClosePseudoConsole(console) };
+            close_detached(console);
         }
     }
+}
+
+/// `ClosePseudoConsole` can block while the output is neither serviced nor closed, so no caller ever
+/// makes the call itself: it runs on its own thread that nobody waits for. If the thread cannot start
+/// the console is left to die with the process (the originals are already closed by then).
+fn close_detached(console: HPCON) {
+    let _ = std::thread::Builder::new()
+        .name("conpty-close".into())
+        .spawn(move || {
+            // SAFETY: the caller took the console out of its owner, so it is closed exactly once.
+            unsafe { ClosePseudoConsole(console) };
+        });
 }
 
 fn new_job() -> io::Result<(OwnedHandle, OwnedHandle)> {
@@ -679,6 +689,8 @@ fn environment_block(env: &[(String, String)]) -> Vec<u16> {
 
 struct Attributes {
     storage: Vec<usize>,
+    /// Only an initialised list may be deleted.
+    initialised: bool,
 }
 
 impl Attributes {
@@ -691,12 +703,14 @@ impl Attributes {
         }
         let mut this = Self {
             storage: vec![0; bytes.div_ceil(size_of::<usize>())],
+            initialised: false,
         };
         let list = this.storage.as_mut_ptr().cast();
         // SAFETY: pointer-aligned storage of the requested length.
         if unsafe { InitializeProcThreadAttributeList(list, 1, 0, &mut bytes) } == 0 {
             return Err(io::Error::last_os_error());
         }
+        this.initialised = true;
         // SAFETY: the list is initialised; the console outlives the following CreateProcessW.
         if unsafe {
             UpdateProcThreadAttribute(
@@ -711,10 +725,8 @@ impl Attributes {
             )
         } == 0
         {
-            let error = io::Error::last_os_error();
-            // SAFETY: initialised above.
-            unsafe { DeleteProcThreadAttributeList(list) };
-            return Err(error);
+            // `Drop` deletes the initialised list exactly once.
+            return Err(io::Error::last_os_error());
         }
         Ok(this)
     }
@@ -726,8 +738,10 @@ impl Attributes {
 
 impl Drop for Attributes {
     fn drop(&mut self) {
-        // SAFETY: the list only escapes to CreateProcessW while `self` is alive.
-        unsafe { DeleteProcThreadAttributeList(self.as_ptr()) };
+        if self.initialised {
+            // SAFETY: the list only escapes to CreateProcessW while `self` is alive.
+            unsafe { DeleteProcThreadAttributeList(self.as_ptr()) };
+        }
     }
 }
 

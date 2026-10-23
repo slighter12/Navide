@@ -91,6 +91,19 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+/// Joins a thread within `LONG`; a thread that never ends fails the case instead of hanging it.
+fn join_bounded(handle: JoinHandle<()>, what: &str) {
+    let deadline = Instant::now() + LONG;
+    while !handle.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "{what} did not end within {LONG:?}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    handle.join().unwrap();
+}
+
 fn tag() -> u64 {
     frame::runtime_tag(GENERATION).unwrap()
 }
@@ -115,7 +128,17 @@ fn start(name: &str) -> Sidecar {
         .unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
     let mut line = String::new();
-    stdout.read_line(&mut line).unwrap();
+    // The ready line is read on its own thread so a sidecar that never speaks fails the case.
+    let (line_tx, line_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let read = stdout.read_line(&mut line).map(|_| line);
+        let _ = line_tx.send((read, stdout));
+    });
+    let (read, stdout) = line_rx
+        .recv_timeout(LONG)
+        .expect("the sidecar never wrote its ready line");
+    let line = read.unwrap();
+    let mut stdout = stdout;
     let ready: Value =
         serde_json::from_str(&line).unwrap_or_else(|e| panic!("not JSON ({e}): {line:?}"));
     let (send, frames) = mpsc::channel();
@@ -471,7 +494,7 @@ fn a_shell_round_trips_bytes_through_the_pulled_handles_and_a_kill_cleans_the_co
     assert_eq!(cleaned["cleanup_complete"], true, "{cleaned}");
     assert_eq!(cleaned["root_reaped"], true);
     // The pump reaches the end of the stream once the console closed: broken pipe.
-    session.pump.take().unwrap().join().unwrap();
+    join_bounded(session.pump.take().unwrap(), "a pump");
     receipt(
         "shell-roundtrip-kill",
         json!({"status":"pass","stage":"cleaned"}),
@@ -556,7 +579,7 @@ fn closing_the_console_completes_under_a_saturating_cli_both_ways() {
         let elapsed = started.elapsed();
         assert_eq!(cleaned["cleanup_complete"], true, "{way}: {cleaned}");
         if let Some(pump) = pump {
-            pump.join().unwrap();
+            join_bounded(pump, "the servicing pump");
         }
         drop(input);
         timings.push(json!({"way":way,"close_to_cleaned_ms":elapsed.as_millis() as u64}));
@@ -672,7 +695,7 @@ fn many_sessions_cost_bounded_threads_and_cancellation_joins_within_the_bound() 
     let mut worst_join = Duration::ZERO;
     for session in &mut sessions {
         let join_started = Instant::now();
-        session.pump.take().unwrap().join().unwrap();
+        join_bounded(session.pump.take().unwrap(), "a pump");
         worst_join = worst_join.max(join_started.elapsed());
     }
     let total_join = started.elapsed();
@@ -764,5 +787,5 @@ fn an_unserviced_natural_exit_is_reported_incomplete_within_the_cleanup_bound() 
     let pump = session.pump.take().unwrap();
     // SAFETY: the pump's own thread handle, valid until joined.
     unsafe { CancelSynchronousIo(pump.as_raw_handle()) };
-    pump.join().unwrap();
+    join_bounded(pump, "the cancelled pump");
 }
