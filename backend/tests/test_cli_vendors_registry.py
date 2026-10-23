@@ -115,6 +115,25 @@ def test_registry_matches_frontend_agent_specs() -> None:
     assert frontend_keys - NON_VENDOR_AGENT_KEYS == set(registry.VENDORS)
 
 
+def test_runtime_inventory_has_one_row_per_registered_vendor() -> None:
+    # The G0 runtime inventory is the reference every later slice compares
+    # against, so a vendor registered without a row there (goose was added
+    # after the baseline) must fail here. Membership comes from the registry;
+    # no count is hard-coded.
+    inventory = (REPO_ROOT / "docs" / "testing" / "agent-cli-runtime-inventory.md").read_text(
+        encoding="utf-8"
+    )
+    section = inventory.partition("## All-vendor interactive declaration inventory")[2]
+    section = section.partition("\n## ")[0]
+    rows = re.findall(r"^\| ([a-z]+) / ", section, re.MULTILINE)
+    assert len(rows) == len(set(rows)), f"duplicate inventory rows: {rows}"
+    assert set(rows) == set(registry.VENDORS), (
+        f"inventory rows {sorted(rows)} disagree with the registry "
+        f"{sorted(registry.VENDORS)}; missing rows: "
+        f"{sorted(set(registry.VENDORS) - set(rows))}"
+    )
+
+
 # The supported-CLI sentence of each README: (file, the sentence's count and
 # list, the list separator). The names are display names, which no code maps
 # to vendor keys, so the guard checks the count and the list's length.
