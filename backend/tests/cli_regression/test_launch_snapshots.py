@@ -32,6 +32,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX shell forms only;
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROBE = Path(__file__).parent / "support" / "launch_snapshot_probe.py"
+BOOT_DIR = Path(__file__).parent / "support" / "passwd_home_boot"
 SHELL_FORMS = ("direct", "posix-login-shell")
 SUBJECTS = [*sorted(VENDORS), "terminal"]
 _SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|API_?KEY|PRIVATE|LAUNCH", re.IGNORECASE)
@@ -40,6 +41,45 @@ _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 _LONG_HEX = re.compile(r"(?<![0-9a-zA-Z])[0-9a-fA-F]{16,}(?![0-9a-zA-Z])")
 _PORT = re.compile(r"(127\.0\.0\.1|localhost):\d+")
 _QUERY_TOKEN = re.compile(r"([?&](?:t|token|key)=)[A-Za-z0-9_\-.]{12,}")
+
+# The leak validator below is written independently of the normaliser so that it
+# can catch the normaliser's mistakes. A path root counts only at a component
+# boundary: not after a word character, `>` (a `<LABEL>` prefix), `.` or `-`,
+# and not when more name characters follow it.
+_RAW_ROOTS = re.compile(
+    r"(?<![\w>.\-])/(?:Users|root|tmp|var/folders|private/var|home/[^/\s\"']+)(?=/|$|[^\w.\-])"
+)
+_SECRET_SHAPES = {
+    "bearer token": re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=\-]{16,}", re.IGNORECASE),
+    "api key": re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}|\bAIza[0-9A-Za-z_\-]{30,}"),
+    "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    "jwt": re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{4,}"),
+}
+_RAW_PORTS = re.compile(r"(?:127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0):\d+|--port[ =]\d+")
+
+
+def _snapshot_leaks(value, where: str = "$") -> list[str]:
+    """Where a captured snapshot still holds a raw path root, secret shape or port.
+
+    Reports the kind and location only, never the matched text.
+    """
+    if isinstance(value, dict):
+        return [leak for key, item in value.items() for leak in _snapshot_leaks(item, f"{where}.{key}")]
+    if isinstance(value, list):
+        found = [leak for index, item in enumerate(value) for leak in _snapshot_leaks(item, f"{where}[{index}]")]
+        for index, (flag, number) in enumerate(zip(value, value[1:])):
+            if flag == "--port" and isinstance(number, str) and number.isdigit():
+                found.append(f"raw port at {where}[{index + 1}]")
+        return found
+    if not isinstance(value, str):
+        return []
+    found = []
+    if _RAW_ROOTS.search(value):
+        found.append(f"raw path root at {where}")
+    if _RAW_PORTS.search(value):
+        found.append(f"raw port at {where}")
+    found.extend(f"{kind} at {where}" for kind, pattern in _SECRET_SHAPES.items() if pattern.search(value))
+    return found
 
 
 def _binary_name(subject: str) -> str:
@@ -130,6 +170,11 @@ async def _observe(subject: str, form: str, root: Path) -> dict:
     # list: wiring appends flags to the command text, which only a string takes.
     command = shlex.quote(str(shim)) if form == "direct" else ["/bin/bash", "-lc", shlex.quote(str(shim))]
     backend = BackendProcess(root)
+    # The product reads the account home from the passwd entry, which $HOME does
+    # not change. The bootstrap directory makes that entry the fixture home in
+    # the backend process, before any application import.
+    backend.env["NAVIDE_SNAPSHOT_PASSWD_HOME"] = str(root / "home")
+    backend.env["PYTHONPATH"] = os.pathsep.join([str(BOOT_DIR), backend.env["PYTHONPATH"]])
     normalise = _normaliser(root)
     refused = None
     shutdown_finding = None
@@ -180,13 +225,18 @@ async def _observe(subject: str, form: str, root: Path) -> dict:
 @pytest.mark.parametrize("subject", SUBJECTS)
 async def test_launch_snapshot(subject, form, tmp_path):
     snapshot = await _observe(subject, form, tmp_path)
-    if "refused" in snapshot:
-        assert form == "direct" and subject != "terminal", "only a direct argv for an agent may be refused"
-        assert snapshot["refused"]["code"] == "SETUP_ERROR"
-    else:
-        assert snapshot["child_cwd"] == "<ROOT>/pane-cwd"
-        assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
+    refused = snapshot.get("refused")
+    assert refused is None, f"{subject}/{form} was refused ({refused['code']}: {refused['message']}), so no child was observed"
+    for key in ("child_argv", "child_cwd", "child_env"):
+        assert key in snapshot, f"{subject}/{form} has no {key}"
+    assert snapshot["child_cwd"] == "<ROOT>/pane-cwd"
+    assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
     rendered = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+    # Pane and shim homes must be built under the fixture home, never the account home.
+    assert "<HOME>" not in rendered, "a path under the physical account home reached the child"
+    pane_homes = [text for text in (*snapshot["child_argv"], *snapshot["child_env"].values()) if ".navide-panes" in text]
+    assert all(text.startswith("<ROOT>/home/.navide-panes/") for text in pane_homes), pane_homes
+    assert not _snapshot_leaks(snapshot), _snapshot_leaks(snapshot)
     assert str(tmp_path) not in rendered, "an unnormalised temp path leaked into the snapshot"
     leaks = [leak for leak in (*_variants(_real_home()), *_temp_roots()) if len(leak) > 1]
     assert not [leak for leak in leaks if leak in rendered], "a real home or OS temp path leaked into the snapshot"
@@ -196,3 +246,36 @@ async def test_launch_snapshot(subject, form, tmp_path):
         directory = Path(target) / sys.platform
         directory.mkdir(parents=True, exist_ok=True)
         (directory / f"{subject}.{form}.json").write_text(rendered, encoding="utf-8")
+
+
+def test_leak_validator_rejects_planted_leaks():
+    planted = {
+        "child_argv": ["tool", "--port", "8123", "--url=http://127.0.0.1:9000/x"],
+        "child_cwd": "/Users/someone/work",
+        "child_env": {
+            "A": "/var/folders/ab/cd/T/x", "B": "/private/var/tmp/x", "C": "/tmp/x", "D": "/home/alice/.cfg", "E": "/root/.x",
+            "F": "Authorization: Bearer abcdefghijklmnopqrstuvwx",
+            "G": "sk-abcdefghijklmnopqrstu", "H": "-----BEGIN RSA PRIVATE KEY-----",
+            "I": "eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.c2lnbmF0dXJl", "J": "localhost:5555",
+        },
+    }
+    leaks = _snapshot_leaks(planted)
+    for expected in ("raw port at $.child_argv[2]", "raw port at $.child_argv[3]", "raw path root at $.child_cwd",
+                     *(f"raw path root at $.child_env.{key}" for key in "ABCDE"),
+                     "bearer token at $.child_env.F", "api key at $.child_env.G", "private key at $.child_env.H",
+                     "jwt at $.child_env.I", "raw port at $.child_env.J"):
+        assert expected in leaks, (expected, leaks)
+    assert all("alice" not in leak and "abcdefghijkl" not in leak for leak in leaks), "a leak report must not echo values"
+
+
+def test_leak_validator_accepts_labelled_and_look_alike_paths():
+    benign = {
+        "child_argv": ["<VENV_BIN>/python", "--port", "<port>", "--url=http://127.0.0.1:<port>/x"],
+        "child_cwd": "<ROOT>/pane-cwd",
+        "child_env": {
+            "HOME": "<ROOT>/home/.navide-panes/grok/p", "TMPDIR": "<TMP>/", "A": "<HOME>/.navide-panes/x",
+            "B": "/Users2/x", "C": "/tmpfoo/bar", "D": "/rootless/x", "E": "<ROOT>/tmp/x", "F": "/usr/local/tmp/x",
+            "G": "/homework/x", "H": "Bearer <redacted>",
+        },
+    }
+    assert _snapshot_leaks(benign) == []
