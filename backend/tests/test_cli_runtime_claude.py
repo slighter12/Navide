@@ -231,9 +231,11 @@ async def test_native_claude_interrupt_rewake_and_session_preflight(tmp_path):
             assert checked["payload"]["exists"] is expected
         missing_current = tmp_path / "home/.claude/projects" / encode_claude_cwd(str(tmp_path)) / f"{sid}.jsonl"
         assert not missing_current.exists(), "cross-project check accidentally stayed within one project"
-        refused = await backend.request(ws, "terminal.create", {"pane_id": "not-migrated", "agent_key": "mcode",
+        # Launch admission follows the composition table, not the observer roster (G2 ticket 05): a
+        # registered vendor such as mcode launches, an unknown subject is refused.
+        refused = await backend.request(ws, "terminal.create", {"pane_id": "not-a-vendor", "agent_key": "no-such-vendor",
             "command": command, "cwd": str(tmp_path)}, ok=False)
-        assert "not yet integrated" in refused["error"]["message"]
+        assert "COMPOSITION_UNSUPPORTED" in refused["error"]["message"], refused["error"]
         assert not list(tmp_path.glob("claude-child-*.json")), "unsupported runtime silently spawned a fallback"
         created = await backend.create(ws, pane_id="claude-rewake", agent_key="claude", command=command,
                                        metadata={"explicit_session_id": sid})

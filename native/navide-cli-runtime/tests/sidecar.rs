@@ -494,6 +494,55 @@ fn a_created_session_hands_over_a_master_bound_to_its_own_frame_then_hangs_up_on
     unsafe { libc::close(master) };
 }
 
+/// A structured CREATE for a vendor subject (`goose` has no Rust observer).
+fn vendor_create_meta(dir: &std::path::Path, agent: &str, session: &str) -> Value {
+    json!({"session_id":session,"session_generation":"ffeeddccbbaa99887766554433221100",
+        "pane_id":"pane-1","workspace_path":dir,"cwd":dir,
+        "launch":{"shape":"wrapped","shell":"/bin/sh","flags":["-c"],"words":[{"lit":"exec /bin/cat"}]},
+        "env":{"PATH":"/usr/bin:/bin","TERM":"xterm"},"rows":24,"cols":80,"agent_key":agent})
+}
+
+#[test]
+fn a_vendor_without_a_rust_observer_still_launches_and_stays_unobservable() {
+    let mut sidecar = start("unobserved-vendor");
+    sidecar.line();
+    let dir = sidecar.dir.clone();
+    sidecar.send(code::CREATE, vendor_create_meta(&dir, "goose", "session-goose"));
+    // Either outcome ends the wait, so a refusal fails the test at once instead of hanging it.
+    let (owned, fd) =
+        sidecar.recv_until(|f| f.code == code::SESSION_OWNED || f.frame_type == FrameType::Error);
+    assert_eq!(
+        owned.code,
+        code::SESSION_OWNED,
+        "the create was refused: {}",
+        owned.meta
+    );
+    let master = fd.expect("SESSION_OWNED must carry the master");
+    assert_eq!(owned.meta["argv_source"], "rust");
+    assert_eq!(owned.meta["session_id"], "session-goose");
+    unsafe { libc::close(master) };
+    // Launching does not make it observable: the observer roster is separate from admission.
+    sidecar.send(
+        code::OBSERVE,
+        json!({"vendor":"goose","session_id":"session-goose",
+            "session_generation":"ffeeddccbbaa99887766554433221100"}),
+    );
+    let (refused, _) = sidecar.recv_until(|f| f.frame_type == FrameType::Error);
+    assert_eq!(refused.meta["code"], "observer not integrated");
+    assert_eq!(refused.meta["effect"], "none");
+}
+
+#[test]
+fn an_agent_that_is_neither_a_vendor_nor_a_shell_is_still_refused() {
+    let mut sidecar = start("unknown-agent");
+    sidecar.line();
+    let dir = sidecar.dir.clone();
+    sidecar.send(code::CREATE, vendor_create_meta(&dir, "no-such-vendor", "session-unknown"));
+    let (refused, _) = sidecar.recv_until(|f| f.frame_type == FrameType::Error);
+    assert_eq!(refused.meta["effect"], "none");
+    assert!(refused.meta["code"].is_string());
+}
+
 #[test]
 fn an_unwritable_journal_refuses_the_create_and_the_target_never_runs() {
     let ran = std::env::temp_dir().join(format!("navide-i-ran-{}", std::process::id()));

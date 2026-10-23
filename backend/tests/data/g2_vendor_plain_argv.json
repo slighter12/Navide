@@ -1,0 +1,260 @@
+{
+  "aider": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "antigravity": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "codex": {
+    "darwin": {
+      "direct": [
+        "-c",
+        "hooks.SessionStart=[{matcher='^(startup|resume)$',hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 2 -o /dev/null -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/session-start\" 2>/dev/null || true',timeout=3}]}]",
+        "-c",
+        "hooks.PreToolUse=[{hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 9 -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/pretooluse\" 2>/dev/null; exit 0',timeout=10}]}]",
+        "-c",
+        "mcp_servers.navide.url=\"http://127.0.0.1:<port>/plan-mcp?pane=snapshot-codex\"",
+        "-c",
+        "mcp_servers.navide.bearer_token_env_var=\"NAVIDE_MCP_TOKEN\""
+      ],
+      "wrapped": [
+        "-c",
+        "hooks.SessionStart=[{matcher='^(startup|resume)$',hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 2 -o /dev/null -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/session-start\" 2>/dev/null || true',timeout=3}]}]",
+        "-c",
+        "hooks.PreToolUse=[{hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 9 -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/pretooluse\" 2>/dev/null; exit 0',timeout=10}]}]",
+        "-c",
+        "mcp_servers.navide.url=\"http://127.0.0.1:<port>/plan-mcp?pane=snapshot-codex\"",
+        "-c",
+        "mcp_servers.navide.bearer_token_env_var=\"NAVIDE_MCP_TOKEN\""
+      ]
+    },
+    "linux": {
+      "direct": [
+        "-c",
+        "hooks.SessionStart=[{matcher='^(startup|resume)$',hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 2 -o /dev/null -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/session-start\" 2>/dev/null || true',timeout=3}]}]",
+        "-c",
+        "hooks.PreToolUse=[{hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 9 -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/pretooluse\" 2>/dev/null; exit 0',timeout=10}]}]",
+        "-c",
+        "mcp_servers.navide.url=\"http://127.0.0.1:<port>/plan-mcp?pane=snapshot-codex\"",
+        "-c",
+        "mcp_servers.navide.bearer_token_env_var=\"NAVIDE_MCP_TOKEN\""
+      ],
+      "wrapped": [
+        "-c",
+        "hooks.SessionStart=[{matcher='^(startup|resume)$',hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 2 -o /dev/null -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/session-start\" 2>/dev/null || true',timeout=3}]}]",
+        "-c",
+        "hooks.PreToolUse=[{hooks=[{type='command',command='[ -n \"$NAVIDE_CODEX_LAUNCH\" ] || exit 0; navide_port=$(cat \"$NAVIDE_CODEX_PORT_FILE\" 2>/dev/null); [ -n \"$navide_port\" ] || exit 0; curl -fsS -m 9 -X POST -H \"Content-Type: application/json\" -H \"@$NAVIDE_CODEX_AUTH_FILE\" -H \"X-Navide-Codex-Launch: $NAVIDE_CODEX_LAUNCH\" --data-binary @- \"http://127.0.0.1:$navide_port/hooks/codex/pretooluse\" 2>/dev/null; exit 0',timeout=10}]}]",
+        "-c",
+        "mcp_servers.navide.url=\"http://127.0.0.1:<port>/plan-mcp?pane=snapshot-codex\"",
+        "-c",
+        "mcp_servers.navide.bearer_token_env_var=\"NAVIDE_MCP_TOKEN\""
+      ]
+    }
+  },
+  "copilot": {
+    "darwin": {
+      "direct": [
+        "--additional-mcp-config",
+        "@<ROOT>/data/plan-mcp-panes/copilot-<hex>.json"
+      ],
+      "wrapped": [
+        "--additional-mcp-config",
+        "@<ROOT>/data/plan-mcp-panes/copilot-<hex>.json"
+      ]
+    },
+    "linux": {
+      "direct": [
+        "--additional-mcp-config",
+        "@<ROOT>/data/plan-mcp-panes/copilot-<hex>.json"
+      ],
+      "wrapped": [
+        "--additional-mcp-config",
+        "@<ROOT>/data/plan-mcp-panes/copilot-<hex>.json"
+      ]
+    }
+  },
+  "cursor": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "droid": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "goose": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "grok": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "kilo": {
+    "darwin": {
+      "direct": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ],
+      "wrapped": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ]
+    },
+    "linux": {
+      "direct": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ],
+      "wrapped": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ]
+    }
+  },
+  "kimi": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "mcode": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "muse": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "opencode": {
+    "darwin": {
+      "direct": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ],
+      "wrapped": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ]
+    },
+    "linux": {
+      "direct": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ],
+      "wrapped": [
+        "--port",
+        "<port>",
+        "--hostname",
+        "127.0.0.1"
+      ]
+    }
+  },
+  "pi": {
+    "darwin": {
+      "direct": [],
+      "wrapped": []
+    },
+    "linux": {
+      "direct": [],
+      "wrapped": []
+    }
+  },
+  "qwen": {
+    "darwin": {
+      "direct": [
+        "--mcp-config",
+        "<ROOT>/data/plan-mcp-panes/qwen-<hex>.json",
+        "--input-file",
+        "<ROOT>/data/runtime/input-file/snapshot-qwen.jsonl"
+      ],
+      "wrapped": [
+        "--mcp-config",
+        "<ROOT>/data/plan-mcp-panes/qwen-<hex>.json",
+        "--input-file",
+        "<ROOT>/data/runtime/input-file/snapshot-qwen.jsonl"
+      ]
+    },
+    "linux": {
+      "direct": [
+        "--mcp-config",
+        "<ROOT>/data/plan-mcp-panes/qwen-<hex>.json",
+        "--input-file",
+        "<ROOT>/data/runtime/input-file/snapshot-qwen.jsonl"
+      ],
+      "wrapped": [
+        "--mcp-config",
+        "<ROOT>/data/plan-mcp-panes/qwen-<hex>.json",
+        "--input-file",
+        "<ROOT>/data/runtime/input-file/snapshot-qwen.jsonl"
+      ]
+    }
+  }
+}
