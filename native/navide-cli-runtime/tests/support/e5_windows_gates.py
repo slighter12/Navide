@@ -137,7 +137,7 @@ def gate_w3(proc, record, handles):
         assert ok, "ConPTY output pipe closed before marker"
         if available:
             output.extend(read(output_end, min(available, 4096)))
-    assert b"777777" in output, "ConPTY child output was not received"
+    assert b"777777" in output, f"ConPTY child output was not received: {bytes(output[-300:])!r}"
     write(input_end, b"exit\r\n")
 
 
@@ -184,7 +184,8 @@ def main():
     except Exception as error:  # noqa: BLE001 - one status-only outcome for every gate failure
         print(
             f"runtime=navide-cli-runtime platform=windows build={build} "
-            f"case=G-{args.gate.upper()} status=failed stage={type(error).__name__}",
+            f"case=G-{args.gate.upper()} status=failed stage={type(error).__name__} "
+            f"detail={str(error)[:400]!r}",
             flush=True,
         )
         raise SystemExit(1) from None
