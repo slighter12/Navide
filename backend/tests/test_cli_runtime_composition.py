@@ -27,6 +27,7 @@ import uuid
 
 import pytest
 
+from agent_team_backend.cli_runtime_frames import MAX_META_P2R
 from tests.cli_regression.support.backend_process import BackendProcess
 from tests.cli_regression.support.cli_shim import base_python_executable, install_cli_shim
 from tests.cli_regression.test_launch_snapshots import (
@@ -88,6 +89,7 @@ def _owned(root: Path) -> list[dict]:
 def _backend(root: Path) -> BackendProcess:
     backend = BackendProcess(root)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
+    backend.env["NAVIDE_G2_META_LOG"] = str(root / "create-meta.jsonl")  # popped by the boot module
     if binary := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):  # a build kept outside native/*/target (Linux container)
         backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
     backend.env["NAVIDE_SNAPSHOT_PASSWD_HOME"] = str(root / "home")
@@ -161,6 +163,15 @@ def _expected_argv(row: tuple, plain_argv: list[str], normalise_user) -> list[st
 async def test_row_child_observation_and_receipt(row, tmp_path):
     name, subject, form, flags, extra = row
     snapshot, _raw, owned = await _observe(row, tmp_path / "row")
+    # The encoded CREATE meta of this real launch, against the frame cap (the environment travels whole).
+    log = tmp_path / "row" / "create-meta.jsonl"
+    sizes = [json.loads(line)["meta_bytes"] for line in log.read_text().splitlines()] if log.exists() else []
+    assert sizes and len(set(sizes)) == 1, sizes  # one CREATE; the service encodes it twice (size check, then send)
+    assert sizes[0] < MAX_META_P2R // 8, sizes
+    if directory := os.environ.get("NAVIDE_G2_META_DIR"):
+        (Path(directory) / sys.platform).mkdir(parents=True, exist_ok=True)
+        (Path(directory) / sys.platform / f"{name}.json").write_text(
+            json.dumps({"row": name, "create_meta_bytes": sizes[0], "cap_bytes": MAX_META_P2R}) + "\n", encoding="utf-8")
     assert snapshot["child_cwd"] == "<ROOT>/pane-cwd"
     assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
     assert not _snapshot_leaks(snapshot)

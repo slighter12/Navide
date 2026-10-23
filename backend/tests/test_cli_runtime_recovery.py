@@ -1611,3 +1611,23 @@ async def test_an_attestation_that_does_not_match_the_program_sent_is_a_failed_b
     assert len(rejected) == 1 and rejected[0]["check"] == "argv0", rejected
     assert [args[1] for args in registered] == [[""]], "only the identity is registered; no unverified program text is persisted"
     assert registered and not psutil.pid_exists(registered[0][0]), "the rejected root was killed"
+
+
+async def test_a_malformed_plugin_result_is_a_bounded_pre_dispatch_refusal_with_no_child(rig, monkeypatch, handler_world):
+    """Principal seam (terminal.create handler → service). Substituted: only the plugin host's transformer list,
+    which holds one plugin returning an int instead of a command."""
+    app, _owners = handler_world
+    monkeypatch.setattr(app.plugin_host, "spawn_transformers", lambda: [("bad-plugin", lambda *_a, **_k: 7)])
+    service = rig.service()
+    session = app.Session(_Socket())
+    session.terminals = service
+    reply = await _handler_create(session, "pane-bad-plugin", [base_python_executable(), "-u", str(rig.peer)],
+                                  str(rig.workspace), message_id="m-bad")
+    assert reply.get("ok") is False, reply
+    failed = [r for r in rig.receipts() if r["event"] == "create_failed"]
+    assert len(failed) == 1, failed
+    assert (failed[0]["code"], failed[0]["stage"], failed[0]["session_id"], failed[0]["effect"]) == (
+        "COMPOSITION_UNREPRESENTABLE", "pre-dispatch", None, "none")
+    assert "plugin bad-plugin" in failed[0]["message"], failed[0]
+    assert not [r for r in rig.receipts() if r["event"] == "owned"], "no child was created"
+    assert not rig.output, "no pane produced output"

@@ -23,3 +23,39 @@ if _home:
         os.environ["PYTHONPATH"] = os.pathsep.join(_rest)
     else:
         os.environ.pop("PYTHONPATH", None)
+
+# G2 ticket 04: records the encoded size of every CREATE request meta to the named file, so the matrix can
+# report the largest real CREATE against the frame cap. Inert unless NAVIDE_G2_META_LOG is set; the variable is
+# removed here so no child ever sees it.
+_meta_log = os.environ.pop("NAVIDE_G2_META_LOG", "")
+if _meta_log:
+    import importlib.abc
+    import importlib.util
+    import json
+    import sys
+
+    class _MetaProbe(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path, target=None):
+            if name != "agent_team_backend.cli_runtime_frames":
+                return None
+            sys.meta_path.remove(self)
+            spec = importlib.util.find_spec(name)
+            loader, original = spec.loader, spec.loader.exec_module
+
+            def exec_module(module):
+                original(module)
+                real = module.encode
+
+                def encode(frame, *args, **kwargs):
+                    out = real(frame, *args, **kwargs)
+                    if frame.frame_type is module.FrameType.REQUEST and frame.code == module.code.CREATE:
+                        with open(_meta_log, "a", encoding="utf-8") as handle:
+                            handle.write(json.dumps({"meta_bytes": len(out) - module.HEADER_LEN - len(frame.blob)}) + "\n")
+                    return out
+
+                module.encode = encode
+
+            loader.exec_module = exec_module
+            return spec
+
+    sys.meta_path.insert(0, _MetaProbe())

@@ -1285,10 +1285,21 @@ class RustTerminalService(TerminalService):
             if not getattr(failure, "_failure_receipted", False):
                 # Refused before anything was dispatched (a fence, a missing cwd, a cancel before the send):
                 # still exactly one structured failed-create receipt (E2 3 item 2).
-                self._receipt({"event": "create_failed", "session_id": None, "pane_id": kwargs.get("pane_id"),
-                               "session_generation": None, "error": type(failure).__name__, "code": getattr(failure, "code", None), "stage": "pre-dispatch",
-                               "effect": "none", "message": str(failure)[:200], "root": None})
+                self.receipt_refused_create(kwargs.get("pane_id"), failure)
             raise
+
+    def receipt_refused_create(self, pane_id: str | None, failure: BaseException) -> None:
+        """The one structured failed-create receipt of a launch refused before CREATE existed (no session id).
+        A refusal raised ahead of `create_async` (a plugin result) is receipted here by its caller; it is
+        marked so `create_async` never writes a second one."""
+        if getattr(failure, "_failure_receipted", False):
+            return
+        self._receipt({"event": "create_failed", "session_id": None, "pane_id": pane_id,
+                       "session_generation": None, "error": type(failure).__name__,
+                       "code": getattr(failure, "code", None), "stage": "pre-dispatch",
+                       "effect": "none", "message": str(failure)[:200], "root": None})
+        with suppress(Exception):
+            failure._failure_receipted = True  # type: ignore[attr-defined]
 
     async def _create_async(self, **kwargs) -> RuntimeSession:
         from .cli_runtime_adapters import NATIVE_VENDORS
