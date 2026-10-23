@@ -700,6 +700,43 @@ fn natural_cleanup(handle: &SessionHandle, state: &mut State) -> Outcome {
     outcome
 }
 
+/// The one absolute bound of a cleanup. A cleanup already running keeps the deadline it started with;
+/// only a cleanup that has not begun starts a fresh `cleanup` budget.
+fn cleanup_deadline(running: Option<Instant>, now: Instant, cleanup: Duration) -> Instant {
+    let _ = running;
+    now + cleanup
+}
+
+/// Wait for the root's exit after its termination was issued, within what is left of `deadline`. On a
+/// timeout the outcome is incomplete and still names the root, which may be running.
+fn confirm_root_exit(
+    deadline: Instant,
+    wait: impl FnOnce(Duration) -> bool,
+    root: impl FnOnce() -> Value,
+    outcome: &mut Outcome,
+) -> bool {
+    let _ = root;
+    if wait(ROOT_REAP.min(deadline.saturating_duration_since(Instant::now()))) {
+        return true;
+    }
+    outcome.failure = Some("root reap timeout".into());
+    false
+}
+
+/// What `SESSION_CLEANED` reports for an outcome: whether the cleanup is complete, the survivors (a failure
+/// is listed as an error entry) and the unverifiable identities.
+fn settle(outcome: Outcome, root_reaped: bool) -> (bool, Vec<Value>, Vec<Value>) {
+    let complete = outcome.survivors.is_empty()
+        && outcome.unverifiable.is_empty()
+        && outcome.failure.is_none()
+        && root_reaped;
+    let mut survivors = outcome.survivors;
+    if let Some(failure) = &outcome.failure {
+        survivors.push(json!({"error":failure}));
+    }
+    (complete, survivors, outcome.unverifiable)
+}
+
 /// R-e on Windows: no hangup step. A session that never adopted closes its originals (the third way
 /// of 7.3 to open the gate); the tree is terminated through the job; `SESSION_EXITED` is sent; then
 /// the console closes once Python is servicing or has closed its read end.
@@ -713,18 +750,22 @@ fn kill_cleanup(
     peer_alive: bool,
 ) -> Outcome {
     let mut outcome = Outcome::default();
-    let deadline = Instant::now() + Duration::from_millis(cleanup_ms());
+    let deadline = cleanup_deadline(
+        state.gate_deadline,
+        Instant::now(),
+        Duration::from_millis(cleanup_ms()),
+    );
     if !handle.adopted.load(Ordering::SeqCst) && handle.pty.release_originals() {
         handle.gate.satisfy(GateReason::OriginalsClosed);
     }
     retain_members(handle, &mut state.owned);
     let _ = handle.pty.terminate_tree();
-    if handle
-        .exit
-        .wait(ROOT_REAP.min(deadline.saturating_duration_since(Instant::now())))
-        .is_none()
-    {
-        outcome.failure = Some("root reap timeout".into());
+    if !confirm_root_exit(
+        deadline,
+        |bound| handle.exit.wait(bound).is_some(),
+        || handle_root_record(handle),
+        &mut outcome,
+    ) {
         return outcome;
     }
     send_exited(handle, state, wire);
@@ -741,20 +782,13 @@ fn kill_cleanup(
 /// `SESSION_CLEANED` and the end of the session thread's work (5.5).
 fn finish(handle: &SessionHandle, wire: &Wire, sessions: &Sessions, outcome: Outcome) {
     let root_reaped = handle.exit.get().is_some();
-    let complete = outcome.survivors.is_empty()
-        && outcome.unverifiable.is_empty()
-        && outcome.failure.is_none()
-        && root_reaped;
-    let mut survivors = outcome.survivors;
-    if let Some(failure) = &outcome.failure {
-        survivors.push(json!({"error":failure}));
-    }
+    let (complete, survivors, unverifiable) = settle(outcome, root_reaped);
     let mut meta = handle.meta();
     meta["cleanup_complete"] = json!(complete);
     meta["root_reaped"] = json!(root_reaped);
     *handle.survivors.lock().unwrap() = survivors.clone();
     meta["survivors"] = json!(survivors);
-    meta["unverifiable"] = json!(outcome.unverifiable);
+    meta["unverifiable"] = json!(unverifiable);
     // The originals are Rust's until here at the latest (a session that adopted already closed them).
     handle.pty.release_originals();
     wire.out.event(code::SESSION_CLEANED, meta);
@@ -1573,6 +1607,74 @@ mod tests {
             || panic!("an emptied tree lists no members"),
         );
         assert!(result.unwrap().is_empty());
+    }
+
+    /// E5 final review 4 finding 2: a kill or shutdown arriving while the exited root's gate deadline runs
+    /// finishes within that deadline; only a cleanup that has not begun gets a fresh budget.
+    #[test]
+    fn a_late_kill_keeps_the_gate_deadline_that_is_already_running() {
+        let now = Instant::now();
+        let budget = Duration::from_secs(10);
+        let running = now + Duration::from_millis(50);
+        assert_eq!(cleanup_deadline(Some(running), now, budget), running);
+        assert_eq!(cleanup_deadline(None, now, budget), now + budget);
+    }
+
+    /// The whole late-kill cleanup, driven through its waits with the running deadline: it ends at the
+    /// original deadline, not a fresh `cleanup_ms` later.
+    #[test]
+    fn a_late_kill_cleanup_ends_within_the_original_deadline() {
+        let started = Instant::now();
+        let running = started + Duration::from_millis(200);
+        let deadline = cleanup_deadline(Some(running), started, Duration::from_secs(5));
+        let mut outcome = Outcome::default();
+        let reaped = confirm_root_exit(
+            deadline,
+            |bound| {
+                std::thread::sleep(bound.min(Duration::from_secs(5)));
+                false
+            },
+            || json!({"pid": 9}),
+            &mut outcome,
+        );
+        assert!(!reaped);
+        assert!(
+            started.elapsed() < Duration::from_millis(600),
+            "the late kill waited {:?} past a 200ms running deadline",
+            started.elapsed()
+        );
+    }
+
+    /// E5 final review 4 finding 3: a root whose termination was issued but whose exit was not confirmed in
+    /// time is named by the emitted receipt, which is incomplete.
+    #[test]
+    fn a_root_that_did_not_confirm_its_exit_is_named_in_the_incomplete_receipt() {
+        let mut outcome = Outcome::default();
+        let reaped = confirm_root_exit(
+            Instant::now(),
+            |bound| {
+                assert!(
+                    bound.is_zero(),
+                    "an expired deadline leaves nothing to wait"
+                );
+                false
+            },
+            || json!({"pid": 4242, "start_kind": "windows-filetime", "start_value": "1"}),
+            &mut outcome,
+        );
+        assert!(!reaped);
+        let (complete, survivors, unverifiable) = settle(outcome, false);
+        assert!(!complete);
+        assert!(
+            unverifiable.iter().any(|entry| entry["pid"] == 4242),
+            "root missing from the receipt: survivors {survivors:?}, unverifiable {unverifiable:?}"
+        );
+        assert!(
+            survivors
+                .iter()
+                .any(|entry| entry["error"] == "root reap timeout"),
+            "the failure must still be reported: {survivors:?}"
+        );
     }
 
     #[test]
