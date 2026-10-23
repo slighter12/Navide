@@ -123,7 +123,8 @@ fn start(name: &str) -> Sidecar {
         if stdout.read_exact(&mut header).is_err() {
             return;
         }
-        let parsed = frame::parse_header(&header, Direction::RustToPython, tag()).unwrap();
+        let parsed = frame::parse_header(&header, Direction::RustToPython, tag())
+            .unwrap_or_else(|e| panic!("bad frame header {e:?}: {header:02x?}"));
         let mut body = vec![0u8; parsed.body_len()];
         if stdout.read_exact(&mut body).is_err() {
             return;
