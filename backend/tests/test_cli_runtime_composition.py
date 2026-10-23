@@ -62,6 +62,14 @@ ROWS = [
     ("terminal-metacharacters", "terminal", "wrapped", "--x 'a b' café \"q\\\"uote\" 'it'\"'\"'s' ';|&'", {}),
     ("claude-long-shell", "claude", "wrapped", "--model fixture-model", {"long_shell": True}),
 ]
+#: What the injectors alone put in the child's argv in the isolated fixture (no skills installed), as
+#: normalised by the ticket 01 snapshot test: the Plan MCP config and the pane hook settings. The shell
+#: is not wired. Written out, not derived, so a plain row cannot agree with itself by construction.
+PLAIN_ARGV = {
+    "claude": ["--mcp-config", "<ROOT>/data/plan-mcp-panes/claude-<hex>.json",
+               "--settings", "<ROOT>/data/runtime/claude/settings.json"],
+    "terminal": [],
+}
 PLAIN = {("claude", "wrapped"): "claude-plain", ("terminal", "wrapped"): "terminal-plain",
          ("claude", "direct-string"): "claude-direct-plain", ("terminal", "direct-string"): "terminal-direct-plain"}
 
@@ -157,15 +165,12 @@ async def test_row_child_observation_and_receipt(row, tmp_path):
         directory.mkdir(parents=True, exist_ok=True)
         (directory / f"{name}.json").write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     # Exact argv: submitted flags (order, multiplicity) then the injectors' flags.
+    # The injectors' flags are an independent constant (the normalised ticket 01 values), never copied
+    # from what this run observed, so the plain rows are checked too.
     plain_name = PLAIN[(subject, form)]
-    if name == plain_name:
-        plain_argv = snapshot["child_argv"]
-    else:
-        plain_snapshot, _, _ = await _observe(next(r for r in ROWS if r[0] == plain_name), tmp_path / "plain")
-        plain_argv = plain_snapshot["child_argv"]
-        normalise = _normaliser(tmp_path / "row")
-        assert snapshot["child_argv"] == _expected_argv(row, plain_argv, lambda words: _normalise_argv(normalise, words)), \
-            snapshot["child_argv"]
+    normalise = _normaliser(tmp_path / "row")
+    expected_argv = _expected_argv(row, PLAIN_ARGV[subject], lambda words: _normalise_argv(normalise, words))
+    assert snapshot["child_argv"] == expected_argv, snapshot["child_argv"]
     # The acceptance run: before/after child argv, cwd and full environment.
     if os.environ.get("NAVIDE_G2_ACCEPTANCE") == "1":
         for variable in ("NAVIDE_G2_BASELINE_DIR", "NAVIDE_G2_TICKET01_DIR"):
