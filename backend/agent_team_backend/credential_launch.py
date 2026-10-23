@@ -15,6 +15,49 @@ from .cli_vendors.base import VendorSpec, simple_command_args
 from .credential_path_helper import HELPER_FLAG, PORT_ENV, TOKEN_ENV
 
 
+def _script_words(command: Any, spec: VendorSpec) -> list[str] | None:
+    """The words of a literal bash/zsh invocation of `spec`'s CLI that the script form can wrap, else None."""
+    words = simple_command_args(command)
+    if not words or not isinstance(command, list):
+        return None
+    if Path(words[0]).name != spec.key or any(c in str(command[-1]) for c in "~*?[]{}!"):
+        return None
+    if Path(str(command[0])).name not in ("bash", "zsh"):
+        return None
+    return words
+
+
+def _resolved_string(command: str, spec: VendorSpec, env: dict[str, str] | None) -> tuple[str, str, list[str]] | None:
+    """(program, head, tail) of a literal string invocation of `spec`'s CLI, else None."""
+    native = osplat.terminal_backend.parse_command(command)
+    if not native or Path(native[0]).stem != spec.key:
+        return None
+    program = shutil.which(native[0], path=(env or {}).get("PATH"))
+    if program is None:
+        return None
+    head, tail = osplat.paths.pty_launch_parts(program, native[1:], path=(env or {}).get("PATH"))
+    if Path(head).stem.lower() in ("cmd", "powershell", "pwsh"):
+        return None
+    return program, head, tail
+
+
+def wrap_plan(command: Any, spec: VendorSpec, helper: list[str], *, env: dict[str, str] | None = None) -> dict | None:
+    """The typed form of `wrap_command` (G2 delta 10.2): the same predicates, but the data the Rust runtime
+    renders instead of the rendered argv. `entrypoint` is the resolved program of a string command and
+    None for the bash/zsh list form. Returns None exactly when `wrap_command` would not wrap."""
+    unset = [PORT_ENV, TOKEN_ENV]
+    if isinstance(command, str) and simple_command_args(command):
+        resolved = _resolved_string(command, spec, env)
+        if resolved is None:
+            return None
+        program, head, tail = resolved
+        return {"helper": list(helper), "unset": unset,
+                "entrypoint": tail[0] if head != program and tail else program}
+    if _script_words(command, spec) is None:
+        return None
+    return {"helper": list(helper), "unset": unset, "entrypoint": None}
+
+
 def wrap_command(command: Any, spec: VendorSpec, helper: list[str], *, env: dict[str, str] | None = None) -> list[str] | None:
     """Wrap a literal bash/zsh CLI invocation, preserving shell function behavior.
 
@@ -25,25 +68,16 @@ def wrap_command(command: Any, spec: VendorSpec, helper: list[str], *, env: dict
     if isinstance(command, str) and words:
         # Native ConPTY commands have no shell rc phase. Reuse the existing
         # platform parser and recognized npm-shim unwrapping before the helper.
-        native = osplat.terminal_backend.parse_command(command)
-        if not native or Path(native[0]).stem != spec.key:
+        resolved = _resolved_string(command, spec, env)
+        if resolved is None:
             return None
-        program = shutil.which(native[0], path=(env or {}).get("PATH"))
-        if program is None:
-            return None
-        head, tail = osplat.paths.pty_launch_parts(program, native[1:], path=(env or {}).get("PATH"))
-        if Path(head).stem.lower() in ("cmd", "powershell", "pwsh"):
-            return None
+        program, head, tail = resolved
         entrypoint = tail[0] if head != program and tail else program
         return [*helper, "--entrypoint", entrypoint, "--", head, *tail]
-    if not words or not isinstance(command, list):
-        return None
-    executable = Path(words[0]).name
-    if executable != spec.key or any(c in str(command[-1]) for c in "~*?[]{}!"):
+    words = _script_words(command, spec)
+    if words is None:
         return None
     shell = Path(str(command[0])).name
-    if shell not in ("bash", "zsh"):
-        return None
     name = shlex.quote(words[0])
     prefix = shlex.join(helper)
     args = shlex.join(words[1:])

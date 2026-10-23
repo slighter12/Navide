@@ -18,6 +18,8 @@ pub struct Composed {
     pub argv_source: &'static str,
     /// Bounded Rust attestation of the executed program (delta section 4).
     pub argv0: Argv0,
+    /// `Some("credential")` when the managed-credential outer wrapper was applied (delta 10.2).
+    pub outer: Option<&'static str>,
 }
 
 /// `len` is the full byte length of the program path; `head`/`tail` are its longest prefix/suffix of
@@ -41,6 +43,8 @@ pub enum ComposeError {
     Validate(String),
     /// The shape is not admitted for this subject on this platform.
     Composition(String),
+    /// A `credential` launch the managed-credential wrapper would not wrap (delta 10.2).
+    Credential(String),
 }
 
 const ATTEST_BYTES: usize = 128;
@@ -227,7 +231,140 @@ fn finish(argv: Vec<String>) -> Result<Composed, ComposeError> {
     let program = parts.next().filter(|program| !program.is_empty());
     let program = program.ok_or_else(|| ComposeError::Compose("no program".to_string()))?;
     let argv0 = attest(&program);
-    Ok(Composed { program, args: parts.collect(), argv_source: "rust", argv0 })
+    Ok(Composed { program, args: parts.collect(), argv_source: "rust", argv0, outer: None })
+}
+
+fn credential_refused(why: &str) -> ComposeError {
+    ComposeError::Credential(why.to_string())
+}
+
+/// Characters `simple_command_args` refuses in a literal invocation (base.py).
+const SHELL_METACHARACTERS: &str = ";&|<>`$%#()\n\r";
+/// Characters the list form of `wrap_command` also declines (credential_launch.py).
+const GLOB_CHARACTERS: &str = "~*?[]{}!";
+
+fn is_variable_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// `shlex.join`.
+fn join(words: &[String]) -> String {
+    words.iter().map(|word| quote(word)).collect::<Vec<_>>().join(" ")
+}
+
+fn base_name(path: &str) -> &str {
+    path.trim_end_matches('/').rsplit('/').next().unwrap_or("")
+}
+
+fn stem(path: &str) -> &str {
+    let name = base_name(path);
+    match name.rfind('.') {
+        Some(at) if at > 0 => &name[..at],
+        _ => name,
+    }
+}
+
+/// The managed-credential outer wrapper (delta 10.2): the same text `credential_launch.wrap_command`
+/// builds, from typed data. Every predicate of `wrap_command` is re-checked here.
+fn compose_credential(agent_key: &str, object: &serde_json::Map<String, Value>) -> Result<Composed, ComposeError> {
+    let strings = |key: &str| -> Result<Vec<String>, ComposeError> {
+        let array = object.get(key).and_then(Value::as_array).ok_or_else(|| shape(&format!("credential needs {key}")))?;
+        array.iter().map(|item| text(item, key).map(String::from)).collect()
+    };
+    let helper = strings("helper")?;
+    let unset = strings("unset")?;
+    let entrypoint = match object.get("entrypoint") {
+        Some(value) => Some(text(value, "entrypoint")?.to_string()),
+        None => None,
+    };
+    let inner = object.get("inner").ok_or_else(|| shape("credential needs an inner launch"))?;
+    let inner_object = inner.as_object().ok_or_else(|| shape("inner must be an object"))?;
+    let inner_shape = inner_object.get("shape").and_then(Value::as_str);
+    if !matches!(inner_shape, Some("wrapped" | "direct")) {
+        return Err(shape("the inner launch is wrapped or direct"));
+    }
+    let composed = compose(agent_key, inner)?;
+    if helper.is_empty() || helper[0].is_empty() {
+        return Err(credential_refused("the helper has no program"));
+    }
+    if unset.is_empty() || !unset.iter().all(|name| is_variable_name(name)) {
+        return Err(credential_refused("unset names are plain variable names"));
+    }
+    if vendor_facts::find(agent_key).is_none() {
+        return Err(credential_refused("this subject has no managed credential wrapper"));
+    }
+    let words = inner_object.get("words").cloned().unwrap_or(Value::Array(vec![]));
+    let line = render(agent_key, &words)?;
+    if line.chars().any(|c| SHELL_METACHARACTERS.contains(c)) {
+        return Err(credential_refused("the line holds a shell metacharacter"));
+    }
+    let (program, args, argv0);
+    if inner_shape == Some("wrapped") {
+        if entrypoint.is_some() {
+            return Err(credential_refused("an entrypoint belongs to the direct form"));
+        }
+        let flags = inner_object.get("flags").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        let sole = match flags {
+            [flag] => flag.as_str().filter(|flag| matches!(*flag, "-c" | "-lc" | "-ilc")),
+            _ => None,
+        };
+        let shell = base_name(&composed.program);
+        if sole.is_none() || !matches!(shell, "bash" | "zsh") {
+            return Err(credential_refused("the shell and flag are not a wrappable pair"));
+        }
+        if line.chars().any(|c| GLOB_CHARACTERS.contains(c)) {
+            return Err(credential_refused("the line holds a glob character"));
+        }
+        let parts = split(&line)?;
+        let first = parts.first().ok_or_else(|| credential_refused("the line has no program"))?;
+        if base_name(first) != agent_key {
+            return Err(credential_refused("the line does not start the subject"));
+        }
+        let name = quote(first);
+        let prefix = join(&helper);
+        let rest = join(&parts[1..]);
+        let (kind, resolved) = if shell == "zsh" {
+            (
+                format!("[[ $(builtin whence -w -- {name}) == {} ]]", quote(&format!("{first}: command"))),
+                format!("$(builtin whence -- {name})"),
+            )
+        } else {
+            (format!("[ \"$(type -t -- {name})\" = file ]"), format!("$(command -v -- {name})"))
+        };
+        let cleanup = format!("unset {}", unset.join(" "));
+        let script = format!(
+            "if {kind}; then \
+             if {prefix} --shell-check -- \"{resolved}\" {rest}; then {cleanup}; exec {line}; \
+             else _navide_credential_status=$?; {cleanup}; \
+             if [ \"$_navide_credential_status\" -eq 76 ]; then {line}; \
+             else exit \"$_navide_credential_status\"; fi; fi; \
+             else {prefix} --probe && {{ {cleanup}; {line}; }}; fi"
+        );
+        program = composed.program;
+        let mut all = composed.args;
+        all.pop();
+        all.push(script);
+        args = all;
+        argv0 = composed.argv0;
+    } else {
+        if inner_object.get("form").and_then(Value::as_str) != Some("string") {
+            return Err(credential_refused("the direct form wraps a string command"));
+        }
+        let entrypoint = entrypoint.filter(|entry| !entry.is_empty()).ok_or_else(|| credential_refused("the direct form needs its entrypoint"))?;
+        if stem(&composed.program) != agent_key {
+            return Err(credential_refused("the command does not start the subject"));
+        }
+        program = helper[0].clone();
+        let mut all: Vec<String> = helper[1..].to_vec();
+        all.extend(["--entrypoint".to_string(), entrypoint.clone(), "--".to_string(), entrypoint]);
+        all.extend(composed.args);
+        args = all;
+        argv0 = attest(&program);
+    }
+    if program.is_empty() {
+        return Err(ComposeError::Compose("no program".to_string()));
+    }
+    Ok(Composed { program, args, argv_source: "rust", argv0, outer: Some("credential") })
 }
 
 /// Compose a structured launch for `agent_key`.
@@ -258,6 +395,7 @@ pub fn compose(agent_key: &str, launch: &Value) -> Result<Composed, ComposeError
             }
             _ => Err(shape("direct needs a form of string or list")),
         },
+        Some("credential") => compose_credential(agent_key, object),
         Some("argv") => Err(shape("argv is not composed by the sidecar")),
         _ => Err(shape("unknown or missing shape")),
     }
@@ -280,7 +418,9 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
         shape == "argv"
     } else {
         match composition {
-            vendor_facts::Composition::Rust => matches!(shape, "wrapped" | "direct"),
+            vendor_facts::Composition::Rust => {
+                matches!(shape, "wrapped" | "direct") || (shape == "credential" && vendor_facts::find(agent_key).is_some())
+            }
             vendor_facts::Composition::Python => shape == "argv",
         }
     };
@@ -492,9 +632,9 @@ mod tests {
             assert_eq!(admit(subject, "argv", true), Ok(()), "{subject:?} argv on Windows");
             assert!(matches!(admit(subject, "wrapped", true), Err(ComposeError::Composition(_))));
         }
-        // A vendor that still composes in Python takes only the pre-composed shape.
-        assert_eq!(admit("aider", "argv", false), Ok(()));
-        assert!(matches!(admit("aider", "wrapped", false), Err(ComposeError::Composition(_))));
+        // Ticket 05 composes every vendor in Rust: none takes the pre-composed shape on POSIX any more.
+        assert!(matches!(admit("aider", "argv", false), Err(ComposeError::Composition(_))));
+        assert_eq!(admit("aider", "wrapped", false), Ok(()));
     }
 
     // ---- G2 ticket 05, delta addendum 10: every vendor composes in Rust; the credential outer form.

@@ -1015,6 +1015,9 @@ class RustTerminalService(TerminalService):
     @staticmethod
     def _expected_program(launch: dict) -> str | None:
         """The program path Python itself sent, when it can know it; direct shapes are Rust's to resolve."""
+        if launch["shape"] == "credential":
+            # The script form runs the inner shell; the entrypoint form runs the helper's interpreter.
+            return launch["helper"][0] if "entrypoint" in launch else RustTerminalService._expected_program(launch["inner"])
         if launch["shape"] == "wrapped":
             return launch["shell"]
         if launch["shape"] == "argv" and not WINDOWS:
@@ -1302,9 +1305,6 @@ class RustTerminalService(TerminalService):
             failure._failure_receipted = True  # type: ignore[attr-defined]
 
     async def _create_async(self, **kwargs) -> RuntimeSession:
-        from .cli_runtime_adapters import NATIVE_VENDORS
-        if kwargs.get("agent_key") not in (None, "", "terminal", *NATIVE_VENDORS):
-            raise RuntimeError("Rust agent runtime not yet integrated; no Python fallback")
         cancelled = kwargs.pop("cancelled", None)
         cancel_record = kwargs.pop("cancel_record", None)
         await self._ensure_started()
@@ -1344,7 +1344,8 @@ class RustTerminalService(TerminalService):
             managed_credential_path=bool(kwargs.get("spawn_command")))
         if composition == "rust":
             launch = cli_launch.build_launch(subject, kwargs.get("base_command", kwargs["command"]), kwargs["command"],
-                                             login=bool(kwargs.get("login_subcommand")))
+                                             login=bool(kwargs.get("login_subcommand")),
+                                             credential=kwargs.get("credential"))
         else:
             launch = cli_launch.argv_launch(argv)
         cli_launch.check_text(launch, cwd, env)

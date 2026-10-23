@@ -4,6 +4,7 @@ use serde_json::Value;
 #[cfg(unix)]
 use std::io;
 
+#[cfg_attr(windows, allow(dead_code))] // observation is POSIX-only; launch admission is `compose::admit`
 pub fn integrated(key: &str) -> bool {
     #[cfg(feature = "fault-hooks")]
     if key == FAULT_GRACEFUL {

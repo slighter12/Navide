@@ -366,9 +366,7 @@ struct CreateArgs {
 }
 fn create_args(args: &Value) -> io::Result<CreateArgs> {
     let agent = args["agent_key"].as_str().unwrap_or("").to_owned();
-    if !matches!(agent.as_str(), "" | "terminal") && !adapters::integrated(&agent) {
-        return Err(io::Error::other("agent runtime not integrated"));
-    }
+    // Admission is the composition table's, independent of observation (delta 10.4).
     if args.get("argv").is_some() || args.get("argv_source").is_some() || args.get("argv0").is_some() {
         return Err(io::Error::other("invalid launch_shape: argv, argv_source and argv0 are not CREATE fields"));
     }
