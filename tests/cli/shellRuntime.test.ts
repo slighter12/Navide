@@ -133,13 +133,8 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         try {
           await until(() => (output.get(tid) ?? '').includes('INTERRUPTED'), `controlling tty interrupt (peer ${peers.findIndex((peer) => peer.tid === tid)})`)
         } catch (error) {
-          if (!isWindows) throw error
-          // Diagnosis only: ask the peer whether a CTRL_C_EVENT raised on its own console reaches it.
-          const state = `exit=${JSON.stringify(exits.get(tid) ?? null)} tail=${JSON.stringify((output.get(tid) ?? '').slice(-300))}`
-          const sent = await client.send('terminal.input', { terminal_session_id: tid, data: 'ctrlc-self\r' })
-          if (!sent.ok) throw new Error(`${(error as Error).message}; session gone before the self-check: ${state}`)
-          await until(() => (output.get(tid) ?? '').includes('CTRLC_SELF '), 'peer self-check answer', 20_000).catch(() => undefined)
-          throw new Error(`${(error as Error).message}; ${(output.get(tid) ?? '').split('\r\n').filter((row) => row.startsWith('CTRLC_SELF ')).join(' | ') || 'no self-check answer'}`)
+          // The wait's own message names the peer; the session state tells a peer that ended from one that ignored it.
+          throw new Error(`${(error as Error).message}; exit=${JSON.stringify(exits.get(tid) ?? null)} tail=${JSON.stringify((output.get(tid) ?? '').slice(-200))}`)
         }
       }))
       client.reconnectNow('actual transport loss')
