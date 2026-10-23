@@ -93,7 +93,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "codex",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "codex",
         model_flag: Some("--model"),
         effort_flag: None,
@@ -107,7 +107,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "copilot",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "copilot",
         model_flag: Some("--model"),
         effort_flag: Some("--reasoning-effort"),
@@ -261,7 +261,7 @@ pub const VENDORS: &[VendorFacts] = &[
     },
     VendorFacts {
         key: "qwen",
-        composition: Composition::Python,
+        composition: Composition::Rust,
         command: "qwen",
         model_flag: Some("--model"),
         effort_flag: None,

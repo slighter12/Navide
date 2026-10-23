@@ -81,7 +81,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'codex': VendorFacts(
         key='codex',
-        composition='python',
+        composition='rust',
         command='codex',
         model_flag='--model',
         effort_flag=None,
@@ -96,7 +96,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'copilot': VendorFacts(
         key='copilot',
-        composition='python',
+        composition='rust',
         command='copilot',
         model_flag='--model',
         effort_flag='--reasoning-effort',
@@ -261,7 +261,7 @@ FACTS: dict[str, VendorFacts] = {
     ),
     'qwen': VendorFacts(
         key='qwen',
-        composition='python',
+        composition='rust',
         command='qwen',
         model_flag='--model',
         effort_flag=None,

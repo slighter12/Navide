@@ -1,6 +1,6 @@
 {
   "key": "qwen",
-  "composition": "python",
+  "composition": "rust",
   "command": "qwen",
   "model_flag": "--model",
   "effort_flag": null,
