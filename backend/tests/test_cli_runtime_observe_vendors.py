@@ -19,15 +19,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
-import re
 import shutil
 import sys
 
 import pytest
 
 from agent_team_backend.cli_vendors import _vendor_facts as facts
+from agent_team_backend.cli_vendors.copilot import CopilotLogReader, _reset_db_warning
 from agent_team_backend.cli_vendors.registry import VENDORS
 from tests.cli_regression.support.backend_process import BackendProcess
 from tests.cli_regression.support.frame_peer import PRODUCT, FramePeer
@@ -38,7 +39,6 @@ from tests.cli_regression.test_vendor_transport import _install, _records
 pytestmark = [pytest.mark.asyncio, pytest.mark.cli_regression,
               pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="POSIX observation only (D2)")]
 
-ADAPTERS_RS = Path(__file__).resolve().parents[2] / "native" / "navide-cli-runtime" / "src" / "adapters.rs"
 #: Vendors whose Rust observation exists at the base commit, on this platform (claude, codex; opencode on macOS).
 BASE_OBSERVED = frozenset({"claude", "codex"} | ({"opencode"} if sys.platform == "darwin" else set()))
 #: Preservation cases: no Python-baseline observer, kept `not-yet-integrated`.
@@ -60,19 +60,9 @@ def test_roster_arithmetic_is_derived_from_the_registry():
     assert set(PORTED) == expected_ported, "the live registry disagrees with ticket 06's ported set"
 
 
-def test_rust_observer_roster_equals_registry_minus_preservation():
-    """Final state: the vendors the sidecar observes are exactly the registry's readers minus mcode, on both
-    POSIX platforms (OpenCode is no longer macOS-only)."""
-    source = ADAPTERS_RS.read_text(encoding="utf-8")
-    observed = set(re.findall(r'Some\("([a-z]+)"\)', source[source.index("pub fn observe"):]))
-    assert "target_os" not in source, "an observer is still gated to one platform"
-    assert observed == {key for key, spec in VENDORS.items() if spec.make_log_reader}
-
-
 def test_mcode_stays_not_yet_integrated():
     assert VENDORS["mcode"].make_log_reader is None
     assert facts.FACTS["mcode"].capabilities.resume_by_id == "not-yet-integrated"
-    assert "mcode" not in re.findall(r'Some\("([a-z]+)"\)', ADAPTERS_RS.read_text(encoding="utf-8"))
 
 
 def test_goose_gaps_are_reported_unknown():
@@ -90,6 +80,20 @@ def peer(tmp_path):
         yield peer
     finally:
         peer.close()
+
+
+@pytest.mark.timeout(120)
+def test_rust_observer_roster_equals_registry_minus_preservation(tmp_path, peer):
+    """Final state: the vendors the sidecar observes on THIS host (its own answer, with whatever platform gating is
+    in force) are exactly the registry's readers minus the preservation set. OpenCode is no longer macOS-only."""
+    path = tmp_path / "session.jsonl"
+    path.write_text("{}\n", encoding="utf-8")
+    observed = set()
+    for key in VENDORS:
+        document, _anchor, final = peer.observe(key, path, "usage", checkpoint={}, allow_error=True)
+        if document is not None or "observer not integrated" not in str(final.meta):
+            observed.add(key)
+    assert observed == {key for key, spec in VENDORS.items() if spec.make_log_reader}
 
 
 @pytest.mark.timeout(60)
@@ -270,27 +274,58 @@ async def _spawn_ready(backend: BackendProcess, ws, vendor: str, command, **kwar
     return created
 
 
+async def _wait_records(backend: BackendProcess, vendor: str, ready, what: str) -> list[dict]:
+    """The peer's audit file is written by another process: wait, bounded, until `ready(records)` holds."""
+    try:
+        async with asyncio.timeout(10):
+            while not ready(records := _records(backend, vendor)):
+                await asyncio.sleep(0.05)
+    except TimeoutError:
+        raise AssertionError(f"the {vendor} peer never recorded {what}: {_records(backend, vendor)}") from None
+    return records
+
+
 @pytest.mark.timeout(180)
 @pytest.mark.parametrize("vendor", [key for key in PORTED if VENDORS[key].push_channel is not None])
 async def test_message_reaches_only_the_intended_ported_pane(vendor, tmp_path):
+    """The intended peer's own record is the evidence: an HTTP submission with the payload (and, for kilo, its
+    authorization) or the input-file line. `agent_msg.push` returning ok only shows admission."""
     other = "mcode" if vendor != "mcode" else "codex"
     backend = _rust_backend(tmp_path)
     command, other_command = _install(backend, vendor), _install(backend, other)
+    envelope = "first\nmessage 測試"
     async with backend, backend.connect() as ws:
         await _spawn_ready(backend, ws, vendor, command)
         await _spawn_ready(backend, ws, other, other_command)
+        spawn = _records(backend, vendor)[0]
         stale = await backend.request(ws, "agent_msg.push", {"pane_id": f"{vendor}-stale", "text": "nobody"})
         assert stale["payload"]["ok"] is False
-        delivered = await backend.request(ws, "agent_msg.push", {"pane_id": vendor, "text": "first\nmessage"})
+        delivered = await backend.request(ws, "agent_msg.push", {"pane_id": vendor, "text": envelope})
         assert delivered["payload"]["ok"] is True, delivered["payload"]
+        if "--port" in spawn["argv"]:
+            records = await _wait_records(
+                backend, vendor, lambda rows: any(r["kind"] == "http" and r["path"].endswith("submit-prompt") for r in rows),
+                "the submit-prompt request")
+            http = [r for r in records if r["kind"] == "http"]
+            assert [r["path"] for r in http] == ["/tui/append-prompt", "/tui/submit-prompt"]
+            assert http[0]["body"] == {"text": envelope}
+            assert http[1]["submitted"] == envelope and http[1]["composer"] == ""
+            assert spawn["password"] is (vendor == "kilo")
+            assert all(r["authorized"] and r["has_auth"] is (vendor == "kilo") for r in http)
+        elif "--input-file" in spawn["argv"]:
+            records = await _wait_records(backend, vendor, lambda rows: any(r["kind"] == "file" for r in rows),
+                                          "the input-file line")
+            assert [r["value"] for r in records if r["kind"] == "file"] == [{"type": "submit", "text": envelope}]
+        else:
+            raise AssertionError(f"{vendor} declares a push channel the peer has no observable arm for: {spawn['argv']}")
         assert not [row for row in _records(backend, other) if row["kind"] in ("http", "file")]
 
 
 @pytest.mark.timeout(180)
 @pytest.mark.parametrize("vendor", PORTED)
 async def test_interrupt_reaches_only_the_ported_vendor_process(vendor, tmp_path):
-    """No ported vendor declares an interrupt key, so each gets the default (SIGINT, observed by the peer as 3);
-    mcode is the bystander whose own `^C` handling must stay untouched."""
+    """No ported vendor declares an interrupt key, so each gets the default (SIGINT, recorded by the target peer as
+    3 in every mode, HTTP and input-file included); mcode is the bystander whose own `^C` handling stays untouched."""
     assert VENDORS[vendor].interrupt_key is None
     other = "mcode"
     backend = _rust_backend(tmp_path)
@@ -299,12 +334,8 @@ async def test_interrupt_reaches_only_the_ported_vendor_process(vendor, tmp_path
         created = await _spawn_ready(backend, ws, vendor, command)
         await _spawn_ready(backend, ws, other, other_command)
         await backend.request(ws, "terminal.interrupt", {"terminal_session_id": created["terminal_session_id"]})
-        if VENDORS[vendor].push_channel is None:
-            await backend.expect_output(ws, created["terminal_session_id"], "INTERRUPT_3")
-            assert {"kind": "interrupt", "value": 3} in _records(backend, vendor)
-        # A vendor launched in HTTP or input-file mode (kilo, qwen) has a peer that serves requests instead of reading
-        # the terminal, so the interrupt is not observable there: the accepted request and an untouched bystander
-        # are the whole assertion for it.
+        await _wait_records(backend, vendor, lambda rows: {"kind": "interrupt", "value": 3} in rows,
+                            "the interrupt")
         assert not [row for row in _records(backend, other) if row["kind"] == "interrupt"]
 
 
@@ -320,3 +351,89 @@ async def test_login_exclusion_holds_for_the_ported_vendor(vendor, tmp_path):
         response = await backend.request(ws, "agent_msg.push", {"pane_id": vendor, "text": "must not deliver"})
         assert response["payload"]["ok"] is False
         assert response["payload"]["reason"] == "no-channel"
+
+
+# ------------------------------------------------------------------------------------------------ copilot specifics
+
+COPILOT_SESSION = "12345678-1234-4234-8234-123456789abc"
+#: One cumulative metrics record, the only shape the 1.0.75 `events.jsonl` branch turns into usage.
+COPILOT_METRICS = {"timestamp": "2026-09-29T10:00:00Z", "data": {
+    "copilotVersion": "1.0.75", "currentModel": "fixture",
+    "modelMetrics": {"fixture": {"usage": {"inputTokens": 12, "outputTokens": 3}}}}}
+#: A double-quoted YAML scalar with a `\u` escape, an escaped quote and an escaped backslash: only a real YAML parser
+#: resolves it, so a hand-written `cwd:` line parser would name a different workspace than the baseline does.
+COPILOT_YAML = f'id: {COPILOT_SESSION}\ncwd: "/work/spa\\u00e9ce \\"quoted\\" \\\\ tail"\n'
+COPILOT_CWD = '/work/spaéce "quoted" \\ tail'
+
+
+@pytest.mark.timeout(60)
+def test_copilot_events_cwd_is_resolved_by_python_and_agrees_in_rust(tmp_path, monkeypatch, peer):
+    """`workspace.yaml` stays read by Python's `yaml.safe_load` (discovery and attribution); the resolved `cwd` is a
+    request key for the Rust `events.jsonl` branch, whose event must carry exactly the baseline's value."""
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "copilot-home"))
+    session = tmp_path / "copilot-home" / "session-state" / COPILOT_SESSION
+    session.mkdir(parents=True)
+    events = session / "events.jsonl"
+    events.write_text(json.dumps(COPILOT_METRICS) + "\n", encoding="utf-8")
+    (session / "workspace.yaml").write_text(COPILOT_YAML, encoding="utf-8")
+
+    reader = CopilotLogReader()
+    resolved = reader.cwd_from_file(events)
+    assert resolved == COPILOT_CWD, "the fixture must exercise YAML quoting and escapes"
+    baseline = reader.parse_session_file(events, set())
+    assert [(usage.input_tokens, usage.output_tokens, usage.cwd) for usage in baseline] == [(12, 3, COPILOT_CWD)]
+
+    document, _anchor, final = peer.observe("copilot", events, "usage", checkpoint={}, cwd=resolved, allow_error=True)
+    assert document is not None, final.meta
+    assert [(event["input_tokens"], event["output_tokens"], event["cwd"]) for event in document["events"]] == [
+        (12, 3, COPILOT_CWD)]
+
+
+@pytest.mark.timeout(120)
+def test_copilot_unreadable_store_warns_once_in_python_and_in_the_native_path(tmp_path, monkeypatch, caplog, peer):
+    """The baseline answers a failed store read with no data for that cycle and one WARNING through `_warn_db_once`.
+    The Rust path keeps both: the sidecar reports the failure in the document, Python warns through the same function
+    and returns no data. Three failing cycles leave one warning; a re-armed flag warns again (so the count is a
+    real observation, not silence)."""
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "copilot-home"))
+    root = tmp_path / "copilot-home"
+    root.mkdir()
+    db = root / "session-store.db"
+    db.write_bytes(b"not sqlite")
+
+    def warnings() -> list[logging.LogRecord]:
+        return [row for row in caplog.records if row.levelno >= logging.WARNING]
+
+    def cycles(reader, count: int) -> None:
+        for _ in range(count):
+            assert reader.parse_incremental(db, {}).events == []
+            assert reader.parse_activity(db, set()) == []
+
+    # The control: the baseline's own behaviour.
+    _reset_db_warning()
+    with caplog.at_level(logging.WARNING, logger="agent_team_backend.log_readers.copilot"):
+        cycles(CopilotLogReader(), 3)
+    assert len(warnings()) == 1 and "session-store" in warnings()[0].getMessage()
+    caplog.clear()
+
+    documents = {}
+    for mode in ("usage", "activity"):
+        document, _anchor, final = peer.observe("copilot", db, mode, checkpoint={}, seen=[], allow_error=True)
+        assert document is not None, final.meta
+        assert document["events"] == [] and document["error"], document
+        documents[mode] = document
+
+    from agent_team_backend import cli_runtime_sqlite
+    from agent_team_backend.cli_runtime_sqlite import NativeCopilotReader
+
+    def answer(_vendor, _parser, _path, mode, **_kwargs):
+        return documents[mode]
+
+    monkeypatch.setattr(cli_runtime_sqlite, "observe", answer)
+    _reset_db_warning()
+    with caplog.at_level(logging.WARNING, logger="agent_team_backend.log_readers.copilot"):
+        cycles(NativeCopilotReader(), 3)
+        assert len(warnings()) == 1 and "session-store" in warnings()[0].getMessage()
+        _reset_db_warning()
+        cycles(NativeCopilotReader(), 1)
+    assert len(warnings()) == 2
