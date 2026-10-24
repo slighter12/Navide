@@ -16,7 +16,9 @@
   "split_rule": "CommandLineToArgvW: the first word is read without escapes (a quote only brackets it); later words use 2n backslashes + quote -> n backslashes and a toggle, 2n+1 -> n backslashes and a literal quote, and a doubled quote inside quotes is a literal quote; whitespace is space and tab",
   "split": [
     {"line": "prog a b", "words": ["prog", "a", "b"]},
-    {"line": "  prog   a  ", "words": ["prog", "a"]},
+    {"line": "prog   a  ", "words": ["prog", "a"]},
+    {"line": "  prog   a  ", "words": ["", "prog", "a"]},
+    {"line": "   ", "words": []},
     {"line": "\"C:\\Program Files\\x\\prog.exe\" --model \"a b\"", "words": ["C:\\Program Files\\x\\prog.exe", "--model", "a b"]},
     {"line": "prog \"say \\\"hi\\\"\"", "words": ["prog", "say \"hi\""]},
     {"line": "prog C:\\dir\\ next", "words": ["prog", "C:\\dir\\", "next"]},

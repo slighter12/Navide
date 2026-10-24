@@ -170,11 +170,16 @@ def quote_windows(arg: str) -> str:
 
 def scan_windows(text: str) -> list[tuple[int, int, str]]:
     """`CommandLineToArgvW` with the span of every word: the grammar of `osplat/_windows.py`
-    `_split_command_line`, which asks the OS. The first word is not escaped (a quote only brackets it);
+    `_split_command_line`, which asks the OS. A line that starts with whitespace has an empty first word.
+    The first word is not escaped (a quote only brackets it);
     later words use the 2n/2n+1 backslash rule and `""` inside quotes for a literal quote. Whitespace is
     space and tab. Never raises: an unmatched quote runs to the end, as the OS does."""
     words: list[tuple[int, int, str]] = []
     size, at = len(text), 0
+    if not text.strip():  # `_split_command_line` never asks the OS about a blank line
+        return words
+    if text[0] in " \t":  # the OS reads leading whitespace as an empty program (observed on hosted runners)
+        words.append((0, 0, ""))
     while True:
         while at < size and text[at] in " \t":
             at += 1
