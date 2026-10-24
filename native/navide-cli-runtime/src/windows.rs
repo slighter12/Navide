@@ -1746,7 +1746,7 @@ mod tests {
         let generation = "0123456789abcdef0123456789abcdef";
         let good = [
             "--wire",
-            "1",
+            "2",
             "--runtime-generation",
             generation,
             "--owner-pid",
@@ -1762,7 +1762,7 @@ mod tests {
             "STARTUP_FAILED"
         );
         let mut wrong = good.to_vec();
-        wrong[1] = "2";
+        wrong[1] = "3";
         assert_eq!(
             parse_args(&args(&wrong)).err().unwrap().0,
             "INCOMPATIBLE_WIRE"

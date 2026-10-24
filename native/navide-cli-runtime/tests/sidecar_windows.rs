@@ -113,7 +113,7 @@ fn start(name: &str) -> Sidecar {
     let mut child = Command::new(env!("CARGO_BIN_EXE_navide-cli-runtime"))
         .args([
             "--wire",
-            "1",
+            "2",
             "--runtime-generation",
             GENERATION,
             "--owner-pid",
@@ -382,7 +382,7 @@ fn create_args(sid: &str, argv: Vec<String>) -> Value {
     let env: serde_json::Map<String, Value> =
         std::env::vars().map(|(k, v)| (k, json!(v))).collect();
     json!({"session_id":sid,"session_generation":"g1","pane_id":format!("pane-{sid}"),
-        "workspace_path":"w","cwd":std::env::temp_dir(),"argv":argv,"env":env,
+        "workspace_path":"w","cwd":std::env::temp_dir(),"launch":{"shape":"argv","argv":argv},"env":env,
         "rows":24,"cols":80,"agent_key":"terminal"})
 }
 
