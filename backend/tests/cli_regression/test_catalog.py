@@ -147,6 +147,13 @@ def test_an_observation_case_cannot_be_exempted_from_posix_hosts():
     assert any("must require exactly posix_pty" in error for error in validate_catalog(data, VENDORS))
 
 
+def test_goose_observation_cannot_be_exempted_from_linux():
+    node = _observation_node("goose")
+    data = deepcopy(load_catalog())
+    next(case for case in data["observation"]["cases"] if case["nodeid"] == node)["platforms"] = ["darwin"]
+    assert any(node in error and "both POSIX hosts" in error for error in validate_catalog(data, VENDORS))
+
+
 @pytest.mark.parametrize("platform,applies", [("linux", True), ("darwin", False)])
 def test_opencode_observation_is_required_on_linux_only(monkeypatch, platform, applies):
     from . import catalog
