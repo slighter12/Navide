@@ -42,6 +42,7 @@ unsafe extern "C" {
     fn sqlite3_column_int64(statement: *mut c_void, column: c_int) -> i64;
     fn sqlite3_column_double(statement: *mut c_void, column: c_int) -> f64;
     fn sqlite3_column_text(statement: *mut c_void, column: c_int) -> *const u8;
+    fn sqlite3_column_blob(statement: *mut c_void, column: c_int) -> *const c_void;
     fn sqlite3_column_bytes(statement: *mut c_void, column: c_int) -> c_int;
     fn sqlite3_finalize(statement: *mut c_void) -> c_int;
 }
@@ -157,6 +158,17 @@ impl ReadConnection {
                         let bytes = unsafe { std::slice::from_raw_parts(pointer, length as usize) };
                         json!(std::str::from_utf8(bytes).map_err(|_| 1)?)
                     }
+                    4 => {
+                        // A BLOB cell travels as `{"$blob": "<hex>"}`; read it with `blob_bytes`.
+                        let pointer = unsafe { sqlite3_column_blob(statement.0, column) }.cast::<u8>();
+                        let length = unsafe { sqlite3_column_bytes(statement.0, column) } as usize;
+                        let bytes = if pointer.is_null() || length == 0 {
+                            &[][..]
+                        } else {
+                            unsafe { std::slice::from_raw_parts(pointer, length) }
+                        };
+                        json!({"$blob": bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()})
+                    }
                     _ => Value::Null,
                 };
                 row.push(value);
@@ -196,6 +208,13 @@ pub(super) fn query_checked(
 }
 pub(super) fn query(path: &Path, sql: &str, parameters: &[Value]) -> Option<Vec<Vec<Value>>> {
     query_checked(path, sql, parameters).ok()
+}
+/// The bytes of a BLOB cell (`{"$blob": "<hex>"}`); `None` for any other cell.
+pub(super) fn blob_bytes(value: &Value) -> Option<Vec<u8>> {
+    let hex = value["$blob"].as_str()?.as_bytes();
+    hex.chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+        .collect()
 }
 pub(super) fn number(value: &Value) -> i64 {
     value

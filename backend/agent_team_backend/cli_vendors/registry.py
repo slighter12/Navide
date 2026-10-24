@@ -16,9 +16,11 @@ from types import MappingProxyType
 from .. import osplat
 from ..cli_runtime_adapters import (
     aider_reference,
+    antigravity_reference,
     claude_reference,
     codex_reference,
     copilot_reference,
+    cursor_reference,
     droid_reference,
     goose_reference,
     grok_reference,
@@ -51,11 +53,11 @@ from . import (
 
 _ALL: tuple[VendorSpec, ...] = (
     aider_reference(aider.SPEC),
-    antigravity.SPEC,
+    antigravity_reference(antigravity.SPEC),
     claude_reference(claude.SPEC),
     codex_reference(codex.SPEC),
     copilot_reference(copilot.SPEC),
-    cursor.SPEC,
+    cursor_reference(cursor.SPEC),
     droid_reference(droid.SPEC),
     goose_reference(goose.SPEC),
     grok_reference(grok.SPEC),

@@ -15,9 +15,11 @@ pub fn integrated(key: &str) -> bool {
         && matches!(
             key,
             "aider"
+                | "antigravity"
                 | "claude"
                 | "codex"
                 | "copilot"
+                | "cursor"
                 | "droid"
                 | "goose"
                 | "grok"
@@ -85,7 +87,9 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
         Some("aider") => super::observe_aider::observe(args, expected),
         Some("claude") => super::claude::observe(args, expected),
         Some("codex") => super::codex::observe(args, expected),
+        Some("antigravity") => super::observe_antigravity::observe(args).map(|document| (document, None)),
         Some("copilot") => super::observe_copilot::observe(args, expected),
+        Some("cursor") => super::observe_cursor::observe(args).map(|document| (document, None)),
         Some("droid") => super::observe_droid::observe(args, expected),
         Some("goose") => super::observe_goose::observe(args).map(|document| (document, None)),
         Some("grok") => super::observe_grok::observe(args, expected),
