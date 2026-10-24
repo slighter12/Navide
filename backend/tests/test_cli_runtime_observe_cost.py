@@ -1,11 +1,17 @@
-"""Per-poll cost of the ported observers on matched fixtures (G2 ticket 06).
+"""Per-poll cost of the ported observers through a `FramePeer` proxy, on matched fixtures (G2 ticket 06).
 
-One poll is what the watcher does for a file that has not changed since the last poll: `parse_incremental` with the
-saved checkpoint and `parse_activity` with the saved bag. The Python path is the baseline reader; the native path is
-the same vendor's `Native<Vendor>Reader` with its `observe` bridge answered by a real sidecar over its frame socket
-(the reader's own work, the request, the sidecar's read and the answer; not the backend's asyncio hop). Both read the
-same fixture file on the same host. The test asserts that both paths answered, never a timing, and writes the
-statistics to the file named by `NAVIDE_G2_COST_OUT` when it is set.
+One poll is what the watcher does for a file: `parse_incremental` with the saved checkpoint and `parse_activity` with
+the saved bag. The Python path is the baseline reader; the native path is the same vendor's `Native<Vendor>Reader`
+with its `observe` bridge replaced by a copy that talks to a real sidecar over a `FramePeer` frame socket. That is a
+PROXY for the production bridge: it counts the reader's own work, the request, the sidecar's read and the answer, and
+leaves out `RustTerminalService.observe`'s asyncio hop, its pane matching and its receipt work. Both paths read the
+same fixture file on the same host.
+
+Two series per vendor and path, each after 20 warm-up polls and over 200 measured ones (the accepted section 11.7
+protocol): an UNCHANGED file, and a file with one record APPENDED before every poll (the append is not timed; for a SQLite store it replaces the completion rows, since their ids are fixed). Each
+series reports the checkpoint's key count and the activity bag's size at its end. The test asserts that both paths
+answered, never a timing, and appends one JSON row per vendor to the file named by `NAVIDE_G2_COST_OUT` when set.
+No speedup is claimed from these numbers.
 """
 from __future__ import annotations
 
@@ -30,8 +36,8 @@ from tests.test_cli_runtime_observe_vendors import PORTED, peer  # noqa: F401  (
 pytestmark = [pytest.mark.cli_regression,
               pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="POSIX observation only (D2)")]
 
-POLLS = 40
-WARMUP = 4
+POLLS = 200
+WARMUP = 20
 NATIVE = {
     "aider": cli_runtime_aider.NativeAiderReader,
     "antigravity": cli_runtime_blob.NativeAntigravityReader,
@@ -85,10 +91,13 @@ def _through(peer):
     return observe
 
 
-def _poll(reader, path):
-    """The warmed-up per-poll cost samples (seconds) of `reader` on an unchanged file."""
+def _poll(reader, path, append=None):
+    """The warmed-up per-poll cost samples (seconds) of `reader`, and the state they ended with. `append`, when given,
+    writes one record before every poll (outside the timed part)."""
     checkpoint, bag, samples = {}, set(), []
     for number in range(WARMUP + POLLS):
+        if append is not None:
+            append()
         start = time.perf_counter()
         result = reader.parse_incremental(path, checkpoint)
         checkpoint = result.checkpoint
@@ -96,7 +105,7 @@ def _poll(reader, path):
         elapsed = time.perf_counter() - start
         if number >= WARMUP:
             samples.append(elapsed)
-    return samples
+    return samples, {"checkpoint_keys": len(checkpoint), "activity_keys": len(bag)}
 
 
 def _stats(samples):
@@ -105,25 +114,40 @@ def _stats(samples):
             "p95_ms": round(ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)] * 1000, 3)}
 
 
-@pytest.mark.timeout(180)
-@pytest.mark.parametrize("vendor", PORTED)
-def test_per_poll_cost_is_measured_on_a_matched_fixture(vendor, tmp_path, monkeypatch, set_home, peer):
-    data = VendorData(vendor, tmp_path / "data", monkeypatch, set_home)
+def _series(vendor, root, monkeypatch, set_home, make_reader, appended):
+    """One series on a fresh copy of the vendor's fixture: (samples, final state)."""
+    root.mkdir(parents=True)
+    data = VendorData(vendor, root, monkeypatch, set_home)
     try:
         for phase in ("initial", "response", "complete"):
             data.apply(phase)
-        baseline = VENDORS[vendor].make_log_reader()
-        assert type(baseline) is not NATIVE[vendor], "the baseline must be the Python reader"
-        python = _poll(baseline, data.path)
-        for module in (cli_runtime_aider, cli_runtime_blob, cli_runtime_droid, cli_runtime_jsonl,
-                       cli_runtime_opencode, cli_runtime_sqlite):
-            monkeypatch.setattr(module, "observe", _through(peer))
-        monkeypatch.setattr(cli_runtime_observation, "observe", _through(peer))
-        native = _poll(NATIVE[vendor](), data.path)
+        # The appended record is the fixture's completion phase again: a new line of the vendor's own shape in a text
+        # store. A SQLite row keeps its fixed id, so there the write replaces the completion rows (a committed write
+        # before every poll, not a new row).
+        for operation in data.fixture["phases"].get("complete", []):
+            for statement in operation.get("statements", []):
+                statement["sql"] = statement["sql"].replace("INSERT INTO", "INSERT OR REPLACE INTO", 1)
+        return _poll(make_reader(), data.path, (lambda: data.apply("complete")) if appended else None)
     finally:
         data.close()
-    assert len(python) == len(native) == POLLS
-    row = {"vendor": vendor, "platform": sys.platform, "python": _stats(python), "rust": _stats(native)}
+
+
+@pytest.mark.timeout(900)
+@pytest.mark.parametrize("vendor", PORTED)
+def test_per_poll_cost_through_a_framepeer_proxy_is_measured(vendor, tmp_path, monkeypatch, set_home, peer):
+    assert type(VENDORS[vendor].make_log_reader()) is not NATIVE[vendor], "the baseline must be the Python reader"
+    for module in (cli_runtime_aider, cli_runtime_blob, cli_runtime_droid, cli_runtime_jsonl,
+                   cli_runtime_opencode, cli_runtime_sqlite):
+        monkeypatch.setattr(module, "observe", _through(peer))
+    monkeypatch.setattr(cli_runtime_observation, "observe", _through(peer))
+    row = {"vendor": vendor, "platform": sys.platform, "bridge": "FramePeer proxy", "warmup": WARMUP, "polls": POLLS}
+    for series, appended in (("unchanged", False), ("appended", True)):
+        python, python_state = _series(vendor, tmp_path / f"python-{series}", monkeypatch, set_home,
+                                       VENDORS[vendor].make_log_reader, appended)
+        native, native_state = _series(vendor, tmp_path / f"rust-{series}", monkeypatch, set_home,
+                                       NATIVE[vendor], appended)
+        assert len(python) == len(native) == POLLS
+        row[series] = {"python": {**_stats(python), **python_state}, "rust": {**_stats(native), **native_state}}
     if out := os.environ.get("NAVIDE_G2_COST_OUT"):
         with open(out, "a", encoding="utf-8") as stream:
             stream.write(json.dumps(row) + "\n")
