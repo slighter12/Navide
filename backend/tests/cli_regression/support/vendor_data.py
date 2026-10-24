@@ -51,6 +51,9 @@ class VendorData:
         self.path = Path(self.fixture.get("path", str(self.workspace / "unused")))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connections = {}
+        #: A store shared by every session (one file the CLI keeps open) can be seen empty before its first rows. A
+        #: per-session file, named by the session id, is created together with its first rows and never is.
+        self.shared_store = self.fixture.get("sessionId", "") not in str(self.path)
 
     def expand(self, value):
         if isinstance(value, str):
@@ -86,7 +89,7 @@ class VendorData:
                 connection = self.connections.get(path)
                 built = only == "rows"
                 if connection is None:
-                    if operation.get("schema") and not path.exists() and only != "rows":
+                    if operation.get("schema") and not path.exists() and only != "rows" and self.shared_store:
                         # Build the schema in a sibling file and rename it into place, so the watched path never
                         # exists without its tables (a half-built store is a state no vendor's CLI shows).
                         staged = path.with_name(path.name + ".staged")
@@ -100,6 +103,7 @@ class VendorData:
                     connection.execute("PRAGMA journal_mode=WAL")
                     self.connections[path] = connection
                 if operation.get("schema") and not built:
+                    # One transaction: a poll between two CREATEs would find a half-built schema.
                     connection.executescript(f"BEGIN;\n{operation['schema']}\nCOMMIT;")
                 for statement in ([] if only == "schema" else operation.get("statements", [])):
                     params = []
