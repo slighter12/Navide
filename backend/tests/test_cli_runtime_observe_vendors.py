@@ -178,7 +178,9 @@ def _stream(events: list[dict]) -> list[list]:
     return rows
 
 
-async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: VendorData, phases: list[str]) -> list[dict]:
+async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: VendorData, phases: list[str],
+                 marks: dict | None = None) -> list[dict]:
+    marks = {} if marks is None else marks
     backend = _backend(root, runtime, stage, data.home)
     command = _install(backend, vendor)
     async with backend, backend.connect() as ws:
@@ -186,7 +188,15 @@ async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: Vendor
                                        metadata={"session_marker": MARKER})
         await backend.expect_output(ws, created["terminal_session_id"], "TRANSPORT_READY")
         for phase in phases:
-            data.apply(phase)
+            if phase == "initial" and data.has_schema(phase):
+                # A watcher's first sight of a store records its high-water mark and emits nothing for several vendors.
+                # Where that falls against the first rows decides whether a row is reported or taken as history, and
+                # so which of a pass's two sinks speaks first. Let the empty store be seen before its rows exist.
+                data.apply(phase, only="schema")
+                await _settle(backend, ws)
+                data.apply(phase, only="rows")
+            else:
+                data.apply(phase)
             if phase == "initial" and MARKER in json.dumps(data.fixture["phases"]["initial"]):
                 # The first sight of a store (which records a high-water mark and emits nothing for several
                 # vendors) must happen before the next write, or that write is swallowed by it.
@@ -196,6 +206,8 @@ async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: Vendor
                     event["event_type"] == "turn_complete" for event in _types(backend, "agent.activity")),
                     "the turn_complete of the completion phase")
             await _settle(backend, ws)
+            if MARKER in json.dumps(data.fixture["phases"].get(phase, [])):
+                marks["marker_rows"] = len(_stream(backend.events))  # the write that carries the pane's marker
         await _settle(backend, ws)
     return backend.events
 
@@ -233,11 +245,15 @@ async def _scenario(root: Path, runtime: str, vendor: str, monkeypatch, set_home
     root.mkdir(parents=True)
     data = VendorData(vendor, root, monkeypatch, set_home)
     try:
-        events = await _stage(root, runtime, 1, vendor, data, ["initial", "response"])
+        marks: dict = {}
+        events = await _stage(root, runtime, 1, vendor, data, ["initial", "response"], marks)
+        first_stage_rows = len(_stream(events))
         # The writer stays open across the restart, as a live CLI's does; the new backend resumes from its checkpoints.
-        events += await _stage(root, runtime, 2, vendor, data, ["complete"])
+        second: dict = {}
+        events += await _stage(root, runtime, 2, vendor, data, ["complete"], second)
+        marker_rows = marks.get("marker_rows", first_stage_rows + second.get("marker_rows", 0))
         path = data.path.resolve()
-        return {"stream": _stream(events), "durable": _durable(root, data.workspace, path),
+        return {"stream": _stream(events), "marker_rows": marker_rows, "durable": _durable(root, data.workspace, path),
                 "receipts": _receipts(root), "path": path, "expected": data.fixture["expected"]}
     finally:
         data.close()
@@ -261,20 +277,28 @@ async def test_rust_selected_run_equals_python_selected_run(vendor, tmp_path, mo
     # the stream comparison unnoticed).
     parsers = {row["parser"] for row in rust["receipts"] if Path(row["path"]).resolve() == rust["path"]}
     assert any(name.startswith(f"rust-{vendor}-") and name.endswith("-v1") for name in parsers), parsers
-    # The fixture's `executescript` commits its CREATE TABLEs one by one, so a poll between two of them finds a table
-    # missing. The baseline's store read answers that with "no data this cycle" and one WARNING; the native path
-    # reports the same failed query in the document (`sqlite error 1`) and Python raises the same warning. Anything
-    # else is an error.
-    errors = [row for row in rust["receipts"] if row.get("error") and "sqlite error 1 in" not in row["error"]]
+    errors = [row for row in rust["receipts"] if row.get("error")]
     assert not errors, "a native observation reported an error"
 
     # Each sink's stream is compared in order (duplicates, losses and reordering within it all fail). The two sinks'
-    # interleaving is not: `session.detected` (the watcher's session sink) and `agent.activity` (its activity sink)
-    # are independent deliveries of one file event, and on Linux the baseline itself delivers a store's first
-    # activity rows before the session binding where the native path binds first.
+    # interleaving is not compared whole: for the marker's write the baseline itself delivers either order across runs
+    # (the watcher's two reads of a pass race the writer), and so does the native path. Evidence, Linux, 6 runs each,
+    # position of the first session.detected: Python 0,0,2,0,0,0; Rust 0,0,0,2,2,2
+    # (.scratch/agent-cli-runtime-evaluation/evidence/g2/06-fix/goose-order-trace.txt). What must hold in both
+    # streams is the bound below: only events up to the marker's write may precede the first session.detected.
+    # An activity event delivered before the binding cannot carry the pane, and which side of the binding the marker
+    # write's events fall on is the race above, so their `pane_id` is masked on both streams. Every later event keeps
+    # it compared exactly.
+    def unbound_masked(run):
+        return [[kind, {**row, "pane_id": None} if index < run["marker_rows"] and kind == "agent.activity" else row]
+                for index, (kind, row) in enumerate(run["stream"])]
+    rust_rows, python_rows = unbound_masked(rust), unbound_masked(python)
     for kind in EVENT_TYPES:
-        assert [row for name, row in rust["stream"] if name == kind] == [
-            row for name, row in python["stream"] if name == kind], f"ordered {kind} streams differ"
+        assert [row for name, row in rust_rows if name == kind] == [
+            row for name, row in python_rows if name == kind], f"ordered {kind} streams differ"
+    for name, run in (("python", python), ("rust", rust)):
+        first = [kind for kind, _ in run["stream"]].index("session.detected")
+        assert first < run["marker_rows"], f"{name}: a later write's event precedes the session binding"
     assert rust["durable"] == python["durable"], "persisted totals or checkpoints differ after the restart"
 
 
@@ -458,3 +482,19 @@ def test_copilot_unreadable_store_warns_once_in_python_and_in_the_native_path(tm
         _reset_db_warning()
         cycles(NativeCopilotReader(), 1)
     assert len(warnings()) == 2
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("mode", ["usage", "activity"])
+def test_a_half_built_copilot_store_is_reported_as_an_error(mode, tmp_path, peer):
+    """The negative case for the principal seam's no-error assertion: a store missing its tables (what a poll between
+    two CREATE TABLEs would find) is answered with no events and an error in the document, so that assertion would
+    catch it. The fixture therefore builds its schema atomically instead of tolerating this error."""
+    import sqlite3
+    db = tmp_path / "session-store.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY)")
+    connection.close()
+    document, _anchor, final = peer.observe("copilot", db, mode, checkpoint={}, seen=[], allow_error=True)
+    assert document is not None, final.meta
+    assert document["events"] == [] and "sqlite error 1" in document["error"], document
