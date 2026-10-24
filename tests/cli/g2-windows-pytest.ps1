@@ -7,6 +7,7 @@ uv --project backend run pytest `
   backend/tests/cli_regression/test_launch_rust_windows.py `
   backend/tests/test_cli_runtime_windows.py `
   backend/tests/test_cli_runtime_windows_close.py `
+  backend/tests/test_cli_launch_windows_words.py `
   -q -p no:cacheprovider -o junit_family=xunit2 `
   --basetemp $env:G2_BASETEMP `
   --junitxml test-results/ci/g2-windows-junit.xml

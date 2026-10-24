@@ -373,7 +373,7 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
     let launch = args.get("launch").ok_or_else(|| io::Error::other("invalid launch_shape: launch is required"))?;
     let shape = launch.get("shape").and_then(Value::as_str).unwrap_or("");
     compose::admit(&agent, shape, true).map_err(|error| io::Error::other(format!("invalid composition: {error:?}")))?;
-    let (argv, argv_source, argv0) = if shape == "direct" {
+    let (mut argv, argv_source, mut argv0) = if shape == "direct" {
         // Composed here, with the Windows grammar; the receipt says so.
         let composed = compose::compose_windows(&agent, launch)
             .map_err(|error| io::Error::other(format!("invalid composition: {error:?}")))?;
@@ -410,6 +410,12 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
             .filter(|s| !s.contains('\0'))
             .ok_or_else(|| io::Error::other("invalid env value"))?;
         env.push((key.clone(), value.to_owned()));
+    }
+    if shape == "direct" {
+        // What Python's own spawn does with the split command (`shutil.which`, shim unwrapping, `cmd /c`).
+        argv = compose::resolve_windows(&argv[0], &argv[1..], &env, &compose::OsFiles)
+            .map_err(|error| io::Error::other(format!("invalid composition: {error:?}")))?;
+        argv0 = compose::attest(&argv[0]);
     }
     Ok(CreateArgs {
         id: text(args, "session_id")?.to_owned(),

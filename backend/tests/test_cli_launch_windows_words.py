@@ -45,6 +45,16 @@ def test_scan_equals_the_operating_systems_command_line_parser():
             vector["line"]), vector["line"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="CommandLineToArgvW exists on Windows only")
+def test_list2cmdline_round_trips_through_the_operating_systems_parser():
+    from agent_team_backend.osplat import _windows
+
+    for vector in VECTORS["quote"]:
+        line = subprocess.list2cmdline(["prog", vector["input"], "tail"])
+        assert _windows._split_command_line(line) == ["prog", vector["input"], "tail"], vector["input"]
+        assert [value for _, _, value in cli_launch.scan_windows(line)] == ["prog", vector["input"], "tail"]
+
+
 def test_nested_quotes_and_a_space_in_the_path_survive_tokenising_and_rendering():
     base = f'{cli_launch.quote_windows(PROGRAM)} --model {cli_launch.quote_windows("say \"hi\" \\")}'
     launch = cli_launch.build_launch("claude", base, base, platform="windows")
