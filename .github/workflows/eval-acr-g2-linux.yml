@@ -1,0 +1,102 @@
+name: G2 Linux Agent CLI Runtime
+
+# Evaluation only: runs on pushes to the evaluation branch, holds no secrets and publishes nothing.
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  g2-linux:
+    name: g2-linux (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      # The runner context is not available in job-level env, so the venv path is set here.
+      - name: Set evaluation paths
+        run: echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/g2-venv" >> "$GITHUB_ENV"
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: Install locked test dependencies
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+
+      - name: Build the harness and release sidecars and prove the release one has no fault hooks
+        id: build
+        run: bash tests/cli/g2-linux-build.sh
+
+      - name: Rust tests
+        id: cargo
+        if: always() && steps.build.outcome == 'success'
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml
+
+      - name: Required backend cases through the real sidecar
+        id: pytest
+        if: always() && steps.build.outcome == 'success'
+        run: bash tests/cli/g2-linux-pytest.sh
+
+      - name: Require every listed case to be collected and passed
+        id: guard
+        if: always() && steps.build.outcome == 'success'
+        run: node tests/cli/g2Native.mjs guard --platform linux --arch ${{ matrix.arch }} --required tests/cli/g2-required-linux.txt --junit test-results/ci/g2-linux-junit.xml --out test-results/ci/g2-linux-outcomes.log
+
+      - name: Require every ready receipt to name the freshly built sidecar
+        id: receipts
+        if: always() && steps.pytest.outcome != 'skipped'
+        run: node tests/cli/g2Native.mjs receipts --root ${{ runner.temp }}/g2-basetemp --sha ${{ env.G2_SIDECAR_SHA }}
+
+      - name: Run the two required production WebSocket cases
+        id: principal
+        if: always() && steps.build.outcome == 'success'
+        run: >
+          bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts
+          -t 'uses one actual native runtime|sidecar death with sessions and a pending request'
+          --reporter=json --outputFile=test-results/ci/g2-linux-ts-results.json
+
+      - name: Require both WebSocket cases to be collected and pass
+        id: principal_guard
+        if: always() && steps.principal.outcome == 'success'
+        run: >
+          jq -e '[.testResults[].assertionResults[] | select(.fullName == "uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits" or .fullName == "sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime")] as $required | ($required | length) == 2 and ($required | all(.status == "passed"))'
+          test-results/ci/g2-linux-ts-results.json
+
+      - name: Upload redacted outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g2-linux-${{ matrix.arch }}-outcomes
+          path: test-results/ci/g2-linux-outcomes.log
+          if-no-files-found: warn
+          retention-days: 7
