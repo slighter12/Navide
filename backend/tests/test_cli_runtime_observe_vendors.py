@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 
@@ -52,6 +53,7 @@ EVENT_TYPES = {"session.detected": ("pane_id", "session_id", "vendor"),
                "agent.activity": ("vendor", "event_type", "detail", "text", "session_id", "pane_id", "workspace_path")}
 
 
+@pytest.mark.timeout(30)
 def test_roster_arithmetic_is_derived_from_the_registry():
     assert PRESERVED == {"mcode"}
     assert len(VENDORS) - len(BASE_OBSERVED) - len(PRESERVED) == len(PORTED)
@@ -60,11 +62,13 @@ def test_roster_arithmetic_is_derived_from_the_registry():
     assert set(PORTED) == expected_ported, "the live registry disagrees with ticket 06's ported set"
 
 
+@pytest.mark.timeout(30)
 def test_mcode_stays_not_yet_integrated():
     assert VENDORS["mcode"].make_log_reader is None
     assert facts.FACTS["mcode"].capabilities.resume_by_id == "not-yet-integrated"
 
 
+@pytest.mark.timeout(30)
 def test_goose_gaps_are_reported_unknown():
     capabilities = facts.FACTS["goose"].capabilities
     assert (capabilities.model, capabilities.effort, capabilities.login) == ("unknown", "unknown", "unknown")
@@ -207,7 +211,13 @@ def _durable(root: Path, workspace: Path, path: Path) -> dict:
         totals = store.snapshot(str(workspace))["global"]["all_time"]
     finally:
         database.close()
-    strip = lambda mark: {key: value for key, value in (mark or {}).items() if key != "identity"}  # noqa: E731 (dev:ino differs per file)
+    def strip(mark):
+        """Drop `dev:ino`, which differs between the two runs' files: the `identity` key of a checkpoint and the
+        `"identity": "<dev>:<ino>"` a vendor embeds in a sentinel string of the activity bag."""
+        masked = {key: value for key, value in (mark or {}).items() if key != "identity"}
+        if "keys" in masked:
+            masked["keys"] = [re.sub(r'"identity": "\d+:\d+"', '"identity": "-"', key) for key in masked["keys"]]
+        return masked
     return {"usage_checkpoint": strip(usage), "activity_checkpoint": strip(activity),
             "totals": {key: totals[key] for key in ("input", "output") if key in totals}}
 
