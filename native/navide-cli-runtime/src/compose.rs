@@ -179,6 +179,12 @@ fn split_windows(line: &str) -> Vec<String> {
     let size = chars.len();
     let blank = |c: char| c == ' ' || c == '\t';
     let (mut words, mut at) = (Vec::new(), 0);
+    if line.trim().is_empty() {
+        return words; // `_split_command_line` never asks the OS about a blank line
+    }
+    if blank(chars[0]) {
+        words.push(String::new()); // the OS reads leading whitespace as an empty program
+    }
     loop {
         while at < size && blank(chars[at]) {
             at += 1;
