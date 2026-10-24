@@ -135,6 +135,134 @@ fn split(line: &str) -> Result<Vec<String>, ComposeError> {
     Ok(words)
 }
 
+/// `subprocess.list2cmdline` for one element: the rule the Python runtime renders a Windows command line
+/// with (`osplat/_windows.py` `spawn`: `subprocess.list2cmdline(tail)`). Quoted when empty or holding a
+/// space or tab; a quote is `\"`, backslashes are doubled only before a quote and, in a quoted element,
+/// at the end.
+fn quote_windows(arg: &str) -> String {
+    let need = arg.is_empty() || arg.contains([' ', '\t']);
+    let mut out = String::new();
+    if need {
+        out.push('"');
+    }
+    let mut slashes = 0;
+    for c in arg.chars() {
+        match c {
+            '\\' => slashes += 1,
+            '"' => {
+                out.push_str(&"\\".repeat(slashes * 2));
+                slashes = 0;
+                out.push_str("\\\"");
+            }
+            _ => {
+                out.push_str(&"\\".repeat(slashes));
+                slashes = 0;
+                out.push(c);
+            }
+        }
+    }
+    out.push_str(&"\\".repeat(slashes));
+    if need {
+        out.push_str(&"\\".repeat(slashes));
+        out.push('"');
+    }
+    out
+}
+
+/// `CommandLineToArgvW`, the grammar of `osplat/_windows.py` `_split_command_line` (which asks the OS).
+/// The first word is read without escapes (a quote only brackets it); later words use `2n` backslashes
+/// plus a quote -> `n` backslashes and a toggle, `2n+1` -> `n` backslashes and a literal quote, and a
+/// doubled quote inside quotes is a literal quote. Whitespace is space and tab. An unmatched quote runs
+/// to the end, as the OS does, so this never fails.
+fn split_windows(line: &str) -> Vec<String> {
+    let chars: Vec<char> = line.chars().collect();
+    let size = chars.len();
+    let blank = |c: char| c == ' ' || c == '\t';
+    let (mut words, mut at) = (Vec::new(), 0);
+    loop {
+        while at < size && blank(chars[at]) {
+            at += 1;
+        }
+        if at >= size {
+            return words;
+        }
+        let mut value = String::new();
+        if words.is_empty() {
+            if chars[at] == '"' {
+                let end = chars[at + 1..].iter().position(|&c| c == '"').map_or(size, |found| at + 1 + found);
+                value.extend(&chars[at + 1..end]);
+                at = (end + 1).min(size);
+            } else {
+                while at < size && !blank(chars[at]) {
+                    value.push(chars[at]);
+                    at += 1;
+                }
+            }
+            words.push(value);
+            continue;
+        }
+        let mut in_quote = false;
+        while at < size {
+            match chars[at] {
+                '\\' => {
+                    let mut run = 0;
+                    while at < size && chars[at] == '\\' {
+                        run += 1;
+                        at += 1;
+                    }
+                    if at < size && chars[at] == '"' {
+                        value.push_str(&"\\".repeat(run / 2));
+                        if run % 2 == 1 {
+                            value.push('"');
+                            at += 1;
+                        }
+                    } else {
+                        value.push_str(&"\\".repeat(run));
+                    }
+                }
+                '"' => {
+                    if in_quote && at + 1 < size && chars[at + 1] == '"' {
+                        value.push('"');
+                        at += 2;
+                    } else {
+                        in_quote = !in_quote;
+                        at += 1;
+                    }
+                }
+                c if blank(c) && !in_quote => break,
+                c => {
+                    value.push(c);
+                    at += 1;
+                }
+            }
+        }
+        words.push(value);
+    }
+}
+
+/// How the words of a launch are written and read back: one per platform family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grammar {
+    Posix,
+    Windows,
+}
+
+impl Grammar {
+    fn quote(self, arg: &str) -> String {
+        match self {
+            Grammar::Posix => quote(arg),
+            Grammar::Windows => quote_windows(arg),
+        }
+    }
+
+    fn split(self, line: &str) -> Result<Vec<String>, ComposeError> {
+        match self {
+            Grammar::Posix => split(line),
+            Grammar::Windows => Ok(split_windows(line)),
+        }
+    }
+}
+
 fn declared(
     agent_key: &str,
     option: &str,
@@ -157,7 +285,8 @@ fn declared(
 }
 
 /// The text of one `opt` word (with its leading space), spelled from the generated facts.
-fn spell(agent_key: &str, option: &str, value: Option<&str>) -> Result<String, ComposeError> {
+fn spell(agent_key: &str, option: &str, value: Option<&str>, grammar: Grammar) -> Result<String, ComposeError> {
+    let quote = |text: &str| grammar.quote(text);
     let facts = declared(agent_key, option)?;
     let need = || value.ok_or_else(|| ComposeError::Option(format!("{option}: a value is required")));
     let missing = || ComposeError::Option(format!("{option}: no flag declared"));
@@ -179,23 +308,23 @@ fn spell(agent_key: &str, option: &str, value: Option<&str>) -> Result<String, C
 }
 
 /// Render the ordered words of a launch to shell text (delta 2.3).
-fn render(agent_key: &str, words: &Value) -> Result<String, ComposeError> {
+fn render(agent_key: &str, words: &Value, grammar: Grammar) -> Result<String, ComposeError> {
     let mut out = String::new();
     for word in words.as_array().ok_or_else(|| shape("words must be an array"))? {
         let object = word.as_object().ok_or_else(|| shape("a word must be an object"))?;
         if let Some(lit) = object.get("lit") {
             out.push_str(text(lit, "lit")?);
         } else if let Some(exe) = object.get("exe") {
-            out.push_str(&quote(text(exe, "exe")?));
+            out.push_str(&grammar.quote(text(exe, "exe")?));
         } else if let Some(arg) = object.get("arg") {
             out.push(' ');
-            out.push_str(&quote(text(arg, "arg")?));
+            out.push_str(&grammar.quote(text(arg, "arg")?));
         } else if let Some(option) = object.get("opt") {
             let value = match object.get("value") {
                 Some(value) => Some(text(value, "opt value")?),
                 None => None,
             };
-            out.push_str(&spell(agent_key, text(option, "opt")?, value)?);
+            out.push_str(&spell(agent_key, text(option, "opt")?, value, grammar)?);
         } else {
             return Err(shape("a word is lit, exe, arg or opt"));
         }
@@ -294,7 +423,7 @@ fn compose_credential(agent_key: &str, object: &serde_json::Map<String, Value>) 
         return Err(credential_refused("this subject has no managed credential wrapper"));
     }
     let words = inner_object.get("words").cloned().unwrap_or(Value::Array(vec![]));
-    let line = render(agent_key, &words)?;
+    let line = render(agent_key, &words, Grammar::Posix)?;
     if line.chars().any(|c| SHELL_METACHARACTERS.contains(c)) {
         return Err(credential_refused("the line holds a shell metacharacter"));
     }
@@ -367,29 +496,42 @@ fn compose_credential(agent_key: &str, object: &serde_json::Map<String, Value>) 
     Ok(Composed { program, args, argv_source: "rust", argv0, outer: Some("credential") })
 }
 
-/// Compose a structured launch for `agent_key`.
+/// Compose a structured launch for `agent_key` with the POSIX grammar.
 pub fn compose(agent_key: &str, launch: &Value) -> Result<Composed, ComposeError> {
+    compose_in(agent_key, launch, Grammar::Posix)
+}
+
+/// Compose a structured launch for `agent_key` with the Windows grammar (`direct` shapes only: the
+/// `wrapped` and `credential` shapes are POSIX shell text and are refused by `admit`).
+pub fn compose_windows(agent_key: &str, launch: &Value) -> Result<Composed, ComposeError> {
+    compose_in(agent_key, launch, Grammar::Windows)
+}
+
+fn compose_in(agent_key: &str, launch: &Value, grammar: Grammar) -> Result<Composed, ComposeError> {
     let object = launch.as_object().ok_or_else(|| shape("launch must be an object"))?;
     let words = object.get("words").cloned().unwrap_or(Value::Array(vec![]));
     match object.get("shape").and_then(Value::as_str) {
+        Some("wrapped" | "credential") if grammar == Grammar::Windows => {
+            Err(ComposeError::Composition("the wrapped and credential shapes are POSIX shell text".to_string()))
+        }
         Some("wrapped") => {
             let shell = text(object.get("shell").ok_or_else(|| shape("wrapped needs a shell"))?, "shell")?;
             let mut argv = vec![shell.to_string()];
             for flag in object.get("flags").and_then(Value::as_array).ok_or_else(|| shape("wrapped needs flags"))? {
                 argv.push(text(flag, "flag")?.to_string());
             }
-            argv.push(render(agent_key, &words)?);
+            argv.push(render(agent_key, &words, grammar)?);
             finish(argv)
         }
         Some("direct") => match object.get("form").and_then(Value::as_str) {
-            Some("string") => finish(split(&render(agent_key, &words)?)?),
+            Some("string") => finish(grammar.split(&render(agent_key, &words, grammar)?)?),
             Some("list") => {
                 let elements = object.get("elements").and_then(Value::as_array);
                 let mut argv = Vec::new();
                 for element in elements.ok_or_else(|| shape("direct list needs elements"))? {
                     argv.push(text(element, "element")?.to_string());
                 }
-                let appended = render(agent_key, &words)?;
+                let appended = render(agent_key, &words, grammar)?;
                 argv.last_mut().ok_or_else(|| ComposeError::Compose("no program".to_string()))?.push_str(&appended);
                 finish(argv)
             }
@@ -401,8 +543,9 @@ pub fn compose(agent_key: &str, launch: &Value) -> Result<Composed, ComposeError
     }
 }
 
-/// May `agent_key` use `shape` on this platform? `windows` selects the ticket 04 transition row
-/// (delta 3.1): Windows takes the pre-composed `argv` shape only, until ticket 07.
+/// May `agent_key` use `shape` on this platform? Windows follows the same declaration as POSIX, but
+/// its structured shape is `direct` only: `wrapped` and `credential` are POSIX shell text. A
+/// Rust-composed subject on POSIX never takes `argv`.
 pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeError> {
     let composition = match vendor_facts::find(agent_key) {
         Some(facts) => facts.composition,
@@ -414,15 +557,14 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
         #[cfg(not(feature = "fault-hooks"))]
         None => return Err(ComposeError::Composition(format!("unknown subject {agent_key:?}"))),
     };
-    let allowed = if windows {
-        shape == "argv"
-    } else {
-        match composition {
-            vendor_facts::Composition::Rust => {
-                matches!(shape, "wrapped" | "direct") || (shape == "credential" && vendor_facts::find(agent_key).is_some())
-            }
-            vendor_facts::Composition::Python => shape == "argv",
+    let allowed = match composition {
+        // Windows: the managed-credential helper form has no Rust wrapper yet (it is composed from a
+        // resolved shim by `credential_launch.wrap_command`), so that launch keeps the `argv` shape.
+        vendor_facts::Composition::Rust if windows => matches!(shape, "direct" | "argv"),
+        vendor_facts::Composition::Rust => {
+            matches!(shape, "wrapped" | "direct") || (shape == "credential" && vendor_facts::find(agent_key).is_some())
         }
+        vendor_facts::Composition::Python => shape == "argv",
     };
     if allowed {
         Ok(())
@@ -477,6 +619,54 @@ mod tests {
             let expected = format!("x {}", vector["quoted"].as_str().unwrap());
             assert_eq!(result.args[1], expected, "input {input:?}");
         }
+    }
+
+    const WINDOWS_VECTORS: &str = include_str!("../../../backend/tests/data/g2_windows_vectors.json");
+
+    #[test]
+    fn windows_quoting_matches_the_shared_list2cmdline_vectors() {
+        let file: Value = serde_json::from_str(WINDOWS_VECTORS).unwrap();
+        for vector in file["quote"].as_array().unwrap() {
+            let input = vector["input"].as_str().unwrap();
+            assert_eq!(quote_windows(input), vector["quoted"].as_str().unwrap(), "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn windows_splitting_matches_the_shared_command_line_vectors() {
+        let file: Value = serde_json::from_str(WINDOWS_VECTORS).unwrap();
+        for vector in file["split"].as_array().unwrap() {
+            let line = vector["line"].as_str().unwrap();
+            let expected: Vec<String> =
+                vector["words"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string()).collect();
+            assert_eq!(split_windows(line), expected, "line {line:?}");
+        }
+    }
+
+    #[test]
+    fn a_windows_direct_string_with_nested_quotes_and_a_spaced_path_composes_to_the_same_argv() {
+        let program = "C:\\Program Files\\x\\prog.cmd";
+        let words = json!([
+            {"lit": quote_windows(program)},
+            {"opt": "model", "value": "say \"hi\" \\"},
+            {"arg": "C:\\a b\\\\"},
+            {"arg": "x\\\"y"}
+        ]);
+        let launch = json!({"shape": "direct", "form": "string", "words": words});
+        let result = compose_windows("claude", &launch).unwrap();
+        assert_eq!(result.program, program);
+        assert_eq!(result.args, ["--model", "say \"hi\" \\", "C:\\a b\\\\", "x\\\"y"]);
+        assert_eq!(result.argv_source, "rust");
+        assert!(matches!(compose_windows("claude", &wrapped(json!([]))), Err(ComposeError::Composition(_))));
+    }
+
+    #[test]
+    fn a_windows_direct_list_appends_its_suffix_to_the_last_element() {
+        let launch = json!({"shape": "direct", "form": "list",
+            "elements": ["pwsh.exe", "-NoLogo", "-Command", "& 'C:\\x\\prog.cmd'"], "words": [{"arg": "a b"}]});
+        let result = compose_windows("claude", &launch).unwrap();
+        assert_eq!(result.program, "pwsh.exe");
+        assert_eq!(result.args, ["-NoLogo", "-Command", "& 'C:\\x\\prog.cmd' \"a b\""]);
     }
 
     #[test]
@@ -629,7 +819,8 @@ mod tests {
             assert_eq!(admit(subject, "wrapped", false), Ok(()), "{subject:?} wrapped on POSIX");
             assert_eq!(admit(subject, "direct", false), Ok(()), "{subject:?} direct on POSIX");
             assert!(matches!(admit(subject, "argv", false), Err(ComposeError::Composition(_))));
-            assert_eq!(admit(subject, "argv", true), Ok(()), "{subject:?} argv on Windows");
+            assert_eq!(admit(subject, "direct", true), Ok(()), "{subject:?} direct on Windows");
+            assert_eq!(admit(subject, "argv", true), Ok(()), "{subject:?} argv on Windows (managed credential)");
             assert!(matches!(admit(subject, "wrapped", true), Err(ComposeError::Composition(_))));
         }
         // Ticket 05 composes every vendor in Rust: none takes the pre-composed shape on POSIX any more.
@@ -756,11 +947,14 @@ mod tests {
     }
 
     #[test]
-    fn every_generated_vendor_composes_in_rust_on_posix_and_none_does_on_windows() {
+    fn every_generated_vendor_composes_in_rust_on_posix_and_takes_only_direct_on_windows() {
         assert!(!vendor_facts::VENDORS.is_empty());
         for facts in vendor_facts::VENDORS.iter() {
             for shape in ["wrapped", "direct", "credential"] {
                 assert_eq!(admit(facts.key, shape, false), Ok(()), "{} {shape} on POSIX", facts.key);
+            }
+            assert_eq!(admit(facts.key, "direct", true), Ok(()), "{} direct on Windows", facts.key);
+            for shape in ["wrapped", "credential"] {
                 assert!(matches!(admit(facts.key, shape, true), Err(ComposeError::Composition(_))), "{} {shape} on Windows", facts.key);
             }
             assert!(matches!(admit(facts.key, "argv", false), Err(ComposeError::Composition(_))), "{} argv on POSIX", facts.key);
