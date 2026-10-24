@@ -297,7 +297,8 @@ async def test_rust_selected_run_equals_python_selected_run(vendor, tmp_path, mo
     # write's events fall on is the race above, so only the activity rows inside that write have their `pane_id`
     # masked for the comparison, on both streams. Every other row keeps it compared exactly, and the check below
     # that every activity row after a run's own first session.detected carries the pane means the mask cannot hide a
-    # bound row's wrong or missing pane.
+    # bound row's wrong or missing pane. Before the binding a row may carry no pane, but never another one, so the
+    # mask is safe on both sides of the binding.
     def first_binding(run):
         return [kind for kind, _ in run["stream"]].index("session.detected")
 
@@ -315,6 +316,9 @@ async def test_rust_selected_run_equals_python_selected_run(vendor, tmp_path, mo
         wrong = [(index, row["pane_id"]) for index, (kind, row) in enumerate(run["stream"])
                  if index > first and kind == "agent.activity" and row["pane_id"] != PANE]
         assert not wrong, f"{name}: activity after the session binding without the pane: {wrong}"
+        foreign = [(index, row["pane_id"]) for index, (kind, row) in enumerate(run["stream"])
+                   if index < first and kind == "agent.activity" and row["pane_id"] not in (None, "", PANE)]
+        assert not foreign, f"{name}: activity before the session binding with another pane: {foreign}"
     assert rust["durable"] == python["durable"], "persisted totals or checkpoints differ after the restart"
 
 
