@@ -63,11 +63,18 @@ class VendorData:
             return {key: self.expand(item) for key, item in value.items()}
         return value
 
-    def apply(self, phase):
+    def has_schema(self, phase) -> bool:
+        return any(operation.get("schema") for operation in self.fixture.get("phases", {}).get(phase, []))
+
+    def apply(self, phase, only=None):
+        """Write a phase. `only="schema"` creates a SQLite store's tables and nothing else; `only="rows"` then adds
+        the phase's rows, so a scenario can let a watcher see the empty store first."""
         for operation in self.fixture.get("phases", {}).get(phase, []):
             path = Path(operation.get("path", str(self.path)))
             path.parent.mkdir(parents=True, exist_ok=True)
             kind = operation["kind"]
+            if kind != "sqlite" and only == "schema":
+                continue
             if kind == "json":
                 path.write_text(json.dumps(operation["value"]), encoding="utf-8")
             elif kind in {"jsonl", "text"}:
@@ -77,13 +84,24 @@ class VendorData:
                     stream.write(text)
             elif kind == "sqlite":
                 connection = self.connections.get(path)
+                built = only == "rows"
                 if connection is None:
+                    if operation.get("schema") and not path.exists() and only != "rows":
+                        # Build the schema in a sibling file and rename it into place, so the watched path never
+                        # exists without its tables (a half-built store is a state no vendor's CLI shows).
+                        staged = path.with_name(path.name + ".staged")
+                        with sqlite3.connect(staged) as staging:
+                            staging.execute("PRAGMA journal_mode=WAL")
+                            staging.executescript(f"BEGIN;\n{operation['schema']}\nCOMMIT;")
+                        staging.close()
+                        staged.replace(path)
+                        built = True
                     connection = sqlite3.connect(path)
                     connection.execute("PRAGMA journal_mode=WAL")
                     self.connections[path] = connection
-                if operation.get("schema"):
-                    connection.executescript(operation["schema"])
-                for statement in operation.get("statements", []):
+                if operation.get("schema") and not built:
+                    connection.executescript(f"BEGIN;\n{operation['schema']}\nCOMMIT;")
+                for statement in ([] if only == "schema" else operation.get("statements", [])):
                     params = []
                     for value in statement.get("params", []):
                         if isinstance(value, dict) and "$hex" in value:
