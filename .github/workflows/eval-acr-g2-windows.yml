@@ -60,3 +60,76 @@ jobs:
           path: ${{ runner.temp }}/g2-snapshots
           if-no-files-found: warn
           retention-days: 14
+
+  # Phase 2: the Rust sidecar, native tests and the Rust-vs-pinned-baseline cases.
+  native:
+    name: windows-native (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+    steps:
+      - name: Set evaluation paths
+        shell: pwsh
+        run: '"UV_PROJECT_ENVIRONMENT=$env:RUNNER_TEMP\g2-venv" >> $env:GITHUB_ENV'
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: Install the backend test environment
+        shell: pwsh
+        run: |
+          python -m pip install uv
+          uv sync --project backend --frozen
+
+      - name: Build the sidecar and record its hash
+        id: build
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/cli/g2-windows-build.ps1
+
+      - name: Rust tests (W10 keeps its 8-round bound)
+        id: cargo
+        if: always() && steps.build.outcome == 'success'
+        shell: pwsh
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml
+
+      - name: Required backend cases through the real sidecar
+        id: pytest
+        if: always() && steps.build.outcome == 'success'
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/cli/g2-windows-pytest.ps1
+
+      - name: Require every listed case to be collected and passed
+        id: guard
+        if: always() && steps.build.outcome == 'success'
+        shell: pwsh
+        run: node tests/cli/g2Native.mjs guard --platform windows --arch ${{ matrix.arch }} --required tests/cli/g2-required-windows.txt --junit test-results/ci/g2-windows-junit.xml --out test-results/ci/g2-windows-outcomes.log
+
+      - name: Require every ready receipt to name the freshly built sidecar
+        id: receipts
+        if: always() && steps.pytest.outcome != 'skipped'
+        shell: pwsh
+        run: node tests/cli/g2Native.mjs receipts --root ${{ runner.temp }}\g2-basetemp --sha ${{ env.G2_SIDECAR_SHA }}
+
+      - name: Upload redacted outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g2-windows-${{ matrix.arch }}-outcomes
+          path: test-results/ci/g2-windows-outcomes.log
+          if-no-files-found: warn
+          retention-days: 7
