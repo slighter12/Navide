@@ -133,6 +133,50 @@
       }
     ]
   },
+  "append": {
+    "count": "SELECT COUNT(*) FROM message",
+    "operations": [
+      {
+        "kind": "sqlite",
+        "statements": [
+          {
+            "sql": "INSERT INTO message VALUES ('n${N}', ?,2000,2000,?)",
+            "params": [
+              "ses_fixture_main",
+              {
+                "role": "assistant",
+                "modelID": "fixture",
+                "time": {
+                  "created": 2000,
+                  "completed": 2000
+                },
+                "tokens": {
+                  "input": 8,
+                  "output": 2,
+                  "reasoning": 1,
+                  "cache": {
+                    "read": 2,
+                    "write": 2
+                  }
+                },
+                "finish": "stop"
+              }
+            ]
+          },
+          {
+            "sql": "INSERT INTO part VALUES ('np${N}','n${N}',?,2000,2000,?)",
+            "params": [
+              "ses_fixture_main",
+              {
+                "type": "step-finish",
+                "reason": "stop"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "binary": "kilo",
   "resumeCommand": "kilo --session ses_fixture_main",
   "guardedEnvironment": [

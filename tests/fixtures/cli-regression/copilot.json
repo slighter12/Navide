@@ -63,6 +63,25 @@
       }
     ]
   },
+  "append": {
+    "count": "SELECT COUNT(*) FROM turns",
+    "operations": [
+      {
+        "kind": "sqlite",
+        "statements": [
+          {
+            "sql": "INSERT INTO turns VALUES (${N}+1,?,${N},?,?,?)",
+            "params": [
+              "12345678-1234-4234-8234-123456789abc",
+              "${MARKER} work",
+              "Regression reply: café 完成\n---MSG-END---",
+              "2026-09-29T10:00:00Z"
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "binary": "copilot",
   "resumeCommand": "copilot --resume 12345678-1234-4234-8234-123456789abc",
   "guardedEnvironment": [
