@@ -54,6 +54,14 @@ def main() -> None:
     def option(name: str) -> str:
         return args[args.index(name) + 1]
 
+    def interrupted(_signum, _frame):
+        record("interrupt", value=3)
+        print("INTERRUPT_3", flush=True)
+
+    # Registered in every mode: an HTTP or input-file peer does not read its terminal, so the target-side record of an
+    # interrupt is the signal the PTY's line discipline delivers.
+    signal.signal(signal.SIGINT, interrupted)
+
     if "--port" in args:
         password = os.environ.get("KILO_SERVER_PASSWORD", "")
         auth = "Basic " + base64.b64encode(f"kilo:{password}".encode()).decode()
@@ -104,11 +112,6 @@ def main() -> None:
                 else:
                     time.sleep(0.01)
     else:
-        def interrupted(_signum, _frame):
-            record("interrupt", value=3)
-            print("INTERRUPT_3", flush=True)
-
-        signal.signal(signal.SIGINT, interrupted)
         if os.name == "nt":
             _raw_console_input()
         else:
