@@ -235,11 +235,11 @@ def test_the_declared_gaps_the_literal_rows_rely_on_are_still_declared():
 
 
 async def test_a_vendor_without_a_rust_observer_launches_through_rust(tmp_path):
-    """Admission is independent of observation: goose has no Rust observer and no observer-roster entry."""
+    """Admission is independent of observation: mcode has no Rust observer and no observer-roster entry."""
     roster = ADAPTERS_RS.read_text(encoding="utf-8")
-    assert '"goose"' not in roster, "the case must use a vendor the sidecar does not observe"
-    row = ("goose-unobserved", "goose", "wrapped", "", {})
+    assert '"mcode"' not in roster, "the case must use a vendor the sidecar does not observe"
+    row = ("mcode-unobserved", "mcode", "wrapped", "", {})
     snapshot, owned, _ = await _observe(row, tmp_path / "row")
-    assert snapshot["child_argv"] == PLAIN_ARGV["goose"][sys.platform]["wrapped"]
+    assert snapshot["child_argv"] == PLAIN_ARGV["mcode"][sys.platform]["wrapped"]
     if not PYTHON_RUNTIME:  # the Python-runtime "before" capture has no owned receipts
         assert [record.get("argv_source") for record in owned] == ["rust"]
