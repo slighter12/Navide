@@ -34,6 +34,18 @@ mod codex;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "initial_retention_test.rs"]
 mod initial_retention_test;
+#[path = "observe_grok.rs"]
+mod observe_grok;
+#[path = "observe_jsonl.rs"]
+mod observe_jsonl;
+#[path = "observe_kimi.rs"]
+mod observe_kimi;
+#[path = "observe_muse.rs"]
+mod observe_muse;
+#[path = "observe_pi.rs"]
+mod observe_pi;
+#[path = "observe_qwen.rs"]
+mod observe_qwen;
 #[cfg(target_os = "macos")]
 #[path = "opencode.rs"]
 mod opencode;

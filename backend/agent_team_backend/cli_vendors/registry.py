@@ -14,7 +14,16 @@ from pathlib import Path
 from types import MappingProxyType
 
 from .. import osplat
-from ..cli_runtime_adapters import claude_reference, codex_reference, opencode_reference
+from ..cli_runtime_adapters import (
+    claude_reference,
+    codex_reference,
+    grok_reference,
+    kimi_reference,
+    muse_reference,
+    opencode_reference,
+    pi_reference,
+    qwen_reference,
+)
 from .base import VendorRuntimeContext, VendorSpec
 from . import (
     aider,
@@ -44,14 +53,14 @@ _ALL: tuple[VendorSpec, ...] = (
     cursor.SPEC,
     droid.SPEC,
     goose.SPEC,
-    grok.SPEC,
+    grok_reference(grok.SPEC),
     kilo.SPEC,
-    kimi.SPEC,
+    kimi_reference(kimi.SPEC),
     mcode.SPEC,
-    muse.SPEC,
+    muse_reference(muse.SPEC),
     opencode_reference(opencode.SPEC),
-    pi.SPEC,
-    qwen.SPEC,
+    pi_reference(pi.SPEC),
+    qwen_reference(qwen.SPEC),
 )
 
 VENDORS: dict[str, VendorSpec] = {spec.key: spec for spec in _ALL}

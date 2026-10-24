@@ -12,7 +12,11 @@ pub fn integrated(key: &str) -> bool {
     }
     // Vendor observers read POSIX session files; none is integrated on Windows yet (E5 scope: shells).
     cfg!(unix)
-        && (matches!(key, "claude" | "codex") || (cfg!(target_os = "macos") && key == "opencode"))
+        && (matches!(
+            key,
+            "claude" | "codex" | "grok" | "kimi" | "muse" | "pi" | "qwen"
+        )
+            || (cfg!(target_os = "macos") && key == "opencode"))
 }
 
 /// Harness build only: a test declaration (not a vendor name) that declares a graceful shutdown
@@ -69,6 +73,11 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
     match args["vendor"].as_str() {
         Some("claude") => super::claude::observe(args, expected),
         Some("codex") => super::codex::observe(args, expected),
+        Some("grok") => super::observe_grok::observe(args, expected),
+        Some("kimi") => super::observe_kimi::observe(args, expected),
+        Some("muse") => super::observe_muse::observe(args, expected),
+        Some("pi") => super::observe_pi::observe(args, expected),
+        Some("qwen") => super::observe_qwen::observe(args, expected),
         #[cfg(target_os = "macos")]
         Some("opencode") => super::opencode::observe(args).map(|document| (document, None)),
         _ => Err(io::Error::other("observer not integrated")),
