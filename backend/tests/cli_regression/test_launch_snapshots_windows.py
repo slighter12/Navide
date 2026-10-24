@@ -107,6 +107,23 @@ def _unredacted_launch_token(parts: list[str]) -> bool:
                for index, part in enumerate(parts) if index)
 
 
+#: A urlsafe credential is 43 characters. Runs of 200 or more are the deterministic base64 PowerShell
+#: script codex passes with -EncodedCommand; everything else of this shape in a pinned field is a secret.
+_TOKEN_SHAPED = re.compile(r"(?<![A-Za-z0-9_\-])[A-Za-z0-9_\-]{24,199}(?![A-Za-z0-9_\-])")
+
+
+def token_shaped_values(value) -> list[str]:
+    """Every token-shaped run in any string of a snapshot (argv element, env value, submitted command,
+    refusal text), found wherever it sits, not only after a known header."""
+    if isinstance(value, str):
+        return _TOKEN_SHAPED.findall(value)
+    if isinstance(value, dict):
+        return [found for item in (*value.keys(), *value.values()) for found in token_shaped_values(item)]
+    if isinstance(value, (list, tuple)):
+        return [found for item in value for found in token_shaped_values(item)]
+    return []
+
+
 def _submitted(form: str, shim: Path):
     """The command the application submits on Windows for each shape."""
     if form == "direct":
@@ -175,6 +192,7 @@ async def test_windows_launch_snapshot(subject, form, tmp_path):
     assert not _snapshot_leaks(snapshot), _snapshot_leaks(snapshot)
     assert not re.search(r"X-Navide-Codex-Launch: (?!<token>)", rendered), "a codex launch credential reached the snapshot"
     assert not _unredacted_launch_token(snapshot.get("child_argv", [])), "a split codex launch credential reached the snapshot"
+    assert not token_shaped_values(snapshot), f"a token-shaped value reached the snapshot (count {len(token_shaped_values(snapshot))})"
     leaks = [leak for leak in (*_variants(Path.home()), *_variants(tempfile.gettempdir())) if len(leak) > 3]
     assert not [leak for leak in leaks if leak.lower() in rendered.lower()], "a real home or OS temp path leaked"
     target = os.environ.get("NAVIDE_G2_SNAPSHOT_DIR")
