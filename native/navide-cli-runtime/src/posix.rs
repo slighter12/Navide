@@ -50,7 +50,10 @@ mod observe_muse;
 mod observe_pi;
 #[path = "observe_qwen.rs"]
 mod observe_qwen;
-#[cfg(target_os = "macos")]
+#[path = "observe_copilot.rs"]
+mod observe_copilot;
+#[path = "observe_goose.rs"]
+mod observe_goose;
 #[path = "opencode.rs"]
 mod opencode;
 #[path = "vendor_facts.rs"]

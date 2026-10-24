@@ -12,11 +12,22 @@ pub fn integrated(key: &str) -> bool {
     }
     // Vendor observers read POSIX session files; none is integrated on Windows yet (E5 scope: shells).
     cfg!(unix)
-        && (matches!(
+        && matches!(
             key,
-            "aider" | "claude" | "codex" | "droid" | "grok" | "kimi" | "muse" | "pi" | "qwen"
+            "aider"
+                | "claude"
+                | "codex"
+                | "copilot"
+                | "droid"
+                | "goose"
+                | "grok"
+                | "kilo"
+                | "kimi"
+                | "muse"
+                | "opencode"
+                | "pi"
+                | "qwen"
         )
-            || (cfg!(target_os = "macos") && key == "opencode"))
 }
 
 /// Harness build only: a test declaration (not a vendor name) that declares a graceful shutdown
@@ -74,14 +85,15 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
         Some("aider") => super::observe_aider::observe(args, expected),
         Some("claude") => super::claude::observe(args, expected),
         Some("codex") => super::codex::observe(args, expected),
+        Some("copilot") => super::observe_copilot::observe(args, expected),
         Some("droid") => super::observe_droid::observe(args, expected),
+        Some("goose") => super::observe_goose::observe(args).map(|document| (document, None)),
         Some("grok") => super::observe_grok::observe(args, expected),
+        Some("kilo" | "opencode") => super::opencode::observe(args).map(|document| (document, None)),
         Some("kimi") => super::observe_kimi::observe(args, expected),
         Some("muse") => super::observe_muse::observe(args, expected),
         Some("pi") => super::observe_pi::observe(args, expected),
         Some("qwen") => super::observe_qwen::observe(args, expected),
-        #[cfg(target_os = "macos")]
-        Some("opencode") => super::opencode::observe(args).map(|document| (document, None)),
         _ => Err(io::Error::other("observer not integrated")),
     }
 }

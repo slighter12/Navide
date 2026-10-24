@@ -11,7 +11,8 @@ from .log_readers.base import ActivityEvent, IncrementalParseResult, TokenUsage,
 
 class NativeOpenCodeReader(OpencodeLogReader):
     def _native(self, path, mode, **kwargs):
-        return observe(self.vendor, 'rust-opencode-sqlite-v1', path, mode, **kwargs)
+        # OpenCode and its fork Kilo share this reader; the vendor key names the parser and the store file.
+        return observe(self.vendor, f'rust-{self.vendor}-sqlite-v1', path, mode, **kwargs)
 
     def has_session(self, session_id):
         session_id = session_id.strip()

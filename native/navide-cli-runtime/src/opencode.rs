@@ -7,7 +7,11 @@ use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
-#[link(name = "sqlite3")]
+// macOS links the system SQLite; Linux links the bundled one `libsqlite3-sys` builds (`use … as _` keeps it in).
+#[cfg(target_os = "linux")]
+use libsqlite3_sys as _;
+
+#[cfg_attr(target_os = "macos", link(name = "sqlite3"))]
 unsafe extern "C" {
     fn sqlite3_open_v2(
         name: *const c_char,
@@ -55,9 +59,9 @@ fn wal_header(path: &Path) -> bool {
 }
 
 // Exactly one short-lived read-only connection per query, as in the Python baseline.
-struct ReadConnection(*mut c_void);
+pub(super) struct ReadConnection(*mut c_void);
 impl ReadConnection {
-    fn open(path: &Path) -> Result<Self, i32> {
+    pub(super) fn open(path: &Path) -> Result<Self, i32> {
         // A WAL store whose last writer closed has no -wal/-shm left, and the system SQLite
         // refuses a plain read-only open of it (SQLITE_CANTOPEN: it may not create the -shm),
         // where the Python baseline's bundled SQLite creates both. With neither file present the
@@ -95,7 +99,7 @@ impl ReadConnection {
         }
         Ok(db)
     }
-    fn query(&self, sql: &str, parameters: &[Value]) -> Result<Vec<Vec<Value>>, i32> {
+    pub(super) fn query(&self, sql: &str, parameters: &[Value]) -> Result<Vec<Vec<Value>>, i32> {
         let sql = CString::new(sql).map_err(|_| 1)?;
         let mut raw = std::ptr::null_mut();
         let code =
@@ -183,12 +187,17 @@ impl Drop for ReadStatement {
         }
     }
 }
-fn query(path: &Path, sql: &str, parameters: &[Value]) -> Option<Vec<Vec<Value>>> {
-    ReadConnection::open(path)
-        .and_then(|db| db.query(sql, parameters))
-        .ok()
+pub(super) fn query_checked(
+    path: &Path,
+    sql: &str,
+    parameters: &[Value],
+) -> Result<Vec<Vec<Value>>, i32> {
+    ReadConnection::open(path).and_then(|db| db.query(sql, parameters))
 }
-fn number(value: &Value) -> i64 {
+pub(super) fn query(path: &Path, sql: &str, parameters: &[Value]) -> Option<Vec<Vec<Value>>> {
+    query_checked(path, sql, parameters).ok()
+}
+pub(super) fn number(value: &Value) -> i64 {
     value
         .as_i64()
         .or_else(|| value.as_bool().map(i64::from))
@@ -197,14 +206,14 @@ fn number(value: &Value) -> i64 {
         .unwrap_or(0)
         .max(0)
 }
-fn text(value: &Value) -> String {
+pub(super) fn text(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::String(s) => s.clone(),
         _ => value.to_string(),
     }
 }
-fn object(value: &Value) -> Value {
+pub(super) fn object(value: &Value) -> Value {
     value
         .as_str()
         .and_then(|s| serde_json::from_str::<Value>(s).ok())
@@ -219,6 +228,7 @@ fn cursor(row: i64, pending: &BTreeSet<i64>, identity: &str, mark: &str) -> Valu
     json!({"kind":"sqlite","row_id":row,"pending":&pending[pending.len().saturating_sub(64)..],"identity":identity,"anchor":mark})
 }
 fn usage_event(
+    vendor: &str,
     path: &Path,
     row: &[Value],
     versions: &HashMap<String, String>,
@@ -242,7 +252,7 @@ fn usage_event(
     let session = text(&row[2]);
     (
         Some(
-            json!({"vendor":"opencode","input_tokens":input,"output_tokens":output,
+            json!({"vendor":vendor,"input_tokens":input,"output_tokens":output,
         "cwd":text(&row[4]),"session_id":session,"file_path":path,"dedup_key":format!("msg:{}",text(&row[1])),
         "timestamp":completed.to_string(),"model":text(&data["modelID"]),
         "cli_version":versions.get(&session).cloned().unwrap_or_default()}),
@@ -275,7 +285,7 @@ fn activity_timestamp(milliseconds: i64) -> String {
         fraction
     )
 }
-fn activity(path: &Path, seen: &mut BTreeSet<String>) -> Vec<Value> {
+fn activity(vendor: &str, path: &Path, seen: &mut BTreeSet<String>) -> Vec<Value> {
     let previous = seen.iter().find_map(|key| {
         key.strip_prefix("opencode_part::")
             .and_then(|v| v.parse::<i64>().ok())
@@ -320,7 +330,7 @@ fn activity(path: &Path, seen: &mut BTreeSet<String>) -> Vec<Value> {
             "text" => "assistant".to_owned(),
             _ => if kind.is_empty(){"part".to_owned()}else{kind},
         };
-        json!({"vendor":"opencode","event_type":event_type,"cwd":text(&row[5]),"session_id":text(&row[1]),
+        json!({"vendor":vendor,"event_type":event_type,"cwd":text(&row[5]),"session_id":text(&row[1]),
             "file_path":path,"dedup_key":format!("part:{}",number(&row[0])),"timestamp":activity_timestamp(number(&row[7])),"detail":detail,"text":body})
     }).collect()
 }
@@ -339,9 +349,12 @@ pub fn observe(args: &Value) -> io::Result<Value> {
         .flatten()
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect();
-    let mut result = json!({"parser":"rust-opencode-sqlite-v1","path":path,"mode":mode,
+    // OpenCode and its fork Kilo share the schema; the vendor key names the parser, the events and the store file.
+    let vendor = args["vendor"].as_str().unwrap_or("opencode");
+    let store_file = if vendor == "kilo" { "kilo.db" } else { "opencode.db" };
+    let mut result = json!({"parser":format!("rust-{vendor}-sqlite-v1"),"path":path,"mode":mode,
         "identity":null,"events":[],"checkpoint":checkpoint,"seen":seen,"markers":{},"found":false});
-    if path.file_name().and_then(|s| s.to_str()) != Some("opencode.db") {
+    if path.file_name().and_then(|s| s.to_str()) != Some(store_file) {
         return Ok(result);
     }
     let Ok(stat) = path.metadata() else {
@@ -350,7 +363,7 @@ pub fn observe(args: &Value) -> io::Result<Value> {
     let identity = format!("{}:{}", stat.dev(), stat.ino());
     result["identity"] = json!({"dev":stat.dev(),"ino":stat.ino(),"size":stat.len()});
     if mode == "activity" {
-        result["events"] = json!(activity(path, &mut seen));
+        result["events"] = json!(activity(vendor, path, &mut seen));
         result["seen"] = json!(seen);
         return Ok(result);
     }
@@ -487,7 +500,7 @@ pub fn observe(args: &Value) -> io::Result<Value> {
             watermark = id;
             mark = anchor(&row[1..3]);
         }
-        let (event, done) = usage_event(path, &row, &versions);
+        let (event, done) = usage_event(vendor, path, &row, &versions);
         if !done {
             pending.insert(id);
             continue;
@@ -514,6 +527,7 @@ pub fn observe(args: &Value) -> io::Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
     use std::ffi::CStr;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -666,6 +680,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn genuine_self_system_sqlite_identity() {
         unsafe extern "C" {
