@@ -663,7 +663,8 @@ fn a_vendor_without_a_rust_observer_still_launches_and_stays_unobservable() {
     let mut sidecar = start("unobserved-vendor");
     sidecar.line();
     let dir = sidecar.dir.clone();
-    sidecar.send(code::CREATE, vendor_create_meta(&dir, "goose", "session-goose"));
+    // MCode is the one registered vendor with no Python-baseline observer, so it stays unobservable.
+    sidecar.send(code::CREATE, vendor_create_meta(&dir, "mcode", "session-mcode"));
     // Either outcome ends the wait, so a refusal fails the test at once instead of hanging it.
     let (owned, fd) =
         sidecar.recv_until(|f| f.code == code::SESSION_OWNED || f.frame_type == FrameType::Error);
@@ -675,12 +676,12 @@ fn a_vendor_without_a_rust_observer_still_launches_and_stays_unobservable() {
     );
     let master = fd.expect("SESSION_OWNED must carry the master");
     assert_eq!(owned.meta["argv_source"], "rust");
-    assert_eq!(owned.meta["session_id"], "session-goose");
+    assert_eq!(owned.meta["session_id"], "session-mcode");
     unsafe { libc::close(master) };
     // Launching does not make it observable: the observer roster is separate from admission.
     sidecar.send(
         code::OBSERVE,
-        json!({"vendor":"goose","session_id":"session-goose",
+        json!({"vendor":"mcode","session_id":"session-mcode",
             "session_generation":"ffeeddccbbaa99887766554433221100"}),
     );
     let (refused, _) = sidecar.recv_until(|f| f.frame_type == FrameType::Error);
