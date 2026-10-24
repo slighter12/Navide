@@ -29,7 +29,7 @@ from agent_team_backend.cli_vendors.registry import VENDORS
 from .support.backend_process import BackendProcess
 from .support.cli_shim import base_python_executable, install_cli_shim
 from .test_launch_snapshots import (
-    PROBE, _LONG_HEX, _PORT, _PORT_FLAG, _QUERY_TOKEN, _SECRET_NAME, _UUID, _snapshot_leaks,
+    PROBE, _LONG_HEX, _PORT, _PORT_FLAG, _QUERY_TOKEN, _SECRET_NAME, _UUID, _normalise_argv, _snapshot_leaks,
 )
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(os.name != "nt", reason="Windows shell forms only")]
@@ -96,7 +96,9 @@ def _submitted(form: str, shim: Path):
     if form == "pwsh":
         pwsh = shutil.which("pwsh") or "pwsh.exe"
         return [pwsh, "-NoLogo", "-NoExit", "-Command", f"& '{shim}'"]
-    return [os.environ.get("ComSpec", "cmd.exe"), "/k", f'"{shim}"']
+    # No quotes of its own: the hosted temp path has no space, and list2cmdline would turn a quoted
+    # element into `\"...\"`, which cmd.exe does not read as a quoted program.
+    return [os.environ.get("ComSpec", "cmd.exe"), "/k", str(shim)]
 
 
 async def _observe(subject: str, form: str, root: Path) -> dict:
@@ -132,7 +134,7 @@ async def _observe(subject: str, form: str, root: Path) -> dict:
     observed = json.loads(destination.read_text(encoding="utf-8"))
     return {
         **snapshot,
-        "child_argv": [normalise(part) for part in observed["argv"]],
+        "child_argv": _normalise_argv(normalise, observed["argv"]),
         "child_cwd": normalise(observed["cwd"]),
         "child_env": {key: "<redacted>" if _SECRET_NAME.search(key) else normalise(value)
                       for key, value in sorted(observed["env"].items())},

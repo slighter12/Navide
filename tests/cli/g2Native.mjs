@@ -93,6 +93,15 @@ function guard(args) {
     lines.push(`${prefix} case=${id} status=${status} stage=${stageOf(id)}`)
     if (status !== 'passed') bad.push(`${status}: ${id}`)
   }
+  // A skip outside the required list is accepted only for the files declared platform-gated, so a case
+  // that silently stopped running cannot hide among the unlisted ones.
+  const gated = new Set((args['skip-allowed'] ?? '').split(',').filter(Boolean))
+  for (const [id, status] of results) {
+    if (status !== 'skipped' && status !== 'xfailed') continue
+    if (gated.has(id.split('::')[0].split('/').pop())) continue
+    counts[`unlisted-${status}`] = (counts[`unlisted-${status}`] ?? 0) + 1
+    bad.push(`unlisted ${status} outside the platform-gated files: ${id}`)
+  }
   if (args.out) writeFileSync(args.out, `${lines.join('\n')}\n`)
   console.log(`required=${required.length} ${Object.entries(counts).map(([k, v]) => `${k}=${v}`).join(' ')}`)
   if (required.length === 0) {
