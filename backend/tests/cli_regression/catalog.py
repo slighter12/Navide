@@ -103,8 +103,13 @@ def validate_observation(observation, vendors: dict) -> list[str]:
             errors.append(f"observation: {nodeid or 'a case'} is not a behavioral test of {OBSERVATION_FILE}")
         if set(case.get("requires", [])) != {"posix_pty"}:
             errors.append(f"observation: {nodeid} must require exactly posix_pty (Windows observation is python-only)")
-        if set(case.get("platforms", [])) - {"linux", "darwin"}:
-            errors.append(f"observation: {nodeid} names an unknown platform")
+        # Both POSIX hosts run every case; only OpenCode's cases are Linux-only. A `platforms` key anywhere else would
+        # make `applicable()` drop a required case on a host without a word.
+        if nodeid.endswith("[opencode]"):
+            if case.get("platforms") != ["linux"]:
+                errors.append(f"observation: {nodeid} must be exactly platforms [\"linux\"]")
+        elif "platforms" in case:
+            errors.append(f"observation: {nodeid} must run on both POSIX hosts (no platforms key)")
         declared.add(nodeid)
     for key, spec in vendors.items():
         if spec.make_log_reader is None or key in OBSERVATION_BASE:
