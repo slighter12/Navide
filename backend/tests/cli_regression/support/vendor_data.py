@@ -104,14 +104,20 @@ class VendorData:
             elif kind == "sqlite":
                 connection = self.connections.get(path)
                 built = only == "rows"
+                written = only == "schema"
                 if connection is None:
-                    if operation.get("schema") and not path.exists() and only != "rows" and self.shared_store:
-                        # Build the schema in a sibling file and rename it into place, so the watched path never
-                        # exists without its tables (a half-built store is a state no vendor's CLI shows).
+                    if operation.get("schema") and not path.exists() and only != "rows":
+                        # Build the store in a sibling file and rename it into place, so the watched path never
+                        # exists half-built. A shared store appears with its tables only (a poll can find it empty).
+                        # A per-session store appears already holding its creating phase's rows, as a CLI's file
+                        # does: a poll between "schema" and "rows" would otherwise read an empty workspace cwd.
                         staged = path.with_name(path.name + ".staged")
                         with sqlite3.connect(staged) as staging:
                             staging.execute("PRAGMA journal_mode=WAL")
                             staging.executescript(f"BEGIN;\n{operation['schema']}\nCOMMIT;")
+                            if not self.shared_store and not written:
+                                self._execute(staging, operation.get("statements", []))
+                                written = True
                         staging.close()
                         staged.replace(path)
                         built = True
@@ -121,20 +127,25 @@ class VendorData:
                 if operation.get("schema") and not built:
                     # One transaction: a poll between two CREATEs would find a half-built schema.
                     connection.executescript(f"BEGIN;\n{operation['schema']}\nCOMMIT;")
-                for statement in ([] if only == "schema" else operation.get("statements", [])):
-                    params = []
-                    for value in statement.get("params", []):
-                        if isinstance(value, dict) and "$hex" in value:
-                            value = bytes.fromhex(value["$hex"])
-                        elif isinstance(value, dict) and "$utf8" in value:
-                            value = value["$utf8"].encode()
-                        elif isinstance(value, (dict, list)):
-                            value = json.dumps(value)
-                        params.append(value)
-                    connection.execute(statement["sql"], params)
+                if not written:
+                    self._execute(connection, operation.get("statements", []))
                 connection.commit()
             else:
                 raise AssertionError(f"unknown fixture operation {kind}")
+
+    @staticmethod
+    def _execute(connection, statements):
+        for statement in statements:
+            params = []
+            for value in statement.get("params", []):
+                if isinstance(value, dict) and "$hex" in value:
+                    value = bytes.fromhex(value["$hex"])
+                elif isinstance(value, dict) and "$utf8" in value:
+                    value = value["$utf8"].encode()
+                elif isinstance(value, (dict, list)):
+                    value = json.dumps(value)
+                params.append(value)
+            connection.execute(statement["sql"], params)
 
     def close(self):
         for connection in self.connections.values():
