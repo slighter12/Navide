@@ -114,6 +114,46 @@ def test_droid_session_fixtures_are_required_on_every_platform(monkeypatch):
         assert data["launch"]["nodeid"] in required
 
 
+def _observation_node(vendor: str) -> str:
+    return ("tests/test_cli_runtime_observe_vendors.py::test_rust_selected_run_equals_python_selected_run"
+            f"[{vendor}]")
+
+
+def test_the_observation_cases_are_required_and_a_missing_one_is_rejected():
+    from . import catalog
+    node = _observation_node("goose")
+    assert node in catalog._required_cases()
+    # present: the inventory validates and a full collection that includes the node passes
+    assert catalog.validate_collection({node}, {node}) == []
+    # absent: the inventory loses the case, and so does a collection that no longer finds it
+    data = deepcopy(load_catalog())
+    data["observation"]["cases"] = [case for case in data["observation"]["cases"] if case["nodeid"] != node]
+    assert any("goose has no test_rust_selected_run_equals_python_selected_run" in error
+               for error in catalog.validate_catalog(data, VENDORS))
+    assert catalog.validate_collection({node}, {node.replace("goose", "gone")})
+
+
+@pytest.mark.parametrize("outcome", ["skipped", "xfailed", "failed", "not-run"])
+def test_a_nonpassing_observation_case_fails_the_session(outcome):
+    from . import catalog
+    node = _observation_node("goose")
+    assert catalog.validate_outcomes({node}, {node: outcome}) == [f"required case {node}: {outcome}"]
+    assert catalog.validate_outcomes({node}, {node: "passed"}) == []
+
+
+def test_an_observation_case_cannot_be_exempted_from_posix_hosts():
+    data = deepcopy(load_catalog())
+    data["observation"]["cases"][0]["requires"] = ["windows_conpty"]
+    assert any("must require exactly posix_pty" in error for error in validate_catalog(data, VENDORS))
+
+
+@pytest.mark.parametrize("platform,applies", [("linux", True), ("darwin", False)])
+def test_opencode_observation_is_required_on_linux_only(monkeypatch, platform, applies):
+    from . import catalog
+    monkeypatch.setattr(catalog.sys, "platform", platform)
+    assert (_observation_node("opencode") in catalog._required_cases()) is applies
+
+
 def test_droid_launch_cannot_be_platform_exempted():
     data = deepcopy(load_catalog())
     data["vendors"]["droid"]["cases"]["launch"]["requires"] = ["posix_pty"]

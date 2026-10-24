@@ -18,6 +18,14 @@ RUNNER_CAPABILITIES = ({"posix_pty", "darwin_helper"}, {"posix_pty"}, {"windows_
 PLATFORM_REQUIREMENTS = {
     ("claude", "shutdown"): {"posix_pty"},
 }
+#: Vendors whose Rust observation predates the ported set (G2 ticket 06); OpenCode joined it on macOS earlier, on Linux
+#: in ticket 06.
+OBSERVATION_BASE = frozenset({"claude", "codex"})
+OBSERVATION_FILE = "tests/test_cli_runtime_observe_vendors.py"
+#: Every ported vendor owns these principal-seam cases: the Rust-selected run equals the Python-selected run, the
+#: sidecar answers its OBSERVE request, and interrupt reaches only its own process.
+OBSERVATION_PER_VENDOR = ("test_rust_selected_run_equals_python_selected_run", "test_sidecar_observes_each_ported_vendor",
+                          "test_interrupt_reaches_only_the_ported_vendor_process")
 
 
 def load_catalog() -> dict:
@@ -79,6 +87,31 @@ def validate_catalog(data: dict, vendors: dict) -> list[str]:
             errors.append(f"{key}: fixture source/revision is invalid")
         if fixture.get("vendor") != key:
             errors.append(f"{key}: fixture belongs to another vendor")
+    errors.extend(validate_observation(data.get("observation"), vendors))
+    return errors
+
+
+def validate_observation(observation, vendors: dict) -> list[str]:
+    """The ticket 06 observation cases: each is a POSIX case, and every vendor with a reader that is not in the base
+    roster owns the three per-vendor principal-seam cases (a Linux-only case names `platforms`)."""
+    if not isinstance(observation, dict) or not isinstance(observation.get("cases"), list):
+        return ["observation: the inventory of native observation cases is missing"]
+    errors, declared = [], set()
+    for case in observation["cases"]:
+        nodeid = case.get("nodeid", "")
+        if not nodeid.startswith(OBSERVATION_FILE + "::test_"):
+            errors.append(f"observation: {nodeid or 'a case'} is not a behavioral test of {OBSERVATION_FILE}")
+        if set(case.get("requires", [])) != {"posix_pty"}:
+            errors.append(f"observation: {nodeid} must require exactly posix_pty (Windows observation is python-only)")
+        if set(case.get("platforms", [])) - {"linux", "darwin"}:
+            errors.append(f"observation: {nodeid} names an unknown platform")
+        declared.add(nodeid)
+    for key, spec in vendors.items():
+        if spec.make_log_reader is None or key in OBSERVATION_BASE:
+            continue
+        for test in OBSERVATION_PER_VENDOR:
+            if f"{OBSERVATION_FILE}::{test}[{key}]" not in declared:
+                errors.append(f"observation: {key} has no {test} case")
     return errors
 
 
@@ -90,7 +123,7 @@ def applicable(case: dict) -> bool:
     available = {"windows_conpty"} if sys.platform == "win32" else {"posix_pty"}
     if sys.platform == "darwin":
         available.add("darwin_helper")
-    return set(case.get("requires", [])) <= available
+    return set(case.get("requires", [])) <= available and sys.platform in (case.get("platforms") or [sys.platform])
 
 
 def validate_collection(required: set[str], collected: set[str]) -> list[str]:
@@ -104,8 +137,10 @@ def validate_outcomes(required: set[str], outcomes: dict[str, str]) -> list[str]
 
 
 def _required_cases() -> set[str]:
-    return {case["nodeid"] for entry in load_catalog()["vendors"].values()
-            for case in entry["cases"].values() if applicable(case)}
+    catalog = load_catalog()
+    return {case["nodeid"] for entry in catalog["vendors"].values()
+            for case in entry["cases"].values() if applicable(case)} | {
+        case["nodeid"] for case in catalog["observation"]["cases"] if applicable(case)}
 
 
 def _historical_case_owners() -> dict[str, str]:
