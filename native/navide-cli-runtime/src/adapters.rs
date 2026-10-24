@@ -14,7 +14,7 @@ pub fn integrated(key: &str) -> bool {
     cfg!(unix)
         && (matches!(
             key,
-            "claude" | "codex" | "grok" | "kimi" | "muse" | "pi" | "qwen"
+            "claude" | "codex" | "droid" | "grok" | "kimi" | "muse" | "pi" | "qwen"
         )
             || (cfg!(target_os = "macos") && key == "opencode"))
 }
@@ -73,6 +73,7 @@ pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u
     match args["vendor"].as_str() {
         Some("claude") => super::claude::observe(args, expected),
         Some("codex") => super::codex::observe(args, expected),
+        Some("droid") => super::observe_droid::observe(args, expected),
         Some("grok") => super::observe_grok::observe(args, expected),
         Some("kimi") => super::observe_kimi::observe(args, expected),
         Some("muse") => super::observe_muse::observe(args, expected),

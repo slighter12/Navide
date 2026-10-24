@@ -17,6 +17,7 @@ from .. import osplat
 from ..cli_runtime_adapters import (
     claude_reference,
     codex_reference,
+    droid_reference,
     grok_reference,
     kimi_reference,
     muse_reference,
@@ -51,7 +52,7 @@ _ALL: tuple[VendorSpec, ...] = (
     codex_reference(codex.SPEC),
     copilot.SPEC,
     cursor.SPEC,
-    droid.SPEC,
+    droid_reference(droid.SPEC),
     goose.SPEC,
     grok_reference(grok.SPEC),
     kilo.SPEC,
