@@ -17,9 +17,10 @@ test -x "$release_bin"
 test -x "$harness_bin"
 file "$release_bin" | grep -q 'ELF 64-bit'
 
-# The proof that the release build does not carry the feature: `fault-graceful` is the key of a
-# #[cfg(feature = "fault-hooks")] constant, so it is in the harness binary (the positive control)
-# and must be absent from the release binary. Stripping does not remove string literals.
+# The proof that the release build does not carry the feature: "fault: exit watcher could not start"
+# is an error message that exists only inside #[cfg(feature = "fault-hooks")] code, so it is in the
+# harness binary (the positive control) and must be absent from the release binary. Stripping does
+# not remove string literals.
 node tests/cli/g2Native.mjs proof --release "$release_bin" --harness "$harness_bin"
 
 sha=$(sha256sum "$release_bin" | cut -d' ' -f1)
