@@ -100,6 +100,7 @@ def _submitted(form: str, shim: Path):
 
 
 async def _observe(subject: str, form: str, root: Path) -> dict:
+    root.mkdir(parents=True, exist_ok=True)
     workspace = root / "pane-cwd"
     workspace.mkdir()
     destination = root / "launch.json"
