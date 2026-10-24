@@ -101,7 +101,7 @@ def _submitted(form: str, shim: Path):
     return [os.environ.get("ComSpec", "cmd.exe"), "/k", str(shim)]
 
 
-async def _observe(subject: str, form: str, root: Path) -> dict:
+async def _observe(subject: str, form: str, root: Path, *, rust: bool = False) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     workspace = root / "pane-cwd"
     workspace.mkdir()
@@ -112,6 +112,10 @@ async def _observe(subject: str, form: str, root: Path) -> dict:
     )
     command = _submitted(form, shim)
     backend = BackendProcess(root)
+    if rust:  # the Rust runtime, selected the way the other evaluation harnesses select it
+        backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
+        if binary := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):
+            backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
     normalise = _normaliser(root)
     refused = None
     async with backend, backend.connect() as socket:
