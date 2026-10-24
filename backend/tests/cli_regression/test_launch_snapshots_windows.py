@@ -80,6 +80,8 @@ def _normaliser(root: Path):
                       lambda m: m.group(1) + m.group(2).replace("\\", "/"), text)
         if user:
             text = re.sub(rf"(?<=[\\/]){re.escape(user)}(?=[\\/]|$)", "<USER>", text, flags=re.IGNORECASE)
+        # Codex's per-launch hook credential travels in its hook command; it is random per run.
+        text = re.sub(r"(X-Navide-Codex-Launch: )[A-Za-z0-9_\-]{16,}", r"\1<token>", text)
         text = _UUID.sub("<uuid>", text)
         text = _LONG_HEX.sub("<hex>", text)
         text = _PORT.sub(r"\1:<port>", text)
@@ -155,6 +157,7 @@ async def test_windows_launch_snapshot(subject, form, tmp_path):
     assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
     rendered = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
     assert not _snapshot_leaks(snapshot), _snapshot_leaks(snapshot)
+    assert not re.search(r"X-Navide-Codex-Launch: (?!<token>)", rendered), "a codex launch credential reached the snapshot"
     leaks = [leak for leak in (*_variants(Path.home()), *_variants(tempfile.gettempdir())) if len(leak) > 3]
     assert not [leak for leak in leaks if leak.lower() in rendered.lower()], "a real home or OS temp path leaked"
     target = os.environ.get("NAVIDE_G2_SNAPSHOT_DIR")
