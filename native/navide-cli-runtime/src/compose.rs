@@ -573,6 +573,246 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Windows program resolution (ticket 07). The Python runtime resolves the program only on its own
+// spawn path (`osplat/_windows.py` `spawn`: `shutil.which` then `pty_launch_parts`); the `argv` it
+// hands the sidecar (`cli_runtime.py` `_resolve_command`, `terminals.py` `_resolve_command`) is only
+// split, never resolved. The sidecar therefore resolves the composed program the same way.
+// ---------------------------------------------------------------------------------------------
+
+/// The filesystem Windows resolution reads; a fake in unit tests.
+pub trait Files {
+    fn is_file(&self, path: &str) -> bool;
+    /// The text of a candidate shim: `None` over `_SHIM_MAX_BYTES` (4096), unreadable or not UTF-8.
+    fn shim_text(&self, path: &str) -> Option<String>;
+}
+
+pub struct OsFiles;
+
+impl Files for OsFiles {
+    fn is_file(&self, path: &str) -> bool {
+        std::fs::metadata(path).map(|meta| meta.is_file()).unwrap_or(false)
+    }
+
+    fn shim_text(&self, path: &str) -> Option<String> {
+        if std::fs::metadata(path).ok()?.len() > 4096 {
+            return None;
+        }
+        std::fs::read_to_string(path).ok()
+    }
+}
+
+/// `shutil._WIN_DEFAULT_PATHEXT`.
+const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD;.VBS;.JSE;.WSF;.WSH;.MSC";
+
+fn is_separator(c: char) -> bool {
+    c == '\\' || c == '/'
+}
+
+fn env_value<'a>(env: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    env.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str())
+}
+
+/// `pathlib.PurePath.suffix`, lowercased.
+fn suffix(path: &str) -> String {
+    let name = path.rsplit(is_separator).next().unwrap_or("");
+    match name.rfind('.') {
+        Some(at) if at > 0 && at + 1 < name.len() => name[at..].to_lowercase(),
+        _ => String::new(),
+    }
+}
+
+fn dirname(path: &str) -> &str {
+    path.rfind(is_separator).map_or("", |at| &path[..at])
+}
+
+/// `os.path.join` for two parts on Windows.
+fn join_path(dir: &str, file: &str) -> String {
+    if dir.is_empty() || dir.ends_with(|c| is_separator(c) || c == ':') {
+        format!("{dir}{file}")
+    } else {
+        format!("{dir}\\{file}")
+    }
+}
+
+/// `os.path.normpath` on Windows for the paths a shim names.
+fn normpath(path: &str) -> String {
+    let path = path.replace('/', "\\");
+    let (mut prefix, mut rest) = (String::new(), path.as_str());
+    if path.len() >= 2 && path.as_bytes()[1] == b':' && path.as_bytes()[0].is_ascii_alphabetic() {
+        prefix.push_str(&path[..2]);
+        rest = &path[2..];
+    } else if let Some(unc) = path.strip_prefix("\\\\") {
+        prefix.push_str("\\\\");
+        rest = unc;
+    }
+    let rooted = rest.starts_with('\\') && !prefix.starts_with("\\\\");
+    if rooted {
+        prefix.push('\\');
+    }
+    let anchored = rooted || !prefix.is_empty();
+    let mut parts: Vec<&str> = Vec::new();
+    for part in rest.split('\\') {
+        match part {
+            "" | "." => {}
+            ".." if parts.last().is_some_and(|last| *last != "..") => {
+                parts.pop();
+            }
+            ".." if anchored => {}
+            other => parts.push(other),
+        }
+    }
+    format!("{prefix}{}", parts.join("\\"))
+}
+
+/// `shutil.which(command, path=path)` on Windows: PATHEXT decides the candidate names, a command with a
+/// directory part is tried where it stands, and PATH directories are tried in order. Two deliberate
+/// differences: the current directory is not searched (the sidecar's is not the pane's), and the
+/// environment is the child's, read without regard to case.
+fn which(command: &str, path: Option<&str>, pathext: Option<&str>, files: &dyn Files) -> Option<String> {
+    let source = pathext.filter(|text| !text.is_empty()).unwrap_or(DEFAULT_PATHEXT);
+    let extensions: Vec<&str> = source.split(';').filter(|ext| !ext.is_empty()).collect();
+    let lowered = command.to_lowercase();
+    let candidates: Vec<String> = if extensions.iter().any(|ext| lowered.ends_with(&ext.to_lowercase())) {
+        vec![command.to_string()]
+    } else {
+        extensions.iter().map(|ext| format!("{command}{ext}")).collect()
+    };
+    if command.contains(|c| is_separator(c) || c == ':') {
+        return candidates.into_iter().find(|candidate| files.is_file(candidate));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for dir in path?.split(';').filter(|dir| !dir.is_empty()) {
+        if !seen.insert(dir.to_lowercase()) {
+            continue;
+        }
+        for candidate in &candidates {
+            let name = join_path(dir, candidate);
+            if files.is_file(&name) {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// The lines a generated node shim may consist of (`_SHIM_LINE_RES`), matched whole, ASCII case-blind.
+fn is_shim_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "goto start" | ":find_dp0" | ":start" | "set dp0=%~dp0" | "call :find_dp0" | ") else (" | ")"
+    ) {
+        return true;
+    }
+    let bare = lower.strip_prefix('@').unwrap_or(&lower);
+    if matches!(bare, "echo off" | "setlocal" | "endlocal" | "set pathext=%pathext:;.js;=;%") || lower == "exit /b" {
+        return true;
+    }
+    let after = |text: &str, head: &str| text.strip_prefix(head).map(str::to_string);
+    for dp0 in ["%~dp0", "%dp0%"] {
+        if after(bare, &format!("if exist \"{dp0}\\node.exe\" (")).is_some_and(|rest| rest.is_empty())
+            || bare == format!("set \"_prog={dp0}\\node.exe\"")
+        {
+            return true;
+        }
+    }
+    bare == "set \"_prog=node\""
+}
+
+/// The script a shim's invocation line runs (`_SHIM_INVOKE_RE`), with its original case.
+fn shim_target(line: &str) -> Option<String> {
+    let lower = line.to_ascii_lowercase();
+    let mut at = 0;
+    let prefix = "endlocal & goto #_undefined_# 2>nul || title %comspec% & ";
+    if lower.starts_with(prefix) {
+        at = prefix.len();
+    }
+    if lower[at..].starts_with('@') {
+        at += 1;
+    }
+    let program = ["\"%_prog%\"", "\"%~dp0\\node.exe\"", "\"%dp0%\\node.exe\"", "node"]
+        .into_iter()
+        .find(|program| lower[at..].starts_with(program))?;
+    at += program.len();
+    let gap = lower[at..].len() - lower[at..].trim_start().len();
+    if gap == 0 {
+        return None;
+    }
+    at += gap;
+    let after_quote = lower[at..].strip_prefix('"')?;
+    at = lower.len() - after_quote.len();
+    let dp0 = ["%~dp0\\", "%dp0%\\"].into_iter().find(|dp0| lower[at..].starts_with(dp0))?;
+    at += dp0.len();
+    let end = at + line[at..].find('"')?;
+    if end == at {
+        return None;
+    }
+    let target = &line[at..end];
+    let tail = &lower[end + 1..];
+    let gap = tail.len() - tail.trim_start().len();
+    (gap > 0 && &tail[gap..] == "%*").then(|| target.to_string())
+}
+
+/// `_unwrap_node_shim`: `(node.exe, script)` for a generated node shim at `program`.
+fn unwrap_node_shim(program: &str, path: Option<&str>, pathext: Option<&str>, files: &dyn Files) -> Option<(String, String)> {
+    let text = files.shim_text(program)?;
+    let mut targets = std::collections::BTreeSet::new();
+    let breaks = |c: char| matches!(c, '\n' | '\r' | '\x0b' | '\x0c' | '\x1c' | '\x1d' | '\x1e' | '\u{85}' | '\u{2028}' | '\u{2029}');
+    for raw in text.split(breaks) {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(target) = shim_target(line) {
+            targets.insert(target);
+        } else if !is_shim_line(line) {
+            return None;
+        }
+    }
+    if targets.len() != 1 {
+        return None;
+    }
+    let shim_dir = dirname(program);
+    let target = targets.into_iter().next()?;
+    let script = normpath(&join_path(shim_dir, &target));
+    if !files.is_file(&script) {
+        return None;
+    }
+    let beside = join_path(shim_dir, "node.exe");
+    let node = if files.is_file(&beside) { beside } else { which("node.exe", path, pathext, files)? };
+    Some((node, script))
+}
+
+/// What the sidecar spawns for a composed Windows launch: `shutil.which`, then `pty_launch_parts`
+/// (`osplat/_windows.py` `spawn` and `launch_argv`). A `.cmd`/`.bat` recognised as a node shim runs its
+/// `node.exe` and script; any other batch file runs under `cmd.exe /d /c`; a `.ps1` under
+/// `powershell.exe -File`. Not found fails the create, as the Python path does.
+pub fn resolve_windows(
+    program: &str,
+    args: &[String],
+    env: &[(String, String)],
+    files: &dyn Files,
+) -> Result<Vec<String>, ComposeError> {
+    let (path, pathext) = (env_value(env, "PATH"), env_value(env, "PATHEXT"));
+    let exe = which(program, path, pathext, files)
+        .ok_or_else(|| ComposeError::Compose(format!("executable not found: {program}")))?;
+    let mut argv: Vec<String> = match suffix(&exe).as_str() {
+        ".cmd" | ".bat" => match unwrap_node_shim(&exe, path, pathext, files) {
+            Some((node, script)) => vec![node, script],
+            None => ["cmd.exe", "/d", "/c"].into_iter().map(String::from).chain([exe]).collect(),
+        },
+        ".ps1" => ["powershell.exe", "-NoLogo", "-NonInteractive", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+            .into_iter()
+            .map(String::from)
+            .chain([exe])
+            .collect(),
+        _ => vec![exe],
+    };
+    argv.extend(args.iter().cloned());
+    Ok(argv)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -962,5 +1202,121 @@ mod tests {
         for alias in ["", "terminal"] {
             assert!(matches!(admit(alias, "credential", false), Err(ComposeError::Composition(_))), "{alias:?} has no wrapper");
         }
+    }
+
+    // ---- ticket 07: Windows program resolution, the expected values read off `osplat/_windows.py`.
+
+    struct Fake(std::collections::HashMap<&'static str, &'static str>);
+
+    impl Files for Fake {
+        // Windows paths are case-blind.
+        fn is_file(&self, path: &str) -> bool {
+            self.0.keys().any(|key| key.eq_ignore_ascii_case(path))
+        }
+
+        fn shim_text(&self, path: &str) -> Option<String> {
+            self.0.iter().find(|(key, _)| key.eq_ignore_ascii_case(path)).map(|(_, text)| text.to_string())
+        }
+    }
+
+    fn fake(entries: &[(&'static str, &'static str)]) -> Fake {
+        Fake(entries.iter().copied().collect())
+    }
+
+    fn windows_env(path: &str) -> Vec<(String, String)> {
+        vec![("Path".to_string(), path.to_string()), ("PATHEXT".to_string(), ".COM;.EXE;.BAT;.CMD;.PS1".to_string())]
+    }
+
+    fn owned(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    const NPM_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\n\
+IF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\n\
+endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@x\\cli\\bin\\cli.js\" %*\r\n";
+
+    #[test]
+    fn a_bare_name_resolves_through_path_and_pathext_and_a_plain_batch_file_runs_under_cmd() {
+        let files = fake(&[("C:\\other\\claude.CMD", "@echo hello\r\n")]);
+        let argv = resolve_windows("claude", &owned(&["--x", "a b"]), &windows_env("C:\\bin;;C:\\other"), &files).unwrap();
+        assert_eq!(argv, owned(&["cmd.exe", "/d", "/c", "C:\\other\\claude.CMD", "--x", "a b"]));
+    }
+
+    #[test]
+    fn an_explicit_executable_and_a_path_without_extension_are_tried_where_they_stand() {
+        let files = fake(&[("C:\\x\\tool.exe", ""), ("C:\\y\\other.CMD", "")]);
+        let env = windows_env("");
+        assert_eq!(resolve_windows("C:\\x\\tool.exe", &owned(&["1"]), &env, &files).unwrap(), owned(&["C:\\x\\tool.exe", "1"]));
+        assert_eq!(
+            resolve_windows("C:\\y\\other", &[], &env, &files).unwrap(),
+            owned(&["cmd.exe", "/d", "/c", "C:\\y\\other.CMD"])
+        );
+        assert!(matches!(resolve_windows("C:\\y\\none", &[], &env, &files), Err(ComposeError::Compose(_))));
+        assert!(matches!(resolve_windows("missing", &[], &windows_env("C:\\x"), &files), Err(ComposeError::Compose(_))));
+    }
+
+    #[test]
+    fn a_recognised_node_shim_runs_its_node_and_script_and_a_powershell_script_runs_under_powershell() {
+        let files = fake(&[
+            ("C:\\npm\\claude.cmd", NPM_SHIM),
+            ("C:\\npm\\node.exe", ""),
+            ("C:\\npm\\node_modules\\@x\\cli\\bin\\cli.js", ""),
+            ("C:\\ps\\run.ps1", ""),
+        ]);
+        let env = windows_env("C:\\npm");
+        assert_eq!(
+            resolve_windows("claude", &owned(&["-p"]), &env, &files).unwrap(),
+            owned(&["C:\\npm\\node.exe", "C:\\npm\\node_modules\\@x\\cli\\bin\\cli.js", "-p"])
+        );
+        assert_eq!(
+            resolve_windows("C:\\ps\\run.ps1", &owned(&["a"]), &env, &files).unwrap(),
+            owned(&["powershell.exe", "-NoLogo", "-NonInteractive", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\ps\\run.ps1", "a"])
+        );
+    }
+
+    #[test]
+    fn a_node_shim_falls_back_to_cmd_when_it_is_not_what_it_seems() {
+        let env = windows_env("C:\\npm;C:\\node");
+        let cmd = |exe: &str| owned(&["cmd.exe", "/d", "/c", exe]);
+        // The script is not on disk.
+        let missing_script = fake(&[("C:\\npm\\claude.cmd", NPM_SHIM), ("C:\\npm\\node.exe", "")]);
+        assert_eq!(resolve_windows("claude", &[], &env, &missing_script).unwrap(), cmd("C:\\npm\\claude.CMD"));
+        // A line outside the known set (a NODE_PATH assignment) makes the whole file unrecognised.
+        let extra: &'static str = Box::leak(format!("SET NODE_PATH=x\r\n{NPM_SHIM}").into_boxed_str());
+        let unknown = fake(&[("C:\\npm\\claude.cmd", extra), ("C:\\npm\\node.exe", ""), ("C:\\npm\\node_modules\\@x\\cli\\bin\\cli.js", "")]);
+        assert_eq!(resolve_windows("claude", &[], &env, &unknown).unwrap(), cmd("C:\\npm\\claude.CMD"));
+        // No node.exe beside the shim or on PATH.
+        let no_node = fake(&[("C:\\npm\\claude.cmd", NPM_SHIM), ("C:\\npm\\node_modules\\@x\\cli\\bin\\cli.js", "")]);
+        assert_eq!(resolve_windows("claude", &[], &env, &no_node).unwrap(), cmd("C:\\npm\\claude.CMD"));
+        // node.exe is found on PATH when it is not beside the shim.
+        let on_path = fake(&[("C:\\npm\\claude.cmd", NPM_SHIM), ("C:\\node\\node.exe", ""), ("C:\\npm\\node_modules\\@x\\cli\\bin\\cli.js", "")]);
+        assert_eq!(
+            resolve_windows("claude", &[], &env, &on_path).unwrap()[..2],
+            owned(&["C:\\node\\node.exe", "C:\\npm\\node_modules\\@x\\cli\\bin\\cli.js"])[..]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_real_filesystem_resolves_a_bare_name_through_path() {
+        let dir = std::env::temp_dir().join(format!("navide-resolve-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shim = dir.join("g2tool.cmd");
+        std::fs::write(&shim, "@echo off\r\n").unwrap();
+        let argv = resolve_windows("g2tool", &owned(&["x"]), &windows_env(dir.to_str().unwrap()), &OsFiles).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(argv[..3], owned(&["cmd.exe", "/d", "/c"])[..]);
+        assert!(argv[3].eq_ignore_ascii_case(shim.to_str().unwrap()), "{argv:?}");
+        assert_eq!(argv[4], "x");
+    }
+
+    #[test]
+    fn windows_path_helpers_normalise_like_ntpath() {
+        assert_eq!(normpath("C:\\a\\b\\..\\.\\c/d"), "C:\\a\\c\\d");
+        assert_eq!(normpath("C:\\..\\x"), "C:\\x");
+        assert_eq!(normpath("rel\\..\\..\\x"), "..\\x");
+        assert_eq!(suffix("C:\\a\\Tool.CMD"), ".cmd");
+        assert_eq!(suffix("C:\\a\\.cmd"), "");
+        assert_eq!(dirname("C:\\a\\b.cmd"), "C:\\a");
     }
 }
