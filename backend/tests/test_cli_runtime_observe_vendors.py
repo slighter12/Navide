@@ -188,6 +188,9 @@ async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: Vendor
                                        metadata={"session_marker": MARKER})
         await backend.expect_output(ws, created["terminal_session_id"], "TRANSPORT_READY")
         for phase in phases:
+            carries_marker = MARKER in json.dumps(data.fixture["phases"].get(phase, []))
+            if carries_marker:
+                marks.setdefault("marker_start", len(_stream(backend.events)))
             if phase == "initial" and data.has_schema(phase) and data.shared_store:
                 # A watcher's first sight of a store records its high-water mark and emits nothing for several vendors.
                 # Where that falls against the first rows decides whether a row is reported or taken as history, and
@@ -208,8 +211,8 @@ async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: Vendor
                     event["event_type"] == "turn_complete" for event in _types(backend, "agent.activity")),
                     "the turn_complete of the completion phase")
             await _settle(backend, ws)
-            if MARKER in json.dumps(data.fixture["phases"].get(phase, [])):
-                marks["marker_rows"] = len(_stream(backend.events))  # the write that carries the pane's marker
+            if carries_marker:
+                marks["marker_end"] = len(_stream(backend.events))  # the write that carries the pane's marker ends here
         await _settle(backend, ws)
     return backend.events
 
@@ -253,9 +256,11 @@ async def _scenario(root: Path, runtime: str, vendor: str, monkeypatch, set_home
         # The writer stays open across the restart, as a live CLI's does; the new backend resumes from its checkpoints.
         second: dict = {}
         events += await _stage(root, runtime, 2, vendor, data, ["complete"], second)
-        marker_rows = marks.get("marker_rows", first_stage_rows + second.get("marker_rows", 0))
+        # The marker's write as a half-open range of stream indexes (the second stage's rows follow the first's).
+        window = ((marks["marker_start"], marks["marker_end"]) if "marker_start" in marks
+                  else (first_stage_rows + second["marker_start"], first_stage_rows + second["marker_end"]))
         path = data.path.resolve()
-        return {"stream": _stream(events), "marker_rows": marker_rows, "durable": _durable(root, data.workspace, path),
+        return {"stream": _stream(events), "marker_window": window, "durable": _durable(root, data.workspace, path),
                 "receipts": _receipts(root), "path": path, "expected": data.fixture["expected"]}
     finally:
         data.close()
@@ -287,20 +292,29 @@ async def test_rust_selected_run_equals_python_selected_run(vendor, tmp_path, mo
     # (the watcher's two reads of a pass race the writer), and so does the native path. Evidence, Linux, 6 runs each,
     # position of the first session.detected: Python 0,0,2,0,0,0; Rust 0,0,0,2,2,2
     # (.scratch/agent-cli-runtime-evaluation/evidence/g2/06-fix/goose-order-trace.txt). What must hold in both
-    # streams is the bound below: only events up to the marker's write may precede the first session.detected.
+    # streams is the bound below: only events of the marker's write may precede the first session.detected.
     # An activity event delivered before the binding cannot carry the pane, and which side of the binding the marker
-    # write's events fall on is the race above, so their `pane_id` is masked on both streams. Every later event keeps
-    # it compared exactly.
+    # write's events fall on is the race above, so only the activity rows inside that write have their `pane_id`
+    # masked for the comparison, on both streams. Every other row keeps it compared exactly, and the check below
+    # that every activity row after a run's own first session.detected carries the pane means the mask cannot hide a
+    # bound row's wrong or missing pane.
+    def first_binding(run):
+        return [kind for kind, _ in run["stream"]].index("session.detected")
+
     def unbound_masked(run):
-        return [[kind, {**row, "pane_id": None} if index < run["marker_rows"] and kind == "agent.activity" else row]
+        start, end = run["marker_window"]
+        return [[kind, {**row, "pane_id": None} if kind == "agent.activity" and start <= index < end else row]
                 for index, (kind, row) in enumerate(run["stream"])]
     rust_rows, python_rows = unbound_masked(rust), unbound_masked(python)
     for kind in EVENT_TYPES:
         assert [row for name, row in rust_rows if name == kind] == [
             row for name, row in python_rows if name == kind], f"ordered {kind} streams differ"
     for name, run in (("python", python), ("rust", rust)):
-        first = [kind for kind, _ in run["stream"]].index("session.detected")
-        assert first < run["marker_rows"], f"{name}: a later write's event precedes the session binding"
+        first, (start, end) = first_binding(run), run["marker_window"]
+        assert start <= first < end, f"{name}: the session binding is not in the marker's write"
+        wrong = [(index, row["pane_id"]) for index, (kind, row) in enumerate(run["stream"])
+                 if index > first and kind == "agent.activity" and row["pane_id"] != PANE]
+        assert not wrong, f"{name}: activity after the session binding without the pane: {wrong}"
     assert rust["durable"] == python["durable"], "persisted totals or checkpoints differ after the restart"
 
 
