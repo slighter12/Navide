@@ -91,6 +91,29 @@ pub fn iso_utc(seconds: f64) -> String {
     format!("{}.{millis:03}Z", utc_fields(whole as i64))
 }
 
+/// `datetime.fromtimestamp(t, timezone.utc).isoformat()`: whole seconds, microseconds only when non-zero, `+00:00`.
+/// `""` where Python raises (outside years 1..9999). The fraction rounds half to even, as Python does.
+pub fn epoch_iso(seconds: f64) -> String {
+    if !seconds.is_finite() {
+        return String::new();
+    }
+    let whole = seconds.trunc();
+    let mut micros = ((seconds - whole) * 1e6).round_ties_even();
+    let mut stamp = whole as i64;
+    if micros >= 1e6 {
+        micros -= 1e6;
+        stamp += 1;
+    } else if micros < 0.0 {
+        micros += 1e6;
+        stamp -= 1;
+    }
+    if !(-62_135_596_800..=253_402_300_799).contains(&stamp) {
+        return String::new();
+    }
+    let fraction = if micros == 0.0 { String::new() } else { format!(".{:06}", micros as i64) };
+    format!("{}{fraction}+00:00", utc_fields(stamp))
+}
+
 /// `YYYY-MM-DDTHH:MM:SS` of a whole-second Unix time (UTC).
 pub fn utc_fields(whole: i64) -> String {
     let (days, rest) = (whole.div_euclid(86_400), whole.rem_euclid(86_400));
@@ -336,6 +359,15 @@ mod tests {
         assert_eq!(iso_utc(1_789_379_453.001), "2026-09-14T09:50:53.000Z");
         assert_eq!(iso_utc(0.0), "");
         assert_eq!(iso_utc(951_782_400.0), "2000-02-29T00:00:00.000Z");
+    }
+
+    #[test]
+    fn epoch_iso_matches_python_isoformat() {
+        assert_eq!(epoch_iso(1.0), "1970-01-01T00:00:01+00:00");
+        assert_eq!(epoch_iso(1.001), "1970-01-01T00:00:01.001000+00:00");
+        assert_eq!(epoch_iso(1_792_513_596.0), "2026-10-20T16:26:36+00:00");
+        assert_eq!(epoch_iso(253_402_300_800.0), "");
+        assert_eq!(epoch_iso(-62_135_596_801.0), "");
     }
 
     #[test]

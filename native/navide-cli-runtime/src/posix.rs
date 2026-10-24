@@ -50,8 +50,12 @@ mod observe_muse;
 mod observe_pi;
 #[path = "observe_qwen.rs"]
 mod observe_qwen;
+#[path = "observe_antigravity.rs"]
+mod observe_antigravity;
 #[path = "observe_copilot.rs"]
 mod observe_copilot;
+#[path = "observe_cursor.rs"]
+mod observe_cursor;
 #[path = "observe_goose.rs"]
 mod observe_goose;
 #[path = "opencode.rs"]
