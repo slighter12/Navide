@@ -91,6 +91,22 @@ def _normaliser(root: Path):
     return normalise
 
 
+_LAUNCH_HEADER_END = "X-Navide-Codex-Launch:"
+_LEADING_TOKEN = re.compile(r"^[A-Za-z0-9_\-]{16,}")
+
+
+def _redact_split_launch_token(parts: list[str]) -> list[str]:
+    """Codex's per-launch credential, when the command line splitter has separated it from its header:
+    the element after one ending in `X-Navide-Codex-Launch:` starts with the token."""
+    return [_LEADING_TOKEN.sub("<token>", part) if index and parts[index - 1].endswith(_LAUNCH_HEADER_END) else part
+            for index, part in enumerate(parts)]
+
+
+def _unredacted_launch_token(parts: list[str]) -> bool:
+    return any(parts[index - 1].endswith(_LAUNCH_HEADER_END) and not part.startswith("<token>")
+               for index, part in enumerate(parts) if index)
+
+
 def _submitted(form: str, shim: Path):
     """The command the application submits on Windows for each shape."""
     if form == "direct":
@@ -140,7 +156,7 @@ async def _observe(subject: str, form: str, root: Path, *, rust: bool = False) -
     observed = json.loads(destination.read_text(encoding="utf-8"))
     return {
         **snapshot,
-        "child_argv": _normalise_argv(normalise, observed["argv"]),
+        "child_argv": _redact_split_launch_token(_normalise_argv(normalise, observed["argv"])),
         "child_cwd": normalise(observed["cwd"]),
         "child_env": {key: "<redacted>" if _SECRET_NAME.search(key) else normalise(value)
                       for key, value in sorted(observed["env"].items())},
@@ -158,6 +174,7 @@ async def test_windows_launch_snapshot(subject, form, tmp_path):
     rendered = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
     assert not _snapshot_leaks(snapshot), _snapshot_leaks(snapshot)
     assert not re.search(r"X-Navide-Codex-Launch: (?!<token>)", rendered), "a codex launch credential reached the snapshot"
+    assert not _unredacted_launch_token(snapshot.get("child_argv", [])), "a split codex launch credential reached the snapshot"
     leaks = [leak for leak in (*_variants(Path.home()), *_variants(tempfile.gettempdir())) if len(leak) > 3]
     assert not [leak for leak in leaks if leak.lower() in rendered.lower()], "a real home or OS temp path leaked"
     target = os.environ.get("NAVIDE_G2_SNAPSHOT_DIR")
