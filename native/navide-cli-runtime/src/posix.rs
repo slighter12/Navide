@@ -34,6 +34,8 @@ mod codex;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "initial_retention_test.rs"]
 mod initial_retention_test;
+#[path = "observe_aider.rs"]
+mod observe_aider;
 #[path = "observe_droid.rs"]
 mod observe_droid;
 #[path = "observe_grok.rs"]

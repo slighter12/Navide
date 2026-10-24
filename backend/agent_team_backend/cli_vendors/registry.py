@@ -15,6 +15,7 @@ from types import MappingProxyType
 
 from .. import osplat
 from ..cli_runtime_adapters import (
+    aider_reference,
     claude_reference,
     codex_reference,
     droid_reference,
@@ -46,7 +47,7 @@ from . import (
 )
 
 _ALL: tuple[VendorSpec, ...] = (
-    aider.SPEC,
+    aider_reference(aider.SPEC),
     antigravity.SPEC,
     claude_reference(claude.SPEC),
     codex_reference(codex.SPEC),
