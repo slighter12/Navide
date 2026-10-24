@@ -73,6 +73,27 @@
       }
     ]
   },
+  "append": {
+    "count": "SELECT COUNT(*) FROM steps",
+    "operations": [
+      {
+        "kind": "sqlite",
+        "statements": [
+          {
+            "sql": "INSERT INTO steps VALUES (${N},15,3,?,?)",
+            "params": [
+              {
+                "$hex": ""
+              },
+              {
+                "$hex": "a2012e0a2c52656772657373696f6e207265706c793a20636166c3a920e5ae8ce688900a2d2d2d4d53472d454e442d2d2d"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "binary": "agy",
   "resumeCommand": "agy --conversation 12345678-1234-4234-8234-123456789abc",
   "guardedEnvironment": []

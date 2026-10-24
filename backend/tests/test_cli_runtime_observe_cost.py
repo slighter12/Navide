@@ -8,7 +8,8 @@ leaves out `RustTerminalService.observe`'s asyncio hop, its pane matching and it
 same fixture file on the same host.
 
 Two series per vendor and path, each after 20 warm-up polls and over 200 measured ones (the accepted section 11.7
-protocol): an UNCHANGED file, and a file with one record APPENDED before every poll (the append is not timed; for a SQLite store it replaces the completion rows, since their ids are fixed). Each
+protocol): an UNCHANGED file, and a file with one record APPENDED before every poll (the append is not timed; a SQLite store
+declares an `append` template whose `${N}` is a fresh id per poll, and its record count must grow by exactly one). Each
 series reports the checkpoint's key count and the activity bag's size at its end. The test asserts that both paths
 answered, never a timing, and appends one JSON row per vendor to the file named by `NAVIDE_G2_COST_OUT` when set.
 No speedup is claimed from these numbers.
@@ -19,6 +20,7 @@ import hashlib
 import json
 import math
 import os
+import sqlite3
 import statistics
 import sys
 import time
@@ -114,6 +116,40 @@ def _stats(samples):
             "p95_ms": round(ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)] * 1000, 3)}
 
 
+def _total_rows(path):
+    connection = sqlite3.connect(path)
+    try:
+        tables = [name for (name,) in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        return sum(connection.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0] for name in tables)
+    finally:
+        connection.close()
+
+
+def _appender(data):
+    """The write before each poll: one new record of the vendor's own shape. A text store gets the completion line
+    again. A SQLite store with an `append` template gets a fresh id per call (`${N}`) and must grow by exactly one
+    record; one without (Goose, whose message id is not unique) re-runs its completion inserts, each of which must add
+    a row."""
+    sqlite_store = any(operation["kind"] == "sqlite" for operation in data.fixture["phases"].get("complete", []))
+    inserts = sum(statement["sql"].lstrip().upper().startswith("INSERT") for operation in
+                  data.fixture["phases"].get("complete", []) for statement in operation.get("statements", []))
+    state = {"calls": 0}
+
+    def append():
+        state["calls"] += 1
+        if "append" in data.fixture:
+            before = data.count()
+            data.append(state["calls"])
+            assert data.count() == before + 1, "the append must add exactly one record"
+        elif sqlite_store:
+            before = _total_rows(data.path)
+            data.apply("complete")
+            assert _total_rows(data.path) == before + inserts, "every insert of the completion write must add a row"
+        else:
+            data.apply("complete")
+    return append
+
+
 def _series(vendor, root, monkeypatch, set_home, make_reader, appended):
     """One series on a fresh copy of the vendor's fixture: (samples, final state)."""
     root.mkdir(parents=True)
@@ -121,13 +157,7 @@ def _series(vendor, root, monkeypatch, set_home, make_reader, appended):
     try:
         for phase in ("initial", "response", "complete"):
             data.apply(phase)
-        # The appended record is the fixture's completion phase again: a new line of the vendor's own shape in a text
-        # store. A SQLite row keeps its fixed id, so there the write replaces the completion rows (a committed write
-        # before every poll, not a new row).
-        for operation in data.fixture["phases"].get("complete", []):
-            for statement in operation.get("statements", []):
-                statement["sql"] = statement["sql"].replace("INSERT INTO", "INSERT OR REPLACE INTO", 1)
-        return _poll(make_reader(), data.path, (lambda: data.apply("complete")) if appended else None)
+        return _poll(make_reader(), data.path, _appender(data) if appended else None)
     finally:
         data.close()
 

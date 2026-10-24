@@ -55,15 +55,15 @@ class VendorData:
         #: per-session file, named by the session id, is created together with its first rows and never is.
         self.shared_store = self.fixture.get("sessionId", "") not in str(self.path)
 
-    def expand(self, value):
+    def expand(self, value, extra=None):
         if isinstance(value, str):
-            for key, replacement in self.values.items():
+            for key, replacement in {**self.values, **(extra or {})}.items():
                 value = value.replace("${" + key + "}", replacement)
             return value
         if isinstance(value, list):
-            return [self.expand(item) for item in value]
+            return [self.expand(item, extra) for item in value]
         if isinstance(value, dict):
-            return {key: self.expand(item) for key, item in value.items()}
+            return {key: self.expand(item, extra) for key, item in value.items()}
         return value
 
     def has_schema(self, phase) -> bool:
@@ -72,7 +72,23 @@ class VendorData:
     def apply(self, phase, only=None):
         """Write a phase. `only="schema"` creates a SQLite store's tables and nothing else; `only="rows"` then adds
         the phase's rows, so a scenario can let a watcher see the empty store first."""
-        for operation in self.fixture.get("phases", {}).get(phase, []):
+        self._write(self.fixture.get("phases", {}).get(phase, []), only)
+
+    def append(self, number):
+        """Add one new record to a store whose fixture declares an `append` template. Every `${N}` in the template
+        becomes `number`, so each call writes a fresh id of the reader's own shape instead of rewriting a fixed row."""
+        self._write(self.expand(self.fixture["append"]["operations"], {"N": str(number)}), None)
+
+    def count(self):
+        """The records the fixture's `append.count` query reports, on a connection of its own."""
+        connection = sqlite3.connect(self.path)
+        try:
+            return connection.execute(self.fixture["append"]["count"]).fetchone()[0]
+        finally:
+            connection.close()
+
+    def _write(self, operations, only):
+        for operation in operations:
             path = Path(operation.get("path", str(self.path)))
             path.parent.mkdir(parents=True, exist_ok=True)
             kind = operation["kind"]
