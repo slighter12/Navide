@@ -1,0 +1,30 @@
+{
+  "quote_rule": "subprocess.list2cmdline for one element: quoted when empty or holding a space or tab; backslashes are doubled only before a quote and, in a quoted element, at the end; a quote is written as a backslash and a quote",
+  "quote": [
+    {"input": "", "quoted": "\"\""},
+    {"input": "plain", "quoted": "plain"},
+    {"input": "a b", "quoted": "\"a b\""},
+    {"input": "tab\there", "quoted": "\"tab\there\""},
+    {"input": "C:\\Program Files\\x\\prog.cmd", "quoted": "\"C:\\Program Files\\x\\prog.cmd\""},
+    {"input": "C:\\Program Files\\x\\", "quoted": "\"C:\\Program Files\\x\\\\\""},
+    {"input": "C:\\dir\\", "quoted": "C:\\dir\\"},
+    {"input": "say \"hi\"", "quoted": "\"say \\\"hi\\\"\""},
+    {"input": "a\"b", "quoted": "a\\\"b"},
+    {"input": "a\\\"b", "quoted": "a\\\\\\\"b"},
+    {"input": "a\\\\\"b c", "quoted": "\"a\\\\\\\\\\\"b c\""}
+  ],
+  "split_rule": "CommandLineToArgvW: the first word is read without escapes (a quote only brackets it); later words use 2n backslashes + quote -> n backslashes and a toggle, 2n+1 -> n backslashes and a literal quote, and a doubled quote inside quotes is a literal quote; whitespace is space and tab",
+  "split": [
+    {"line": "prog a b", "words": ["prog", "a", "b"]},
+    {"line": "  prog   a  ", "words": ["prog", "a"]},
+    {"line": "\"C:\\Program Files\\x\\prog.exe\" --model \"a b\"", "words": ["C:\\Program Files\\x\\prog.exe", "--model", "a b"]},
+    {"line": "prog \"say \\\"hi\\\"\"", "words": ["prog", "say \"hi\""]},
+    {"line": "prog C:\\dir\\ next", "words": ["prog", "C:\\dir\\", "next"]},
+    {"line": "prog \"C:\\dir with space\\\\\" next", "words": ["prog", "C:\\dir with space\\", "next"]},
+    {"line": "prog a\\\\\\\"b", "words": ["prog", "a\\\"b"]},
+    {"line": "prog \"a \"\"b\"\" c\"", "words": ["prog", "a \"b\" c"]},
+    {"line": "prog \"\"", "words": ["prog", ""]},
+    {"line": "prog a\"b c\"d", "words": ["prog", "ab cd"]},
+    {"line": "prog --model \"it's a \\\"x\\\" \\\\\"", "words": ["prog", "--model", "it's a \"x\" \\"]}
+  ]
+}

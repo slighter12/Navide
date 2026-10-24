@@ -26,9 +26,9 @@ def test_ticket_05_every_registered_subject_composes_in_rust_on_posix(subject):
 
 
 @pytest.mark.parametrize("subject", EVERY_SUBJECT)
-def test_windows_transition_sends_the_precomposed_shape_for_every_subject(subject):
-    """Ticket 07 removes this row; until then Windows takes `argv` and reports `python`."""
-    assert cli_launch.admit_composition(subject, platform="windows", managed_credential_path=False) == "python"
+def test_windows_composes_every_subject_in_rust_like_posix(subject):
+    """Ticket 07 removed the Windows transition row: the declaration decides, on every platform."""
+    assert cli_launch.admit_composition(subject, platform="windows", managed_credential_path=False) == "rust"
 
 
 @pytest.mark.parametrize("subject", sorted(key for key, spec in VENDORS.items() if spec.live_file_from_context))

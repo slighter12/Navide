@@ -6,10 +6,9 @@ snapshot of the Python path captured on the same architecture (windows_baseline/
 test_launch_snapshots_windows.py at the revision named in the evidence). No macOS or Linux snapshot
 is read.
 
-Windows composition is still Python's (delta 3.1 transition), so each owned receipt says
-`argv_source: python`; the rows prove a Rust-selected, child-observed launch for every subject,
-including every vendor that has no Rust observer (observation is Python-side on Windows, D2).
-They cannot satisfy a required `argv_source: rust` case, and this file does not claim that.
+Windows composition is the Rust runtime's (ticket 07 removed the delta 3.1 transition), so each owned
+receipt says `argv_source: rust`; the rows prove a Rust-composed, child-observed launch for every
+subject, including every vendor that has no Rust observer (observation is Python-side on Windows, D2).
 """
 from __future__ import annotations
 
@@ -53,4 +52,4 @@ async def test_rust_runtime_launch_equals_the_pinned_python_baseline(subject, fo
         assert snapshot[key] == expected[key], f"{subject}/{form}: {key} differs from the pinned Python-path baseline"
     owned = _owned(root)
     assert len(owned) == 1, owned  # the launch went through the Rust sidecar, once
-    assert owned[0].get("argv_source") == "python", owned[0]  # the transition row, stated, not hidden
+    assert owned[0].get("argv_source") == "rust", owned[0]  # composed by the sidecar, not pre-composed by Python

@@ -357,7 +357,7 @@ struct CreateArgs {
     workspace: String,
     cwd: String,
     argv: Vec<String>,
-    /// Always `python` here: ticket 04 leaves Windows on the pre-composed shape until ticket 07 (delta 3.1).
+    /// `rust` for a composed `direct` launch, `python` for the pre-composed `argv` shape (delta 3.1).
     argv_source: &'static str,
     argv0: compose::Argv0,
     env: Vec<(String, String)>,
@@ -371,24 +371,32 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
         return Err(io::Error::other("invalid launch_shape: argv, argv_source and argv0 are not CREATE fields"));
     }
     let launch = args.get("launch").ok_or_else(|| io::Error::other("invalid launch_shape: launch is required"))?;
-    // The Windows transition row: only the pre-composed shape is admitted; structured shapes are refused.
-    compose::admit(&agent, launch.get("shape").and_then(Value::as_str).unwrap_or(""), true).map_err(|error| {
-        io::Error::other(format!("invalid composition: {error:?}"))
-    })?;
-    let argv: Vec<String> = launch["argv"]
-        .as_array()
-        .ok_or_else(|| io::Error::other("invalid launch_shape: argv must be an array"))?
-        .iter()
-        .map(|v| {
-            v.as_str()
-                .filter(|s| !s.contains('\0'))
-                .map(String::from)
-                .ok_or_else(|| io::Error::other("invalid validate: argv holds a non-string or NUL"))
-        })
-        .collect::<io::Result<_>>()?;
-    let argv0 = compose::attest(
-        argv.first().filter(|program| !program.is_empty()).ok_or_else(|| io::Error::other("invalid launch_shape: argv is empty"))?,
-    );
+    let shape = launch.get("shape").and_then(Value::as_str).unwrap_or("");
+    compose::admit(&agent, shape, true).map_err(|error| io::Error::other(format!("invalid composition: {error:?}")))?;
+    let (argv, argv_source, argv0) = if shape == "direct" {
+        // Composed here, with the Windows grammar; the receipt says so.
+        let composed = compose::compose_windows(&agent, launch)
+            .map_err(|error| io::Error::other(format!("invalid composition: {error:?}")))?;
+        let argv: Vec<String> = std::iter::once(composed.program).chain(composed.args).collect();
+        (argv, composed.argv_source, composed.argv0)
+    } else {
+        // The managed-credential launch keeps the pre-composed shape on Windows (`compose::admit`).
+        let argv: Vec<String> = launch["argv"]
+            .as_array()
+            .ok_or_else(|| io::Error::other("invalid launch_shape: argv must be an array"))?
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .filter(|s| !s.contains('\0'))
+                    .map(String::from)
+                    .ok_or_else(|| io::Error::other("invalid validate: argv holds a non-string or NUL"))
+            })
+            .collect::<io::Result<_>>()?;
+        let argv0 = compose::attest(
+            argv.first().filter(|program| !program.is_empty()).ok_or_else(|| io::Error::other("invalid launch_shape: argv is empty"))?,
+        );
+        (argv, "python", argv0)
+    };
     let mut env = Vec::new();
     for (key, value) in args["env"]
         .as_object()
@@ -410,7 +418,7 @@ fn create_args(args: &Value) -> io::Result<CreateArgs> {
         workspace: text(args, "workspace_path")?.to_owned(),
         cwd: text(args, "cwd")?.to_owned(),
         argv,
-        argv_source: "python",
+        argv_source,
         argv0,
         env,
         rows: dimension(args, "rows")?,
