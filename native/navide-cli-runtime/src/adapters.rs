@@ -14,7 +14,7 @@ pub fn integrated(key: &str) -> bool {
     cfg!(unix)
         && (matches!(
             key,
-            "claude" | "codex" | "droid" | "grok" | "kimi" | "muse" | "pi" | "qwen"
+            "aider" | "claude" | "codex" | "droid" | "grok" | "kimi" | "muse" | "pi" | "qwen"
         )
             || (cfg!(target_os = "macos") && key == "opencode"))
 }
@@ -71,6 +71,7 @@ pub fn max_grace_ms() -> u64 {
 #[cfg(unix)]
 pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u8>>)> {
     match args["vendor"].as_str() {
+        Some("aider") => super::observe_aider::observe(args, expected),
         Some("claude") => super::claude::observe(args, expected),
         Some("codex") => super::codex::observe(args, expected),
         Some("droid") => super::observe_droid::observe(args, expected),
