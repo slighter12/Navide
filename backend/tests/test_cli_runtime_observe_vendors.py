@@ -188,10 +188,12 @@ async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: Vendor
                                        metadata={"session_marker": MARKER})
         await backend.expect_output(ws, created["terminal_session_id"], "TRANSPORT_READY")
         for phase in phases:
-            if phase == "initial" and data.has_schema(phase):
+            if phase == "initial" and data.has_schema(phase) and data.shared_store:
                 # A watcher's first sight of a store records its high-water mark and emits nothing for several vendors.
                 # Where that falls against the first rows decides whether a row is reported or taken as history, and
                 # so which of a pass's two sinks speaks first. Let the empty store be seen before its rows exist.
+                # Only for a shared store: a per-session file (Antigravity's conversation db, Cursor's store.db) comes
+                # into being together with its first rows, so there is no empty state to see first.
                 data.apply(phase, only="schema")
                 await _settle(backend, ws)
                 data.apply(phase, only="rows")
