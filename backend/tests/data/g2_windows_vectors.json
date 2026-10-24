@@ -13,7 +13,7 @@
     {"input": "a\\\"b", "quoted": "a\\\\\\\"b"},
     {"input": "a\\\\\"b c", "quoted": "\"a\\\\\\\\\\\"b c\""}
   ],
-  "split_rule": "CommandLineToArgvW: the first word is read without escapes (a quote only brackets it); later words use 2n backslashes + quote -> n backslashes and a toggle, 2n+1 -> n backslashes and a literal quote, and a doubled quote inside quotes is a literal quote; whitespace is space and tab",
+  "split_rule": "CommandLineToArgvW: the first word is read without escapes (a quote only brackets it); later words use 2n backslashes + quote -> n backslashes and a toggle, 2n+1 -> n backslashes and a literal quote, and a doubled quote inside quotes is a literal quote that ends the quoted run; leading whitespace is an empty first word; whitespace is space and tab",
   "split": [
     {"line": "prog a b", "words": ["prog", "a", "b"]},
     {"line": "prog   a  ", "words": ["prog", "a"]},
@@ -24,7 +24,7 @@
     {"line": "prog C:\\dir\\ next", "words": ["prog", "C:\\dir\\", "next"]},
     {"line": "prog \"C:\\dir with space\\\\\" next", "words": ["prog", "C:\\dir with space\\", "next"]},
     {"line": "prog a\\\\\\\"b", "words": ["prog", "a\\\"b"]},
-    {"line": "prog \"a \"\"b\"\" c\"", "words": ["prog", "a \"b\" c"]},
+    {"line": "prog \"a \"\"b\"\" c\"", "words": ["prog", "a \"b", "c"]},
     {"line": "prog \"\"", "words": ["prog", ""]},
     {"line": "prog a\"b c\"d", "words": ["prog", "ab cd"]},
     {"line": "prog --model \"it's a \\\"x\\\" \\\\\"", "words": ["prog", "--model", "it's a \"x\" \\"]}

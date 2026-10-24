@@ -172,7 +172,7 @@ fn quote_windows(arg: &str) -> String {
 /// `CommandLineToArgvW`, the grammar of `osplat/_windows.py` `_split_command_line` (which asks the OS).
 /// The first word is read without escapes (a quote only brackets it); later words use `2n` backslashes
 /// plus a quote -> `n` backslashes and a toggle, `2n+1` -> `n` backslashes and a literal quote, and a
-/// doubled quote inside quotes is a literal quote. Whitespace is space and tab. An unmatched quote runs
+/// doubled quote inside quotes is a literal quote that ends the quoted run. Whitespace is space and tab. An unmatched quote runs
 /// to the end, as the OS does, so this never fails.
 fn split_windows(line: &str) -> Vec<String> {
     let chars: Vec<char> = line.chars().collect();
@@ -228,7 +228,9 @@ fn split_windows(line: &str) -> Vec<String> {
                 }
                 '"' => {
                     if in_quote && at + 1 < size && chars[at + 1] == '"' {
+                        // A doubled quote is a literal quote that also ends the quoted run.
                         value.push('"');
+                        in_quote = false;
                         at += 2;
                     } else {
                         in_quote = !in_quote;
