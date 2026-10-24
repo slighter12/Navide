@@ -13,7 +13,9 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const FAULT_HOOKS_LITERAL = Buffer.from('fault-graceful')
+// A message literal that exists only inside #[cfg(feature = "fault-hooks")] code in posix.rs. (The
+// `fault-graceful` constant is compared inline and does not survive as one contiguous string.)
+const FAULT_HOOKS_LITERAL = Buffer.from('fault: exit watcher could not start')
 
 function parseArgs(argv) {
   const args = { junit: [] }
