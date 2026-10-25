@@ -71,7 +71,7 @@ export function stageOf(id) {
 }
 
 export function requiredIds(text) {
-  return text.split(/\r?\n/).map(line => line.trim()).filter(line => line.includes('::') && !line.includes(' '))
+  return text.split(/\r?\n/).map(line => line.trim()).filter(line => /^[\w./-]+\.py::\S/.test(line))
 }
 
 function guard(args) {
