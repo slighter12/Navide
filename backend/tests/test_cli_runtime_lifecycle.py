@@ -35,8 +35,8 @@ PEER = Path(__file__).parent / "cli_regression/support/lifecycle_peer.py"
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(sys.platform != "darwin" or not PRODUCT.is_file() or not HARNESS.is_file(),
-                       reason="requires the explicitly built macOS native runtime (product and harness)"),
+    pytest.mark.skipif(sys.platform == "win32" or not PRODUCT.is_file() or not HARNESS.is_file(),
+                       reason="requires the explicitly built POSIX native runtime (product and harness)"),
 ]
 
 LOSS_BOUND_S = (cli_runtime.TASK_DRAIN_S + cli_runtime.SIDECAR_EXIT_S + cli_runtime.PERSIST_WAIT_S
@@ -122,6 +122,7 @@ class LifeRig:
         self.root, self.monkeypatch = root, monkeypatch
         self.sink = Sink()
         self.services: list[RustTerminalService] = []
+        self.batches: dict[int, list[bytes]] = {}
         self.pids: set[int] = set()
         self.binary = root / "runtime-under-test"
         shutil.copyfile(binary, self.binary)
@@ -136,6 +137,13 @@ class LifeRig:
 
     def service(self) -> RustTerminalService:
         service = RustTerminalService(self.sink)
+        mirror = service._mirror_flush_to_log
+
+        def recording_mirror(session, combined: bytes) -> None:
+            self.batches.setdefault(session.id, []).append(combined)  # a taken batch, including pieces still behind a blocked emit
+            return mirror(session, combined)
+
+        service._mirror_flush_to_log = recording_mirror
         self.services.append(service)
         return service
 
@@ -161,7 +169,8 @@ class LifeRig:
         taken = b"".join(a[2] for a in self.sink.attempts if a[0] == "out" and a[1] == session.id)
         delivered = self.sink.raw(session.id)
         buffered = b"".join(service._out_buffers.get(session.id, []))
-        return max(taken, delivered, key=len).count(marker) + buffered.count(marker)
+        batched = b"".join(self.batches.get(session.id, []))
+        return max(taken, delivered, batched, key=len).count(marker) + buffered.count(marker)
 
     @staticmethod
     async def until(predicate, message: str, timeout: float = 15):
@@ -364,6 +373,7 @@ async def test_t3_shutdown_variant_kill_all_reaches_a_root_live_session_within_c
 
 # --------------------------------------------------------------------------------------- T4
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only: the kernel revokes the controlling terminal when the session leader exits; the Linux behaviour is test_t4_on_linux_...")
 async def test_t4_on_macos_root_exit_always_ends_the_stream_even_with_a_descendant_holding_the_slave(rig):
     """E1 R-d expects no EOF while a descendant holds the slave. Measured on macOS (also for the
     baseline Python spawn, see the checkpoint note): the kernel revokes the controlling terminal when
@@ -379,6 +389,30 @@ async def test_t4_on_macos_root_exit_always_ends_the_stream_even_with_a_descenda
     rig.sink.assert_exit_after_last_byte(session.id)
     await rig.until(lambda: session.cleanup.is_set(), "cleanup after EOF", 15)
     assert not alive(child) and not session.cleanup_error
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux counterpart of the macOS T4 case")
+async def test_t4_on_linux_a_descendant_holding_the_slave_survives_the_root_and_is_reported(rig):
+    """Linux hangs up the foreground group when the session leader exits, so a plain descendant dies
+    with it; one that ignores SIGHUP keeps the slave open (E1 R-d). The sidecar never signals it by a
+    reusable id (ticket 03): the stream stays open, and a kill ends the session with an incomplete
+    cleanup that names the descendant, which is still running."""
+    service = rig.service()
+    session = await rig.life(service, "pane-t4l")
+    await rig.say(service, session, "child-nohup")
+    await rig.until(lambda: "CHILD " in rig.sink.text(session.id), "descendant started")
+    child = json.loads(rig.sink.text(session.id).split("CHILD ")[1].splitlines()[0])["pid"]
+    rig.pids.add(child)
+    await rig.say(service, session, "exit")
+    await asyncio.sleep(2.0)  # a functional hold: the stream must stay open while the slave is held
+    assert not rig.sink.exits(session.id), "no EOF while a descendant holds the slave"
+    assert not session.cleanup.is_set() and alive(child), "the descendant was not signalled by the root's exit"
+    with pytest.raises(RuntimeError, match="CLEANUP_FAILED: native cleanup incomplete"):
+        await service.kill(session.id, force=True)
+    cleaned = rig.receipts_of("cleaned", session_id=session.id)[0]
+    assert cleaned["cleanup_complete"] is False and cleaned["root_reaped"] is True, cleaned
+    assert [s["pid"] for s in cleaned["survivors"]] == [child], "the receipt names the descendant it did not signal"
+    assert alive(child)
 
 
 async def test_t4_kill_cleans_a_recorded_descendant_by_identity(rig):

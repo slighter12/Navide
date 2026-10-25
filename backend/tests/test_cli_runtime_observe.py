@@ -29,8 +29,8 @@ from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT, FramePeer
 from tests.cli_regression.support.isolation import isolated_environment
 
 pytestmark = pytest.mark.skipif(
-    sys.platform != "darwin" or not PRODUCT.is_file() or not HARNESS.is_file(),
-    reason="requires the explicitly built macOS native runtime (product and harness)")
+    sys.platform == "win32" or not PRODUCT.is_file() or not HARNESS.is_file(),
+    reason="requires the explicitly built POSIX native runtime (product and harness)")
 
 BACKEND = Path(__file__).resolve().parents[1]
 PEER = Path(__file__).parent / "cli_regression/support/handoff_peer.py"

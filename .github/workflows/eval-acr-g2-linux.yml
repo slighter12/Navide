@@ -70,7 +70,7 @@ jobs:
       - name: Require every listed case to be collected and passed
         id: guard
         if: always() && steps.build.outcome == 'success'
-        run: node tests/cli/g2Native.mjs guard --platform linux --arch ${{ matrix.arch }} --required tests/cli/g2-required-linux.txt --skip-allowed test_cli_runtime_recovery.py,test_cli_runtime_lifecycle.py,test_cli_runtime_handoff.py,test_cli_runtime_sidecar.py,test_cli_runtime_review1.py,test_cli_runtime_observe.py --junit test-results/ci/g2-linux-junit.xml --out test-results/ci/g2-linux-outcomes.log
+        run: node tests/cli/g2Native.mjs guard --platform linux --arch ${{ matrix.arch }} --required tests/cli/g2-required-linux.txt --skip-allowed test_cli_runtime_recovery.py,test_cli_runtime_lifecycle.py --junit test-results/ci/g2-linux-junit.xml --out test-results/ci/g2-linux-outcomes.log
 
       - name: Require every ready receipt to name the freshly built sidecar
         id: receipts
