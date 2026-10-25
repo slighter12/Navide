@@ -126,7 +126,12 @@ function findReceipts(root, found = []) {
 function receipts(args) {
   let ready = 0
   const foreign = new Set()
+  // A receipt may name the fault-hooks harness sidecar (its hash is exported by the build) anywhere. A sidecar
+  // that is neither it nor the release build is accepted only in a test directory declared as substituting
+  // its own peer (stub or handshake peers, which write their own ready record); anywhere else it is foreign.
+  const substituted = (args.substituted ?? '').split(',').filter(Boolean)
   for (const file of findReceipts(args.root)) {
+    const testDir = file.split('/').slice(-2)[0]
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       if (!line.includes('"ready"')) continue
       let record
@@ -137,7 +142,10 @@ function receipts(args) {
       }
       if (record.event !== 'ready') continue
       ready += 1
-      if (record.executableSha256 !== args.sha) foreign.add(String(record.executableSha256))
+      if (record.executableSha256 === args.sha) continue
+      if (args['harness-sha'] && record.executableSha256 === args['harness-sha']) continue
+      if (substituted.some(prefix => testDir.startsWith(prefix))) continue
+      foreign.add(`${record.executableSha256} in ${testDir}`)
     }
   }
   console.log(`ready receipts=${ready} expected executableSha256=${args.sha} foreign hashes=${foreign.size}`)
