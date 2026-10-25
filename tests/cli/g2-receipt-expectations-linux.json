@@ -1,0 +1,883 @@
+{
+  "stubs": {
+    "review1": "e192f04c8aa7aeb560d52777825912f41021199ecc00a835d992e7f1caae3d5b",
+    "observe": "d4483e3f3aa77a3e1a1b9a1c092a04b1fbfd90bf16f6b00970a866f9b7d1a817",
+    "handshake-after-ready": "cf4b75bcbb0accf814696630f86c4386d9d2e6997766ba536a4920e70952fcc6"
+  },
+  "cases": [
+    {
+      "dir": "test_a_sidecar_refusal_keeps_t",
+      "tests": [
+        "test_a_sidecar_refusal_keeps_the_session_id_and_the_sidecars_own_stage"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_abandoned_create_blocks_a",
+      "tests": [
+        "test_abandoned_create_blocks_another_pane_resuming_the_same_session"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_abandoned_create_is_clean",
+      "tests": [
+        "test_abandoned_create_is_cleaned_never_resurrected_and_blocks_replacement"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_an_attestation_that_does_",
+      "tests": [
+        "test_an_attestation_that_does_not_match_the_program_sent_is_a_failed_binding_check_that_kills_the_root"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_b10_a_failure_whose_reap_",
+      "tests": [
+        "test_b10_a_failure_whose_reap_cannot_be_verified_is_cleanup_failed_and_ends_the_generation"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_b10_a_session_thread_that",
+      "tests": [
+        "test_b10_a_session_thread_that_cannot_start_kills_and_reaps_before_answering"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_b10_an_exit_watcher_failu",
+      "tests": [
+        "test_b10_an_exit_watcher_failure_after_gate_release_kills_and_reaps_before_answering"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_b1_a_root_that_exits_befo",
+      "tests": [
+        "test_b1_a_root_that_exits_before_the_create_answer_still_delivers_its_output_ends_its_stream_and_publishes_its_exit"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_b1_known_survivor_keeps_i",
+      "tests": [
+        "test_b1_known_survivor_keeps_its_durable_row_through_late_registration_and_restart"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_b2_child_spawned_before_o",
+      "tests": [
+        "test_b2_child_spawned_before_owned_was_read_is_cleaned_from_the_sidecar_journal"
+      ],
+      "kinds": [
+        "harness",
+        "release"
+      ]
+    },
+    {
+      "dir": "test_b2_unreadable_sidecar_jou",
+      "tests": [
+        "test_b2_unreadable_sidecar_journal_keeps_the_fence_and_the_journal"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_b3_a_late_answer_to_an_ex",
+      "tests": [
+        "test_b3_a_late_answer_to_an_expired_request_is_tolerated_once"
+      ],
+      "kinds": [
+        "stub:review1"
+      ]
+    },
+    {
+      "dir": "test_b3_cancel_while_the_creat",
+      "tests": [
+        "test_b3_cancel_while_the_create_waits_for_the_send_lock_never_reaches_the_sidecar"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_b3_end_to_end_a_wrong_cod",
+      "tests": [
+        "test_b3_end_to_end_a_wrong_code_answer_ends_the_generation"
+      ],
+      "kinds": [
+        "stub:review1"
+      ]
+    },
+    {
+      "dir": "test_b4_a_create_waits_create_",
+      "tests": [
+        "test_b4_a_create_waits_create_answer_ms_not_request_ms_and_then_the_generation_is_lost"
+      ],
+      "kinds": [
+        "stub:review1"
+      ]
+    },
+    {
+      "dir": "test_b5_a_prevented_cancel_set",
+      "tests": [
+        "test_b5_a_prevented_cancel_settles_the_lost_create_without_a_generation_loss"
+      ],
+      "kinds": [
+        "stub:review1"
+      ]
+    },
+    {
+      "dir": "test_b6_an_unresolved_panel_se",
+      "tests": [
+        "test_b6_an_unresolved_panel_settlement_refuses_and_retires_no_record"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_b6_kill_surface_settles_a",
+      "tests": [
+        "test_b6_kill_surface_settles_an_unpublished_panel_create_before_it_answers"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_b8_loss_is_bounded_by_tas",
+      "tests": [
+        "test_b8_loss_is_bounded_by_task_drain_when_an_event_task_refuses_to_be_cancelled"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_b8_the_loss_receipt_carri",
+      "tests": [
+        "test_b8_the_loss_receipt_carries_every_stage_transition"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_b9_a_request_that_expires",
+      "tests": [
+        "test_b9_a_request_that_expires_while_the_sidecar_still_answers_ping_fails_only_that_request"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_b9_an_unanswered_ping_aft",
+      "tests": [
+        "test_b9_an_unanswered_ping_after_a_request_expiry_is_runtime_loss"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_cancel_while_waiting_for_",
+      "tests": [
+        "test_cancel_while_waiting_for_the_bridge_wire_prevents_any_native_spawn"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_create_cancelled_mid_send",
+      "tests": [
+        "test_create_cancelled_mid_send_never_leaves_a_torn_control_frame"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_f1_unpersisted_owned_spaw",
+      "tests": [
+        "test_f1_unpersisted_owned_spawn_is_cleaned_by_identity_before_a_fresh_runtime"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_f2_failed_abandoned_clean",
+      "tests": [
+        "test_f2_failed_abandoned_cleanup_keeps_the_replacement_blocked_while_the_child_lives"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_f2_pipeline_retirement_se",
+      "tests": [
+        "test_f2_pipeline_retirement_settles_an_unpublished_create_before_it_answers"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_f3_an_unresolved_settleme",
+      "tests": [
+        "test_f3_an_unresolved_settlement_refuses_and_retires_no_record"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_f4_native_cleanup_failure",
+      "tests": [
+        "test_f4_native_cleanup_failure_invalidates_the_runtime_for_every_session_and_request"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_f6_observe_inflight_caps_",
+      "tests": [
+        "test_f6_observe_inflight_caps_open_observations_at_four_and_queues_the_fifth"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_gate_journal_refusal_leav",
+      "tests": [
+        "test_gate_journal_refusal_leaves_no_executed_target_and_no_process"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_gate_normal_path_keeps_se",
+      "tests": [
+        "test_gate_normal_path_keeps_session_group_and_controlling_terminal"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_gate_serialises_concurren",
+      "tests": [
+        "test_gate_serialises_concurrent_creates_without_cross_talk"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_gate_sidecar_death_during",
+      "tests": [
+        "test_gate_sidecar_death_during_the_gate_leaves_no_executed_target_and_no_process"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_h1_healthy_handshake_reco",
+      "tests": [
+        "test_h1_healthy_handshake_records_the_real_hashed_binary"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_h5_h7_ready_with_a_wrong_",
+      "tests": [
+        "test_h5_h7_ready_with_a_wrong_field_or_a_g1_candidate_protocol_is_a_mismatch"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_h8_bytes_after_ready_on_s",
+      "tests": [
+        "test_h8_bytes_after_ready_on_stdout_are_a_protocol_error"
+      ],
+      "kinds": [
+        "stub:handshake-after-ready"
+      ]
+    },
+    {
+      "dir": "test_incomplete_cleanup_keeps_",
+      "tests": [
+        "test_incomplete_cleanup_keeps_fresh_runtime_and_observation_refused"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1_sidecar_sigkill_cleans",
+      "tests": [
+        "test_l1_sidecar_sigkill_cleans_every_session_by_identity_and_presents_one_exit_each"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1_timed_out_cleanup_wait",
+      "tests": [
+        "test_l1_timed_out_cleanup_wait_is_the_explicit_reap_timeout_refusal"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1b_loss_order_and_bounds",
+      "tests": [
+        "test_l1b_loss_order_and_bounds_with_a_wedged_sink"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1b_variant_a_sink_releas",
+      "tests": [
+        "test_l1b_variant_a_sink_released_inside_the_bound_delivers_everything_in_order_without_a_marker"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1c_loss_after_partial_de",
+      "tests": [
+        "test_l1c_loss_after_partial_delivery_never_resends_the_in_flight_piece"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1d_a_split_multibyte_cha",
+      "tests": [
+        "test_l1d_a_split_multibyte_character_at_the_loss_cut_matches_the_baseline_log_path"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1e_close_once_a_retained",
+      "tests": [
+        "test_l1e_close_once_a_retained_stream_closed_session_never_closes_a_reused_number"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l1f_a_late_normal_closer_",
+      "tests": [
+        "test_l1f_a_late_normal_closer_cannot_close_a_reused_number_or_publish_after_loss"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l2_a_wedged_sidecar_fails",
+      "tests": [
+        "test_l2_a_wedged_sidecar_fails_the_request_then_the_unanswered_ping_is_loss"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l4_sidecar_killed_after_t",
+      "tests": [
+        "test_l4_sidecar_killed_after_the_journal_append_is_cleaned_from_the_journal"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_l7_stale_events_of_a_reti",
+      "tests": [
+        "test_l7_stale_events_of_a_retired_generation_cannot_act_on_the_replacement"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_l8_f3_principal_a_corrupt",
+      "tests": [
+        "test_l8_f3_principal_a_corrupt_frame_from_the_sidecar_ends_in_loss_and_recovery"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_loss_cleanup_never_touche",
+      "tests": [
+        "test_loss_cleanup_never_touches_another_runtime"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_n2_cancel_after_the_nativ",
+      "tests": [
+        "test_n2_cancel_after_the_native_answer_is_proven_only_by_verified_cleanup"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_note1_a_registration_that",
+      "tests": [
+        "test_note1_a_registration_that_outlives_the_cleanup_wait_cannot_recreate_a_dead_roots_row"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_o1_a_result_over_the_limi",
+      "tests": [
+        "test_o1_a_result_over_the_limit_sends_no_part_and_is_a_refusal_without_loss"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_o2_observation_violations",
+      "tests": [
+        "test_o2_observation_violations_by_a_faulty_peer_end_in_loss"
+      ],
+      "kinds": [
+        "stub:observe"
+      ]
+    },
+    {
+      "dir": "test_o3_an_endless_part_stream",
+      "tests": [
+        "test_o3_an_endless_part_stream_stops_at_the_counters_and_runs_loss"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_observation_across_runtim",
+      "tests": [
+        "test_observation_across_runtime_loss_is_unchanged_and_not_duplicated"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p11_a_journal_that_cannot",
+      "tests": [
+        "test_p11_a_journal_that_cannot_be_appended_refuses_the_create_and_the_target_never_runs"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p1_an_oversized_handoff_i",
+      "tests": [
+        "test_p1_an_oversized_handoff_is_refused_before_any_process_exists"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p1_p5_p6_a_published_sess",
+      "tests": [
+        "test_p1_p5_p6_a_published_session_runs_over_the_handed_off_master"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p3_a_short_first_send_sti",
+      "tests": [
+        "test_p3_a_short_first_send_still_associates_the_descriptor_with_its_frame"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_p3_zero_progress_on_the_f",
+      "tests": [
+        "test_p3_zero_progress_on_the_first_send_is_channel_loss_with_no_misassociated_descriptor"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_p4_descriptor_counts_retu",
+      "tests": [
+        "test_p4_descriptor_counts_return_to_baseline_after_create_kill_cycles"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p7a_a_caller_cancelled_af",
+      "tests": [
+        "test_p7a_a_caller_cancelled_after_dispatch_is_resolved_by_verified_cleanup"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p7b_a_missing_create_answ",
+      "tests": [
+        "test_p7b_a_missing_create_answer_after_owned_is_settled_by_one_session_cleanup"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_p7d_p10_cancel_before_the",
+      "tests": [
+        "test_p7d_p10_cancel_before_the_gate_is_prevented_and_leaves_no_root_and_no_descriptor"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p9_a_single_wrong_descrip",
+      "tests": [
+        "test_p9_a_single_wrong_descriptor_fails_closed_and_unrelated_sessions_keep_running"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_p9_thirty_two_simultaneou",
+      "tests": [
+        "test_p9_thirty_two_simultaneous_creates_deliver_each_marker_only_to_its_own_cli"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_p9c_a_tty_already_held_by",
+      "tests": [
+        "test_p9c_a_tty_already_held_by_a_claimed_session_fails_check_3"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_p9e_a_consistently_swappe",
+      "tests": [
+        "test_p9e_a_consistently_swapped_pair_is_accepted_documented_limitation_not_a_pass_criterion"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_r1_b1_quiescent_all_old_w",
+      "tests": [
+        "test_r1_b1_quiescent_all_old_width_lines_precede_the_acknowledgement"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_r2_flood_during_resize_pr",
+      "tests": [
+        "test_r2_flood_during_resize_preserves_order_accounts_drops_and_emits_late_bytes_after_the_ack"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_r3_resize_for_a_finished_",
+      "tests": [
+        "test_r3_resize_for_a_finished_session_is_not_applied_and_does_not_hang"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_r4_redraw_applies_two_siz",
+      "tests": [
+        "test_r4_redraw_applies_two_size_changes_and_concurrent_resizes_serialize"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_r4_resizes_on_different_s",
+      "tests": [
+        "test_r4_resizes_on_different_sessions_run_independently"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_r5_barrier_mechanics_lock",
+      "tests": [
+        "test_r5_barrier_mechanics_lock_held_across_slurp_resize_ack_and_tail"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_r6_1_a_create_whose_succe",
+      "tests": [
+        "test_r6_1_a_create_whose_success_is_being_sent_has_exactly_one_coherent_outcome"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_r6_1_a_success_send_that_",
+      "tests": [
+        "test_r6_1_a_success_send_that_finds_the_connection_dead_rolls_the_term_back"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_r6_a_partial_redraw_repor",
+      "tests": [
+        "test_r6_a_partial_redraw_reports_the_first_step_and_is_never_retried"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_r8_1b_unspawn_settles_an_",
+      "tests": [
+        "test_r8_1b_unspawn_settles_an_unpublished_create_before_it_answers"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_replacement_create_after_",
+      "tests": [
+        "test_replacement_create_after_the_abandoned_launch_lost_the_runtime_starts_a_fresh_one"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_replacement_runtime_failu",
+      "tests": [
+        "test_replacement_runtime_failure_after_loss_is_explicit"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_s2_a_term_trapping_cli_es",
+      "tests": [
+        "test_s2_a_term_trapping_cli_escalates_and_a_plain_one_completes_without_escalation"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_s6_a_create_cleanup_faile",
+      "tests": [
+        "test_s6_a_create_cleanup_failed_ends_the_generation"
+      ],
+      "kinds": [
+        "stub:review1"
+      ]
+    },
+    {
+      "dir": "test_s6_kill_accepted_then_an_",
+      "tests": [
+        "test_s6_kill_accepted_then_an_incomplete_cleanup_is_a_fence_and_loss"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_s9_unrelated_panes_surviv",
+      "tests": [
+        "test_s9_unrelated_panes_survive_one_sessions_request_expiry_and_input_does_not_wait_on_output"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_sidecar_death_invalidates",
+      "tests": [
+        "test_sidecar_death_invalidates_every_session_and_cleans_only_its_own_tree"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t1a_root_exit_with_an_unr",
+      "tests": [
+        "test_t1a_root_exit_with_an_unread_tail_and_a_slow_consumer_loses_nothing"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t1b_forced_interleaving_e",
+      "tests": [
+        "test_t1b_forced_interleaving_every_retained_byte_precedes_the_exit_and_the_log_matches"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t2_eof_before_root_exit_p",
+      "tests": [
+        "test_t2_eof_before_root_exit_publishes_after_both"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t3_root_live_fence_refuse",
+      "tests": [
+        "test_t3_root_live_fence_refuses_creates_then_the_user_path_kills_it_and_a_create_succeeds"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t3_shutdown_variant_kill_",
+      "tests": [
+        "test_t3_shutdown_variant_kill_all_reaches_a_root_live_session_within_cleanup_ms"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t4_after_eof_the_remainin",
+      "tests": [
+        "test_t4_after_eof_the_remaining_descendants_are_swept_by_identity"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t4_kill_cleans_a_recorded",
+      "tests": [
+        "test_t4_kill_cleans_a_recorded_descendant_by_identity"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t4_on_linux_a_descendant_",
+      "tests": [
+        "test_t4_on_linux_a_descendant_holding_the_slave_survives_the_root_and_is_reported"
+      ],
+      "kinds": [
+        "release"
+      ]
+    },
+    {
+      "dir": "test_t6_eof_during_an_active_r",
+      "tests": [
+        "test_t6_eof_during_an_active_resize_barrier_waits_for_the_control_lock_then_publishes_the_tail"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_unreadable_registry_keeps",
+      "tests": [
+        "test_unreadable_registry_keeps_the_fence_closed_and_never_clears_the_loss"
+      ],
+      "kinds": [
+        "release"
+      ]
+    }
+  ]
+}
