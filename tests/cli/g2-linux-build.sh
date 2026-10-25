@@ -29,6 +29,7 @@ sha=$(sha256sum "$release_bin" | cut -d' ' -f1)
   echo "NAVIDE_T05_SIDECAR=$release_bin"
   echo "NAVIDE_CLI_RUNTIME_HARNESS_BIN=$harness_bin"
   echo "G2_SIDECAR_SHA=$sha"
+  echo "G2_HARNESS_SHA=$(sha256sum "$harness_bin" | cut -d' ' -f1)"
   echo "G2_BASETEMP=$RUNNER_TEMP/g2-basetemp"
 } >> "$GITHUB_ENV"
 echo "uname -m: $(uname -m); principal sidecar sha256: $sha"
