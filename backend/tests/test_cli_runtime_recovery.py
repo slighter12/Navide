@@ -27,15 +27,16 @@ from agent_team_backend import pty_registry
 from agent_team_backend.applog import in_data_dir
 from agent_team_backend.cli_runtime import CreateCancelled, RustTerminalService
 from tests.cli_regression.support.cli_shim import base_python_executable
+from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT
 from tests.cli_regression.support.isolation import isolated_environment
 
-BINARY = Path(__file__).resolve().parents[2] / "native/navide-cli-runtime/target/release/navide-cli-runtime"
+BINARY = PRODUCT  # NAVIDE_CLI_RUNTIME_BIN, else the in-repo release build
 PEER = Path(__file__).parent / "cli_regression/support/native_shell_peer.py"
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(sys.platform != "darwin" or not BINARY.is_file(),
-                       reason="requires the explicitly built macOS native runtime"),
+    pytest.mark.skipif(sys.platform == "win32" or not BINARY.is_file(),
+                       reason="requires the explicitly built POSIX native runtime"),
 ]
 
 
@@ -247,7 +248,7 @@ async def test_replacement_runtime_failure_after_loss_is_explicit(rig, failure):
         rig.runtime_bin.chmod(0o600)
         expected = "START_FAILED at exec"
     elif failure == "protocol-mismatch":
-        harness = BINARY.parents[2] / "target-harness/release/navide-cli-runtime"  # the forced-wire hook is harness-only
+        harness = HARNESS  # the forced-wire hook is harness-only
         rig.runtime_bin.write_text(f'#!/bin/sh\nexec {harness} "$@" --ready-wire 999\n')
         rig.runtime_bin.chmod(0o755)
         expected = "PROTOCOL_MISMATCH at handshake"
@@ -502,7 +503,7 @@ async def test_b2_child_spawned_before_owned_was_read_is_cleaned_from_the_sideca
     answer was ever sent to Python (substituted: the harness build's `suppress-owned-and-response`
     fault, which replaces the old gated read side of the pipe). Its identity can only come from the
     sidecar's own durable ownership journal. The child is NOT registered with `rig.pids`."""
-    harness = BINARY.parents[2] / "target-harness/release/navide-cli-runtime"
+    harness = HARNESS
     shutil.copyfile(harness, rig.runtime_bin)
     rig.runtime_bin.chmod(0o755)
     pid_file = rig.root / "spawned.pid"
@@ -938,7 +939,7 @@ async def test_gate_normal_path_keeps_session_group_and_controlling_terminal(rig
     assert os.getsid(pid) == pid and os.getpgid(pid) == pid
     owned = next(r for r in rig.receipts() if r["event"] == "owned" and r["session_id"] == session.id)
     assert owned["root"]["pid"] == pid and owned["root"]["pgid"] == pid and owned["root"]["start_value"]
-    assert process.terminal() and process.terminal().startswith("/dev/tty")
+    assert process.terminal() and process.terminal().startswith(("/dev/tty", "/dev/pts/"))
     journal = in_data_dir(rig.root, pty_registry.journal_path, service._runtime_generation)()
     lines = [json.loads(line) for line in journal.read_text().splitlines()]
     assert lines[0]["journal"] == "header" and lines[0]["owner_pid"] == os.getpid()
@@ -958,6 +959,7 @@ async def test_gate_serialises_concurrent_creates_without_cross_talk(rig):
     assert service._lost is None
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Linux test-technique gap (unverified on Linux, owner ticket 09): the hold is a FIFO journal, and the append's fsync on a FIFO is EINVAL on Linux (macOS accepts it); a regular file cannot hold an open")
 async def test_f2r4_cancel_during_a_held_gate_is_acked_only_with_proof_and_the_target_never_executes(rig, handler_world):
     """The journal append is held (FIFO), the renderer's cancel arrives through the handler while the
     root waits at the gate, and only afterwards the hold is released. The ACK must come with proof the
@@ -1002,6 +1004,7 @@ async def test_f2r4_cancel_during_a_held_gate_is_acked_only_with_proof_and_the_t
         cleanup_leaks(rig, marker, detached)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Linux test-technique gap (unverified on Linux, owner ticket 09): the hold is a FIFO journal, and the append's fsync on a FIFO is EINVAL on Linux (macOS accepts it); a regular file cannot hold an open")
 async def test_f2r4_cancel_after_the_gate_opened_is_proven_only_by_the_verified_cleanup_disposition(rig, monkeypatch):
     """Substituted: the sidecar's answer to `cancel` (forced to "released", i.e. the target may be running)
     while the real sidecar proceeds normally. The verdict is not a proof ("pending"); the transaction's own

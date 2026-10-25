@@ -26,17 +26,16 @@ from agent_team_backend import cli_runtime
 from agent_team_backend.cli_runtime import RustTerminalService
 from agent_team_backend.cli_runtime_handoff import MasterHandle
 from tests.cli_regression.support.cli_shim import base_python_executable
+from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT  # NAVIDE_CLI_RUNTIME[_HARNESS]_BIN, else in-repo builds
 from tests.cli_regression.support.isolation import isolated_environment
 
 ROOT = Path(__file__).resolve().parents[2]
-PRODUCT = ROOT / "native/navide-cli-runtime/target/release/navide-cli-runtime"
-HARNESS = ROOT / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime"
 PEER = Path(__file__).parent / "cli_regression/support/handoff_peer.py"
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(sys.platform != "darwin" or not PRODUCT.is_file() or not HARNESS.is_file(),
-                       reason="requires the explicitly built macOS native runtime (product and harness)"),
+    pytest.mark.skipif(sys.platform == "win32" or not PRODUCT.is_file() or not HARNESS.is_file(),
+                       reason="requires the explicitly built POSIX native runtime (product and harness)"),
 ]
 
 
@@ -167,6 +166,21 @@ async def test_h2_missing_binary_refuses_without_a_child_or_a_python_pty(rig, mo
     with pytest.raises(FileNotFoundError):
         await service.create_async(pane_id="p", agent_key="terminal", command=["/bin/cat"], cwd=str(rig.workspace))
     assert len(psutil.Process().children(recursive=True)) == before and not service._sessions
+
+
+async def test_h3_a_sidecar_reaped_before_its_identity_is_read_is_still_start_failed(harness, monkeypatch):
+    """The order that made h3 flaky on Linux, forced: the sidecar is gone when its identity is read."""
+    from agent_team_backend import cli_runtime
+
+    def gone(pid):
+        raise psutil.NoSuchProcess(pid)
+
+    monkeypatch.setenv("NAVIDE_ACR_FAULT", "startup")
+    monkeypatch.setattr(cli_runtime.psutil, "Process", gone)
+    service = harness.service()
+    with pytest.raises(RuntimeError, match=r"START_FAILED: STARTUP_FAILED"):
+        await service.create_async(pane_id="p", agent_key="terminal", command=["/bin/cat"], cwd=str(harness.workspace))
+    assert not service._sessions
 
 
 async def test_h3_startup_fatal_is_an_explicit_failure_with_no_fallback(harness, monkeypatch):

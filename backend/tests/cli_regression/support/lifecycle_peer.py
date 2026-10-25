@@ -3,7 +3,7 @@
 Commands (one per line on its tty): ``flood N`` (N numbered 200-byte lines, then FLOOD_DONE),
 ``numbered N W`` (N lines stamped with the current window width, then MARKER), ``size``
 (window size), ``noecho`` (stop the tty echoing input), ``closestdio`` (close fds 0/1/2 and keep running), ``exit``, ``child`` (a
-descendant that holds the slave open; prints its pid), ``detach`` (a descendant in its own
+descendant that holds the slave open; prints its pid), ``child-nohup`` (the same, ignoring SIGHUP),``detach`` (a descendant in its own
 session that keeps running), ``trap-term`` (ignore SIGTERM), ``winch`` (print the window
 size on every SIGWINCH), ``marker-file PATH`` (write PATH when everything printed so far was
 flushed), ``stubborn`` (ignore SIGTERM and SIGHUP).
@@ -66,6 +66,9 @@ for line in lines():
         sys.exit(0)
     elif command == "child":
         child = subprocess.Popen(["/bin/sleep", "300"])
+        print("CHILD " + json.dumps({"pid": child.pid}), flush=True)
+    elif command == "child-nohup":
+        child = subprocess.Popen(["/bin/sleep", "300"], preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN))
         print("CHILD " + json.dumps({"pid": child.pid}), flush=True)
     elif command == "detach":
         child = subprocess.Popen(["/bin/sleep", "300"], start_new_session=True, stdin=subprocess.DEVNULL,

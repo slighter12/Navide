@@ -32,8 +32,8 @@ from tests.test_cli_runtime_observe import STUB_LIMITS
 
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(sys.platform != "darwin" or not PRODUCT.is_file() or not HARNESS.is_file(),
-                       reason="requires the explicitly built macOS native runtime (product and harness)"),
+    pytest.mark.skipif(sys.platform == "win32" or not PRODUCT.is_file() or not HARNESS.is_file(),
+                       reason="requires the explicitly built POSIX native runtime (product and harness)"),
 ]
 
 GENERATION = "00112233445566778899aabbccddeeff"

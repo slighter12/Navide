@@ -632,12 +632,20 @@ class RustTerminalService(TerminalService):
             # Python must hold only its own end, or it could never observe the sidecar's death.
             if child is not None:
                 child.close()
-            process = psutil.Process(self._runtime.pid)
-            self._runtime_identity = {"pid": process.pid, "created": process.create_time(),
-                                      "executable": process.exe(), "executableSha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            try:
+                process = psutil.Process(self._runtime.pid)
+                self._runtime_identity = {"pid": process.pid, "created": process.create_time(),
+                                          "executable": process.exe(), "executableSha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            except psutil.NoSuchProcess:
+                # Reaped before its identity could be read: the handshake below still reads its fatal line
+                # (START_FAILED), and a ready line from an identity-less process is refused.
+                self._runtime_identity = {"pid": self._runtime.pid, "created": None, "executable": str(path),
+                                          "executableSha256": hashlib.sha256(path.read_bytes()).hexdigest()}
             self._stderr_task = self._task(self._read_stderr())
             try:
                 ready = await self._read_ready()
+                if self._runtime_identity["created"] is None:
+                    raise RuntimeError("START_FAILED: the sidecar exited before its identity was read")
                 self._receipt({**ready, **self._runtime_identity})
                 self._ownership_gate = True  # verified in `_verify_ready`
                 # The reader runs before the first request is sent (3.3).
