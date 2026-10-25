@@ -75,7 +75,7 @@ jobs:
       - name: Require every ready receipt to name the freshly built sidecar
         id: receipts
         if: always() && steps.pytest.outcome != 'skipped'
-        run: node tests/cli/g2Native.mjs receipts --root ${{ runner.temp }}/g2-basetemp --sha ${{ env.G2_SIDECAR_SHA }} --harness-sha ${{ env.G2_HARNESS_SHA }} --substituted test_replacement_runtime_failu,test_h6_,test_h8_,test_s6_a_create_cleanup,test_b3_,test_b4_,test_b5_,test_o2_observation_violations
+        run: node tests/cli/g2Native.mjs receipts --root ${{ runner.temp }}/g2-basetemp --sha ${{ env.G2_SIDECAR_SHA }} --harness-sha ${{ env.G2_HARNESS_SHA }} --required tests/cli/g2-required-linux.txt --expect tests/cli/g2-receipt-expectations-linux.json
 
       - name: Run the two required production WebSocket cases
         id: principal

@@ -3,8 +3,10 @@
 //   guard    --platform P --arch A --required FILE --junit F... [--out FILE]
 //            Fails unless every required case is in the junit files and passed: a missing,
 //            skipped, xfailed, failed or errored case fails the run. Writes redacted outcomes.
-//   receipts --root DIR --sha HEX
-//            Fails unless at least one `ready` receipt exists and every one carries that hash.
+//   receipts --root DIR --sha HEX [--required FILE --expect FILE --harness-sha HEX --stubs name=HEX,...]
+//            Fails unless a `ready` receipt exists and every one carries the release hash, except in the
+//            exact test directories the expectations file lists, which may hold only their declared kinds
+//            (harness build or named stub peer) and must show each of them.
 //   proof    --release BIN --harness BIN
 //            Fails unless the harness binary carries the fault-hooks literal and the release one does not.
 //
@@ -70,8 +72,18 @@ export function stageOf(id) {
   return 'launch-contract'
 }
 
+// Blank lines and `#` comments are skipped; any other line must be a node id, and an id may appear once, so
+// a malformed or repeated line fails loudly instead of silently shrinking or padding the enforced set.
 export function requiredIds(text) {
-  return text.split(/\r?\n/).map(line => line.trim()).filter(line => /^[\w./-]+\.py::\S/.test(line))
+  const ids = new Set()
+  for (const [index, raw] of text.split(/\r?\n/).entries()) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    if (!/^[\w./-]+\.py::\S/.test(line)) throw new Error(`required list line ${index + 1} is not a node id: ${line}`)
+    if (ids.has(line)) throw new Error(`required list line ${index + 1} repeats an id: ${line}`)
+    ids.add(line)
+  }
+  return [...ids]
 }
 
 function guard(args) {
@@ -123,15 +135,46 @@ function findReceipts(root, found = []) {
   return found
 }
 
-function receipts(args) {
+// pytest names a test's temp directory after the test function cut to 30 characters plus a counter.
+export function dirStem(dir) {
+  return dir.replace(/^(.*?)\d+$/, '$1')
+}
+
+// Every receipt directory not named in the expectations may hold only release-sidecar ready receipts. A
+// listed directory (a test that substitutes the fault-hooks harness sidecar or its own stub peer) may hold
+// only the hashes of its declared kinds, and must show every declared kind: a listed test that stopped
+// spawning its sidecar fails the guard rather than passing by absence.
+export function checkReceipts({ dirs, release, harness, expectations, stubHashes, requiredNames }) {
+  const problems = []
+  const cases = new Map((expectations?.cases ?? []).map(entry => [entry.dir, entry]))
+  const hashOf = new Map([[release, 'release']])
+  if (harness) hashOf.set(harness, 'harness')
+  for (const [name, hash] of Object.entries(stubHashes)) hashOf.set(hash, `stub:${name}`)
+  const seen = new Map()
   let ready = 0
-  const foreign = new Set()
-  // A receipt may name the fault-hooks harness sidecar (its hash is exported by the build) anywhere. A sidecar
-  // that is neither it nor the release build is accepted only in a test directory declared as substituting
-  // its own peer (stub or handshake peers, which write their own ready record); anywhere else it is foreign.
-  const substituted = (args.substituted ?? '').split(',').filter(Boolean)
+  for (const [dir, hashes] of dirs) {
+    const stem = dirStem(dir)
+    const allowed = cases.get(stem)?.kinds ?? ['release']
+    for (const hash of hashes) {
+      ready += 1
+      const kind = hashOf.get(hash)
+      if (!kind || !allowed.includes(kind)) problems.push(`foreign ${kind ?? hash} in ${dir} (allowed: ${allowed.join(',')})`)
+      else seen.set(stem, new Set([...(seen.get(stem) ?? []), kind]))
+    }
+  }
+  for (const [stem, entry] of cases) {
+    for (const kind of entry.kinds) if (!seen.get(stem)?.has(kind)) problems.push(`missing ${kind} evidence in ${stem}`)
+    for (const test of entry.tests) if (!requiredNames.has(test)) problems.push(`expectation names ${test}, which is not a required case`)
+  }
+  if (ready === 0) problems.push('no ready receipt found')
+  return { ready, problems }
+}
+
+function receipts(args) {
+  const dirs = new Map()
   for (const file of findReceipts(args.root)) {
-    const testDir = file.split('/').slice(-2)[0]
+    const dir = file.split('/').slice(-2)[0]
+    const hashes = dirs.get(dir) ?? new Set()
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       if (!line.includes('"ready"')) continue
       let record
@@ -140,17 +183,30 @@ function receipts(args) {
       } catch {
         continue
       }
-      if (record.event !== 'ready') continue
-      ready += 1
-      if (record.executableSha256 === args.sha) continue
-      if (args['harness-sha'] && record.executableSha256 === args['harness-sha']) continue
-      if (substituted.some(prefix => testDir.startsWith(prefix))) continue
-      foreign.add(`${record.executableSha256} in ${testDir}`)
+      if (record.event === 'ready') hashes.add(String(record.executableSha256))
     }
+    if (hashes.size) dirs.set(dir, hashes)
   }
-  console.log(`ready receipts=${ready} expected executableSha256=${args.sha} foreign hashes=${foreign.size}`)
-  for (const hash of foreign) console.log(`FOREIGN ${hash}`)
-  return ready > 0 && foreign.size === 0 ? 0 : 1
+  const expectations = args.expect ? JSON.parse(readFileSync(args.expect, 'utf8')) : undefined
+  const stubHashes = { ...(expectations?.stubs ?? {}) }
+  for (const pair of (args.stubs ?? '').split(',').filter(Boolean)) {
+    const [name, hash] = pair.split('=')
+    stubHashes[name] = hash
+  }
+  const requiredNames = new Set(
+    args.required ? requiredIds(readFileSync(args.required, 'utf8')).map(id => id.split('::')[1].split('[')[0]) : [],
+  )
+  const { ready, problems } = checkReceipts({
+    dirs,
+    release: args.sha,
+    harness: args['harness-sha'],
+    expectations,
+    stubHashes,
+    requiredNames,
+  })
+  console.log(`ready receipts=${ready} expected executableSha256=${args.sha} problems=${problems.length}`)
+  for (const problem of problems.slice(0, 25)) console.log(`RECEIPT ${problem}`)
+  return problems.length === 0 ? 0 : 1
 }
 
 function proof(args) {
