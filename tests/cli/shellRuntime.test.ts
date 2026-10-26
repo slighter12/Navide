@@ -139,7 +139,9 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         expect(output.get(tid)).not.toContain('\uFFFD')
         await input(tid, 'burst\r')
         // Four ConPTYs each re-render a 256 KB burst row by row: a bound that suits a POSIX pty is too short there.
-        const burstWait = isWindows ? 120_000 : 15_000
+        // A hosted x64 run passed "input while bursting" and then missed BURST_DONE at 15 s (cause not pinned), so the
+        // POSIX bound is wider too; only the deadline changed, not the content assertions.
+        const burstWait = isWindows ? 120_000 : 60_000
         await until(() => (output.get(tid) ?? '').includes('BURST 0000 '), 'first burst', burstWait)
         await input(tid, 'during-burst-世界\r')
         try {

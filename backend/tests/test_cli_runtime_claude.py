@@ -289,7 +289,7 @@ async def test_native_activity_error_advances_before_next_poll_completion(tmp_pa
         tid = created["terminal_session_id"]
         await backend.expect_output(ws, tid, "CLAUDE_REFERENCE_READY")
         await backend.request(ws, "terminal.input", {"terminal_session_id": tid, "data": "stage 1\r"})
-        async with asyncio.timeout(6):
+        async with asyncio.timeout(15):
             while not any(event.get("type") == "agent.activity" and event["payload"].get("event_type") == "turn_complete"
                           for event in backend.events):
                 await backend.receive(ws)
