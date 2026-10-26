@@ -859,6 +859,50 @@ def make_fifo(rig, service) -> Path:
     return journal
 
 
+class JournalHold:
+    """Holds the sidecar's ownership-journal append, so the root waits at the gate, until `release()`.
+
+    macOS: the journal becomes a FIFO without a reader (the append blocks in `open`). Linux rejects `fsync`
+    on a FIFO (EINVAL, see the probe in the ticket 09 evidence), so the append would fail instead of
+    waiting; there the harness build holds at the same point (before the append, the journal a regular
+    file) until a release file exists. The assertions around the hold do not depend on which one is used.
+    """
+
+    def __init__(self, rig, name: str):
+        self.rig = rig
+        self.fifo = sys.platform == "darwin"
+        self.release_file = rig.root / f"{name}.journal-release"
+        self.pane = name if self.fifo else f"fault:journal-hold:{self.release_file}"
+        self.journal: Path | None = None
+        self.reader = -1
+        self.drain = None
+        if not self.fifo:  # the hold hook exists only in the harness build; set before the sidecar starts
+            shutil.copyfile(HARNESS, rig.runtime_bin)
+            rig.runtime_bin.chmod(0o755)
+
+    def arm(self, service) -> None:
+        if self.fifo:
+            self.journal = make_fifo(self.rig, service)
+
+    def release(self) -> None:
+        if not self.fifo:
+            self.release_file.touch()
+            return
+        self.reader = os.open(self.journal, os.O_RDONLY | os.O_NONBLOCK)
+        os.set_blocking(self.reader, True)
+        reader = self.reader
+        self.drain = asyncio.get_running_loop().run_in_executor(None, lambda: os.read(reader, 1 << 20))
+
+    async def settled(self) -> None:
+        if self.drain is not None and not self.drain.done():
+            await asyncio.wait_for(self.drain, 5)
+
+    def close(self) -> None:
+        if self.reader >= 0:
+            os.close(self.reader)
+            self.reader = -1
+
+
 def cleanup_leaks(rig, *paths: Path) -> None:
     for path in paths:  # failure path only: a leaked fixture is never a pass condition
         if path.exists():
@@ -959,38 +1003,35 @@ async def test_gate_serialises_concurrent_creates_without_cross_talk(rig):
     assert service._lost is None
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="Linux test-technique gap (unverified on Linux, owner ticket 09): the hold is a FIFO journal, and the append's fsync on a FIFO is EINVAL on Linux (macOS accepts it); a regular file cannot hold an open")
 async def test_f2r4_cancel_during_a_held_gate_is_acked_only_with_proof_and_the_target_never_executes(rig, handler_world):
     """The journal append is held (FIFO), the renderer's cancel arrives through the handler while the
     root waits at the gate, and only afterwards the hold is released. The ACK must come with proof the
     target cannot execute; the fixture's first instruction (a marker file) must never appear."""
     app, owners = handler_world
+    hold = JournalHold(rig, "pane-r4")
     service = rig.service()
     await service._ensure_started()
-    journal = make_fifo(rig, service)
+    hold.arm(service)
     session = app.Session(_Socket())
     session.terminals = service
     marker, detached = rig.root / "cancelled.marker", rig.root / "cancelled.detached"
     create = asyncio.create_task(_handler_create(
-        session, "pane-r4", ["/bin/sh", "-c", GATED_FIXTURE, str(marker), str(detached)], str(rig.workspace),
+        session, hold.pane, ["/bin/sh", "-c", GATED_FIXTURE, str(marker), str(detached)], str(rig.workspace),
         message_id="m1"))
-    reader = -1
     try:
         await rig.until(lambda: sidecar_children(service), "the root is forked and gated")
         held = sidecar_children(service)
         await asyncio.sleep(1.0)  # the journal append is blocked: the gate is closed
         assert not create.done() and not marker.exists()
         await app.handle_message(session, {"id": "c1", "type": "terminal.create.cancel",
-                                           "payload": {"pane_id": "pane-r4", "create_generation": "gen-m1"}})
+                                           "payload": {"pane_id": hold.pane, "create_generation": "gen-m1"}})
         ack = [m for m in session.websocket.sent if m.get("id") == "c1"][-1]
         # ORDER: the ACK was produced while the journal was still held, so it must be a proven one.
         assert not marker.exists(), "the target executed before the cancel ACK"
         assert ack.get("payload", {}).get("cancelled") is True or ack.get("error"), ack
-        reader = os.open(journal, os.O_RDONLY | os.O_NONBLOCK)  # NOW release the hold
-        os.set_blocking(reader, True)
-        drain = asyncio.get_running_loop().run_in_executor(None, lambda: os.read(reader, 1 << 20))
+        hold.release()  # NOW release the hold
         response = await asyncio.wait_for(create, 20)
-        await asyncio.wait_for(drain, 5) if not drain.done() else None
+        await hold.settled()
         await rig.until(lambda: gone(held), "the cancelled create leaves no process", timeout=10)
         await asyncio.sleep(0.5)
         assert not marker.exists(), "the cancelled target executed after the ACK"
@@ -999,19 +1040,18 @@ async def test_f2r4_cancel_during_a_held_gate_is_acked_only_with_proof_and_the_t
         assert not [r for r in rig.receipts() if r["event"] == "owned"]
         assert ack["payload"]["cancelled"] is True
     finally:
-        if reader >= 0:
-            os.close(reader)
+        hold.close()
         cleanup_leaks(rig, marker, detached)
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="Linux test-technique gap (unverified on Linux, owner ticket 09): the hold is a FIFO journal, and the append's fsync on a FIFO is EINVAL on Linux (macOS accepts it); a regular file cannot hold an open")
 async def test_f2r4_cancel_after_the_gate_opened_is_proven_only_by_the_verified_cleanup_disposition(rig, monkeypatch):
     """Substituted: the sidecar's answer to `cancel` (forced to "released", i.e. the target may be running)
     while the real sidecar proceeds normally. The verdict is not a proof ("pending"); the transaction's own
     disposition is: the created root cleaned with its verified identity, never published."""
+    hold = JournalHold(rig, "pane-released")
     service = rig.service()
     await service._ensure_started()
-    journal = make_fifo(rig, service)
+    hold.arm(service)
     real_request = service._request
 
     async def released(op, *args, **kwargs):
@@ -1023,18 +1063,15 @@ async def test_f2r4_cancel_after_the_gate_opened_is_proven_only_by_the_verified_
     marker, detached = rig.root / "released.marker", rig.root / "released.detached"
     record: dict = {"cancelled": False}
     create = asyncio.create_task(service.create_async(
-        pane_id="pane-released", agent_key="terminal", cwd=str(rig.workspace), env=rig.env,
+        pane_id=hold.pane, agent_key="terminal", cwd=str(rig.workspace), env=rig.env,
         command=["/bin/sh", "-c", GATED_FIXTURE, str(marker), str(detached)],
         cancelled=lambda: record["cancelled"], cancel_record=record))
-    reader = -1
     try:
         await rig.until(lambda: sidecar_children(service), "the root is forked and gated")
         await asyncio.sleep(0.5)
         record["cancelled"] = True
         assert await service.cancel_dispatched(record) == "pending", "a released verdict is not a proof"
-        reader = os.open(journal, os.O_RDONLY | os.O_NONBLOCK)
-        os.set_blocking(reader, True)
-        asyncio.get_running_loop().run_in_executor(None, lambda: os.read(reader, 1 << 20))
+        hold.release()
         with pytest.raises(CreateCancelled):
             await asyncio.wait_for(create, 30)
         await asyncio.wait_for(record["native"]["settled"].wait(), 30)
@@ -1047,8 +1084,7 @@ async def test_f2r4_cancel_after_the_gate_opened_is_proven_only_by_the_verified_
         assert not _alive_pidfile(detached)
         assert service._lost is None and not service._unresolved and not service._sessions
     finally:
-        if reader >= 0:
-            os.close(reader)
+        hold.close()
         cleanup_leaks(rig, marker, detached)
 
 
