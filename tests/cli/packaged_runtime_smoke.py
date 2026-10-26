@@ -39,9 +39,7 @@ import websockets
 WINDOWS = os.name == "nt"
 RUNTIME = "navide-cli-runtime.exe" if WINDOWS else "navide-cli-runtime"
 BACKEND = "agent_team_backend.exe" if WINDOWS else "agent_team_backend"
-# A `.cmd` shim re-parses `%*` with cmd.exe, which cannot carry an embedded double quote next to `|` and `&`
-# (the Windows baseline records the same limit), so the Windows argument keeps every other metacharacter.
-ARGUMENTS = ["café 世界 quote' \\ ; | &" if os.name == "nt" else "café 世界 quote' \" \\ ; | &", "second argument"]
+ARGUMENTS = ["café 世界 quote' \" \\ ; | &", "second argument"]
 FAIL_BOUND_S = 40.0
 
 PEER = r'''
@@ -241,6 +239,18 @@ async def positive(backend: Backend, runtime: Path, result: dict) -> None:
             result["shell"] = {"exit_code": wire.exits[sid].get("exit_code"), "pid": pid}
             assert wire.exits[sid].get("exit_code") == 7, wire.exits[sid]
 
+            if WINDOWS:
+                # Control for the agent argument below: the same shim spawned by Python's own subprocess (CreateProcess
+                # with a list2cmdline command line, the Python arm's spawner) with the same nested-quote arguments.
+                # Recorded first, so it exists even when the pane fails: it says whether a difference in the pane's
+                # argv comes from the shim or from the runtime.
+                run = subprocess.run([str(backend.shims / "aider.cmd"), "--dump-argv", *ARGUMENTS], capture_output=True,
+                                     text=True, timeout=30, env=backend.env, encoding="utf-8", errors="replace")
+                result["python_spawn_control"] = {"returncode": run.returncode, "stdout": run.stdout[-400:],
+                                                  "stderr": run.stderr[-300:],
+                                                  "preserved": run.stdout.strip() == "ARGV " + json.dumps(ARGUMENTS)}
+                print("CONTROL python_spawn_control " + json.dumps(result["python_spawn_control"], ensure_ascii=True), flush=True)
+
             # 2. Agent pane: a vendor key started through a shim found by name, nested arguments intact.
             command = ["aider", *ARGUMENTS]
             created = await wire.request("terminal.create", {
@@ -268,18 +278,6 @@ async def positive(backend: Backend, runtime: Path, result: dict) -> None:
             await wire.until(lambda: "AGENT_FINAL café 世界" in wire.output[asid], "agent last output before exit")
             assert wire.exits[asid].get("exit_code") == 7, wire.exits[asid]
             result["agent"] = {"argv": ready["argv"], "exit_code": 7, "pid": ready["pid"], "shim": "aider"}
-
-            if WINDOWS:
-                # Why the Windows argument above has no embedded double quote: behind a `.cmd` shim, cmd.exe re-parses
-                # `%*`. The control spawns the same shim with Python's own subprocess (the Python arm's spawner is
-                # CreateProcess with the same command line) and records what the peer receives; it must NOT be intact.
-                quoted = 'a "b" ; | & c'
-                run = subprocess.run([str(backend.shims / "aider.cmd"), "--dump-argv", quoted], capture_output=True,
-                                     text=True, timeout=30, env=backend.env)
-                preserved = run.stdout.strip() == "ARGV " + json.dumps([quoted])
-                result["cmd_shim_quote_control"] = {"returncode": run.returncode, "stdout": run.stdout[-300:],
-                                                    "stderr": run.stderr[-300:], "preserved": preserved}
-                assert not preserved, "the cmd.exe shim limit on embedded double quotes does not exist: restore the quote"
 
             # 3. Runtime identity: the ready receipt names the staged binary and the live sidecar process.
             receipts = [json.loads(line) for line in (backend.root / "runtime-receipts.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
