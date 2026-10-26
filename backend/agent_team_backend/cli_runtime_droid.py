@@ -9,6 +9,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+from . import osplat
 from .cli_runtime_observation import observe
 from .cli_vendors import droid as _droid
 from .log_readers.base import (
@@ -48,7 +49,7 @@ class NativeDroidReader(_droid.DroidLogReader):
 
 
 def reference_spec(spec):
-    if os.environ.get('NAVIDE_ACR_EVAL_RUNTIME') != 'rust-shell':
+    if os.environ.get('NAVIDE_ACR_EVAL_RUNTIME') != 'rust-shell' or not osplat.has_native_vendor_observer():
         return spec
     if not os.environ.get('NAVIDE_REGRESSION_ROOT'):
         raise RuntimeError('Rust native differences require the isolated regression harness')

@@ -138,6 +138,16 @@ has_tty_servicing: bool = platform_id == "win32"
 has_windows_runtime_client: bool = platform_id == "win32"
 __all__ += ["has_tty_servicing", "has_windows_runtime_client"]
 
+
+def has_native_vendor_observer() -> bool:
+    """Whether the selected Rust runtime's sidecar answers vendor OBSERVE requests on this platform. The Windows
+    sidecar refuses every one (`native/navide-cli-runtime/src/windows.rs:1244`, "observer not integrated"), so a
+    Rust-launched Windows pane is observed by the Python watcher's baseline readers (spec D2)."""
+    return platform_id != "win32"
+
+
+__all__ += ["has_native_vendor_observer"]
+
 from . import controlling_tty  # noqa: E402
 
 #: A process's controlling-terminal device read from the kernel record, or None.

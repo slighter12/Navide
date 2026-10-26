@@ -8,6 +8,7 @@ import hashlib
 import os
 from pathlib import Path
 
+from . import osplat
 from .log_readers.base import (
     ActivityEvent, IncrementalParseResult, LogReader, TokenUsage, TurnCall,
     TurnUsage, tail_anchor, user_prompt_text,
@@ -177,7 +178,7 @@ class NativeClaudeReader(LogReader):
 
 def reference_spec(spec):
     """Only explicit isolated evaluation selects native Claude interpretation."""
-    if os.environ.get("NAVIDE_ACR_EVAL_RUNTIME") != "rust-shell":
+    if os.environ.get("NAVIDE_ACR_EVAL_RUNTIME") != "rust-shell" or not osplat.has_native_vendor_observer():
         return spec
     if not os.environ.get("NAVIDE_REGRESSION_ROOT"):
         raise RuntimeError("Rust reference integration requires the isolated regression harness")

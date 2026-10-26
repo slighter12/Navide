@@ -11,6 +11,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from . import osplat
 from .cli_runtime_observation import observe
 from .cli_vendors import grok as _grok
 from .cli_vendors import kimi as _kimi
@@ -24,7 +25,7 @@ from .log_readers.base import (
 
 
 def _selected(spec, reader):
-    if os.environ.get('NAVIDE_ACR_EVAL_RUNTIME') != 'rust-shell':
+    if os.environ.get('NAVIDE_ACR_EVAL_RUNTIME') != 'rust-shell' or not osplat.has_native_vendor_observer():
         return spec
     if not os.environ.get('NAVIDE_REGRESSION_ROOT'):
         raise RuntimeError('Rust native differences require the isolated regression harness')

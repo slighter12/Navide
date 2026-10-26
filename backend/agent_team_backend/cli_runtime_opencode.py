@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 
+from . import osplat
 from .cli_runtime_observation import observe
 from .cli_vendors.opencode import OpencodeLogReader
 from .log_readers.base import ActivityEvent, IncrementalParseResult, TokenUsage, user_prompt_text
@@ -54,7 +55,7 @@ class NativeOpenCodeReader(OpencodeLogReader):
 
 
 def reference_spec(spec):
-    if os.environ.get('NAVIDE_ACR_EVAL_RUNTIME') != 'rust-shell':
+    if os.environ.get('NAVIDE_ACR_EVAL_RUNTIME') != 'rust-shell' or not osplat.has_native_vendor_observer():
         return spec
     if not os.environ.get('NAVIDE_REGRESSION_ROOT'):
         raise RuntimeError('Rust native differences require the isolated regression harness')
