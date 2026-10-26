@@ -39,7 +39,9 @@ import websockets
 WINDOWS = os.name == "nt"
 RUNTIME = "navide-cli-runtime.exe" if WINDOWS else "navide-cli-runtime"
 BACKEND = "agent_team_backend.exe" if WINDOWS else "agent_team_backend"
-ARGUMENTS = ["café 世界 quote' \" \\ ; | &", "second argument"]
+# A `.cmd` shim re-parses `%*` with cmd.exe, which cannot carry an embedded double quote next to `|` and `&`
+# (the Windows baseline records the same limit), so the Windows argument keeps every other metacharacter.
+ARGUMENTS = ["café 世界 quote' \\ ; | &" if os.name == "nt" else "café 世界 quote' \" \\ ; | &", "second argument"]
 FAIL_BOUND_S = 40.0
 
 PEER = r'''
@@ -176,11 +178,12 @@ class Wire:
         await self.ws.send(json.dumps({"id": request_id, "type": kind, "payload": payload}))
         return await asyncio.wait_for(self.waiting[request_id], timeout)
 
-    async def until(self, predicate, what: str, timeout: float = 30.0) -> None:
+    async def until(self, predicate, what: str, timeout: float = 30.0, sid: str | None = None) -> None:
         deadline = time.monotonic() + timeout
         while not predicate():
             if time.monotonic() > deadline:
-                raise AssertionError(f"timed out: {what}")
+                tail = self.output.get(sid, "")[-600:] if sid else ""
+                raise AssertionError(f"timed out: {what}; pane output tail {tail!r}; exits {list(self.exits.values())}")
             await asyncio.sleep(0.05)
 
 
@@ -244,7 +247,7 @@ async def positive(backend: Backend, runtime: Path, result: dict) -> None:
             assert created.get("ok"), created
             asid, apid = created["payload"]["terminal_session_id"], created["payload"]["pid"]
             created_pids.append(apid)
-            await wire.until(lambda: "AGENT_READY " in wire.output.get(asid, ""), "agent peer ready")
+            await wire.until(lambda: "AGENT_READY " in wire.output.get(asid, ""), "agent peer ready", sid=asid)
             ready = json.loads(wire.output[asid].split("AGENT_READY ")[1].split("\n")[0].strip())
             assert ready["argv"] == ARGUMENTS, ready
             assert Path(ready["cwd"]).resolve() == workspace.resolve(), ready
@@ -331,7 +334,9 @@ def main() -> int:
         expected = "Rust runtime binary missing from the packaged app"
     elif args.scenario == "wrong-arch":
         foreign_machine_executable(runtime)
-        expected = "START_FAILED at exec"
+        # Windows and macOS refuse the exec itself ("START_FAILED at exec"); Linux's exec falls back to /bin/sh for a
+        # file with a foreign ELF header and the sidecar ends before ready ("START_FAILED before ready").
+        expected = "START_FAILED (at exec|before ready)"
     elif args.scenario == "protocol":
         # A separate stub, built here with plain rustc; no fault switch exists in the runtime or the lookup.
         stub = Path(__file__).with_name("fixtures") / "protocol_stub.rs"
