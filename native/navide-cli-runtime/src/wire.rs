@@ -23,7 +23,7 @@ pub const MAX_OUTBOUND_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_OUTBOUND_FRAMES: usize = 256;
 
 /// Harness build only: how the writer deliberately mis-sends a `SESSION_OWNED` (E1 P3).
-#[cfg(feature = "fault-hooks")]
+#[cfg(all(unix, feature = "fault-hooks"))]
 #[derive(Clone, Copy)]
 pub enum SendFault {
     /// The first `sendmsg` accepts only a few bytes (the remainder follows by plain sends).
@@ -34,7 +34,7 @@ pub enum SendFault {
 
 pub enum Payload {
     Plain(Vec<u8>),
-    #[cfg(feature = "fault-hooks")]
+    #[cfg(all(unix, feature = "fault-hooks"))]
     OwnedFault {
         bytes: Vec<u8>,
         pty: Arc<SessionPty>,
@@ -53,7 +53,7 @@ impl Payload {
             Self::Plain(bytes) => bytes.len(),
             #[cfg(unix)]
             Self::Owned { bytes, .. } => bytes.len(),
-            #[cfg(feature = "fault-hooks")]
+            #[cfg(all(unix, feature = "fault-hooks"))]
             Self::OwnedFault { bytes, .. } => bytes.len(),
         }
     }
@@ -199,13 +199,13 @@ impl Outbound {
     }
 
     /// Harness build only: bytes that are not a frame, queued in order with real ones.
-    #[cfg(feature = "fault-hooks")]
+    #[cfg(all(unix, feature = "fault-hooks"))]
     pub fn raw(&self, bytes: Vec<u8>) {
         self.push(Payload::Plain(bytes));
     }
 
     /// Harness build only: `SESSION_OWNED` with a deliberately faulty send.
-    #[cfg(feature = "fault-hooks")]
+    #[cfg(all(unix, feature = "fault-hooks"))]
     pub fn session_owned_fault(&self, meta: Value, pty: Arc<SessionPty>, fault: SendFault) {
         let bytes = self.frame(
             FrameType::Event,
@@ -271,7 +271,7 @@ impl Outbound {
                 return Ok(());
             };
             let outcome = match &payload {
-                #[cfg(feature = "fault-hooks")]
+                #[cfg(all(unix, feature = "fault-hooks"))]
                 Payload::OwnedFault { bytes, pty, fault } => pty
                     .lend_master(|fd| {
                         let mut faulty = Faulty {
@@ -340,13 +340,13 @@ pub fn write_frame(
     Ok(())
 }
 
-#[cfg(feature = "fault-hooks")]
+#[cfg(all(unix, feature = "fault-hooks"))]
 struct Faulty<'a> {
     inner: &'a mut dyn Sender,
     fault: SendFault,
     first: bool,
 }
-#[cfg(feature = "fault-hooks")]
+#[cfg(all(unix, feature = "fault-hooks"))]
 impl Sender for Faulty<'_> {
     fn send_first(&mut self, data: &[u8], descriptor: Option<RawFd>) -> io::Result<usize> {
         match (self.fault, std::mem::replace(&mut self.first, false)) {

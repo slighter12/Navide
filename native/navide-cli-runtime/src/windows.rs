@@ -482,6 +482,16 @@ fn watch_exit(pty: Arc<SessionPty>, cell: Arc<ExitCell>, tx: mpsc::Sender<Msg>) 
     Ok(())
 }
 
+/// Harness build only. A session whose pane id is `fault:<kind>` gets that deliberate fault (the
+/// Windows counterpart of the POSIX `fault` module; only the exit-watcher start fault exists here).
+#[cfg(feature = "fault-hooks")]
+mod fault {
+    /// `fault:watch-exit-fail`: the exit watcher cannot start after the gate was released.
+    pub fn watch_exit_fails(pane: &str) -> bool {
+        pane.strip_prefix("fault:") == Some("watch-exit-fail")
+    }
+}
+
 /// End a released (or never resumed) root and report whether its exit was observed.
 fn kill_and_reap_released(pty: &SessionPty) -> bool {
     let _ = pty.terminate_tree();
@@ -537,7 +547,15 @@ fn spawn(args: &Value, wire: &Wire, request: u64, sessions: &Sessions) -> io::Re
     let pty = Arc::new(pty);
     let (tx, mailbox) = mpsc::channel();
     let exit = Arc::new(ExitCell::new());
-    if let Err(error) = watch_exit(pty.clone(), exit.clone(), tx.clone()) {
+    #[cfg(feature = "fault-hooks")]
+    let watched = if fault::watch_exit_fails(&parsed.pane) {
+        Err(io::Error::other("fault: exit watcher could not start"))
+    } else {
+        watch_exit(pty.clone(), exit.clone(), tx.clone())
+    };
+    #[cfg(not(feature = "fault-hooks"))]
+    let watched = watch_exit(pty.clone(), exit.clone(), tx.clone());
+    if let Err(error) = watched {
         let verified = kill_and_reap_released(&pty);
         return Err(post_effect_failure(
             verified,

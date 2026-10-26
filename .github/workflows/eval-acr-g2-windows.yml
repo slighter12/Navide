@@ -96,7 +96,7 @@ jobs:
           python -m pip install uv
           uv sync --project backend --frozen
 
-      - name: Build the sidecar and record its hash
+      - name: Build the harness and release sidecars, prove the release one has no fault hooks, and record its hash
         id: build
         shell: pwsh
         run: pwsh -NoProfile -File tests/cli/g2-windows-build.ps1
