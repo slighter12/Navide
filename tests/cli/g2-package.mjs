@@ -62,15 +62,18 @@ function main() {
     results.push({ scenario, outcome: run.status === 0 ? 'pass' : 'fail', ...detail })
   }
 
+  let baseNegative = { outcome: 'missing' }
+  try { baseNegative = JSON.parse(readFileSync(join(out, 'base-negative.json'), 'utf8')) } catch { /* not run */ }
+  console.log(`base_negative outcome=${baseNegative.outcome}`)
   const summary = {
-    revision: process.env.GITHUB_SHA ?? 'local', platform: process.platform, arch, listingEqual,
+    revision: process.env.GITHUB_SHA ?? 'local', platform: process.platform, arch, listingEqual, base_negative: baseNegative,
     realBin: real, simulatedBin: simulated, scenarios: results
   }
   writeFileSync(join(out, 'summary.json'), JSON.stringify(summary, null, 1))
   const failed = results.filter((result) => result.outcome !== 'pass')
   console.log(`PACKAGE-SUMMARY revision=${summary.revision} platform=${process.platform} arch=${arch} listingEqual=${listingEqual} ` +
     results.map((result) => `${result.scenario}=${result.outcome}`).join(' '))
-  process.exit(listingEqual && failed.length === 0 ? 0 : 1)
+  process.exit(listingEqual && failed.length === 0 && baseNegative.outcome === 'pass' ? 0 : 1)
 }
 
 main()

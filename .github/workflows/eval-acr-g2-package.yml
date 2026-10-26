@@ -102,6 +102,9 @@ jobs:
       - name: Build the unsigned unpacked application with electron-builder
         run: bun run electron-builder ${{ matrix.builder }} --dir --publish never
 
+      - name: Base-commit negative (no runtime staged, base backend; the packaged smoke must fail with the missing cause)
+        run: node tests/cli/g2-base-negative.mjs --base-sha 0297adbba3a2acdbc61d116631b349deb0129f48 --out test-results/ci/g2-package
+
       - name: Check the unpacked bin listing and run the packaged smoke against it
         run: node tests/cli/g2-package.mjs verify --unpacked dist-release/${{ matrix.unpacked }} --arch ${{ matrix.arch }} --out test-results/ci/g2-package
 
