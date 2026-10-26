@@ -40,8 +40,9 @@ from tests.cli_regression.test_vendor_transport import _install, _records
 pytestmark = [pytest.mark.asyncio, pytest.mark.cli_regression,
               pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="POSIX observation only (D2)")]
 
-#: Vendors whose Rust observation exists at the base commit, on this platform (claude, codex; opencode on macOS).
-BASE_OBSERVED = frozenset({"claude", "codex"} | ({"opencode"} if sys.platform == "darwin" else set()))
+#: Vendors whose Rust observation exists at the base commit on every POSIX platform (claude, codex). OpenCode, macOS-only
+#: at the base commit, is parametrized here on macOS as well, so its principal-seam cases run on both POSIX platforms.
+BASE_OBSERVED = frozenset({"claude", "codex"})
 #: Preservation cases: no Python-baseline observer, kept `not-yet-integrated`.
 PRESERVED = frozenset(key for key, spec in VENDORS.items() if spec.make_log_reader is None)
 #: Registry members with a reader, minus what Rust observes at the base commit: the vendors this ticket ports.
@@ -58,7 +59,7 @@ def test_roster_arithmetic_is_derived_from_the_registry():
     assert PRESERVED == {"mcode"}
     assert len(VENDORS) - len(BASE_OBSERVED) - len(PRESERVED) == len(PORTED)
     expected_ported = {"aider", "antigravity", "copilot", "cursor", "droid", "goose", "grok", "kilo", "kimi", "muse",
-                       "pi", "qwen"} | ({"opencode"} if sys.platform == "linux" else set())
+                       "pi", "qwen", "opencode"}
     assert set(PORTED) == expected_ported, "the live registry disagrees with ticket 06's ported set"
 
 
