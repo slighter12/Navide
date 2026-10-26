@@ -51,6 +51,7 @@
     "build:pane-helper": "node scripts/build-pane-helper.mjs",
     "build:fn-key": "node scripts/build-fn-key-helper.mjs",
     "build:stt": "node scripts/build-stt.mjs",
+    "build:cli-runtime": "node scripts/build-cli-runtime.mjs",
     "build:official-plugins": "pnpm run build:public-packages && pnpm run build:mini-ide && pnpm run build:mini-ide:v2 && pnpm run build:plans && pnpm run build:git:v2 && node scripts/stage-official-plugin-artifacts.mjs",
     "build:mini-ide": "vite build --config vite.mini-ide.config.ts",
     "build:mini-ide:v2": "vite build --config plugins/navide-mini-ide/vite.config.ts",
@@ -194,6 +195,13 @@
           "filter": [
             "navide-stt"
           ]
+        },
+        {
+          "from": "build/cli-runtime",
+          "to": "bin",
+          "filter": [
+            "navide-cli-runtime"
+          ]
         }
       ]
     },
@@ -227,6 +235,13 @@
           "filter": [
             "navide-stt.exe"
           ]
+        },
+        {
+          "from": "build/cli-runtime",
+          "to": "bin",
+          "filter": [
+            "navide-cli-runtime.exe"
+          ]
         }
       ]
     },
@@ -259,6 +274,13 @@
           "to": "bin",
           "filter": [
             "navide-stt"
+          ]
+        },
+        {
+          "from": "build/cli-runtime",
+          "to": "bin",
+          "filter": [
+            "navide-cli-runtime"
           ]
         }
       ]

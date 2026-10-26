@@ -76,19 +76,23 @@ def prepare_native_launch(argv: list[str], *, cwd: str, env: dict[str, str]) -> 
 
 
 def runtime_path() -> Path:
+    if getattr(sys, "frozen", False):
+        # Packaged: only the binary electron-builder stages beside the frozen backend in <resources>/bin
+        # (the STT sidecar's directory). No override, development build or other candidate is consulted.
+        name = "navide-cli-runtime.exe" if WINDOWS else "navide-cli-runtime"
+        path = Path(sys.executable).resolve().parent / name
+        if not path.is_file():
+            raise FileNotFoundError(f"Rust runtime binary missing from the packaged app at {path}")
+        return path
     if override := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):
         path = Path(override)
         if not path.is_file():
             raise FileNotFoundError("Rust runtime binary missing at explicit override")
         return path
     name = osplat.paths.executable_candidates("navide-cli-runtime")[0]
-    if getattr(sys, "frozen", False):
-        candidates = [Path(sys.executable).parent / "bin" / name]
-    else:
-        candidates = [Path(__file__).resolve().parents[2] / "native/navide-cli-runtime/target/release" / name]
-    for path in candidates:
-        if path.is_file():
-            return path
+    path = Path(__file__).resolve().parents[2] / "native/navide-cli-runtime/target/release" / name
+    if path.is_file():
+        return path
     raise FileNotFoundError("Rust runtime binary missing; build native/navide-cli-runtime explicitly")
 
 
