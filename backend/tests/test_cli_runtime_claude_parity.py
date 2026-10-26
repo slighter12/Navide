@@ -12,7 +12,7 @@ from agent_team_backend.cli_vendors.claude import ClaudeLogReader
 from agent_team_backend.log_readers.base import ActivityEvent, TokenUsage, TurnCall, TurnUsage, user_prompt_text
 from tests.cli_regression.support.frame_peer import FramePeer as NativePeer
 
-pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="native macOS reference evidence")
+pytestmark = pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="native POSIX reference evidence")
 
 
 def observe(peer, path, mode, **args):

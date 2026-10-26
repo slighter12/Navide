@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -22,6 +23,8 @@ async def main(root: Path, fault: str):
         backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
         if fault == "missing":
             backend.env["NAVIDE_CLI_RUNTIME_BIN"] = str(root / "missing-runtime")
+        elif binary := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):
+            backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
         script = Path(__file__).with_name("claude_runtime_peer.py")
         executable = install_cli_shim(root, "claude", [base_python_executable(), "-u", str(script), str(root)])
         (root / "home/.bash_profile").write_text(

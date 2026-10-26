@@ -53,7 +53,7 @@ function stages(root: string): number {
 async function withBackend(fault: string, run: (root: string, driver: ReturnType<typeof spawn>, endpoint: (stage: number) => Promise<any>, firstOffset: number) => Promise<void>): Promise<void> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'navide-rust-claude-')))
   const firstOffset = stages(root)
-  const driver = spawn(resolve('backend/.venv/bin/python'), ['-m', 'tests.cli_regression.support.claude_runtime_driver', root, fault], {
+  const driver = spawn(process.env.UV_PROJECT_ENVIRONMENT ? join(process.env.UV_PROJECT_ENVIRONMENT, 'bin/python') : resolve('backend/.venv/bin/python'), ['-m', 'tests.cli_regression.support.claude_runtime_driver', root, fault], {
     cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'],
   })
   let log = ''
@@ -89,7 +89,7 @@ async function withBackend(fault: string, run: (root: string, driver: ReturnType
   }
 }
 
-it.runIf(process.platform === 'darwin')('native Claude production-client checkpoint and persisted resume', async ({ task }) => {
+it.runIf(process.platform === 'darwin' || process.platform === 'linux')('native Claude production-client checkpoint and persisted resume', async ({ task }) => {
   await withBackend('', async (root, driver, endpoint, firstOffset) => {
     const tids: string[] = []
     const backends: any[] = []
@@ -188,7 +188,7 @@ it.runIf(process.platform === 'darwin')('native Claude production-client checkpo
     const ready = receipts.filter((r) => r.event === 'ready')
     expect(ready).toHaveLength(2)
     expect(new Set(ready.map((r) => r.runtime_generation)).size).toBe(2)
-    const binarySha = createHash('sha256').update(readFileSync(resolve('native/navide-cli-runtime/target/release/navide-cli-runtime'))).digest('hex')
+    const binarySha = createHash('sha256').update(readFileSync(process.env.NAVIDE_CLI_RUNTIME_BIN ?? resolve('native/navide-cli-runtime/target/release/navide-cli-runtime'))).digest('hex')
     expect(new Set(ready.map((r) => r.executableSha256))).toEqual(new Set([binarySha]))
     for (let index = 0; index < 2; index++) {
       expect(ready[index]).toMatchObject({ runtime: 'navide-cli-runtime', owner_pid: backends[index].pid })
@@ -213,7 +213,7 @@ it.runIf(process.platform === 'darwin')('native Claude production-client checkpo
   task.meta.cliRuntimeReference = 'claude-checkpoint-resume'
 }, 120_000)
 
-it.runIf(process.platform === 'darwin')('native Claude production-client selected failure has no rescue', async ({ task }) => {
+it.runIf(process.platform === 'darwin' || process.platform === 'linux')('native Claude production-client selected failure has no rescue', async ({ task }) => {
   await withBackend('missing', async (root, _driver, endpoint) => {
     const wire = await endpoint(1)
     const client = createWsClient()
