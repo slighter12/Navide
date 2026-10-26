@@ -50,6 +50,9 @@ import json, os, sys
 if sys.argv[1:] == ["--version"]:  # the backend's startup probe
     print("aider 0.0.0-fixture")
     sys.exit(0)
+if sys.argv[1:2] == ["--dump-argv"]:  # the control run: what a spawner's arguments become behind the shim
+    print("ARGV " + json.dumps(sys.argv[2:]))
+    sys.exit(0)
 
 def size():
     s = os.get_terminal_size(sys.__stdout__.fileno())
@@ -265,6 +268,18 @@ async def positive(backend: Backend, runtime: Path, result: dict) -> None:
             await wire.until(lambda: "AGENT_FINAL café 世界" in wire.output[asid], "agent last output before exit")
             assert wire.exits[asid].get("exit_code") == 7, wire.exits[asid]
             result["agent"] = {"argv": ready["argv"], "exit_code": 7, "pid": ready["pid"], "shim": "aider"}
+
+            if WINDOWS:
+                # Why the Windows argument above has no embedded double quote: behind a `.cmd` shim, cmd.exe re-parses
+                # `%*`. The control spawns the same shim with Python's own subprocess (the Python arm's spawner is
+                # CreateProcess with the same command line) and records what the peer receives; it must NOT be intact.
+                quoted = 'a "b" ; | & c'
+                run = subprocess.run([str(backend.shims / "aider.cmd"), "--dump-argv", quoted], capture_output=True,
+                                     text=True, timeout=30, env=backend.env)
+                preserved = run.stdout.strip() == "ARGV " + json.dumps([quoted])
+                result["cmd_shim_quote_control"] = {"returncode": run.returncode, "stdout": run.stdout[-300:],
+                                                    "stderr": run.stderr[-300:], "preserved": preserved}
+                assert not preserved, "the cmd.exe shim limit on embedded double quotes does not exist: restore the quote"
 
             # 3. Runtime identity: the ready receipt names the staged binary and the live sidecar process.
             receipts = [json.loads(line) for line in (backend.root / "runtime-receipts.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
