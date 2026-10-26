@@ -1,0 +1,117 @@
+name: G2 Packaged Agent CLI Runtime
+
+# Evaluation only: runs on pushes to the evaluation branch, holds no secrets and publishes nothing.
+# Builds the frozen backend, the release-shaped CLI runtime and a real unsigned `electron-builder --dir`
+# unpacked app on each native target, then drives the unpacked app's resources through the packaged smoke.
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  g2-package:
+    name: g2-package (${{ matrix.os }} ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: x64
+            builder: --linux --x64
+            unpacked: linux-unpacked
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+            builder: --linux --arm64
+            unpacked: linux-arm64-unpacked
+          - runner: windows-2025
+            os: windows
+            arch: x64
+            builder: --win --x64 -c.win.signAndEditExecutable=false
+            unpacked: win-unpacked
+          - runner: windows-11-arm
+            os: windows
+            arch: arm64
+            builder: --win --arm64 -c.win.signAndEditExecutable=false
+            unpacked: win-arm64-unpacked
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: Install locked dependencies
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+
+      - name: Build the frozen Python backend
+        working-directory: backend
+        run: uv run --locked pyinstaller agent_team_backend.spec
+
+      - name: Build the release-shaped CLI runtime
+        run: bun run build:cli-runtime
+
+      - name: Build the speech-to-text sidecar (best effort; the listing check covers whichever is staged)
+        continue-on-error: true
+        env:
+          NAVIDE_STT_REQUIRED: '0'
+        run: bun run build:stt
+
+      - name: Build the application bundles
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: bun run build
+
+      - name: Build the unsigned unpacked application with electron-builder
+        run: bun run electron-builder ${{ matrix.builder }} --dir --publish never
+
+      - name: Check the unpacked bin listing and run the packaged smoke against it
+        run: node tests/cli/g2-package.mjs verify --unpacked dist-release/${{ matrix.unpacked }} --arch ${{ matrix.arch }} --out test-results/ci/g2-package
+
+      - name: Upload redacted outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g2-package-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            test-results/ci/g2-package/summary.json
+            test-results/ci/g2-package/smoke/*.json
+          if-no-files-found: warn
+          retention-days: 14
