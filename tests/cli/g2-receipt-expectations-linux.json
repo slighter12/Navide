@@ -259,6 +259,24 @@
       ]
     },
     {
+      "dir": "test_f2r4_cancel_after_the_gat",
+      "tests": [
+        "test_f2r4_cancel_after_the_gate_opened_is_proven_only_by_the_verified_cleanup_disposition"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
+      "dir": "test_f2r4_cancel_during_a_held",
+      "tests": [
+        "test_f2r4_cancel_during_a_held_gate_is_acked_only_with_proof_and_the_target_never_executes"
+      ],
+      "kinds": [
+        "harness"
+      ]
+    },
+    {
       "dir": "test_f4_native_cleanup_failure",
       "tests": [
         "test_f4_native_cleanup_failure_invalidates_the_runtime_for_every_session_and_request"

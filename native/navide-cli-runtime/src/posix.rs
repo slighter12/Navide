@@ -593,6 +593,9 @@ struct GateContext<'a> {
     generation: &'a str,
     sessions: &'a Sessions,
     request: u64,
+    /// Harness build only: a release file the owner waits for before the journal append.
+    #[cfg(feature = "fault-hooks")]
+    hold: Option<&'a str>,
 }
 fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Table, Value, Births)> {
     let GateContext {
@@ -603,6 +606,8 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         generation,
         sessions,
         request,
+        #[cfg(feature = "fault-hooks")]
+        hold,
     } = *ctx;
     let mut buffer = [0u8; 4];
     let mut got = 0;
@@ -631,6 +636,10 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
     let record = json!({"journal":1,"pid":pid,"pgid":root["pgid"],"start_kind":root["start_kind"],
         "start_value":root["start_value"],"argv0":argv0,"session_id":id,"session_generation":generation,
         "runtime_generation":wire.generation,"owner_pid":wire.owner_pid});
+    #[cfg(feature = "fault-hooks")]
+    if let Some(path) = hold {
+        fault::wait_for_file_bounded(path)?;
+    }
     journal_append(journal, &record).map_err(|error| {
         io::Error::other(format!("OWNERSHIP_JOURNAL_FAILED: {}", error.kind() as u32))
     })?;
@@ -960,6 +969,8 @@ fn spawn_gated(
     let (child, table, root, births) = {
         let journal = wire.journal.as_path();
         let (id_ref, generation_ref, argv0) = (&parsed.id, &parsed.generation, &argv[0]);
+        #[cfg(feature = "fault-hooks")]
+        let hold = fault::journal_hold(&parsed.pane);
         let (spawned, verdict) = thread::scope(|scope| {
             let watcher = scope.spawn(move || {
                 // Owner side of the gate: every path below ends by closing the gate's write end
@@ -975,6 +986,8 @@ fn spawn_gated(
                         generation: generation_ref,
                         sessions,
                         request,
+                        #[cfg(feature = "fault-hooks")]
+                        hold: hold.as_deref(),
                     },
                 );
                 close_fds(&[report_r, gate_w]);
@@ -1508,6 +1521,25 @@ mod fault {
         while !std::path::Path::new(path).exists() {
             thread::sleep(Duration::from_millis(5));
         }
+    }
+    /// `fault:journal-hold:<path>`: the owner waits, before the ownership journal append, until `<path>`
+    /// exists. A regular-file journal keeps its `fsync`; Linux rejects `fsync` on the FIFO that holds the
+    /// append on macOS.
+    pub fn journal_hold(pane: &str) -> Option<String> {
+        kind(pane)?.strip_prefix("journal-hold:").map(str::to_owned)
+    }
+    /// The hold is bounded: a release that never comes fails the create loudly instead of blocking.
+    pub fn wait_for_file_bounded(path: &str) -> io::Result<()> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !std::path::Path::new(path).exists() {
+            if std::time::Instant::now() >= deadline {
+                return Err(io::Error::other(
+                    "OWNERSHIP_JOURNAL_FAILED: fault journal hold was not released within 60 s",
+                ));
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        Ok(())
     }
     /// `fault:watch-exit-fail` / `fault:watch-exit-fail-noreap`: the exit watcher cannot start after
     /// the gate was released. `-noreap` also makes the sidecar's kill/reap verification fail.
