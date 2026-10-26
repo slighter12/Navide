@@ -39,7 +39,12 @@ import websockets
 WINDOWS = os.name == "nt"
 RUNTIME = "navide-cli-runtime.exe" if WINDOWS else "navide-cli-runtime"
 BACKEND = "agent_team_backend.exe" if WINDOWS else "agent_team_backend"
-ARGUMENTS = ["café 世界 quote' \" \\ ; | &", "second argument"]
+#: Behind a Windows `.cmd` shim, cmd.exe re-parses `%*`: a lone (unbalanced) embedded double quote next to `|` and `&`
+#: breaks the line for Python's spawner and for the runtime alike (hosted run 40267322544: both print
+#: "& was unexpected at this time."), so the Windows argument keeps a balanced nested quote and drops the lone one.
+LONE_QUOTE = "café 世界 quote' \" \\ ; | &"
+ARGUMENTS = ["café 世界 quote' \\ ; | &", 'balanced "inner quote" text', "second argument"] if os.name == "nt" \
+    else [LONE_QUOTE, "second argument"]
 FAIL_BOUND_S = 40.0
 
 PEER = r'''
@@ -244,12 +249,15 @@ async def positive(backend: Backend, runtime: Path, result: dict) -> None:
                 # with a list2cmdline command line, the Python arm's spawner) with the same nested-quote arguments.
                 # Recorded first, so it exists even when the pane fails: it says whether a difference in the pane's
                 # argv comes from the shim or from the runtime.
-                run = subprocess.run([str(backend.shims / "aider.cmd"), "--dump-argv", *ARGUMENTS], capture_output=True,
-                                     text=True, timeout=30, env=backend.env, encoding="utf-8", errors="replace")
-                result["python_spawn_control"] = {"returncode": run.returncode, "stdout": run.stdout[-400:],
-                                                  "stderr": run.stderr[-300:],
-                                                  "preserved": run.stdout.strip() == "ARGV " + json.dumps(ARGUMENTS)}
-                print("CONTROL python_spawn_control " + json.dumps(result["python_spawn_control"], ensure_ascii=True), flush=True)
+                for label, arguments in (("python_spawn_control", ARGUMENTS), ("python_spawn_lone_quote", [LONE_QUOTE])):
+                    run = subprocess.run([str(backend.shims / "aider.cmd"), "--dump-argv", *arguments], capture_output=True,
+                                         text=True, timeout=30, env=backend.env, encoding="utf-8", errors="replace")
+                    result[label] = {"returncode": run.returncode, "stdout": run.stdout[-400:], "stderr": run.stderr[-300:],
+                                     "preserved": run.stdout.strip() == "ARGV " + json.dumps(arguments)}
+                    print(f"CONTROL {label} " + json.dumps(result[label], ensure_ascii=True), flush=True)
+                # The arguments the pane must preserve survive Python's spawner; the lone quote does not (the limit).
+                assert result["python_spawn_control"]["preserved"], result["python_spawn_control"]
+                assert not result["python_spawn_lone_quote"]["preserved"], result["python_spawn_lone_quote"]
 
             # 2. Agent pane: a vendor key started through a shim found by name, nested arguments intact.
             command = ["aider", *ARGUMENTS]
