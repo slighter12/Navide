@@ -53,7 +53,7 @@ class VendorData:
         self.connections = {}
         #: A store shared by every session (one file the CLI keeps open) can be seen empty before its first rows. A
         #: per-session file, named by the session id, is created together with its first rows and never is.
-        self.shared_store = self.fixture.get("sessionId", "") not in str(self.path)
+        self.shared_store = (self.fixture.get("sessionId") or "") not in str(self.path)
 
     def expand(self, value, extra=None):
         if isinstance(value, str):
