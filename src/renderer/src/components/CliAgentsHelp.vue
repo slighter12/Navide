@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuotaFailover } from '../composables/useQuotaFailover'
+import { VENDOR_FACTS } from '../platform/plugin-shell/agents/_vendorFacts'
 
 import MockDialog from './helpMocks/MockDialog.vue'
 import MockFigure from './helpMocks/MockFigure.vue'
@@ -45,29 +46,46 @@ interface VendorRow {
 // of a list kept here. The three vendors without a permission-bypass flag
 // (Grok CLI, OpenCode, Pi) simply have no such flag in the CLI itself.
 //
-// "signIn" mirrors each vendor's `login_command_args` (cli_vendors/*.py), which
-// is what `_login_spawn_command` appends when the Accounts pane's sign-in
-// button spawns a login pane. Checked against the registry on 2026-09-18; the
-// eight vendors that declare none launch normally and sign in inside the CLI.
-// test_help_panel_sign_in_column_matches_login_command_args keeps the two in
-// step, so this table cannot quietly drift from what the button runs.
+// The binary, bypass flag and sign-in arguments are read from the generated
+// vendor facts (`shared/agent-cli/<key>.json`), so this table cannot drift from
+// what the launch paths and the Accounts pane's sign-in button run. Only the
+// display name, the usage flag and the static multi-account fallback live here.
+const row = (
+  agentKey: keyof typeof VENDOR_FACTS,
+  name: string,
+  usage: boolean,
+  multiAccount: boolean,
+  flagNote?: string
+): VendorRow => {
+  const facts = VENDOR_FACTS[agentKey]
+  return {
+    name,
+    bin: facts.command,
+    agentKey,
+    skipFlag: facts.permission_flag ?? '',
+    ...(flagNote ? { flagNote } : {}),
+    usage,
+    multiAccount,
+    signIn: facts.login_args ?? '',
+  }
+}
 const vendors: VendorRow[] = [
-  { name: 'Claude Code (Anthropic)', bin: 'claude', agentKey: 'claude', skipFlag: '--dangerously-skip-permissions', usage: true, multiAccount: true, signIn: 'auth login' },
-  { name: 'Codex CLI (OpenAI)', bin: 'codex', agentKey: 'codex', skipFlag: '--dangerously-bypass-approvals-and-sandbox', usage: true, multiAccount: true, signIn: 'login' },
-  { name: 'Antigravity CLI (Google)', bin: 'agy', agentKey: 'antigravity', skipFlag: '--dangerously-skip-permissions', usage: true, multiAccount: false, signIn: '' },
-  { name: 'Grok Build (SpaceXAI)', bin: 'grok', agentKey: 'grok', skipFlag: '', usage: true, multiAccount: true, signIn: 'login' },
-  { name: 'Kimi Code CLI (Moonshot AI)', bin: 'kimi', agentKey: 'kimi', skipFlag: '--yolo', usage: true, multiAccount: true, signIn: 'login' },
-  { name: 'OpenCode (Anomaly)', bin: 'opencode', agentKey: 'opencode', skipFlag: '', usage: true, multiAccount: false, signIn: 'auth login' },
-  { name: 'Qwen Code (Alibaba Cloud)', bin: 'qwen', agentKey: 'qwen', skipFlag: '--yolo', usage: true, multiAccount: false, signIn: '' },
-  { name: 'Kilo Code CLI', bin: 'kilo', agentKey: 'kilo', skipFlag: '--auto', usage: true, multiAccount: true, signIn: 'auth login' },
-  { name: 'Pi', bin: 'pi', agentKey: 'pi', skipFlag: '', usage: true, multiAccount: false, signIn: '' },
-  { name: 'GitHub Copilot CLI', bin: 'copilot', agentKey: 'copilot', skipFlag: '--yolo', usage: true, multiAccount: false, signIn: 'login' },
-  { name: 'Cursor CLI', bin: 'agent', agentKey: 'cursor', skipFlag: '--force', usage: true, multiAccount: false, signIn: '' },
-  { name: 'Aider', bin: 'aider', agentKey: 'aider', skipFlag: '--yes-always', usage: false, multiAccount: false, signIn: '' },
-  { name: 'Muse Code (Meta)', bin: 'muse', agentKey: 'muse', skipFlag: '--disable-approval', usage: false, multiAccount: false, signIn: 'login' },
-  { name: 'Droid CLI (Factory)', bin: 'droid', agentKey: 'droid', skipFlag: '--auto high', usage: false, multiAccount: false, signIn: '' },
-  { name: 'MiniMax Code', bin: 'mcode', agentKey: 'mcode', skipFlag: '', usage: false, multiAccount: false, signIn: 'login' },
-  { name: 'Goose (AAIF)', bin: 'goose', agentKey: 'goose', skipFlag: '', flagNote: 'settings.help.cliAgents.s1.table.flagNoteGoose', usage: false, multiAccount: false, signIn: '' },
+  row('claude', 'Claude Code (Anthropic)', true, true),
+  row('codex', 'Codex CLI (OpenAI)', true, true),
+  row('antigravity', 'Antigravity CLI (Google)', true, false),
+  row('grok', 'Grok Build (SpaceXAI)', true, true),
+  row('kimi', 'Kimi Code CLI (Moonshot AI)', true, true),
+  row('opencode', 'OpenCode (Anomaly)', true, false),
+  row('qwen', 'Qwen Code (Alibaba Cloud)', true, false),
+  row('kilo', 'Kilo Code CLI', true, true),
+  row('pi', 'Pi', true, false),
+  row('copilot', 'GitHub Copilot CLI', true, false),
+  row('cursor', 'Cursor CLI', true, false),
+  row('aider', 'Aider', false, false),
+  row('muse', 'Muse Code (Meta)', false, false),
+  row('droid', 'Droid CLI (Factory)', false, false),
+  row('mcode', 'MiniMax Code', false, false),
+  row('goose', 'Goose (AAIF)', false, false, 'settings.help.cliAgents.s1.table.flagNoteGoose'),
 ]
 
 // Backend truth for the multi-account column. `supported` alone is not
