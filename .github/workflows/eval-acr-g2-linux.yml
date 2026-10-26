@@ -83,7 +83,7 @@ jobs:
         run: >
           bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts
           -t 'uses one actual native runtime|sidecar death with sessions and a pending request'
-          --reporter=json --outputFile=test-results/ci/g2-linux-ts-results.json
+          --reporter=default --reporter=json --outputFile.json=test-results/ci/g2-linux-ts-results.json
 
       - name: Require both WebSocket cases to be collected and pass
         id: principal_guard
@@ -97,6 +97,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: g2-linux-${{ matrix.arch }}-outcomes
-          path: test-results/ci/g2-linux-outcomes.log
+          path: |
+            test-results/ci/g2-linux-outcomes.log
+            test-results/ci/g2-linux-ts-results.json
           if-no-files-found: warn
           retention-days: 7
