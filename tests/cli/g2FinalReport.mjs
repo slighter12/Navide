@@ -67,7 +67,9 @@ function matrix(args) {
   const data = new Map()
   for (const name of platforms) {
     if (!args[name]) continue
-    data.set(name, name === 'mac' ? readJunit(readFileSync(args[name], 'utf8')) : readOutcomes(args[name]))
+    data.set(name, name === 'mac'
+      ? new Map(args[name].split(',').flatMap(file => [...readJunit(readFileSync(file, 'utf8'))]))
+      : readOutcomes(args[name]))
   }
   // macOS runs the Linux required list: its ids are the Linux ones that exist in the junit.
   const linuxIds = requiredIds(readFileSync(args['linux-required'], 'utf8'))
