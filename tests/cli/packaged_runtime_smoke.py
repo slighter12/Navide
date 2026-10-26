@@ -248,7 +248,10 @@ async def positive(backend: Backend, runtime: Path, result: dict) -> None:
             asid, apid = created["payload"]["terminal_session_id"], created["payload"]["pid"]
             created_pids.append(apid)
             await wire.until(lambda: "AGENT_READY " in wire.output.get(asid, ""), "agent peer ready", sid=asid)
-            ready = json.loads(wire.output[asid].split("AGENT_READY ")[1].split("\n")[0].strip())
+            # A ConPTY re-renders a line wider than the screen as rows with cursor sequences; those are layout, not
+            # content (same treatment as tests/cli/shellRuntime.test.ts), so they are removed before parsing.
+            flat = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]|[\r\n]", "", wire.output[asid].split("AGENT_READY ", 1)[1])
+            ready, _end = json.JSONDecoder().raw_decode(flat)
             assert ready["argv"] == ARGUMENTS, ready
             assert Path(ready["cwd"]).resolve() == workspace.resolve(), ready
             assert ready["isatty"] is True and ready["size"] == [100, 30], ready
@@ -307,6 +310,13 @@ async def negative(backend: Backend, expected: str, result: dict) -> None:
     result["elapsed_s"] = round(elapsed, 2)
     assert elapsed < FAIL_BOUND_S, f"failure took {elapsed:.1f}s"
     assert all(re.search(expected, text) for text in failures), (expected, failures)
+    # What the failed sidecar wrote to stderr (the backend logs it as a diagnostic) and, on Linux, the kernel's
+    # registered binary-format handlers: together they name the layer that handled a foreign executable.
+    log_text = (backend.root / "backend.log").read_text(encoding="utf-8", errors="replace")
+    result["runtime_diagnostics"] = [line[-300:] for line in log_text.splitlines() if "Rust runtime diagnostic" in line][:5]
+    if sys.platform.startswith("linux"):
+        handlers = Path("/proc/sys/fs/binfmt_misc")
+        result["binfmt_misc"] = sorted(path.name for path in handlers.iterdir()) if handlers.is_dir() else None
     children = [child.name() for child in psutil.Process(backend.process.pid).children(recursive=True)]
     result["children_after_failure"] = children
     assert not any("sh" == name or name.startswith("cmd") for name in children), f"a PTY child exists: {children}"
