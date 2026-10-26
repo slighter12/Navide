@@ -8,41 +8,18 @@ from __future__ import annotations
 
 import os
 import stat
-import sys
 from typing import Any
 
 import psutil
 
 from . import cli_runtime_frames as wire
+from . import osplat
 from .cli_runtime_handoff import slave_name_of
 
 
 def controlling_terminal_device(pid: int) -> int | None:
-    """Read the root's controlling-terminal device directly, or return None when it has none.
-
-    psutil caches its tty map at first use and misses ttys created later.
-    """
-    if sys.platform == "linux":
-        try:
-            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat_file:
-                fields = stat_file.read().rsplit(")", 1)[1].split()
-            encoded = int(fields[4])  # tty_nr is field 7; fields[0] is state (field 3).
-            if encoded == 0:
-                return None
-            major = (encoded >> 8) & 0xFFF
-            minor = (encoded & 0xFF) | ((encoded >> 12) & 0xFFF00)
-            return os.makedev(major, minor)
-        except (OSError, IndexError, ValueError):
-            return None
-    import ctypes
-    import ctypes.util
-    library = ctypes.CDLL(ctypes.util.find_library("proc"), use_errno=True)
-    size = 136  # sizeof(struct proc_bsdinfo)
-    buffer = ctypes.create_string_buffer(size)
-    if library.proc_pidinfo(pid, 3, 0, buffer, size) != size:
-        return None
-    device = int.from_bytes(buffer.raw[108:112], sys.byteorder)
-    return None if device in (0, 0xFFFFFFFF) else device
+    """Read the root's controlling-terminal device directly, or return None when it has none."""
+    return osplat.controlling_terminal_device(pid)
 
 
 def enabled() -> bool:
