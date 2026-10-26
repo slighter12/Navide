@@ -17,6 +17,7 @@ SUBJECTS = Path("shared/agent-cli-subjects.json")
 COMPOSITIONS = ("rust", "python")
 PYTHON_OUTPUT = Path("backend/agent_team_backend/cli_vendors/_vendor_facts.py")
 TYPESCRIPT_OUTPUT = Path("src/renderer/src/platform/plugin-shell/agents/_vendorFacts.ts")
+SHARED_TYPESCRIPT_OUTPUT = Path("src/shared/vendorFacts.ts")  # same data, for the main process (own tsconfig project)
 RUST_OUTPUT = Path("native/navide-cli-runtime/src/vendor_facts.rs")
 
 HEADER = "Generated from shared/agent-cli/*.json by scripts/generate-agent-cli-facts.py; do not edit."
@@ -30,7 +31,7 @@ TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilit
 
 
 def output_paths() -> tuple[Path, ...]:
-    return (PYTHON_OUTPUT, TYPESCRIPT_OUTPUT, RUST_OUTPUT)
+    return (PYTHON_OUTPUT, TYPESCRIPT_OUTPUT, SHARED_TYPESCRIPT_OUTPUT, RUST_OUTPUT)
 
 
 def load(root: Path) -> list[dict]:
@@ -228,6 +229,7 @@ def outputs(root: Path = ROOT) -> dict[Path, str]:
     return {
         PYTHON_OUTPUT: python_source(facts, subjects),
         TYPESCRIPT_OUTPUT: typescript_source(facts),
+        SHARED_TYPESCRIPT_OUTPUT: typescript_source(facts),
         RUST_OUTPUT: rust_source(facts, subjects),
     }
 

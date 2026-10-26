@@ -24,6 +24,6 @@ export function aiTerminalCommand(input: {
   }
   const enabled = input.permissionStored === 'force-on' ||
     (input.permissionStored !== 'force-off' && (input.yoloStored == null || input.yoloStored === '1'))
-  if (enabled && 'yoloFlag' in profile) parts.push(profile.yoloFlag)
+  if (enabled && profile.yoloFlag) parts.push(profile.yoloFlag)
   return buildAgentPaneCommand(input.shell, parts)
 }

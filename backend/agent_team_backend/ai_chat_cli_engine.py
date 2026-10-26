@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import onboarding_deps, osplat
+from .cli_vendors import _vendor_facts as vendor_facts
 
 log = logging.getLogger("agent_team_backend.ai_chat_cli_engine")
 
@@ -32,7 +33,7 @@ _KILL_GRACE_S = 3.0
 # must match onboarding_deps (cli_binary_overrides) and command is the PATH
 # executable name.
 ENGINES: dict[str, dict[str, str]] = {
-    "claude": {"agent_key": "claude", "command": "claude"},
+    "claude": {"agent_key": "claude", "command": vendor_facts.FACTS["claude"].command},
 }
 
 
