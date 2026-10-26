@@ -129,3 +129,21 @@ __all__ += ["folder_birth_time"]
 #: compared by its (device, inode).
 paths_ignore_case: bool = {"darwin": True, "linux": False, "win32": True}[platform_id]
 __all__ += ["paths_ignore_case"]
+
+#: Whether the runtime wire carries a TTY_SERVICING request here (Windows only;
+#: on POSIX that code stays a protocol error).
+has_tty_servicing: bool = platform_id == "win32"
+
+#: Whether the Windows runtime client (Win32 handle APIs) can run on this machine.
+has_windows_runtime_client: bool = platform_id == "win32"
+__all__ += ["has_tty_servicing", "has_windows_runtime_client"]
+
+from . import controlling_tty  # noqa: E402
+
+#: A process's controlling-terminal device read from the kernel record, or None.
+controlling_terminal_device = {
+    "darwin": controlling_tty.from_libproc,
+    "linux": controlling_tty.from_proc,
+    "win32": controlling_tty.unsupported,
+}[platform_id]
+__all__ += ["controlling_terminal_device"]

@@ -20,11 +20,12 @@ import asyncio
 import collections
 import ctypes
 import errno
-import sys
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+from . import osplat
 
 #: How long a cancelled pump or writer may take to end (E1 7.4, G-W5).
 THREAD_CLOSE_S = 2.0
@@ -93,7 +94,7 @@ _api: _Api | None = None
 def api() -> _Api:
     global _api
     if _api is None:
-        if sys.platform != "win32":
+        if not osplat.has_windows_runtime_client:
             raise RuntimeError("the Windows runtime client only runs on Windows")
         _api = _Api()
     return _api

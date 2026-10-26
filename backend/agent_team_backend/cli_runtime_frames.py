@@ -11,10 +11,11 @@ import json
 import os
 import socket
 import struct
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from . import osplat
 
 HEADER_LEN = 32
 WIRE_VERSION = 2
@@ -63,7 +64,7 @@ CODE_NAMES = {value: name for name, value in vars(code).items() if name.isupper(
 _EVENT_CODES = {code.SESSION_OWNED, code.SESSION_HANGUP, code.SESSION_EXITED, code.SESSION_CLEANED,
                 code.SESSION_OWNERSHIP, code.OBSERVATION_PART, code.SESSION_ROOT_LIVE, code.FATAL}
 _REQUEST_CODES = set(range(code.CREATE, code.TTY_EOF + 1))
-if sys.platform == "win32":  # TTY_SERVICING exists on Windows only; on POSIX it stays a protocol error
+if osplat.has_tty_servicing:  # on POSIX TTY_SERVICING stays a protocol error
     _REQUEST_CODES.add(code.TTY_SERVICING)
 
 
