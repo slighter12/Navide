@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, copyFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, copyFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { expect, it } from 'vitest'
@@ -52,8 +52,50 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
     const decoders = new Map<string, TextDecoder>()
     const exits = new Map<string, any>()
     const tailBeforeExit = new Map<string, boolean>()
+    // Failure diagnostics only: when each session's chunks arrived (ms since the test began, cumulative bytes).
+    const startedAt = Date.now()
+    // Event-loop lag of this test process: a frozen client looks like a silent server from the outside.
+    let loopLagMs = 0
+    let lastTick = Date.now()
+    const lagTimer = setInterval(() => {
+      const now = Date.now()
+      loopLagMs = Math.max(loopLagMs, now - lastTick - 50)
+      lastTick = now
+    }, 50)
+    const chunkLog = new Map<string, Array<[number, number]>>()
+    // Linux only: what each thread of the peer is doing (state letter and kernel wait channel), so a peer
+    // blocked writing a full pty is told apart from one that is runnable but starved of CPU.
+    const peerThreads = (pid: number): string => {
+      if (process.platform !== 'linux') return 'n/a'
+      try {
+        return readdirSync(`/proc/${pid}/task`).map((task) => {
+          const stat = readFileSync(`/proc/${pid}/task/${task}/stat`, 'utf8')
+          const wchan = readFileSync(`/proc/${pid}/task/${task}/wchan`, 'utf8')
+          let syscall = ''
+          try { syscall = readFileSync(`/proc/${pid}/task/${task}/syscall`, 'utf8').trim().split(' ').slice(0, 4).join(' ') } catch { /* not readable */ }
+          return `${task}:${stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3)}:${wchan}:sys[${syscall}]`
+        }).join(' ')
+      } catch (error) {
+        return `unreadable ${(error as Error).message}`
+      }
+    }
+    const describeFlow = (tid: string): string => {
+      const log = chunkLog.get(tid) ?? []
+      const text = output.get(tid) ?? ''
+      const gaps = log.slice(1).map(([at], index) => at - log[index][0])
+      return JSON.stringify({
+        nowMs: Date.now() - startedAt, maxLoopLagMs: loopLagMs, chunks: log.length, bytes: log.at(-1)?.[1] ?? 0,
+        firstChunkMs: log[0]?.[0] ?? null, lastChunkMs: log.at(-1)?.[0] ?? null, maxGapMs: gaps.length ? Math.max(...gaps) : null,
+        chunkTimeline: log,
+        burstRows: (text.match(/BURST \d{4} /g) ?? []).length, burstDone: text.includes('BURST_DONE'),
+        echoSeen: text.includes('"text": "during-burst-世界"'), tail: text.slice(-120),
+      })
+    }
     client.on('terminal.output', (payload) => {
       const frame = payload as TerminalOutputFrame
+      const flow = chunkLog.get(frame.terminal_session_id) ?? []
+      flow.push([Date.now() - startedAt, (flow.at(-1)?.[1] ?? 0) + frame.data.byteLength])
+      chunkLog.set(frame.terminal_session_id, flow)
       const decoder = decoders.get(frame.terminal_session_id) ?? new TextDecoder()
       decoders.set(frame.terminal_session_id, decoder)
       output.set(frame.terminal_session_id, (output.get(frame.terminal_session_id) ?? '') + decoder.decode(frame.data, { stream: true }))
@@ -100,7 +142,26 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
         const burstWait = isWindows ? 120_000 : 15_000
         await until(() => (output.get(tid) ?? '').includes('BURST 0000 '), 'first burst', burstWait)
         await input(tid, 'during-burst-世界\r')
-        await until(() => (output.get(tid) ?? '').includes('"text": "during-burst-世界"'), 'input while bursting', burstWait)
+        try {
+          await until(() => (output.get(tid) ?? '').includes('"text": "during-burst-世界"'), 'input while bursting', burstWait)
+        } catch (error) {
+          const peer = peers.find((candidate) => candidate.tid === tid)
+          // Diagnosis only, after the bound has already failed: does the missing output ever arrive by itself
+          // (slow delivery), or only after the session is poked with more input (stranded in the backend)?
+          const before = describeFlow(tid)
+          const echoed = () => (output.get(tid) ?? '').includes('"text": "during-burst-世界"')
+          const deadlineAt = Date.now() + 4_000
+          while (!echoed() && Date.now() < deadlineAt) await delay(50)
+          const arrivedByItself = echoed() ? Date.now() - startedAt : null
+          let arrivedAfterPoke: number | null = null
+          if (!echoed()) {
+            await client.send('terminal.input', { terminal_session_id: tid, data: 'poke\r' }).catch(() => undefined)
+            const pokeDeadline = Date.now() + 3_000
+            while (!echoed() && Date.now() < pokeDeadline) await delay(50)
+            arrivedAfterPoke = echoed() ? Date.now() - startedAt : null
+          }
+          throw new Error(`${(error as Error).message}; peer ${peers.findIndex((candidate) => candidate.tid === tid)} exits=${JSON.stringify([...exits.keys()])} peerThreads=${peerThreads(peer?.pid ?? 0)} atTimeout=${before} late=${JSON.stringify({ arrivedByItself, arrivedAfterPoke })} afterWait=${describeFlow(tid)}`)
+        }
         await until(() => (output.get(tid) ?? '').includes('BURST_DONE'), 'complete burst', burstWait)
         let previous = -1
         // A ConPTY re-renders long lines as screen rows: it cuts a wrapped line with CR LF and cursor-position
@@ -171,6 +232,7 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
       expect(identities.some((entry) => entry.pid === ready[0].pid && entry.created === ready[0].created && entry.parent === endpoint.backend.pid)).toBe(true)
       for (const peer of peers) expect(identities.some((entry) => entry.pid === peer.pid && entry.created > 0)).toBe(true)
     } finally {
+      clearInterval(lagTimer)
       client.dispose('native shell complete')
     }
   })
