@@ -339,14 +339,23 @@ def main() -> int:
     runtime = resources / "bin" / RUNTIME
     extra: dict[str, str] = {}
     expected = ""
+    driver_probe = None
     if args.scenario == "missing":
         runtime.unlink()
         expected = "Rust runtime binary missing from the packaged app"
     elif args.scenario == "wrong-arch":
         foreign_machine_executable(runtime)
-        # Windows and macOS refuse the exec itself ("START_FAILED at exec"); Linux's exec falls back to /bin/sh for a
-        # file with a foreign ELF header and the sidecar ends before ready ("START_FAILED before ready").
-        expected = "START_FAILED (at exec|before ready)"
+        # The backend names the cause from the file's own header before spawning (cli_runtime.refuse_foreign_binary).
+        expected = "START_FAILED wrong architecture"
+        # What this host's own spawn does with the same file, for the record (Linux hosted runs end such a file in
+        # a /bin/sh fallback; that is why the backend does not leave the cause to the OS).
+        try:
+            probe = subprocess.Popen([str(runtime)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            _out, err = probe.communicate(timeout=10)
+            extra_probe = {"status": probe.returncode, "stderr": err.decode("utf-8", "replace")[-200:]}
+        except OSError as error:
+            extra_probe = {"oserror": error.errno, "message": error.strerror}
+        driver_probe = extra_probe
     elif args.scenario == "protocol":
         # A separate stub, built here with plain rustc; no fault switch exists in the runtime or the lookup.
         stub = Path(__file__).with_name("fixtures") / "protocol_stub.rs"
@@ -355,6 +364,8 @@ def main() -> int:
         expected = "PROTOCOL_MISMATCH"
     result: dict = {"scenario": args.scenario, "platform": sys.platform, "machine": platform.machine(),
                     "runtime_staged": runtime.is_file(), "expected": expected or "pass"}
+    if driver_probe is not None:
+        result["host_spawn_of_the_same_file"] = driver_probe
     backend = Backend(resources, root, extra)
     outcome = "pass"
     try:

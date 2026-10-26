@@ -57,7 +57,7 @@ function main() {
     let detail = {}
     try { detail = JSON.parse(readFileSync(join(out, 'smoke', `${scenario}.json`), 'utf8')) } catch { /* no result file */ }
     if (detail.runtime_diagnostics || detail.binfmt_misc) {
-      console.log(`DETAIL ${scenario} diagnostics=${JSON.stringify(detail.runtime_diagnostics)} binfmt_misc=${JSON.stringify(detail.binfmt_misc)} failures=${JSON.stringify(detail.failures)}`)
+      console.log(`DETAIL ${scenario} host_spawn=${JSON.stringify(detail.host_spawn_of_the_same_file)} diagnostics=${JSON.stringify(detail.runtime_diagnostics)} binfmt_misc=${JSON.stringify(detail.binfmt_misc)} failures=${JSON.stringify(detail.failures)}`)
     }
     results.push({ scenario, outcome: run.status === 0 ? 'pass' : 'fail', ...detail })
   }

@@ -96,6 +96,43 @@ def runtime_path() -> Path:
     raise FileNotFoundError("Rust runtime binary missing; build native/navide-cli-runtime explicitly")
 
 
+_HOST_MACHINES = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}
+_ELF_MACHINES = {62: "x64", 183: "arm64"}
+_MACHO_CPUS = {0x01000007: "x64", 0x0100000C: "arm64"}
+_PE_MACHINES = {0x8664: "x64", 0xAA64: "arm64"}
+
+
+def binary_architecture(path: Path) -> str | None:
+    """The machine a native executable was built for ('x64', 'arm64', or the raw code), None for anything else.
+
+    Read from the file's own header, so a foreign binary is named before it is spawned: the OS reports one in
+    different ways (ENOEXEC, 'not a valid Win32 application', or a sh fallback that runs it as a script).
+    """
+    with path.open("rb") as stream:
+        head = stream.read(4096)
+    if head[:4] == b"\x7fELF" and len(head) >= 20:
+        code = int.from_bytes(head[18:20], "little" if head[5] == 1 else "big")
+        return _ELF_MACHINES.get(code, f"elf-machine-{code}")
+    if head[:4] == b"\xcf\xfa\xed\xfe" and len(head) >= 8:
+        code = int.from_bytes(head[4:8], "little")
+        return _MACHO_CPUS.get(code, f"macho-cpu-{code:#x}")
+    if head[:2] == b"MZ" and len(head) >= 0x40:
+        offset = int.from_bytes(head[0x3C:0x40], "little")
+        if head[offset:offset + 4] == b"PE\0\0" and len(head) >= offset + 6:
+            code = int.from_bytes(head[offset + 4:offset + 6], "little")
+            return _PE_MACHINES.get(code, f"pe-machine-{code:#x}")
+    return None
+
+
+def refuse_foreign_binary(path: Path) -> None:
+    """START_FAILED, naming the cause, when the staged runtime was built for another machine than this host."""
+    import platform
+    host = _HOST_MACHINES.get(platform.machine().lower())
+    built = binary_architecture(path)
+    if host is not None and built is not None and built != host:
+        raise RuntimeError(f"START_FAILED wrong architecture: the runtime is built for {built}, this host is {host}")
+
+
 class CreateCancelled(RuntimeError):
     """The caller cancelled this create while it was still being coordinated; nothing was sent."""
 
@@ -597,6 +634,7 @@ class RustTerminalService(TerminalService):
             if self._runtime is not None:
                 return
             path = runtime_path().resolve()
+            refuse_foreign_binary(path)
             self._runtime_generation = secrets.token_hex(16)
             if fence := await asyncio.to_thread(in_data_dir(self._data_dir, pty_registry.reevaluate_fence)):
                 self._runtime_generation = ""
