@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -13,13 +14,15 @@ from tests.cli_regression.support.backend_process import BackendProcess
 from tests.cli_regression.support.cli_shim import base_python_executable, install_cli_shim
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cli_regression,
-              pytest.mark.skipif(sys.platform != "darwin", reason="native macOS reference evidence")]
+              pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="native POSIX reference evidence")]
 
 
 def reference_backend(root: Path) -> tuple[BackendProcess, list[str]]:
     backend = BackendProcess(root)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
-    script = Path(__file__).parent / "cli_regression/support/claude_runtime_peer.py"
+    if binary := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):
+        backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
+    script =Path(__file__).parent / "cli_regression/support/claude_runtime_peer.py"
     executable = install_cli_shim(root, "claude", [base_python_executable(), "-u", str(script), str(root)])
     # Own shell startup file, never the real user's startup configuration.
     (root / "home/.bash_profile").write_text(
@@ -168,6 +171,7 @@ async def test_native_checkpoint_restart_preserves_question_background_partial_a
     assert len({r["runtime_generation"] for r in observed}) == 2
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="the credential store fixture replaces the macOS Keychain; Linux uses a different store")
 async def test_native_claude_isolated_login_switch_and_refusal_preserve_python_credentials(tmp_path):
     backend, command = reference_backend(tmp_path)
     backend.env["NAVIDE_REGRESSION_KEYCHAIN_FIXTURE"] = "1"

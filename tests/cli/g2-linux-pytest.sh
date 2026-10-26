@@ -19,6 +19,9 @@ uv --project backend run pytest \
   backend/tests/test_cli_runtime_vendor_transport.py \
   backend/tests/test_cli_runtime_review1.py \
   backend/tests/test_cli_runtime_observe.py \
+  backend/tests/test_cli_runtime_claude.py \
+  backend/tests/test_cli_runtime_claude_parity.py \
+  backend/tests/test_cli_runtime_observe_codex.py \
   backend/tests/test_cli_create_meta_size.py \
   backend/tests/test_cli_runtime_credential_env_remove.py \
   -q -p no:cacheprovider -o junit_family=xunit2 \

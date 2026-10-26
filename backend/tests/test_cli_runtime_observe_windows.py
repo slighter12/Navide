@@ -56,9 +56,9 @@ QUIET_S = 6.0
 STAGE_BOUND_S = 90.0
 
 
-def _backend(root: Path, stage: int, home: Path) -> BackendProcess:
+def _backend(root: Path, stage: int, home: Path, native: bool = WINDOWS) -> BackendProcess:
     backend = BackendProcess(root, artifact_prefix=f"windows-stage-{stage}-")
-    if WINDOWS:
+    if native:
         backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
         if binary := os.environ.get("NAVIDE_CLI_RUNTIME_BIN"):
             backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
@@ -96,8 +96,8 @@ async def _settle(backend: BackendProcess, ws) -> None:
 
 
 async def _stage(root: Path, stage: int, vendor: str, data: VendorData, phases: list[str],
-                 completion_phase: str) -> list[dict]:
-    backend = _backend(root, stage, data.home)
+                 completion_phase: str, native: bool = WINDOWS) -> list[dict]:
+    backend = _backend(root, stage, data.home, native)
     command = _command(backend, vendor, data)
     metadata = {} if vendor == "codex" else {"session_marker": MARKER}  # codex is bound by its hook and pane home
     if vendor == "claude":  # claude is bound by the session id its launch names

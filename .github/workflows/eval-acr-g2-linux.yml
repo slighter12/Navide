@@ -70,7 +70,7 @@ jobs:
       - name: Require every listed case to be collected and passed
         id: guard
         if: always() && steps.build.outcome == 'success'
-        run: node tests/cli/g2Native.mjs guard --platform linux --arch ${{ matrix.arch }} --required tests/cli/g2-required-linux.txt --skip-allowed test_cli_runtime_recovery.py,test_cli_runtime_lifecycle.py --junit test-results/ci/g2-linux-junit.xml --out test-results/ci/g2-linux-outcomes.log
+        run: node tests/cli/g2Native.mjs guard --platform linux --arch ${{ matrix.arch }} --required tests/cli/g2-required-linux.txt --skip-allowed test_cli_runtime_recovery.py,test_cli_runtime_lifecycle.py,test_cli_runtime_claude.py --junit test-results/ci/g2-linux-junit.xml --out test-results/ci/g2-linux-outcomes.log
 
       - name: Require every ready receipt to name the freshly built sidecar
         id: receipts
@@ -81,8 +81,8 @@ jobs:
         id: principal
         if: always() && steps.build.outcome == 'success'
         run: >
-          bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts
-          -t 'uses one actual native runtime|sidecar death with sessions and a pending request'
+          bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts tests/cli/claudeRuntime.test.ts
+          -t 'uses one actual native runtime|sidecar death with sessions and a pending request|native Claude production-client'
           --reporter=default --reporter=json --outputFile.json=test-results/ci/g2-linux-ts-results.json
 
       - name: Require both WebSocket cases to be collected and pass
@@ -102,3 +102,8 @@ jobs:
             test-results/ci/g2-linux-ts-results.json
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Require the Claude production-client cases to be collected and pass
+        id: claude_guard
+        if: always() && steps.principal.outcome == 'success'
+        run: jq -e -f tests/cli/g2-linux-principal.jq test-results/ci/g2-linux-ts-results.json
