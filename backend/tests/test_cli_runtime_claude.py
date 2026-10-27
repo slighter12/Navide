@@ -289,10 +289,28 @@ async def test_native_activity_error_advances_before_next_poll_completion(tmp_pa
         tid = created["terminal_session_id"]
         await backend.expect_output(ws, tid, "CLAUDE_REFERENCE_READY")
         await backend.request(ws, "terminal.input", {"terminal_session_id": tid, "data": "stage 1\r"})
-        async with asyncio.timeout(15):
-            while not any(event.get("type") == "agent.activity" and event["payload"].get("event_type") == "turn_complete"
-                          for event in backend.events):
-                await backend.receive(ws)
+        def completed() -> bool:
+            return any(event.get("type") == "agent.activity" and event["payload"].get("event_type") == "turn_complete"
+                       for event in backend.events)
+
+        try:
+            async with asyncio.timeout(15):
+                while not completed():
+                    await backend.receive(ws)
+        except TimeoutError:
+            # Diagnosis only, after the bound has already failed: which step was reached, and does the event still arrive.
+            seen = [event["payload"].get("event_type") for event in backend.events if event.get("type") == "agent.activity"]
+            rows = [row for row in receipts(tmp_path) if row.get("event") == "observed"] if (tmp_path / "runtime-receipts.jsonl").exists() else []
+            late = False
+            try:
+                async with asyncio.timeout(10):
+                    while not completed():
+                        await backend.receive(ws)
+                late = True
+            except TimeoutError:
+                pass
+            raise TimeoutError(f"turn_complete not seen in 15 s; activity={seen} observed_rows={len(rows)} "
+                               f"observed_errors={sum(1 for row in rows if row.get('error'))} arrived_within_10s_after={late}")
         activity = [event["payload"] for event in backend.events if event.get("type") == "agent.activity"]
         assert [event["event_type"] for event in activity] == ["agent_active", "turn_complete"]
         assert [event["text"] for event in activity if event["event_type"] == "turn_complete"] == ["After exceptional record"]
