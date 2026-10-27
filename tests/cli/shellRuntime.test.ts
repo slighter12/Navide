@@ -164,7 +164,17 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux' || proces
           }
           throw new Error(`${(error as Error).message}; peer ${peers.findIndex((candidate) => candidate.tid === tid)} exits=${JSON.stringify([...exits.keys()])} peerThreads=${peerThreads(peer?.pid ?? 0)} atTimeout=${before} late=${JSON.stringify({ arrivedByItself, arrivedAfterPoke })} afterWait=${describeFlow(tid)}`)
         }
-        await until(() => (output.get(tid) ?? '').includes('BURST_DONE'), 'complete burst', burstWait)
+        try {
+          await until(() => (output.get(tid) ?? '').includes('BURST_DONE'), 'complete burst', burstWait)
+        } catch (error) {
+          const peer = peers.find((candidate) => candidate.tid === tid)
+          // Diagnosis only, after the bound has already failed: does BURST_DONE ever arrive by itself, and where is the flow?
+          const before = describeFlow(tid)
+          const done = () => (output.get(tid) ?? '').includes('BURST_DONE')
+          const deadlineAt = Date.now() + 10_000
+          while (!done() && Date.now() < deadlineAt) await delay(50)
+          throw new Error(`${(error as Error).message}; peer ${peers.findIndex((candidate) => candidate.tid === tid)} exits=${JSON.stringify([...exits.keys()])} peerThreads=${peerThreads(peer?.pid ?? 0)} atTimeout=${before} arrivedWithin10sAfter=${done()} afterWait=${describeFlow(tid)} bytes=${(output.get(tid) ?? '').length}`)
+        }
         let previous = -1
         // A ConPTY re-renders long lines as screen rows: it cuts a wrapped line with CR LF and cursor-position
         // sequences. Those are layout, not content, so they are removed before the exact-bytes comparison
