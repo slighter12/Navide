@@ -489,6 +489,10 @@ class LogReader(ABC):
     #: replacement for membership in the watcher's vendor-name tuple.
     emits_session_sink: bool = False
 
+    #: A store that commits between the session sink and the activity parse of one watcher pass (a shared SQLite
+    #: store) needs the sink to run once more before activity is delivered, or a marker the sink missed is never bound.
+    resinks_session_after_activity: bool = False
+
     #: How turns_for_session splits a session into turns: "exact" when the
     #: log carries its own turn boundaries (a vendor override), "inferred"
     #: for the generic cut on turn_complete timestamps below, "unsupported"

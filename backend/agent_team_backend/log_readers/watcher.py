@@ -762,6 +762,19 @@ class LogWatcher:
                     # Progress is strictly forward, so the follow-up chain terminates.
                     self._queue.put_nowait((path, ""))
                 return False
+            if (
+                activity_events
+                and self._session_sink is not None
+                and reader.emits_session_sink
+                and reader.resinks_session_after_activity
+            ):
+                # The store can commit between the session sink above and this parse; the sink then missed a marker
+                # that these events already carry, and a WAL commit raises no later file event for it to try again.
+                # An already bound pane answers from memory without reading the store.
+                try:
+                    await self._session_sink(reader.vendor, path)
+                except Exception as err:  # noqa: BLE001
+                    log.warning("session sink raised: %s", err)
             for aev in activity_events:
                 try:
                     await self._activity_sink(aev)

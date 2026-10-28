@@ -1040,6 +1040,7 @@ CopilotLogReader.binds_shared_db_by_marker = True
 # layout. Narrow, but the alternative is a pane that can never bind.
 CopilotLogReader.binds_new_session_single_candidate = True
 CopilotLogReader.emits_session_sink = True
+CopilotLogReader.resinks_session_after_activity = True
 CopilotLogReader.workspace_match = _workspace_match
 CopilotLogReader.pane_cwd_match = _pane_cwd_match
 
