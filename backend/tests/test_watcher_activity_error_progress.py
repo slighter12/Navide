@@ -94,3 +94,31 @@ async def test_records_after_an_error_with_progress_are_read_without_another_fil
     finally:
         drain.cancel()
         await asyncio.gather(drain, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_progress_made_before_an_error_is_persisted_when_the_bad_record_is_last(tmp_path: Path) -> None:
+    root = tmp_path / "logs"
+    root.mkdir()
+    path = root / "a.jsonl"
+    path.write_text('{"type": "assistant"}\nnull\n', encoding="utf-8")
+
+    async def tokens(_usage: object) -> None:
+        return None
+
+    async def sink(_event: ActivityEvent) -> None:
+        return None
+
+    store = TokensStore(
+        global_path=tmp_path / "tokens.json",
+        workspace_base_dir=tmp_path / "workspaces",
+        ingestion_state_path=tmp_path / "token-ingestion-state.json",
+    )
+    watcher = LogWatcher(sink=tokens, activity_sink=sink,  # type: ignore[arg-type]
+                         checkpoint_provider=store.get_ingestion_checkpoint,
+                         checkpoint_sink=store.advance_ingestion_checkpoint)
+    watcher.add_reader(_ErrorProgressReader(root))
+    # The follow-up poll finds nothing new and makes no progress, so only the error poll can persist.
+    await watcher._process_realtime_path(path)
+    stored = store.get_ingestion_checkpoint(str(path.resolve()), "@activity")
+    assert "act_hw::2" in stored.get("keys", [])
