@@ -24,7 +24,7 @@ describe('App pane context menu — Remove sub-panes', () => {
     expect(appSource).toContain(
       'return withDescendants([paneId], panes.value).filter((id) => id !== paneId)'
     )
-    expect(appSource).toContain('for (const id of descendantPaneIds(paneId)) await onKill(id)')
+    expect(appSource).toContain('for (const id of descendantPaneIds(paneId)) await onUserClosePane(id)')
   })
 
   it('shows the item only when the right-clicked pane has descendants', () => {

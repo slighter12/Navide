@@ -9349,14 +9349,14 @@ function descendantPaneIds(paneId: string): string[] {
 // "Remove sub-panes": closes only what the right-clicked pane spawned. The
 // parent stays; its sidebar row simply loses the ↳ family beneath it.
 async function killDescendants(paneId: string): Promise<void> {
-  for (const id of descendantPaneIds(paneId)) await onKill(id)
+  for (const id of descendantPaneIds(paneId)) await onUserClosePane(id)
 }
 
 // "Remove with sub-panes": the whole family in one click. Descendants go first
 // so the sidebar never re-roots them onto a parent that is about to go too.
 async function killWithDescendants(paneId: string): Promise<void> {
   await killDescendants(paneId)
-  await onKill(paneId)
+  await onUserClosePane(paneId)
 }
 
 async function batchRebuild(ids: string[]): Promise<void> {
@@ -23560,7 +23560,7 @@ function paneIsCommander(p: ActivePane): boolean {
           :title="$t('action.remove-children-title')"
           @click="killDescendants(paneCtxMenu!.paneId); closePaneCtxMenu()"
         >{{ $t('action.remove-children', { count: ctxDescendantIds.length }) }}</div>
-        <div class="pane-ctx-item danger" @click="onKill(paneCtxMenu!.paneId); closePaneCtxMenu()">{{ $t('action.remove') }}</div>
+        <div class="pane-ctx-item danger" @click="onUserClosePane(paneCtxMenu!.paneId); closePaneCtxMenu()">{{ $t('action.remove') }}</div>
         <div
           v-if="ctxDescendantIds.length"
           class="pane-ctx-item danger"
