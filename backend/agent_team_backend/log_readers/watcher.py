@@ -770,7 +770,8 @@ class LogWatcher:
             ):
                 # The store can commit between the session sink above and this parse; the sink then missed a marker
                 # that these events already carry, and a WAL commit raises no later file event for it to try again.
-                # An already bound pane answers from memory without reading the store.
+                # A bound pane skips the store read only when no other Copilot marker is still pending; otherwise
+                # this extra sink does one bounded marker lookup.
                 try:
                     await self._session_sink(reader.vendor, path)
                 except Exception as err:  # noqa: BLE001
