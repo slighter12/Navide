@@ -66,6 +66,20 @@ describe('closePaneHidden — the pane is hidden while settlement is pending', (
     await expect(closePaneHidden(closing, 'p1', async () => { throw new Error('boom') })).rejects.toThrow('boom')
     expect(closing.has('p1')).toBe(false)
   })
+  it('stays hidden while a second close of the same pane is pending, even after the first one is refused', async () => {
+    const closing = new Set<string>()
+    const first = deferred<object | null>()
+    const second = deferred<object | null>()
+    const firstClose = close(closing, first.promise)
+    const secondClose = close(closing, second.promise)
+    await Promise.resolve()
+    first.resolve(null)
+    expect(await firstClose).toBe(false)
+    expect(closing.has('p1')).toBe(true)
+    second.resolve({ ok: true })
+    expect(await secondClose).toBe(true)
+    expect(closing.has('p1')).toBe(false)
+  })
   it('a caller that starts a replacement only after a proven answer starts none while pending or refused', async () => {
     const closing = new Set<string>()
     const replacements: string[] = []

@@ -30,16 +30,30 @@ export interface PaneRetirementSteps {
  * replacement. A proven answer drops the pane as before; a refusal, a timeout, a transport failure
  * or a throw shows the same pane again (the caller reports the error).
  */
+const inFlight = new WeakMap<object, Map<string, number>>()
+
 export async function closePaneHidden(
   closing: Set<string>,
   paneId: string,
   retire: () => Promise<boolean>,
 ): Promise<boolean> {
+  // The set may be a reactive proxy; its raw target is the stable key, and a count per pane keeps
+  // the hide until the LAST overlapping close settles (an earlier refusal must not reveal it).
+  const key = (closing as { __v_raw?: object }).__v_raw ?? closing
+  let counts = inFlight.get(key)
+  if (!counts) inFlight.set(key, counts = new Map())
+  counts.set(paneId, (counts.get(paneId) ?? 0) + 1)
   closing.add(paneId)
   try {
     return await retire()
   } finally {
-    closing.delete(paneId)
+    const left = (counts.get(paneId) ?? 1) - 1
+    if (left > 0) {
+      counts.set(paneId, left)
+    } else {
+      counts.delete(paneId)
+      closing.delete(paneId)
+    }
   }
 }
 

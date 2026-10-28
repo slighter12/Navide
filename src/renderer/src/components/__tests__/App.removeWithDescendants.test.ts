@@ -42,7 +42,7 @@ describe('App pane context menu — Remove with sub-panes', () => {
     expect(zhLocale).toContain('"remove-with-children-title"')
   })
 
-  it('leaves the existing single-pane Remove item untouched', () => {
+  it('keeps the single-pane Remove item closing outright, through the same hide-while-settling close', () => {
     expect(appSource).toContain(
       '<div class="pane-ctx-item danger" @click="onUserClosePane(paneCtxMenu!.paneId); closePaneCtxMenu()">'
     )

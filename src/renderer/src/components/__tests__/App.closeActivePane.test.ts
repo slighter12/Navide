@@ -15,10 +15,8 @@ import { describe, expect, it } from 'vitest'
 
 const appSource = readFileSync(resolve(process.cwd(), 'src/renderer/src/App.vue'), 'utf8')
 
-const closeFn = appSource.slice(
-  appSource.indexOf('async function closeFocusedPane'),
-  appSource.indexOf('async function onKill')
-)
+const closeStart = appSource.indexOf('async function closeFocusedPane')
+const closeFn = appSource.slice(closeStart, appSource.indexOf('\n}\n', closeStart))
 
 describe('App ⌘W closes the focused pane', () => {
   it('registers the command and routes it through closeFocusedPane', () => {
@@ -51,7 +49,7 @@ describe('App ⌘W closes the focused pane', () => {
     expect(closeFn).toContain('else if (confirmBeforeClosePane.value)')
     expect(closeFn).toContain('close-idle-confirm-body')
     expect(closeFn).toContain("checkboxLabel: i18n.global.t('confirm-close.dont-show-again')")
-    expect(closeFn).toContain('await onKill(paneId)')
+    expect(closeFn).toContain('await onUserClosePane(paneId)')
   })
 
   it('records the opt-out only after a confirmed close', () => {
@@ -63,8 +61,9 @@ describe('App ⌘W closes the focused pane', () => {
     expect(idleBranch.indexOf('if (!ok) return')).toBeLessThan(idleBranch.indexOf(optOut))
   })
 
-  it('leaves the ✕ button closing outright', () => {
-    // The mouse path is deliberate; only the keystroke gained a prompt.
+  it('leaves the context-menu Remove item closing outright', () => {
+    // The mouse path is deliberate (no prompt); only the keystroke gained one. It closes through
+    // onUserClosePane, which hides the pane while the backend settles.
     expect(appSource).toContain('@click="onUserClosePane(paneCtxMenu!.paneId); closePaneCtxMenu()"')
   })
 
