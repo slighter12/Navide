@@ -21776,7 +21776,7 @@ function onGridHandleEnd(): void {
 const effectiveFocusPaneId = computed(() =>
   // Of the panes the stage can draw — naming one it filters out renders
   // nothing at all, since sidebar and spotlight draw this pane and no other.
-  resolveFocusedPane(focusPaneId.value, panesOnStage.value, minimizedPanes.value)
+  resolveFocusedPane(focusPaneId.value, panesOnStage.value, minimizedPanes.value, closingPaneIds.value)
 )
 
 // ── Dual-focus: show 2 running panes side-by-side in non-grid modes ───────────
@@ -21789,6 +21789,7 @@ const runningPaneIds = computed(() => {
     (p) =>
       (p.status === 'running' || p.status === 'starting') &&
       !minimizedPanes.value.has(p.id) &&
+      !closingPaneIds.value.has(p.id) &&
       p.origin === 'pipeline' &&
       p.stageId === activeStageId &&
       pipeline.state === 'running'

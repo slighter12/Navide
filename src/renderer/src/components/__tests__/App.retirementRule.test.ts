@@ -58,6 +58,15 @@ describe('the user\'s own close hides the pane while settling', () => {
     expect(body).toContain(call)
     expect(body).not.toMatch(/await onKill\(/)
   })
+  it('hands the stage to the next pane while the focused pane is closing (sidebar, spotlight, fullscreen, dual focus)', () => {
+    // The behaviour is tested in lib/__tests__/paneFocus.test.ts; this only pins the call site.
+    expect(appSource).toContain(
+      'resolveFocusedPane(focusPaneId.value, panesOnStage.value, minimizedPanes.value, closingPaneIds.value)'
+    )
+    const start = appSource.indexOf('const runningPaneIds = computed(')
+    const block = appSource.slice(start, appSource.indexOf('\n})\n', start))
+    expect(block).toContain('!closingPaneIds.value.has(p.id)')
+  })
   it('removes a closing pane from the layout but not from the pane list', () => {
     const start = appSource.indexOf('const tabVisiblePanes = computed(')
     const block = appSource.slice(start, appSource.indexOf('\n)\n', start))

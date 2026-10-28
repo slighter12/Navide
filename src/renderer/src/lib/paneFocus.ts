@@ -18,18 +18,26 @@ export interface FocusablePane {
  *  `panes` must already be the workspace on screen: sidebar and spotlight
  *  render this pane and nothing else, so naming one from another workspace
  *  renders nothing at all.
+ *
+ *  `closing` holds panes the user is closing whose settlement is still pending.
+ *  They are hidden from the layout, so like a minimized pane they cannot stand
+ *  on the stage: the stage moves to the next pane at once, by the same rule it
+ *  uses once the pane is gone. The requested id itself is the caller's to keep,
+ *  so a refused close names the same pane again.
  */
 export function resolveFocusedPane(
   requested: string | null,
   panes: readonly FocusablePane[],
   minimized: ReadonlySet<string>,
+  closing: ReadonlySet<string> = new Set(),
 ): string | null {
-  if (requested && !minimized.has(requested) && panes.some((p) => p.id === requested)) {
+  const offStage = (id: string): boolean => minimized.has(id) || closing.has(id)
+  if (requested && !offStage(requested) && panes.some((p) => p.id === requested)) {
     return requested
   }
   // A minimized pane is docked, not on the stage — falling back to it would
   // leave the stage empty just as surely.
-  return panes.find((p) => !minimized.has(p.id))?.id ?? null
+  return panes.find((p) => !offStage(p.id))?.id ?? null
 }
 
 export interface SidebarSection {
