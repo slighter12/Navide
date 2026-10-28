@@ -37,11 +37,10 @@ export async function closePaneHidden(
   paneId: string,
   retire: () => Promise<boolean>,
 ): Promise<boolean> {
-  // The set may be a reactive proxy; its raw target is the stable key, and a count per pane keeps
-  // the hide until the LAST overlapping close settles (an earlier refusal must not reveal it).
-  const key = (closing as { __v_raw?: object }).__v_raw ?? closing
-  let counts = inFlight.get(key)
-  if (!counts) inFlight.set(key, counts = new Map())
+  // A count per pane keeps the hide until the LAST overlapping close settles (an earlier refusal
+  // must not reveal it). The caller passes the same set every time.
+  let counts = inFlight.get(closing)
+  if (!counts) inFlight.set(closing, counts = new Map())
   counts.set(paneId, (counts.get(paneId) ?? 0) + 1)
   closing.add(paneId)
   try {
