@@ -65,7 +65,7 @@ describe('App ⌘W closes the focused pane', () => {
 
   it('leaves the ✕ button closing outright', () => {
     // The mouse path is deliberate; only the keystroke gained a prompt.
-    expect(appSource).toContain('@click="onKill(paneCtxMenu!.paneId); closePaneCtxMenu()"')
+    expect(appSource).toContain('@click="onUserClosePane(paneCtxMenu!.paneId); closePaneCtxMenu()"')
   })
 
   it('keeps the opt-out reversible in Settings', () => {

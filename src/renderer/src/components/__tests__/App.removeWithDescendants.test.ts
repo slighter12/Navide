@@ -23,7 +23,7 @@ describe('App pane context menu — Remove with sub-panes', () => {
     expect(appSource).toContain(
       'async function killWithDescendants(paneId: string): Promise<void> {\n' +
         '  await killDescendants(paneId)\n' +
-        '  await onKill(paneId)\n' +
+        '  await onUserClosePane(paneId)\n' +
         '}'
     )
   })
@@ -44,9 +44,9 @@ describe('App pane context menu — Remove with sub-panes', () => {
 
   it('leaves the existing single-pane Remove item untouched', () => {
     expect(appSource).toContain(
-      '<div class="pane-ctx-item danger" @click="onKill(paneCtxMenu!.paneId); closePaneCtxMenu()">'
+      '<div class="pane-ctx-item danger" @click="onUserClosePane(paneCtxMenu!.paneId); closePaneCtxMenu()">'
     )
-    expect(appSource).toContain('for (const id of descendantPaneIds(paneId)) await onKill(id)')
+    expect(appSource).toContain('for (const id of descendantPaneIds(paneId)) await onUserClosePane(id)')
   })
 
   it('the scope rule: the target plus its whole subtree, nothing outside it', () => {
