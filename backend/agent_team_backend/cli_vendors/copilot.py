@@ -359,6 +359,10 @@ class CopilotLogReader(LogReader):
     def _db_path(self) -> Path:
         return copilot_root() / _DB_NAME
 
+    def accepts_watch_path(self, path_str: str) -> bool:
+        """The store's rollback journal: its deletion is the commit (see watcher._Handler.on_deleted)."""
+        return path_str.endswith(f"{_DB_NAME}-journal")
+
     def project_dirs(self) -> list[Path]:
         """The CLI root itself (empty list when it doesn't exist).
 
