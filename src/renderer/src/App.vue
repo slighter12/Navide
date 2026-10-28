@@ -289,7 +289,7 @@ import {
   type WorkspaceRestoreSession,
 } from './lib/resumeBehavior'
 import { shouldQueuePtyLostResume } from './lib/ptyLostRecovery'
-import { settlePaneTerminals } from './lib/paneRetirement'
+import { closePaneHidden, settlePaneTerminals } from './lib/paneRetirement'
 import { WakeClaims, joinedRealizeOutcome, paneOpenAnswer, sessionHeldElsewhere, type SessionHolder } from './lib/paneOpenAnswer'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
 import { cliPermissionKey, parseCliPermissionMode, skipPermissionFlagFor } from '@navide/plugin-shell'
@@ -8066,7 +8066,16 @@ async function closeFocusedPane(paneId: string): Promise<void> {
     // next one.
     if (notifyRestore.dialogCheckbox.value) confirmBeforeClosePane.value = false
   }
-  await onKill(paneId)
+  await onUserClosePane(paneId)
+}
+
+// Panes the user is closing whose backend settlement is still pending: hidden from the layout
+// (so the CLI's shutdown output is never shown) but still in `panes`, so every check that reads
+// the list still sees them as unsettled. Shown again when the settlement is not proven.
+const closingPaneIds = ref(new Set<string>())
+
+function onUserClosePane(paneId: string): Promise<boolean> {
+  return closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId))
 }
 
 // The backend may wait for an in-flight create's own disposition (60 s) before answering.
@@ -19610,7 +19619,7 @@ const tabFilteredPaneIds = computed<Set<string>>(() =>
 
 // Panes visible under both tab filter and minimize filter — drives grid sizing
 const tabVisiblePanes = computed(() =>
-  panes.value.filter((p) => tabFilteredPaneIds.value.has(p.id) && !minimizedPanes.value.has(p.id))
+  panes.value.filter((p) => tabFilteredPaneIds.value.has(p.id) && !minimizedPanes.value.has(p.id) && !closingPaneIds.value.has(p.id))
 )
 
 async function onUserSelectTab(tabId: string): Promise<void> {
@@ -22552,7 +22561,7 @@ function paneIsCommander(p: ActivePane): boolean {
       v-model:sidebar-mode="sidebarMode"
       @spawn="onManualSpawn"
       @spawn-resume="onManualResume"
-      @kill="onKill"
+      @kill="onUserClosePane"
       @minimize="minimizePane"
       @toggle-collapsed="togglePaneCollapsed"
       @toggle-workspace="toggleWorkspaceCollapsed"
