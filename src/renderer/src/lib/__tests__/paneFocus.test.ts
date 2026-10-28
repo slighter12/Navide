@@ -47,6 +47,30 @@ describe('resolveFocusedPane', () => {
     expect(resolveFocusedPane(null, [p('a'), p('b')], none)).toBe('a')
     expect(resolveFocusedPane('', [p('a')], none)).toBe('a')
   })
+
+  describe('a pane the user is closing', () => {
+    it('hands the stage to the next pane at once, instead of drawing nothing', () => {
+      // The blank stage of the pane-close hide: the closing pane leaves the layout, so naming it
+      // renders nothing until settlement removes it.
+      expect(resolveFocusedPane('a', [p('a'), p('b')], none, new Set(['a']))).toBe('b')
+    })
+
+    it('uses the same fallback rule as a removed pane: the first pane that is neither minimized nor closing', () => {
+      expect(resolveFocusedPane('b', [p('a'), p('b'), p('c')], new Set(['a']), new Set(['b']))).toBe('c')
+      expect(resolveFocusedPane('b', [p('a'), p('b'), p('c')], none, new Set(['b']))).toBe(
+        resolveFocusedPane('b', [p('a'), p('c')], none),
+      )
+    })
+
+    it('does not move focus away from a pane that is not closing', () => {
+      expect(resolveFocusedPane('b', [p('a'), p('b')], none, new Set(['a']))).toBe('b')
+    })
+
+    it('answers null when every pane is closing, and names the pane again once its close is refused', () => {
+      expect(resolveFocusedPane('a', [p('a')], none, new Set(['a']))).toBeNull()
+      expect(resolveFocusedPane('a', [p('a'), p('b')], none, new Set())).toBe('a')
+    })
+  })
 })
 
 describe('flattenSidebarOrder', () => {
