@@ -43,6 +43,20 @@ describe('onKill: settlement first, retirement only on proof', () => {
   })
 })
 
+describe('the user\'s own close hides the pane while settling', () => {
+  it('goes through onUserClosePane from the confirm dialog and the list button', () => {
+    expect(fn('onUserClosePane')).toContain('closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId))')
+    expect(fn('closeFocusedPane')).toContain('await onUserClosePane(paneId)')
+    expect(appSource).toContain('@kill="onUserClosePane"')
+  })
+  it('removes a closing pane from the layout but not from the pane list', () => {
+    const start = appSource.indexOf('const tabVisiblePanes = computed(')
+    const block = appSource.slice(start, appSource.indexOf('\n)\n', start))
+    expect(block).toContain('!closingPaneIds.value.has(p.id)')
+    expect(block).toContain('panes.value.filter(')
+  })
+})
+
 describe('callers that start a replacement (or retire more) only after a proven onKill', () => {
   it.each([
     ['rebuildPaneViaResume', 'await spawnPane({'],
