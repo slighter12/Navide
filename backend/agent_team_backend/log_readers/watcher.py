@@ -743,6 +743,12 @@ class LogWatcher:
                 return False
             except Exception as err:  # noqa: BLE001
                 log.warning("parse_activity %s (%s) failed: %s", path, reader.vendor, err)
+                if frozenset(act_seen) != before:
+                    # The reader advanced past the offending record before raising and
+                    # records after it are unread. A single write raises one watch event,
+                    # so without a follow-up poll they wait for the next file change.
+                    # Progress is strictly forward, so the follow-up chain terminates.
+                    self._queue.put_nowait((path, ""))
                 return False
             for aev in activity_events:
                 try:
