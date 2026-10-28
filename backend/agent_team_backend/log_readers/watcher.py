@@ -116,6 +116,8 @@ class _Handler(FileSystemEventHandler):
         if s.endswith(".db-wal"):
             self._on_path(Path(s[: -len("-wal")]))
             return
+        if s.endswith(".db-journal"):
+            return  # a rollback journal's writes are not a commit; its deletion is (on_deleted)
         if self._accepts_path(s):
             self._on_path(Path(s))
             return
@@ -127,6 +129,14 @@ class _Handler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent) -> None:
         self.on_modified(event)
+
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        # A rollback-journal SQLite store commits when its `-journal` file is deleted, which can be after the last
+        # .db event: a pass run for that event may have read the store before the commit was visible. Re-enqueue
+        # the canonical .db path for the readers that claim the journal.
+        s = str(event.src_path)
+        if not event.is_directory and s.endswith(".db-journal") and self._accepts_path(s):
+            self._on_path(Path(s[: -len("-journal")]))
 
 
 class LogWatcher:
