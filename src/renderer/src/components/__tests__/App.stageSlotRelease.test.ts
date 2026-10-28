@@ -102,7 +102,7 @@ describe('closing a run-group tab ends the run it belonged to', () => {
     expect(fn).toContain("affected.some((p) => p.origin === 'pipeline')")
     expect(fn).toContain('await onPipelineAbort()')
     const abortAt = fn.indexOf('onPipelineAbort()')
-    const killAt = fn.indexOf('await onKill(p.id)')
+    const killAt = fn.indexOf('await onUserClosePane(p.id)')
     expect(killAt).toBeGreaterThan(abortAt)
   })
 })

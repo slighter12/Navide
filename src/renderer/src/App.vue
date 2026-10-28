@@ -8074,8 +8074,8 @@ async function closeFocusedPane(paneId: string): Promise<void> {
 // the list still sees them as unsettled. Shown again when the settlement is not proven.
 const closingPaneIds = ref(new Set<string>())
 
-function onUserClosePane(paneId: string): Promise<boolean> {
-  return closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId))
+function onUserClosePane(paneId: string, opts: Parameters<typeof onKill>[1] = {}): Promise<boolean> {
+  return closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId, opts))
 }
 
 // The backend may wait for an in-flight create's own disposition (60 s) before answering.
@@ -9337,7 +9337,7 @@ function batchRestore(ids: string[]): void {
 }
 
 async function batchKill(ids: string[]): Promise<void> {
-  for (const id of [...ids]) await onKill(id)
+  for (const id of [...ids]) await onUserClosePane(id)
   selectedPaneIds.value = new Set()
 }
 
@@ -13852,7 +13852,7 @@ async function closeAllSessions(): Promise<void> {
   )
   if (!ok) return
   if (pipeline.state === 'running') await onPipelineAbort()
-  for (const p of [...panes.value]) await onKill(p.id)
+  for (const p of [...panes.value]) await onUserClosePane(p.id)
   runGroups.value = runGroups.value.filter((g) => detachedGroupIds.value.has(g.id))
   if (!runGroups.value.some((g) => g.id === currentRunGroupId.value)) currentRunGroupId.value = ''
   activeTab.value = ''
@@ -19306,7 +19306,7 @@ async function closeRunGroup(id: string, keepGroup = false): Promise<void> {
     pipelineLog('Pipeline aborted — its run group tab was closed')
     await onPipelineAbort()
   }
-  for (const p of [...affected]) await onKill(p.id)
+  for (const p of [...affected]) await onUserClosePane(p.id)
   noteOtherWorkspacesUntouched((p) => (id === 'manual' ? !p.runGroupId : p.runGroupId === id))
   if (id !== 'manual' && !keepGroup) {
     runGroups.value = runGroups.value.filter((g) => g.id !== id)

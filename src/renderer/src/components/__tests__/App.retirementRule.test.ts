@@ -45,9 +45,18 @@ describe('onKill: settlement first, retirement only on proof', () => {
 
 describe('the user\'s own close hides the pane while settling', () => {
   it('goes through onUserClosePane from the confirm dialog and the list button', () => {
-    expect(fn('onUserClosePane')).toContain('closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId))')
+    expect(fn('onUserClosePane')).toContain('closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId, opts))')
     expect(fn('closeFocusedPane')).toContain('await onUserClosePane(paneId)')
     expect(appSource).toContain('@kill="onUserClosePane"')
+  })
+  it.each([
+    ['batchKill', 'await onUserClosePane(id)'],
+    ['closeAllSessions', 'await onUserClosePane(p.id)'],
+    ['closeRunGroup', 'await onUserClosePane(p.id)'],
+  ])('the bulk user close %s hides each pane too', (name, call) => {
+    const body = fn(name)
+    expect(body).toContain(call)
+    expect(body).not.toMatch(/await onKill\(/)
   })
   it('removes a closing pane from the layout but not from the pane list', () => {
     const start = appSource.indexOf('const tabVisiblePanes = computed(')
