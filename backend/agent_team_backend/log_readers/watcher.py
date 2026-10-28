@@ -743,6 +743,8 @@ class LogWatcher:
                 return False
             except Exception as err:  # noqa: BLE001
                 log.warning("parse_activity %s (%s) failed: %s", path, reader.vendor, err)
+                if seeded or frozenset(act_seen) != before:
+                    self._persist_activity_seen(key, act_seen)
                 if frozenset(act_seen) != before:
                     # The reader advanced past the offending record before raising and
                     # records after it are unread. A single write raises one watch event,
