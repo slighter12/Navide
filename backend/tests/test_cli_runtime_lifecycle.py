@@ -183,6 +183,11 @@ class LifeRig:
     async def say(self, service, session, line: str) -> None:
         await service.write_async(session.id, line + "\r")
 
+    async def say_noecho(self, service, session) -> None:
+        """Stop the tty echoing typed input, so a command typed while a flood is printing cannot splice into a flood line."""
+        await self.say(service, session, "noecho")
+        await self.until(lambda: "NOECHO" in self.sink.text(session.id), "tty echo off")
+
     def peer_pid(self, session) -> int:
         return json.loads(self.sink.text(session.id).split("LIFE_READY ")[1].splitlines()[0])["pid"]
 
@@ -248,6 +253,7 @@ async def harness(tmp_path, monkeypatch):
 async def test_t1a_root_exit_with_an_unread_tail_and_a_slow_consumer_loses_nothing(rig):
     service = rig.service()
     session = await rig.life(service, "pane-t1a")
+    await rig.say_noecho(service, session)  # `exit` is typed while the flood prints
     rig.sink.delay = 0.01  # a slow consumer
     count = 6000  # ~1.2 MB
     await rig.say(service, session, f"flood {count}")
@@ -262,6 +268,7 @@ async def test_t1b_forced_interleaving_every_retained_byte_precedes_the_exit_and
     service = rig.service()
     log = rig.root / "pipeline.log"
     session = await rig.life(service, "pane-t1b", output_log_file=str(log))
+    await rig.say_noecho(service, session)  # `flood 200` and `closestdio` are typed while a flood prints
     rig.sink.hold(session.id)
     await rig.say(service, session, "flood 400")  # ~80 KB: a taken batch whose first piece blocks the sink
     await rig.until(lambda: session.id in service._drain_tasks, "a drain in flight")
@@ -294,6 +301,7 @@ async def test_t6_eof_during_an_active_resize_barrier_waits_for_the_control_lock
         return await original(session_)
 
     service._drain_output_behind_barrier = traced
+    await harness.say_noecho(service, session)  # `closestdio` is typed while the flood prints
 
     async def resize():
         async with service.control_async(session.id, 120, 40):
