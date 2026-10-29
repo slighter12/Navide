@@ -66,7 +66,7 @@ class DriverError(Exception):
     pass
 
 
-CORRECTNESS_BASETEMP = "/private/tmp/g3r3-ct"     # short on purpose: run 1's ~150-char basetemp overflowed a path-derived name (grok) and timed out an aider scenario; a fresh name for r3 (r2 left /private/tmp/g3r2-ct); must not exist before the run
+CORRECTNESS_BASETEMP = "/private/tmp/g3r4-ct"     # short on purpose: run 1's ~150-char basetemp overflowed a path-derived name (grok) and timed out an aider scenario; a fresh name for r4 (r2 left /private/tmp/g3r2-ct, r3 /private/tmp/g3r3-ct); must not exist before the run
 
 
 def _step(name: str, argv: list[str], *, cwd: str, env: dict | None = None, outputs: list[str] | None = None, stdout: str | None = None) -> dict:
@@ -292,6 +292,8 @@ REGISTERED_OUT_REL = ".scratch/agent-cli-runtime-evaluation/evidence/g2/10-final
 REHEARSAL_OUT_REL = ".scratch/agent-cli-runtime-evaluation/evidence/g2/10-final/g3r2/rehearsal"      # the only place a rehearsal may write (G3-r2 amendment 2)
 R3_REGISTERED_OUT_REL = ".scratch/agent-cli-runtime-evaluation/evidence/g2/10-final/g3r3/run"      # G3-r3 amendment: the follow-up run's own directory, with its own claim beside it
 R3_REHEARSAL_PARENT_REL = ".scratch/agent-cli-runtime-evaluation/evidence/g2/10-final/g3r3"      # a G3-r3 rehearsal writes to a `rehearsal*` directory here, or to its attempt-<n> subdirectory
+R4_REGISTERED_OUT_REL = ".scratch/agent-cli-runtime-evaluation/evidence/g2/10-final/g3r4/run"      # G3-r4 amendment: the merged-head run's own directory, with its own claim beside it
+R4_REHEARSAL_PARENT_REL = ".scratch/agent-cli-runtime-evaluation/evidence/g2/10-final/g3r4"      # a G3-r4 rehearsal writes to a `rehearsal*` directory here, or to its attempt-<n> subdirectory
 REGISTERED_CLAIM_NAME = "cost-run.claim"
 
 
@@ -300,15 +302,16 @@ def registered_out(repo: str | Path) -> Path:
 
 
 def registered_claim(repo: str | Path, out: str | Path | None = None) -> Path:
-    """The one-run claim of the cost run: a file BESIDE the registered output directory (the r3 one when `out` is the r3 directory), so it does not depend on the `out` a caller names otherwise."""
-    if out is not None and os.path.realpath(out) == os.path.realpath(Path(repo) / R3_REGISTERED_OUT_REL):
-        return (Path(repo) / R3_REGISTERED_OUT_REL).parent / REGISTERED_CLAIM_NAME
+    """The one-run claim of the cost run: a file BESIDE the registered output directory (the r3 or r4 one when `out` is that directory), so it does not depend on the `out` a caller names otherwise."""
+    for rel in (R3_REGISTERED_OUT_REL, R4_REGISTERED_OUT_REL):
+        if out is not None and os.path.realpath(out) == os.path.realpath(Path(repo) / rel):
+            return (Path(repo) / rel).parent / REGISTERED_CLAIM_NAME
     return registered_out(repo).parent / REGISTERED_CLAIM_NAME
 
 
 def out_problem(repo: str | Path, out: str | Path) -> str | None:
-    if os.path.realpath(out) not in (os.path.realpath(registered_out(repo)), os.path.realpath(Path(repo) / R3_REGISTERED_OUT_REL)):
-        return f"the cost run writes only to the registered output {registered_out(repo)} or {Path(repo) / R3_REGISTERED_OUT_REL}, not {out}"
+    if os.path.realpath(out) not in (os.path.realpath(registered_out(repo)), os.path.realpath(Path(repo) / R3_REGISTERED_OUT_REL), os.path.realpath(Path(repo) / R4_REGISTERED_OUT_REL)):
+        return f"the cost run writes only to the registered output {registered_out(repo)}, {Path(repo) / R3_REGISTERED_OUT_REL} or {Path(repo) / R4_REGISTERED_OUT_REL}, not {out}"
     return None
 
 
@@ -321,10 +324,11 @@ def rehearsal_out_problem(repo: str | Path, out: str | Path) -> str | None:
     real, base = Path(os.path.realpath(out)), Path(os.path.realpath(rehearsal_out(repo)))
     if real == base or (real.parent == base and re.fullmatch(r"attempt-\d+", real.name)):
         return None
-    r3 = Path(os.path.realpath(Path(repo) / R3_REHEARSAL_PARENT_REL))
-    if real.parent == r3 and real.name.startswith("rehearsal") or real.parent.parent == r3 and real.parent.name.startswith("rehearsal") and re.fullmatch(r"attempt-\d+", real.name):
-        return None
-    return f"a rehearsal writes only to {rehearsal_out(repo)} or its attempt-<n> subdirectories, or to a rehearsal* directory of {Path(repo) / R3_REHEARSAL_PARENT_REL}, not {out}"
+    for parent_rel in (R3_REHEARSAL_PARENT_REL, R4_REHEARSAL_PARENT_REL):
+        rn = Path(os.path.realpath(Path(repo) / parent_rel))
+        if real.parent == rn and real.name.startswith("rehearsal") or real.parent.parent == rn and real.parent.name.startswith("rehearsal") and re.fullmatch(r"attempt-\d+", real.name):
+            return None
+    return f"a rehearsal writes only to {rehearsal_out(repo)} or its attempt-<n> subdirectories, or to a rehearsal* directory of {Path(repo) / R3_REHEARSAL_PARENT_REL} or {Path(repo) / R4_REHEARSAL_PARENT_REL}, not {out}"
 
 
 def rehearsal_plan(plan: list[dict], repo: str, out: str) -> list[dict]:

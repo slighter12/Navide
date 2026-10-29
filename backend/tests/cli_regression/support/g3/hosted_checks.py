@@ -42,7 +42,7 @@ SEAM_PHRASES = {
 }
 PIPE_PHRASES = ("python_pty_spawns", "Python spawned", "counters")
 # marker kinds that are a hook-delivery check; `counters-connection` is the pipe-connection check instead
-HOOK_KINDS = {"Linux": ("python-seams", "reader-rss-bytes"), "Windows": ("python-seams", "termios-shim", "counters-server", "node-preload")}
+HOOK_KINDS = {"Linux": ("python-seams", "reader-rss-bytes", "reader-counters-v2"), "Windows": ("python-seams", "termios-shim", "counters-server", "node-preload", "reader-counters-v2")}
 # a hook check that is about one process is satisfied only by a marker of that process's role: the measured peer is `g1e_peer.py`, not any Python step that also loaded the shim
 HOOK_ROLES = {"termios-shim": "g1e_peer"}
 

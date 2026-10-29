@@ -87,6 +87,7 @@ backend/tests/cli_regression/support/g3/rows.py
 backend/tests/cli_regression/support/g3/run_driver.py
 backend/tests/cli_regression/support/g3/run_helper.py
 backend/tests/cli_regression/support/g3/smoke.py
+backend/tests/cli_regression/support/reader_counters_v2.py
 tests/cli/g1eAttempt.ts
 tests/cli/g1eBurst.ts
 tests/cli/g1eLedger.ts

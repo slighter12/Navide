@@ -24,6 +24,11 @@ def _counters() -> object:
     return hosted_counters.install_pipe_serve()
 
 
+def _reader_v2() -> object:
+    from tests.cli_regression.support.g3 import hosted_counters
+    return hosted_counters.install_reader_v2()
+
+
 def _seams() -> object:
     from tests.cli_regression.support.g3 import hosted_seams
     return hosted_seams.install_from_env()
@@ -40,7 +45,8 @@ def _rss_bytes() -> object:
 
 
 def install_all(env: dict | None = None, os_name: str | None = None, *, seams: Callable[[], object] = _seams, termios: Callable[[], object] = _termios, counters: Callable[[], object] = _counters,
-                rss_bytes: Callable[[], object] = _rss_bytes, write: Callable[..., bool] = hosted_markers.write, posix_names: Callable[[], object] = _posix_names) -> list[str]:
+                rss_bytes: Callable[[], object] = _rss_bytes, write: Callable[..., bool] = hosted_markers.write, posix_names: Callable[[], object] = _posix_names,
+                reader_v2: Callable[[], object] = _reader_v2) -> list[str]:
     """The marker kinds written, in install order. The Linux reader child (`ACR_G3_HOSTED_RSS_BYTES=1`, posix) normalises `ru_maxrss` to bytes and writes `reader-rss-bytes` only if that install happened."""
     env = os.environ if env is None else env
     os_name = os.name if os_name is None else os_name
@@ -55,6 +61,10 @@ def install_all(env: dict | None = None, os_name: str | None = None, *, seams: C
         counters()
         write("counters-server")
         done.append("counters-server")
+    if env.get("ACR_G3_HOSTED_READER_V2") == "1":      # the isolated backend process, both systems
+        reader_v2()
+        write("reader-counters-v2")
+        done.append("reader-counters-v2")
     if env.get("ACR_G3_HOSTED_RSS_BYTES") == "1" and os_name == "posix" and rss_bytes() is not None:
         write("reader-rss-bytes")
         done.append("reader-rss-bytes")

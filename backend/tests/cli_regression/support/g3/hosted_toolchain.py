@@ -53,6 +53,28 @@ def runner_in(root: Path) -> Runner:
     return translating_runner(call=lambda argv: tc.default_runner(argv, Path(root)))
 
 
+PROBE_EXPRESSION = "JSON.stringify({bun:process.versions.bun||null,node:process.version,exec:require('path').basename(process.execPath)})"
+RUNTIME_COMMANDS = {"bun run": ["bun", "run", "node", "-p", PROBE_EXPRESSION], "bunx": ["bunx", "node", "-p", PROBE_EXPRESSION]}
+
+
+def runtime_record(*, which: Callable[[str], str | None] = shutil.which, call: Callable[[list[str]], str] | None = None, cwd: Path | None = None) -> dict:
+    """What the hosted run's JavaScript commands really execute on (t14 item 3). F0's toolchain record is `{node, pnpm, python, sidecar}` and is frozen, so bun cannot join it; this is a hosted-only record
+    written next to the run logs. `bun` and `node` are the identities (real path, version, sha256) of the binaries on PATH; `commands` maps `bun run ...` (the build steps, and `bun run test:run`) and
+    `bunx ...` (the vitest steps) to the runtime a probe process reported: `bun run` puts a `node` alias for Bun first (`bunfig.toml` `[run] bun = true`), `bunx` uses the `node` on PATH."""
+    call = call or (lambda argv: default_call(argv, cwd))
+    identities = {}
+    for name in ("bun", "node"):
+        found = which(name)
+        if not found:
+            raise RuntimeError(f"{name} does not resolve on PATH")
+        identities[name] = {**tc.file_identity(Path(found)), "version": tc.last_line(call([found, "--version"]))}
+    commands = {}
+    for label, argv in RUNTIME_COMMANDS.items():
+        probe_out = json.loads(tc.last_line(call(argv)))
+        commands[label] = {"runtime": "bun" if probe_out.get("bun") else "node", "reportedVersion": probe_out.get("bun") or probe_out["node"], "execName": probe_out["exec"]}
+    return {"kind": "hosted-js-runtime-record", **identities, "commands": commands}
+
+
 def venv_python(root: Path, *, windows: bool) -> Path:
     return Path(root) / "backend" / ".venv" / (os.path.join("Scripts", "python.exe") if windows else os.path.join("bin", "python"))
 

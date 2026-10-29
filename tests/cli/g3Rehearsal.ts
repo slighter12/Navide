@@ -12,8 +12,8 @@ export function rehearsalRefusal(out: string, env: NodeJS.ProcessEnv = process.e
   if (env.ACR_G3_REHEARSAL === undefined) return null
   if (env.ACR_G3_REHEARSAL !== '1') return `ACR_G3_REHEARSAL must be exactly "1" or unset`
   const resolved = `${resolve(out)}${sep}`
-  if (resolved.includes(`${REHEARSAL_DIR_SEGMENT}${sep}`) || resolved.includes(`${sep}g3r3${sep}rehearsal`)) return null      // G3-r3: any g3r3/rehearsal* directory
-  return `ACR_G3_REHEARSAL is set but ${out} is not under g3r2/rehearsal or g3r3/rehearsal*: a rehearsal never writes elsewhere`
+  if (resolved.includes(`${REHEARSAL_DIR_SEGMENT}${sep}`) || resolved.includes(`${sep}g3r3${sep}rehearsal`) || resolved.includes(`${sep}g3r4${sep}rehearsal`)) return null      // G3-r3/r4: any g3r3|g3r4/rehearsal* directory
+  return `ACR_G3_REHEARSAL is set but ${out} is not under g3r2/rehearsal or g3r3|g3r4/rehearsal*: a rehearsal never writes elsewhere`
 }
 
 /** Shell calibration: the discarded warm-up and slot 0 of each chain (3 attempts instead of 21). */

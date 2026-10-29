@@ -23,12 +23,13 @@ from pathlib import Path
 from tests.cli_regression.support.g3 import hosted_posix_stubs
 
 hosted_posix_stubs.install()      # before the import below: this entry process is not under the hosted startup (no `ACR_G3_HOSTED`, no `hosted_site`), and `g3.driver` -> `g3.f0` -> `g1e.quiet_gate` reads `os.getloadavg` at import
-from tests.cli_regression.support.g3 import driver, f0 as f0mod, helper, hosted_diag, hosted_packaged, hosted_seams, packaged  # noqa: E402
+from tests.cli_regression.support.g3 import driver, f0 as f0mod, helper, hosted_diag, hosted_packaged, hosted_seams, hosted_toolchain, packaged  # noqa: E402
 
 G3 = driver.G3
 PRE_RUN_NAME, PACKAGED_RUN_NAME, SMOKE_RUN_NAME, RUN_NAME = driver.PRE_RUN_NAME, driver.PACKAGED_RUN_NAME, driver.SMOKE_RUN_NAME, driver.RUN_NAME
 BUILD_RECORD_NAME, PACKAGED_RECORD_NAME = driver.BUILD_RECORD_NAME, driver.PACKAGED_RECORD_NAME
 EXPECTED_MINUTES = {**driver.EXPECTED_MINUTES, "hosted-inputs-check": (0.1, "estimate: a manifest and an excerpt")}
+RUNTIME_RECORD_NAME = "toolchain-runtime.json"      # written next to `rustc-vV.txt`, in the directory the registered run uploads whole
 PACKAGED_STEPS = driver.PACKAGED_STEPS
 READER_STEPS = ("calibrate-reader", "reader-measure")
 CORRECTNESS_PROBLEM = "run-correctness.json is missing"
@@ -205,6 +206,14 @@ def diagnostic_runner(base, *, emit=print, node_run=None):
     return run
 
 
+def record_js_runtime(repo: str, destination: Path, *, record=hosted_toolchain.runtime_record) -> None:
+    """Write which JavaScript runtime `bun run` and `bunx` really use on this runner (t14 item 3). F0's frozen toolchain record cannot hold bun, so this is a separate file; it is written outside the
+    journaled plans (their step lists are pinned to the macOS order) and from the repository root, because bun reads `bunfig.toml` from the working directory. A runner without bun or node stops the run here."""
+    text = json.dumps(record(cwd=Path(repo)), indent=1, sort_keys=True) + "\n"
+    Path(destination).parent.mkdir(parents=True, exist_ok=True)
+    Path(destination).write_text(text, encoding="utf-8")
+
+
 def main(argv: list[str], *, system: str | None = None, runner_temp: str | None = None, install=hosted_seams.install, run_plan=_run_plan, base_runner=driver.default_runner, emit=print,
          environ: dict | None = None, node_run=None) -> int:
     from tests.cli_regression.support.g3 import incomplete
@@ -223,6 +232,8 @@ def main(argv: list[str], *, system: str | None = None, runner_temp: str | None 
             if cmd == "build":
                 return run_plan(build_pre_plan(plan_env, args[1], str(out.parent)), out, PRE_RUN_NAME, **kwargs)
             if cmd == "packaged":
+                if run_plan is _run_plan:      # the real runner only: a test that substitutes the plan runner must not start bun
+                    record_js_runtime(plan_env.repo, out.parent / RUNTIME_RECORD_NAME)
                 return run_plan(build_packaged_plan(plan_env, args[1]), out, PACKAGED_RUN_NAME, **kwargs)
             return run_plan(build_smoke_plan(plan_env, args[1]), out, SMOKE_RUN_NAME, **kwargs)
         if cmd in ("cost", "recover") and len(args) == 6:

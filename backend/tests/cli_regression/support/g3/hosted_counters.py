@@ -86,6 +86,18 @@ def serve_pipe(gate, path: str | Path, *, new_loop: Callable[[], object] | None 
     return thread
 
 
+def install_reader_v2() -> Callable[[], None]:
+    """In the backend process (Linux and Windows): `g1e_counters_gate.CountersGate.__init__` looks up the module-level `ReaderCounters` at call time; this makes it build `ReaderCountersV2`, so a handle
+    whose address was reused is still counted and a session with no installed reader answers an error instead of `read_total` 0 (the hosted registered run's `python:4:6`). Returns the undo."""
+    from tests.cli_regression.support import g1e_counters_gate, reader_counters_v2
+    original = g1e_counters_gate.ReaderCounters
+    g1e_counters_gate.ReaderCounters = reader_counters_v2.ReaderCountersV2
+
+    def undo() -> None:
+        g1e_counters_gate.ReaderCounters = original
+    return undo
+
+
 def install_pipe_serve() -> Callable[[], None]:
     """In the backend process: `g1e_counters_gate.install` calls the module-level `serve(gate, root/'gc.sock')`; this makes that call `serve_pipe`. Returns the undo."""
     from tests.cli_regression.support import g1e_counters_gate

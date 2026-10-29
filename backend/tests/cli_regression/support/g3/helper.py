@@ -193,7 +193,7 @@ def rehearsal_stamp(directory: Path) -> dict:
     listed as unstamped in `NOT-EVIDENCE.json` at the root, which is itself the marker of the whole directory. Refuses any directory not under g3r2/rehearsal*."""
     directory = Path(directory)
     parts = Path(os.path.realpath(directory)).parts
-    if not any(parts[i] in (REHEARSAL_SEGMENTS[0], "g3r3") and parts[i + 1].startswith(REHEARSAL_SEGMENTS[1]) for i in range(len(parts) - 1)):
+    if not any(parts[i] in (REHEARSAL_SEGMENTS[0], "g3r3", "g3r4") and parts[i + 1].startswith(REHEARSAL_SEGMENTS[1]) for i in range(len(parts) - 1)):
         raise ValueError(f"{directory} is not under g3r2/rehearsal: only a rehearsal's output is stamped")
     stamped, unstamped = 0, []
     for path in sorted(p for p in directory.rglob("*") if p.is_file() and not p.is_symlink() and p.name != STAMP_MARKER):

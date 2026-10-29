@@ -9,7 +9,7 @@ Each install that worked leaves an installed marker (`hosted_markers`, written b
 import os
 
 try:
-    if any(os.environ.get(flag) == "1" for flag in ("ACR_G3_HOSTED", "ACR_G3_HOSTED_TERMIOS", "ACR_G3_HOSTED_COUNTERS", "ACR_G3_HOSTED_RSS_BYTES")):
+    if any(os.environ.get(flag) == "1" for flag in ("ACR_G3_HOSTED", "ACR_G3_HOSTED_TERMIOS", "ACR_G3_HOSTED_COUNTERS", "ACR_G3_HOSTED_READER_V2", "ACR_G3_HOSTED_RSS_BYTES")):
         from tests.cli_regression.support.g3 import hosted_startup
         hosted_startup.install_all()
 except BaseException as error:  # noqa: BLE001 - a half-installed port must end the process, not run as the macOS one

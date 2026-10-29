@@ -14,8 +14,9 @@ import sys
 from pathlib import Path
 
 ENV = "ACR_G3_HOSTED_MARKERS"
-KINDS = ("python-seams", "termios-shim", "counters-server", "counters-connection", "node-preload", "reader-rss-bytes", "ws-defer")      # `ws-defer`: the Linux Node preload had to wait for a port (written by the preload; informative, never required)
-EXPECTED = {"Linux": ("python-seams", "reader-rss-bytes"), "Windows": KINDS[:5]}
+NONCE_ENV = "ACR_G3_HOSTED_START_NONCE"      # set by the hosted BackendProcess seam for one backend start; every marker that process writes carries it
+KINDS = ("python-seams", "termios-shim", "counters-server", "counters-connection", "node-preload", "reader-rss-bytes", "ws-defer", "reader-counters-v2")      # `ws-defer`: the Linux Node preload had to wait for a port (written by the preload; informative, never required)
+EXPECTED = {"Linux": ("python-seams", "reader-rss-bytes", "reader-counters-v2"), "Windows": KINDS[:5] + ("reader-counters-v2",)}
 SUFFIX = ".marker"
 
 
@@ -40,15 +41,30 @@ def write(kind: str, *, env: dict | None = None, pid: int | None = None, role: s
         return False
     process = os.getpid() if pid is None else pid
     path = Path(directory) / f"{kind}-{process}{SUFFIX}"
+    nonce = (os.environ if env is None else env).get(NONCE_ENV)
+    body = {"kind": kind, "pid": process, "role": process_role() if role is None else role, **({"nonce": nonce} if nonce else {})}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "x", encoding="utf-8") as handle:
-            handle.write(json.dumps({"kind": kind, "pid": process, "role": process_role() if role is None else role}))
+        with open(path, "w" if nonce else "x", encoding="utf-8") as handle:      # a start with a nonce replaces a marker an earlier process left under a reused pid
+            handle.write(json.dumps(body))
     except FileExistsError:
         return False
     except OSError:
         return False
     return True
+
+
+def written_by(kind: str, pid: int, nonce: str, *, env: dict | None = None) -> bool:
+    """True when the process `pid` wrote a `kind` marker that carries `nonce`, the token of this one start. A marker of another process, or an older one under a reused pid (another nonce, or none), never
+    counts; no directory named means False (fail closed)."""
+    directory = (os.environ if env is None else env).get(ENV)
+    if not directory or not nonce:
+        return False
+    try:
+        body = json.loads((Path(directory) / f"{kind}-{pid}{SUFFIX}").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(body, dict) and body.get("nonce") == nonce and body.get("pid") == pid
 
 
 def kinds_present(directory: str | Path) -> set[str]:
