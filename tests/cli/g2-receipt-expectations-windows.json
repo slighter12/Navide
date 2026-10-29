@@ -1,0 +1,5 @@
+{
+  "note": "No required Windows case file (tests/cli/g2-windows-pytest.ps1) sets NAVIDE_CLI_RUNTIME_HARNESS_BIN or spawns a stub peer, so every ready receipt must carry the release hash. Derived from the test sources, not from observed receipts: the hosted run 41627476531 uploaded no receipt files. The first Windows rehearsal's receipts step output is the check.",
+  "stubs": {},
+  "cases": []
+}
