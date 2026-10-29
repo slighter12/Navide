@@ -1,0 +1,450 @@
+name: G3 Hosted Rehearsal macOS (not evidence)
+
+# DRAFT (rf4f, rh16). Evaluation only. A full end-to-end rehearsal of the hosted G3 run on the real macOS arm64 runner image (macos-15). It is NOT evidence: it writes under $RUNNER_TEMP/g3r2/rehearsal (the only place the stamp
+# and the TS runners accept a rehearsal), is stamped NOT-EVIDENCE, and uploads only step outcomes and check verdicts and the runner facts, and the correctness records (G6; the per-row table and the receipt, no measurement data), never measurement data.
+# TRIGGER: pushes of a round-suffixed branch, eval/agent-cli-runtime-macos-rehearsal-r<N> (rh16: no force push; every round pushes a fresh branch name). The tip of that branch holds this file and NOT the registered workflow;
+# each push is one rehearsal (cap of 6 per platform, D11).
+# STAGE H5 FILLS, before this file is committed to the workflows directory of the branch: H5_FILL_PACK_COMMIT, H5_FILL_PACK_DIGEST.
+# Two distinct SHAs: the run head is $GITHUB_SHA (the pushed commit, which also holds this file), and FREEZE_H is the head of the rf3 freeze; the identity step is the registered one (D7).
+# No G1-E bundle: the cost run takes six path arguments and then --rehearsal.
+# The rehearsal runs the SAME correctness steps as the registered workflow (D8, E1, G1), so the exact gate is exercised before a registered push, and passes --rehearsal to build, packaged and smoke (D6): the
+# build-step diagnostics no longer depend on this workflow's `name:`.
+# The JavaScript runtime is plain default Bun (D2).
+# macOS (G4): the harness runs on the exact python-build-standalone build 20250818 of CPython 3.12.11 (sha256 checked before use). Only the Python interpreter is pinned.
+# rf4f (H1-H5): the `correctness` step first stages the reader descriptor the runner built and verified (`pre/FIXTURES.json`) over the packed one, so the reader cases run on runner-built fixtures; it runs a real
+# `pytest --collect-only` with its own arguments (rootdir-relative `--deselect` ids, every variant of a parametrized case expected), and a required case that did not pass fails its row. On macOS the interpreter
+# preflight also checks the pinned build's compile stamp.
+# rh9 (rehearsal 2 finding, macOS), three disclosed accommodations of HOW the `Rust tests` step is invoked; no test is skipped, filtered, retried or edited, and the command after `cargo` is otherwise unchanged:
+#  1. the step runs `cargo test` in a new session (a perl fork + POSIX::setsid + exec wrapper that passes the exit status through). Rehearsal 2's step ran in the runner's own session and group; three frozen tests
+#     walk the group or the session of the test process and the product fails closed on a member it cannot read (EPERM), so the run saw a member of another user. The wrapper makes the test's group and session hold only its own descendants.
+#  2. `-- --test-threads=1` (macOS only): the runner has 3 vCPUs and the default is 3 test threads; a 2 ms sleep took at least 20 ms in `scan_board`'s timing test. It is not a filter.
+#  3. an information-only step before it records the members of the group and of the session it runs in (pid, ppid, pgid, sess, uid, comm; no arguments, no environment), so whether a process of another user was there is observed.
+# rh12 (rehearsal 3 finding, macOS): the three EPERM tests passed under the new session; one other frozen timing test (`scan_board`, `n_sessions_with_an_expensive_read...`) failed on a stall of unobserved cause. Two more
+# disclosed changes, neither of which touches a test: the `Rust tests` command is byte-identical to rh9's.
+#  4. (A) a step before it compiles the test binaries with the same locked manifest (`cargo test ... --no-run`, nothing runs), then a settling pass reuses the load sampler that runs before the quiet gate, ending early
+#     once the quiet gate's own rule is met twice in a row (information only, `continue-on-error`, bounded at 15 minutes, its own JSON file), so the tests start on a machine the gate's rule calls quiet, not straight after a build.
+#  5. (B) an information-only record of the load, the busiest command names and the timer latency (requested against actual sleeps of 2 ms and 20 ms) is taken right before the step and right after it, also when it fails.
+# If a frozen product timing test fails again after (A), the manager stops the macOS rehearsals and reports to the user, without further accommodation and without spending the cap (D11: stop and report); whether macOS
+# is then reported as "Not measured" is the user's decision.
+# rh13 (rehearsal 3 review), two more disclosed changes, neither of which touches a test or a gate rule:
+#  6. (B2) the load and timer record of item 5 is now the last step before `Rust tests`, after the process-layout record, so it describes the state the tests start in.
+#  7. (S3) in the cost run's own plan, on macOS only, the settle sampler that runs before the quiet gate (information only, ends early on the gate's own rule, at most 20 minutes so that the job stays inside its 330 minutes, an exit status that never ends the plan)
+#     runs before each of the three in-plan quiet gates `quiet-1`, `quiet-2` and `quiet-3`. Each gate is unchanged and still decides; the plan steps are `settle-1`, `settle-2` and `settle-3` (the addendum, section 10, says the same).
+# rh14 (rehearsal 3 re-review), one name only:
+#  8. the process-layout record of item 3 is named for what it records, "the session the Rust tests run in": since rh13 (item 6) the step after it is the timer record, not the tests. Its command and place are unchanged.
+# rh16 (rehearsal 4 finding, macOS; the user chose to continue with this accommodation, macos-1): a frozen timing test failed again (`scan_board.rs:360`, 133.7 ms against 80) while the timer record showed 2 ms sleeps with a median of
+# 15.8 ms on a quiet machine, which is the runner's timer coalescing. rh17 corrects items 9 to 11 from the diagnostic run on macos-15 (run 43125817075, OUT/diag1/results.md). No test is skipped, filtered, retried or edited, and the
+# `Rust tests` and `Correctness` commands are those of rehearsal 4 (the one exception, --no-fail-fast, is named below):
+#  9. withdrawn (rh17). rh16 ran the `Rust tests` step and the `Correctness` step under `taskpolicy -l 0 -t 0`. The diagnostic run showed that the wrapper changes nothing: 2 ms sleeps took a median of 19.2 ms without it and 18.1 ms with it
+#     while coalescing was on, and 2.7 ms and 2.4 ms while it was off. Both steps run without it again.
+# 10. a step before the tests sets `kern.timer.coalescing_enabled` to 0 with sudo and records the value before and after, and a step after the correctness step puts the recorded original value back and records it. The diagnostic run showed
+#     that macos-15 accepts the write (1 -> 0, exit status 0; restored 0 -> 1, exit status 0) and what it does: 2 ms sleeps took a median of 19.2 ms with coalescing on and 2.7 ms with it off, and the frozen `scan_board` tests failed in 5 of 5
+#     runs with it on and passed in 5 of 5 with it off. Both steps are information only and neither can fail the job (each `sudo` line is guarded): if a runner refuses the write, the timing tests fail as in rehearsal 4 and the summary shows it.
+#     The setting is machine-wide and is put back before F0 and the cost run, so both arms are measured under the same, original timers.
+# 11. withdrawn (rh17). The timer record under the wrapper (`rust-context-taskpolicy.json`) went with the wrapper; the record of item 6 is taken after the switch, so it shows the timers the tests start with.
+# 12. the runner record adds `ulimit -n`, `kern.maxfilesperproc` and the `kern.timer_coalesce_*` and `kern.timer.coalescing_enabled` sysctls; the load-probe step timeout is 32 minutes and the pre-test settling timeout is 17 minutes (the probe's own bounds are unchanged).
+# rh16 (one run, every failure): after the install step every step runs even after an earlier failure (`if: !cancelled()` with the step's inputs, `continue-on-error: true` and an id); a step whose input is missing is skipped and
+# the summary records "skipped: missing <input>". The final summary step writes every step's id, outcome and conclusion, prints them, and fails the job if any step failed; the upload always runs (after the leak check).
+# The cost run is not blocked by a failing Rust test or correctness step. The commands are unchanged, except that this rehearsal's `cargo test` has --no-fail-fast (before the `--`), so a failing test binary does not stop the
+# remaining binaries from running; the registered workflow's Rust step does not have it, and the flag does not select, skip or retry a test.
+# rh17 (B-4): the summary step lists a step whose name says "information only" with `kind=information-only` and does not count its outcome as a failure of the job; every other step is counted as before.
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime-macos-rehearsal-r*
+
+permissions:
+  contents: read
+
+env:
+  FREEZE_H: 202084cf74eccb07bec366897ebf4c588799e72e
+  PACK_COMMIT: "b269ed46d7d6816a64a6b6b18e56c4518d29eabe"
+  PACK_DIGEST: "1b0bd54c8efc2725f5e9e9200ebaef8c13cd4784a7c9a7556b4e305c84d8103f"
+
+jobs:
+  rehearsal:
+    name: rehearsal-${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            runner: macos-15
+            system: Darwin
+    defaults:
+      run:
+        shell: bash
+    env:
+      G3H_OS: ${{ matrix.system }}
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - name: Pin line endings before any checkout
+        run: git config --global core.autocrlf false
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the harness pack
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PACK_COMMIT }}
+          path: pack
+          persist-credentials: false
+
+      - name: Check the run head and the checked-out bytes
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git config --get core.autocrlf)" = "false"
+          test -z "$(git status --porcelain -- . ':(exclude)pack')"
+
+      - name: Verify the pack digest, then overlay it
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" pack/backend/tests/cli_regression/support/g3/hosted_pack.py digest pack > "$RUNNER_TEMP/pack-digest.txt"
+          cat "$RUNNER_TEMP/pack-digest.txt"
+          grep -q -F "$PACK_DIGEST" "$RUNNER_TEMP/pack-digest.txt"
+          tar -C pack --exclude=.git -cf - . | tar -C . -xf -
+
+      - name: Verify the g1e pins and the hosted inputs (first step after the overlay)
+        id: pins
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
+
+      - name: Product identity against the freeze head (rf4c D7)
+        id: identity
+        run: |
+          git cat-file -e "$FREEZE_H^{commit}"
+          git diff --exit-code "$FREEZE_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain --ignored -- native src backend/agent_team_backend)"
+          test "$(git diff --name-only --no-renames "$FREEZE_H" "$GITHUB_SHA")" = ".github/workflows/eval-acr-g3-hosted-macos-rehearsal.yml"
+
+      - name: Set up Bun (default version, no input)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install the pinned CPython 3.12.11 build (python-build-standalone 20250818, sha256 checked before use, G4)
+        id: pbs
+        timeout-minutes: 15
+        run: |
+          mkdir -p "$RUNNER_TEMP/pbs"
+          curl -fsSL -o "$RUNNER_TEMP/pbs/python.tar.gz" "https://github.com/astral-sh/python-build-standalone/releases/download/20250818/cpython-3.12.11%2B20250818-aarch64-apple-darwin-install_only_stripped.tar.gz"
+          got="$(shasum -a 256 < "$RUNNER_TEMP/pbs/python.tar.gz" | cut -d' ' -f1)"
+          echo "python-build-standalone 20250818 archive sha256 $got"
+          test "$got" = "bbf0c85d09a8173e50d18a0198f14d1de91eab17a593ccf9445f214fb0555547"
+          tar -xzf "$RUNNER_TEMP/pbs/python.tar.gz" -C "$RUNNER_TEMP/pbs"
+          "$RUNNER_TEMP/pbs/python/bin/python3.12" -VV
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked dependencies and record the toolchain
+        id: install
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked --python "$RUNNER_TEMP/pbs/python/bin/python3.12" --no-python-downloads
+          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h-summary"
+          rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
+
+      - name: Check the harness interpreter, the pinned CPython 3.12.11 build with the registered SQLite 3.49.1 (E4, G4)
+        id: sqlite
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: backend/.venv/bin/python -B backend/tests/cli_regression/support/g3/hosted_preflight.py sqlite "$RUNNER_TEMP/pbs/python"
+
+      - name: Record the runner (information only; it decides nothing)
+        id: runnerfacts
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          {
+            echo "uname -m: $(uname -m)"
+            sw_vers
+            echo "hw.ncpu: $(sysctl -n hw.ncpu)"
+            echo "hw.memsize: $(sysctl -n hw.memsize)"
+            echo "hw.model: $(sysctl -n hw.model)"
+            echo "cpu brand: $(sysctl -n machdep.cpu.brand_string)"
+            echo "loadavg: $(sysctl -n vm.loadavg)"
+            echo "ulimit -n: $(ulimit -n)"
+            echo "kern.maxfilesperproc: $(sysctl -n kern.maxfilesperproc)"
+            echo "kern.timer.coalescing_enabled: $(sysctl -n kern.timer.coalescing_enabled)"
+            sysctl -a | grep -E '^kern\.timer_coalesce_' | sort || true
+          } | tee "$RUNNER_TEMP/g3r2h-summary/runner-facts.txt"
+
+      - name: Sample the load before the quiet gate (rehearsal 1 RC-3, information only; it decides nothing and cannot fail the job)
+        id: loadprobe
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 32
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_load_probe.py "$RUNNER_TEMP/g3r2h-summary/load-probe.json"
+
+      - name: Quiet gate before the run
+        id: quiet
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_quiet_gate.py before "$RUNNER_TEMP/g3r2/rehearsal/quiet-pre"
+
+      - name: Build the sidecars and the reader fixtures
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Build the packaged app
+        id: packaged
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py packaged "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Smoke
+        id: smoke
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py smoke "$PWD" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
+
+      - name: Prove the release sidecar has no fault hooks (the F0 sidecar and its harness)
+        id: proof
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}/g3r2h/pre/harness-target/release/navide-cli-runtime
+          G2_BASETEMP: ${{ runner.temp }}/g2-basetemp
+        run: |
+          file "$NAVIDE_CLI_RUNTIME_BIN" | grep -q 'Mach-O 64-bit executable arm64'
+          bun tests/cli/g2Native.mjs proof --release "$NAVIDE_CLI_RUNTIME_BIN" --harness "$NAVIDE_CLI_RUNTIME_HARNESS_BIN"
+
+      - name: Compile the Rust tests without running them (rh12, M-1 A)
+        id: cargobuild
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-run
+
+      - name: Settle the machine before the Rust tests (rh12, M-1 A, information only; it decides nothing and cannot fail the job)
+        id: rustsettle
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 17
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_load_probe.py "$RUNNER_TEMP/g3r2h-summary/load-probe-rust.json" --max-seconds 900
+
+      - name: Switch timer coalescing off for the Rust tests and the correctness step (rh16 macos-1, information only; it decides nothing and cannot fail the job)
+        id: coalesce
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          {
+            echo "before: kern.timer.coalescing_enabled=$(sysctl -n kern.timer.coalescing_enabled)"
+            sudo -n sysctl -w kern.timer.coalescing_enabled=0 || echo "sysctl -w failed with status $?"
+            echo "after: kern.timer.coalescing_enabled=$(sysctl -n kern.timer.coalescing_enabled)"
+          } | tee "$RUNNER_TEMP/g3r2h-summary/timer-coalescing.txt"
+
+      - name: Record the process group and the session the Rust tests run in (rh9, information only; it decides nothing and cannot fail the job)
+        id: layout
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_process_layout.py "$RUNNER_TEMP/g3r2h-summary/process-layout.json"
+
+      - name: Record the load and the timer latency before the Rust tests (rh12, M-1 B; rh13 B2, the last step before them, after the layout probe; information only, it decides nothing and cannot fail the job)
+        id: timerbefore
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_timer_probe.py before "$RUNNER_TEMP/g3r2h-summary/rust-context-before.json"
+
+      - name: Rust tests
+        id: cargo
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast -- --test-threads=1
+
+      - name: Record the load and the timer latency after the Rust tests (rh12, M-1 B, information only; it decides nothing and cannot fail the job)
+        id: timerafter
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_timer_probe.py after "$RUNNER_TEMP/g3r2h-summary/rust-context-after.json"
+
+      - name: Correctness, the 21 G1-E rows from the gates registry on the F0 sidecar, gated by case, plus the frozen macOS G2 part (row table, collected-and-passed gate, sidecar receipt, E1, G1)
+        id: correctness
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 120
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py correctness "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Put timer coalescing back as it was before the Rust tests (rh16 macos-1, information only; it decides nothing and cannot fail the job)
+        id: coalescerestore
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          original="$(sed -n 's/^before: kern.timer.coalescing_enabled=//p' "$RUNNER_TEMP/g3r2h-summary/timer-coalescing.txt")"
+          case "$original" in 0|1) sudo -n sysctl -w kern.timer.coalescing_enabled="$original" || echo "sysctl -w failed with status $?" ;; *) echo "no original value recorded: $original" ;; esac
+          echo "restored: kern.timer.coalescing_enabled=$(sysctl -n kern.timer.coalescing_enabled)" | tee -a "$RUNNER_TEMP/g3r2h-summary/timer-coalescing.txt"
+
+      - name: Build F0
+        id: f0
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.packaged.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          H="uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_helper"
+          $H f0-spec "$PWD" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/f0-spec.json" "$GITHUB_REF_NAME"
+          $H f0-build "$PWD" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/f0-spec.json"
+
+      - name: Rehearsal cost run (NOT evidence)
+        id: cost
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.smoke.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 300
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py cost "$PWD" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
+
+      - name: Per-check verdicts of the receipt and byte-ledger validation (names and verdicts only)
+        id: checks
+        if: always()
+        continue-on-error: true
+        env:
+          PYTHONPATH: backend
+        run: |
+          mkdir -p "$RUNNER_TEMP/g3r2h-summary"
+          backend/.venv/bin/python backend/tests/cli_regression/support/g3/hosted_checks.py "$RUNNER_TEMP/g3r2/rehearsal/rehearsal-verdict.json" "$RUNNER_TEMP/g3r2h-summary/rehearsal-checks.json" "$G3H_OS" "$RUNNER_TEMP/g3r2h/markers"
+
+      - name: Stage the correctness records for the upload (G6)
+        id: stage
+        if: always()
+        continue-on-error: true
+        run: |
+          stage="$RUNNER_TEMP/g3r2h-summary/evidence"
+          mkdir -p "$stage"
+          pre="$RUNNER_TEMP/g3r2h/pre"
+          for f in "$pre/correctness-gate.json" "$pre/correctness-receipt.json"; do
+            if [ -f "$f" ]; then cp "$f" "$stage/" && echo "staged $(basename "$f")" >> "$stage/staged.txt"; else echo "missing $f" >> "$stage/staged.txt"; fi
+          done
+          uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_diag.py stage-smoke "$RUNNER_TEMP/g3r2h/smoke" "$stage" >> "$stage/staged.txt" || echo "stage-smoke failed" >> "$stage/staged.txt"
+          cat "$stage/staged.txt"
+
+      - name: Write the outcomes summary (every step's id, outcome and conclusion; fails the job if any step failed)
+        id: summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          O_PINS: ${{ steps.pins.outcome }}
+          C_PINS: ${{ steps.pins.conclusion }}
+          O_IDENTITY: ${{ steps.identity.outcome }}
+          C_IDENTITY: ${{ steps.identity.conclusion }}
+          O_PBS: ${{ steps.pbs.outcome }}
+          C_PBS: ${{ steps.pbs.conclusion }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          C_INSTALL: ${{ steps.install.conclusion }}
+          O_SQLITE: ${{ steps.sqlite.outcome }}
+          C_SQLITE: ${{ steps.sqlite.conclusion }}
+          O_RUNNERFACTS: ${{ steps.runnerfacts.outcome }}
+          C_RUNNERFACTS: ${{ steps.runnerfacts.conclusion }}
+          O_LOADPROBE: ${{ steps.loadprobe.outcome }}
+          C_LOADPROBE: ${{ steps.loadprobe.conclusion }}
+          O_QUIET: ${{ steps.quiet.outcome }}
+          C_QUIET: ${{ steps.quiet.conclusion }}
+          O_BUILD: ${{ steps.build.outcome }}
+          C_BUILD: ${{ steps.build.conclusion }}
+          O_PACKAGED: ${{ steps.packaged.outcome }}
+          C_PACKAGED: ${{ steps.packaged.conclusion }}
+          O_SMOKE: ${{ steps.smoke.outcome }}
+          C_SMOKE: ${{ steps.smoke.conclusion }}
+          O_PROOF: ${{ steps.proof.outcome }}
+          C_PROOF: ${{ steps.proof.conclusion }}
+          O_CARGOBUILD: ${{ steps.cargobuild.outcome }}
+          C_CARGOBUILD: ${{ steps.cargobuild.conclusion }}
+          O_RUSTSETTLE: ${{ steps.rustsettle.outcome }}
+          C_RUSTSETTLE: ${{ steps.rustsettle.conclusion }}
+          O_COALESCE: ${{ steps.coalesce.outcome }}
+          C_COALESCE: ${{ steps.coalesce.conclusion }}
+          O_LAYOUT: ${{ steps.layout.outcome }}
+          C_LAYOUT: ${{ steps.layout.conclusion }}
+          O_TIMERBEFORE: ${{ steps.timerbefore.outcome }}
+          C_TIMERBEFORE: ${{ steps.timerbefore.conclusion }}
+          O_CARGO: ${{ steps.cargo.outcome }}
+          C_CARGO: ${{ steps.cargo.conclusion }}
+          O_TIMERAFTER: ${{ steps.timerafter.outcome }}
+          C_TIMERAFTER: ${{ steps.timerafter.conclusion }}
+          O_CORRECTNESS: ${{ steps.correctness.outcome }}
+          C_CORRECTNESS: ${{ steps.correctness.conclusion }}
+          O_COALESCERESTORE: ${{ steps.coalescerestore.outcome }}
+          C_COALESCERESTORE: ${{ steps.coalescerestore.conclusion }}
+          O_F0: ${{ steps.f0.outcome }}
+          C_F0: ${{ steps.f0.conclusion }}
+          O_COST: ${{ steps.cost.outcome }}
+          C_COST: ${{ steps.cost.conclusion }}
+          O_CHECKS: ${{ steps.checks.outcome }}
+          C_CHECKS: ${{ steps.checks.conclusion }}
+          O_STAGE: ${{ steps.stage.outcome }}
+          C_STAGE: ${{ steps.stage.conclusion }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/g3r2h-summary"
+          failed=0
+          report() {
+            printf 'step=%s outcome=%s conclusion=%s' "$1" "$2" "$3"
+            if [ "${5:-}" = "information-only" ]; then printf ' kind=information-only'; fi
+            if [ "$2" = "skipped" ]; then printf ' note=skipped: missing %s' "$4"; fi
+            printf '\n'
+            if [ "${5:-}" != "information-only" ]; then case "$2" in failure|cancelled) failed=1 ;; esac; fi
+          }
+          {
+            printf 'NOT-EVIDENCE\njob=%s\n' "$JOB_STATUS"
+            report pins "$O_PINS" "$C_PINS" "an earlier step"
+            report identity "$O_IDENTITY" "$C_IDENTITY" "an earlier step"
+            report pbs "$O_PBS" "$C_PBS" "an earlier step"
+            report install "$O_INSTALL" "$C_INSTALL" "an earlier step"
+            report sqlite "$O_SQLITE" "$C_SQLITE" "the install step"
+            report runnerfacts "$O_RUNNERFACTS" "$C_RUNNERFACTS" "the install step" information-only
+            report loadprobe "$O_LOADPROBE" "$C_LOADPROBE" "the install step" information-only
+            report quiet "$O_QUIET" "$C_QUIET" "the install step"
+            report build "$O_BUILD" "$C_BUILD" "the install step"
+            report packaged "$O_PACKAGED" "$C_PACKAGED" "the build output"
+            report smoke "$O_SMOKE" "$C_SMOKE" "the build output"
+            report proof "$O_PROOF" "$C_PROOF" "the build output (release and harness sidecars)"
+            report cargobuild "$O_CARGOBUILD" "$C_CARGOBUILD" "the install step"
+            report rustsettle "$O_RUSTSETTLE" "$C_RUSTSETTLE" "the install step" information-only
+            report coalesce "$O_COALESCE" "$C_COALESCE" "the install step" information-only
+            report layout "$O_LAYOUT" "$C_LAYOUT" "the install step" information-only
+            report timerbefore "$O_TIMERBEFORE" "$C_TIMERBEFORE" "the install step" information-only
+            report cargo "$O_CARGO" "$C_CARGO" "the install step"
+            report timerafter "$O_TIMERAFTER" "$C_TIMERAFTER" "nothing (always runs)" information-only
+            report correctness "$O_CORRECTNESS" "$C_CORRECTNESS" "the build output"
+            report coalescerestore "$O_COALESCERESTORE" "$C_COALESCERESTORE" "nothing (always runs)" information-only
+            report f0 "$O_F0" "$C_F0" "the build and packaged outputs"
+            report cost "$O_COST" "$C_COST" "F0, the build output or the smoke output"
+            report checks "$O_CHECKS" "$C_CHECKS" "nothing (always runs)"
+            report stage "$O_STAGE" "$C_STAGE" "nothing (always runs)"
+            printf 'failed=%s\n' "$failed"
+          } > "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"
+          cat "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"
+          if grep -q '^failed=1$' "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"; then echo "at least one step failed"; exit 1; fi
+
+      - name: Leak check (no token or runner secret in the upload)
+        id: leak
+        if: always()
+        run: if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/g3r2h-summary"; then echo "credential-like text found"; exit 1; fi
+
+      - name: Upload the outcomes (exit codes, check verdicts and runner facts, the correctness records only)
+        if: always() && steps.leak.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-rehearsal-${{ matrix.os }}
+          path: ${{ runner.temp }}/g3r2h-summary
+          if-no-files-found: warn
+          retention-days: 7
