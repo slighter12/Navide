@@ -1,0 +1,578 @@
+name: G3 Diag1 macOS (not evidence)
+
+# DRAFT (diag1). Evaluation only. A SHORT DIAGNOSTIC on the real macOS arm64 runner image (macos-15), built from the rh16 rehearsal draft. It is NOT evidence, it is NOT a rehearsal and it does not count
+# against the rehearsal cap (D11): it runs no cost run, no matrix, no smoke, no build of the sidecars or the app, no correctness step and no measurement. It answers rh16 review S-1 and B-4.
+# TRIGGER: a push of eval/agent-cli-runtime-macos-diag-r1. The tip of that branch is the freeze head plus this one file.
+# STAGE H5 FILLS, before this file is committed to the workflows directory of the branch: H5_FILL_PACK_COMMIT, H5_FILL_PACK_DIGEST.
+# The pack is the rh16 pack, unchanged. The identity step is the registered one with this file's own name.
+# PREFIX, copied step for step from the rehearsal draft: checkouts, head check, pack digest and overlay, pins, identity, Bun, the pinned CPython, uv, Rust, install, `cargo test --no-run`, and the rehearsal's
+# settle sampler (information only, at most 15 minutes, it ends once the machine is quiet), so that the first state is not sampled straight after a build.
+# DIAG STEPS, in order, each information only and `continue-on-error` with its own file under $RUNNER_TEMP/diag1/out:
+#   1. the runner and every `kern.timer*` sysctl; the timer probe (2 ms, 20 ms, 0.5 s, 1.2 s) plain and under `taskpolicy -l 0 -t 0`; the scan_board tests five times as the rehearsal runs its Rust step
+#      (the setsid wrapper, --no-fail-fast, one test thread, no taskpolicy) and once as the bare command;
+#   2. `sudo -n sysctl -w kern.timer.coalescing_enabled=0`, guarded: the exit status, sudo's own message and the value before and after are recorded and the step cannot fail. If that name cannot be
+#      read on this kernel, the older spelling `kern.timer_coalescing_enabled` is used and the record says so (which name exists on macos-15 is itself a finding);
+#   3. the sysctls again, the timer probe again, the scan_board tests five times and once bare, then the timer probe and one scan_board run under `taskpolicy -l 0 -t 0`;
+#   4. the restore (guarded the same way, always runs), the sysctls, and a second sample of the first state: the timer probe and two scan_board runs.
+# No test is skipped, filtered inside scan_board, retried or edited: `scan_board` is cargo's own name filter and selects every test whose path holds it.
+# No step fails the job before the upload except the strict setup steps and the leak check; the last step fails the job when `cargo test --no-run` did not succeed.
+# The JavaScript runtime is plain default Bun; the pinned actions are the rehearsal draft's.
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime-macos-diag-r1
+
+permissions:
+  contents: read
+
+env:
+  FREEZE_H: 202084cf74eccb07bec366897ebf4c588799e72e
+  PACK_COMMIT: "1fa7381afeb5214fc5818a3e4cf9f68404da95b0"
+  PACK_DIGEST: "5c4ab25ed1a30a1ec298e565acef91e72a25472f0d34966c366fd44a8cc82670"
+
+jobs:
+  diag:
+    name: diag1-${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos
+            runner: macos-15
+            system: Darwin
+    defaults:
+      run:
+        shell: bash
+    env:
+      G3H_OS: ${{ matrix.system }}
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - name: Pin line endings before any checkout
+        run: git config --global core.autocrlf false
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the harness pack
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PACK_COMMIT }}
+          path: pack
+          persist-credentials: false
+
+      - name: Check the run head and the checked-out bytes
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git config --get core.autocrlf)" = "false"
+          test -z "$(git status --porcelain -- . ':(exclude)pack')"
+
+      - name: Verify the pack digest, then overlay it
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" pack/backend/tests/cli_regression/support/g3/hosted_pack.py digest pack > "$RUNNER_TEMP/pack-digest.txt"
+          cat "$RUNNER_TEMP/pack-digest.txt"
+          grep -q -F "$PACK_DIGEST" "$RUNNER_TEMP/pack-digest.txt"
+          tar -C pack --exclude=.git -cf - . | tar -C . -xf -
+
+      - name: Verify the g1e pins and the hosted inputs (first step after the overlay)
+        id: pins
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
+
+      - name: Product identity against the freeze head (rf4c D7)
+        id: identity
+        run: |
+          git cat-file -e "$FREEZE_H^{commit}"
+          git diff --exit-code "$FREEZE_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain --ignored -- native src backend/agent_team_backend)"
+          test "$(git diff --name-only --no-renames "$FREEZE_H" "$GITHUB_SHA")" = ".github/workflows/eval-acr-g3-diag-macos.yml"
+
+      - name: Set up Bun (default version, no input)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install the pinned CPython 3.12.11 build (python-build-standalone 20250818, sha256 checked before use, G4)
+        id: pbs
+        timeout-minutes: 15
+        run: |
+          mkdir -p "$RUNNER_TEMP/pbs"
+          curl -fsSL -o "$RUNNER_TEMP/pbs/python.tar.gz" "https://github.com/astral-sh/python-build-standalone/releases/download/20250818/cpython-3.12.11%2B20250818-aarch64-apple-darwin-install_only_stripped.tar.gz"
+          got="$(shasum -a 256 < "$RUNNER_TEMP/pbs/python.tar.gz" | cut -d' ' -f1)"
+          echo "python-build-standalone 20250818 archive sha256 $got"
+          test "$got" = "bbf0c85d09a8173e50d18a0198f14d1de91eab17a593ccf9445f214fb0555547"
+          tar -xzf "$RUNNER_TEMP/pbs/python.tar.gz" -C "$RUNNER_TEMP/pbs"
+          "$RUNNER_TEMP/pbs/python/bin/python3.12" -VV
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked dependencies and record the toolchain
+        id: install
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked --python "$RUNNER_TEMP/pbs/python/bin/python3.12" --no-python-downloads
+          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h-summary"
+          rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
+
+      - name: Compile the Rust tests without running them (rh12, M-1 A)
+        id: cargobuild
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-run
+
+      - name: Settle the machine before the Rust tests (rh12, M-1 A, information only; it decides nothing and cannot fail the job)
+        id: rustsettle
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 17
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_load_probe.py "$RUNNER_TEMP/g3r2h-summary/load-probe-rust.json" --max-seconds 900
+
+      - name: diag1, record the runner and the kern.timer sysctls before anything is changed (information only; it cannot fail the job)
+        id: sysctl_on
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          {
+            echo "uname -m: $(uname -m)"
+            sw_vers
+            echo "hw.ncpu: $(sysctl -n hw.ncpu)"
+            echo "hw.model: $(sysctl -n hw.model)"
+            echo "loadavg: $(sysctl -n vm.loadavg)"
+            echo "kern.timer.coalescing_enabled: $(sysctl -n kern.timer.coalescing_enabled 2>&1)"
+            echo "kern.timer_coalescing_enabled: $(sysctl -n kern.timer_coalescing_enabled 2>&1)"
+            sysctl -a 2>/dev/null | grep -E '^kern\.timer' | sort || true
+          } | tee "$RUNNER_TEMP/diag1/out/sysctl-1-coalescing-on.txt"
+
+      - name: diag1, timer latency at 2 ms, 20 ms, 0.5 s and 1.2 s, coalescing as the runner has it (information only; it cannot fail the job)
+        id: timer_on
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_timer_probe.py before "$RUNNER_TEMP/diag1/out/timer-1-coalescing-on.json"
+
+      - name: diag1, timer latency at 2 ms, 20 ms, 0.5 s and 1.2 s, coalescing as the runner has it, under taskpolicy -l 0 -t 0 (information only; it cannot fail the job)
+        id: timer_on_taskpolicy
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          taskpolicy -l 0 -t 0 uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_timer_probe.py before "$RUNNER_TEMP/diag1/out/timer-2-coalescing-on-taskpolicy.json"
+
+      - name: diag1, the scan_board tests, run 1 of 5 with coalescing as the runner has it (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_on_1
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-on-1.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-on-1.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-on-1.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 2 of 5 with coalescing as the runner has it (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_on_2
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-on-2.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-on-2.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-on-2.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 3 of 5 with coalescing as the runner has it (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_on_3
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-on-3.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-on-3.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-on-3.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 4 of 5 with coalescing as the runner has it (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_on_4
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-on-4.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-on-4.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-on-4.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 5 of 5 with coalescing as the runner has it (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_on_5
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-on-5.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-on-5.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-on-5.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, once as the bare command (no wrapper, default threads) with coalescing as the runner has it (information only; it cannot fail the job)
+        id: scan_on_bare
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml scan_board > "$RUNNER_TEMP/diag1/out/scan-board-on-bare.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-on-bare.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-on-bare.exit"
+          exit "$rc"
+
+      - name: diag1, try to switch timer coalescing off with sudo, guarded, the outcome is recorded (information only; it cannot fail the job)
+        id: coalesce_off
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          {
+            name=none
+            for candidate in kern.timer.coalescing_enabled kern.timer_coalescing_enabled; do
+              if sysctl -n "$candidate" > /dev/null 2>&1; then name="$candidate"; break; fi
+            done
+            echo "tried: kern.timer.coalescing_enabled kern.timer_coalescing_enabled"
+            echo "name: $name"
+            if [ "$name" = none ]; then
+              echo "sysctl -w exit status: not attempted"
+            else
+              echo "before: $(sysctl -n "$name" 2>&1)"
+              status=0
+              sudo -n sysctl -w "$name=0" 2>&1 || status=$?
+              echo "sysctl -w exit status: $status"
+              echo "after: $(sysctl -n "$name" 2>&1)"
+            fi
+          } | tee "$RUNNER_TEMP/diag1/out/coalescing-switch.txt"
+
+      - name: diag1, record the runner and the kern.timer sysctls after the switch (information only; it cannot fail the job)
+        id: sysctl_off
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          {
+            echo "uname -m: $(uname -m)"
+            sw_vers
+            echo "hw.ncpu: $(sysctl -n hw.ncpu)"
+            echo "hw.model: $(sysctl -n hw.model)"
+            echo "loadavg: $(sysctl -n vm.loadavg)"
+            echo "kern.timer.coalescing_enabled: $(sysctl -n kern.timer.coalescing_enabled 2>&1)"
+            echo "kern.timer_coalescing_enabled: $(sysctl -n kern.timer_coalescing_enabled 2>&1)"
+            sysctl -a 2>/dev/null | grep -E '^kern\.timer' | sort || true
+          } | tee "$RUNNER_TEMP/diag1/out/sysctl-2-after-the-switch.txt"
+
+      - name: diag1, timer latency at 2 ms, 20 ms, 0.5 s and 1.2 s, after the switch (information only; it cannot fail the job)
+        id: timer_off
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_timer_probe.py after "$RUNNER_TEMP/diag1/out/timer-3-coalescing-off.json"
+
+      - name: diag1, the scan_board tests, run 1 of 5 after the switch (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_off_1
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-off-1.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-off-1.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-off-1.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 2 of 5 after the switch (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_off_2
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-off-2.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-off-2.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-off-2.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 3 of 5 after the switch (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_off_3
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-off-3.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-off-3.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-off-3.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 4 of 5 after the switch (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_off_4
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-off-4.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-off-4.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-off-4.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 5 of 5 after the switch (the rehearsal's wrapper and thread count, no taskpolicy) (information only; it cannot fail the job)
+        id: scan_off_5
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-off-5.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-off-5.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-off-5.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, once as the bare command (no wrapper, default threads) after the switch (information only; it cannot fail the job)
+        id: scan_off_bare
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml scan_board > "$RUNNER_TEMP/diag1/out/scan-board-off-bare.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-off-bare.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-off-bare.exit"
+          exit "$rc"
+
+      - name: diag1, timer latency at 2 ms, 20 ms, 0.5 s and 1.2 s, after the switch, under taskpolicy -l 0 -t 0 (information only; it cannot fail the job)
+        id: timer_off_taskpolicy
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          taskpolicy -l 0 -t 0 uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_timer_probe.py after "$RUNNER_TEMP/diag1/out/timer-4-coalescing-off-taskpolicy.json"
+
+      - name: diag1, the scan_board tests, once after the switch under taskpolicy -l 0 -t 0 (the rehearsal's Rust command with the scan_board filter) (information only; it cannot fail the job)
+        id: scan_off_taskpolicy
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- taskpolicy -l 0 -t 0 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-off-taskpolicy.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-off-taskpolicy.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-off-taskpolicy.exit"
+          exit "$rc"
+
+      - name: diag1, put timer coalescing back, guarded, the outcome is recorded, always runs (information only; it cannot fail the job)
+        id: coalesce_restore
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          name="$(sed -n 's/^name: //p' "$RUNNER_TEMP/diag1/out/coalescing-switch.txt" 2>/dev/null || true)"
+          original="$(sed -n 's/^before: //p' "$RUNNER_TEMP/diag1/out/coalescing-switch.txt" 2>/dev/null || true)"
+          {
+            echo "name: ${name:-none}"
+            echo "recorded original: $original"
+            status="not attempted"
+            case "$name=$original" in
+              kern.timer.coalescing_enabled=[01]|kern.timer_coalescing_enabled=[01]) status=0; sudo -n sysctl -w "$name=$original" 2>&1 || status=$? ;;
+              *) echo "no setting with an original value of 0 or 1 was recorded: nothing is written" ;;
+            esac
+            echo "sysctl -w exit status: $status"
+            case "$name" in ""|none) ;; *) echo "restored: $(sysctl -n "$name" 2>&1)" ;; esac
+          } | tee "$RUNNER_TEMP/diag1/out/coalescing-restore.txt"
+
+      - name: diag1, record the runner and the kern.timer sysctls after the restore (information only; it cannot fail the job)
+        id: sysctl_restored
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          {
+            echo "uname -m: $(uname -m)"
+            sw_vers
+            echo "hw.ncpu: $(sysctl -n hw.ncpu)"
+            echo "hw.model: $(sysctl -n hw.model)"
+            echo "loadavg: $(sysctl -n vm.loadavg)"
+            echo "kern.timer.coalescing_enabled: $(sysctl -n kern.timer.coalescing_enabled 2>&1)"
+            echo "kern.timer_coalescing_enabled: $(sysctl -n kern.timer_coalescing_enabled 2>&1)"
+            sysctl -a 2>/dev/null | grep -E '^kern\.timer' | sort || true
+          } | tee "$RUNNER_TEMP/diag1/out/sysctl-3-after-the-restore.txt"
+
+      - name: diag1, timer latency at 2 ms, 20 ms, 0.5 s and 1.2 s, after the restore (a second sample of the first state) (information only; it cannot fail the job)
+        id: timer_restored
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_timer_probe.py after "$RUNNER_TEMP/diag1/out/timer-5-restored.json"
+
+      - name: diag1, the scan_board tests, run 1 of 2 after the restore (a second sample of the first state) (information only; it cannot fail the job)
+        id: scan_restored_1
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-restored-1.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-restored-1.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-restored-1.exit"
+          exit "$rc"
+
+      - name: diag1, the scan_board tests, run 2 of 2 after the restore (a second sample of the first state) (information only; it cannot fail the job)
+        id: scan_restored_2
+        if: ${{ !cancelled() && steps.cargobuild.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/out"
+          rc=0
+          perl -MPOSIX -e 'defined(my $pid = fork) or die "fork: $!\n"; if (!$pid) { POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n" } waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' -- cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast scan_board -- --test-threads=1 > "$RUNNER_TEMP/diag1/out/scan-board-restored-2.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/diag1/out/scan-board-restored-2.txt"
+          echo "exit=$rc" | tee "$RUNNER_TEMP/diag1/out/scan-board-restored-2.exit"
+          exit "$rc"
+
+      - name: diag1, stage the records and write the step outcomes (always runs; it decides nothing and cannot fail the job)
+        id: stage
+        if: always()
+        continue-on-error: true
+        env:
+          JOB_STATUS: ${{ job.status }}
+          O_PINS: ${{ steps.pins.outcome }}
+          O_IDENTITY: ${{ steps.identity.outcome }}
+          O_PBS: ${{ steps.pbs.outcome }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          O_CARGOBUILD: ${{ steps.cargobuild.outcome }}
+          O_RUSTSETTLE: ${{ steps.rustsettle.outcome }}
+          O_SYSCTL_ON: ${{ steps.sysctl_on.outcome }}
+          O_TIMER_ON: ${{ steps.timer_on.outcome }}
+          O_TIMER_ON_TASKPOLICY: ${{ steps.timer_on_taskpolicy.outcome }}
+          O_SCAN_ON_1: ${{ steps.scan_on_1.outcome }}
+          O_SCAN_ON_2: ${{ steps.scan_on_2.outcome }}
+          O_SCAN_ON_3: ${{ steps.scan_on_3.outcome }}
+          O_SCAN_ON_4: ${{ steps.scan_on_4.outcome }}
+          O_SCAN_ON_5: ${{ steps.scan_on_5.outcome }}
+          O_SCAN_ON_BARE: ${{ steps.scan_on_bare.outcome }}
+          O_COALESCE_OFF: ${{ steps.coalesce_off.outcome }}
+          O_SYSCTL_OFF: ${{ steps.sysctl_off.outcome }}
+          O_TIMER_OFF: ${{ steps.timer_off.outcome }}
+          O_SCAN_OFF_1: ${{ steps.scan_off_1.outcome }}
+          O_SCAN_OFF_2: ${{ steps.scan_off_2.outcome }}
+          O_SCAN_OFF_3: ${{ steps.scan_off_3.outcome }}
+          O_SCAN_OFF_4: ${{ steps.scan_off_4.outcome }}
+          O_SCAN_OFF_5: ${{ steps.scan_off_5.outcome }}
+          O_SCAN_OFF_BARE: ${{ steps.scan_off_bare.outcome }}
+          O_TIMER_OFF_TASKPOLICY: ${{ steps.timer_off_taskpolicy.outcome }}
+          O_SCAN_OFF_TASKPOLICY: ${{ steps.scan_off_taskpolicy.outcome }}
+          O_COALESCE_RESTORE: ${{ steps.coalesce_restore.outcome }}
+          O_SYSCTL_RESTORED: ${{ steps.sysctl_restored.outcome }}
+          O_TIMER_RESTORED: ${{ steps.timer_restored.outcome }}
+          O_SCAN_RESTORED_1: ${{ steps.scan_restored_1.outcome }}
+          O_SCAN_RESTORED_2: ${{ steps.scan_restored_2.outcome }}
+        run: |
+          out="$RUNNER_TEMP/diag1/out"
+          mkdir -p "$out"
+          for f in "$RUNNER_TEMP/g3r2h-summary/load-probe-rust.json" "$RUNNER_TEMP/g3r2h/rustc-vV.txt"; do if [ -f "$f" ]; then cp "$f" "$out/" || true; fi; done
+          {
+            printf 'NOT-EVIDENCE diag1\njob=%s\n' "$JOB_STATUS"
+            printf 'step=%s outcome=%s\n' pins "$O_PINS"
+            printf 'step=%s outcome=%s\n' identity "$O_IDENTITY"
+            printf 'step=%s outcome=%s\n' pbs "$O_PBS"
+            printf 'step=%s outcome=%s\n' install "$O_INSTALL"
+            printf 'step=%s outcome=%s\n' cargobuild "$O_CARGOBUILD"
+            printf 'step=%s outcome=%s\n' rustsettle "$O_RUSTSETTLE"
+            printf 'step=%s outcome=%s\n' sysctl_on "$O_SYSCTL_ON"
+            printf 'step=%s outcome=%s\n' timer_on "$O_TIMER_ON"
+            printf 'step=%s outcome=%s\n' timer_on_taskpolicy "$O_TIMER_ON_TASKPOLICY"
+            printf 'step=%s outcome=%s\n' scan_on_1 "$O_SCAN_ON_1"
+            printf 'step=%s outcome=%s\n' scan_on_2 "$O_SCAN_ON_2"
+            printf 'step=%s outcome=%s\n' scan_on_3 "$O_SCAN_ON_3"
+            printf 'step=%s outcome=%s\n' scan_on_4 "$O_SCAN_ON_4"
+            printf 'step=%s outcome=%s\n' scan_on_5 "$O_SCAN_ON_5"
+            printf 'step=%s outcome=%s\n' scan_on_bare "$O_SCAN_ON_BARE"
+            printf 'step=%s outcome=%s\n' coalesce_off "$O_COALESCE_OFF"
+            printf 'step=%s outcome=%s\n' sysctl_off "$O_SYSCTL_OFF"
+            printf 'step=%s outcome=%s\n' timer_off "$O_TIMER_OFF"
+            printf 'step=%s outcome=%s\n' scan_off_1 "$O_SCAN_OFF_1"
+            printf 'step=%s outcome=%s\n' scan_off_2 "$O_SCAN_OFF_2"
+            printf 'step=%s outcome=%s\n' scan_off_3 "$O_SCAN_OFF_3"
+            printf 'step=%s outcome=%s\n' scan_off_4 "$O_SCAN_OFF_4"
+            printf 'step=%s outcome=%s\n' scan_off_5 "$O_SCAN_OFF_5"
+            printf 'step=%s outcome=%s\n' scan_off_bare "$O_SCAN_OFF_BARE"
+            printf 'step=%s outcome=%s\n' timer_off_taskpolicy "$O_TIMER_OFF_TASKPOLICY"
+            printf 'step=%s outcome=%s\n' scan_off_taskpolicy "$O_SCAN_OFF_TASKPOLICY"
+            printf 'step=%s outcome=%s\n' coalesce_restore "$O_COALESCE_RESTORE"
+            printf 'step=%s outcome=%s\n' sysctl_restored "$O_SYSCTL_RESTORED"
+            printf 'step=%s outcome=%s\n' timer_restored "$O_TIMER_RESTORED"
+            printf 'step=%s outcome=%s\n' scan_restored_1 "$O_SCAN_RESTORED_1"
+            printf 'step=%s outcome=%s\n' scan_restored_2 "$O_SCAN_RESTORED_2"
+          } > "$out/diag-summary.txt" || echo "the summary could not be written"
+          cat "$out/diag-summary.txt" || true
+          find "$out" -type f | sort > "$RUNNER_TEMP/diag1/files.txt" || true
+          cp "$RUNNER_TEMP/diag1/files.txt" "$out/files.txt" || true
+
+      - name: Leak check (no token or runner secret in the upload)
+        id: leak
+        if: always()
+        run: if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/diag1/out"; then echo "credential-like text found"; exit 1; fi
+
+      - name: Upload everything the diagnostic recorded (always runs, after the leak check)
+        if: always() && steps.leak.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-diag1-macos
+          path: ${{ runner.temp }}/diag1/out
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: diag1, fail the job only when a prefix step failed (last step, after the upload; a probe or test outcome never fails the job)
+        id: verdict
+        if: always()
+        env:
+          O_CARGOBUILD: ${{ steps.cargobuild.outcome }}
+        run: |
+          failed=0
+          for pair in "cargobuild=$O_CARGOBUILD"; do
+            case "${pair#*=}" in success) ;; *) echo "the prefix step ${pair%%=*} did not succeed (${pair#*=}): the diagnostic steps that need it did not run"; failed=1 ;; esac
+          done
+          exit "$failed"
