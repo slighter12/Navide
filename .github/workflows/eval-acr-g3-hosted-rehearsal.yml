@@ -1,23 +1,37 @@
 name: G3 Hosted Rehearsal (not evidence)
 
-# Evaluation only. A full end-to-end rehearsal of the hosted G3 run on the real runner images. It is NOT evidence: it writes under $RUNNER_TEMP/g3r2/rehearsal (the only place the stamp and the TS runners
-# accept a rehearsal), is stamped NOT-EVIDENCE, and uploads only step outcomes and check verdicts, never measurement data.
-# STAGE H3 FILLS, before this file is committed to .github/workflows/: H3_FILL_PACK_COMMIT_SHA, H3_FILL_PACK_DIGEST (see eval-acr-g3-hosted.yml).
-# Two distinct SHAs: the run head is $GITHUB_SHA (the pushed commit, which also holds this workflow file), and MACOS_H is the fixed head the macOS G3 measured; the product paths are diffed against MACOS_H.
-# The correctness precondition is not rehearsed here: the rehearsal runs the cost path only.
+# DRAFT (rf4f, rh16). Evaluation only. A full end-to-end rehearsal of the hosted G3 run on the real Linux x64 runner image (ubuntu-24.04). It is NOT evidence: it writes under $RUNNER_TEMP/g3r2/rehearsal (the only place the stamp
+# and the TS runners accept a rehearsal), is stamped NOT-EVIDENCE, and uploads only step outcomes and check verdicts, and the correctness records (G6; the per-row table and the receipt, no measurement data), never measurement data.
+# TRIGGER: pushes of a round-suffixed branch, eval/agent-cli-runtime-linux-rehearsal-r<N> (rh16: no force push; every round pushes a fresh branch name). The tip of that branch holds this file and NOT the registered workflow;
+# each push is one rehearsal (cap of 6 per platform, D11).
+# STAGE H5 FILLS, before this file is committed to the workflows directory of the branch: H5_FILL_PACK_COMMIT, H5_FILL_PACK_DIGEST.
+# Two distinct SHAs: the run head is $GITHUB_SHA (the pushed commit, which also holds this file), and FREEZE_H is the head of the rf3 freeze; the identity step is the registered one (D7).
+# No G1-E bundle: the cost run takes six path arguments and then --rehearsal.
+# The rehearsal runs the SAME correctness steps as the registered workflow (D8, E1, G1), so the exact gate is exercised before a registered push, and passes --rehearsal to build, packaged and smoke (D6): the
+# build-step diagnostics no longer depend on this workflow's `name:`.
+# The JavaScript runtime is plain default Bun (D2).
+# rf4f (H1-H5): the `correctness` step first stages the reader descriptor the runner built and verified (`pre/FIXTURES.json`) over the packed one, so the reader cases run on runner-built fixtures; it runs a real
+# `pytest --collect-only` with its own arguments (rootdir-relative `--deselect` ids, every variant of a parametrized case expected), and a required case that did not pass fails its row. On macOS the interpreter
+# preflight also checks the pinned build's compile stamp.
+# rh9 (rehearsal 2 finding): the G2 backend cases run in the virtual environment the registered G2 Linux workflow uses ($RUNNER_TEMP/g2-venv). The three stub-sidecar scripts the tests write start with
+# `#!<sys.executable>`, so their SHA-256 depends on the interpreter path, and the Linux receipt pins of tests/cli/g2-receipt-expectations-linux.json were taken with that path. A step before the pytest step creates the
+# environment the way the registered workflow does (`uv --project backend sync --locked`), and UV_PROJECT_ENVIRONMENT is set on that step and on the pytest step ONLY (the pack and the TypeScript cases look for backend/.venv).
+# rh16 (one run, every failure): after the install step every step runs even after an earlier failure (`if: !cancelled()` with the step's inputs, `continue-on-error: true` and an id); a step whose input is missing is skipped and
+# the summary records "skipped: missing <input>". `cargo test` has --no-fail-fast. The final summary step writes every step's id, outcome and conclusion, prints them, and fails the job if any step failed; the upload always runs
+# (after the leak check). The cost run is not blocked by a failing Rust test, pytest, principal or correctness step. The commands are unchanged.
 
 on:
   push:
     branches:
-      - eval/agent-cli-runtime
+      - eval/agent-cli-runtime-linux-rehearsal-r*
 
 permissions:
   contents: read
 
 env:
-  MACOS_H: 6b64ff86958bd0a7efe07f3964b8b971a173af72
-  PACK_COMMIT: 1cb3b8e00f47228062ff95098bb55fbdf89723a0
-  PACK_DIGEST: 107e53fba3d71e72c0a1ca989cfcd55ee4828c06bdbe1443ec84316cdf43147f
+  FREEZE_H: 202084cf74eccb07bec366897ebf4c588799e72e
+  PACK_COMMIT: "a72bc60971f495193a8228c1f8dbda4cf48f0229"
+  PACK_DIGEST: "a61f05dd999f71e250a9ce847acbe75063e98d04a181c2e94343e9d9069fe518"
 
 jobs:
   rehearsal:
@@ -73,22 +87,16 @@ jobs:
           if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
           "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
 
-      - name: Product identity against the registered macOS head
+      - name: Product identity against the freeze head (rf4c D7)
         id: identity
         run: |
-          git cat-file -e "$MACOS_H^{commit}"
-          git diff --exit-code "$MACOS_H" -- native src backend/agent_team_backend
-          test -z "$(git status --porcelain -- native src backend/agent_team_backend)"
+          git cat-file -e "$FREEZE_H^{commit}"
+          git diff --exit-code "$FREEZE_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain --ignored -- native src backend/agent_team_backend)"
+          test "$(git diff --name-only --no-renames "$FREEZE_H" "$GITHUB_SHA")" = ".github/workflows/eval-acr-g3-hosted-rehearsal.yml"
 
-      - name: Set up Bun
+      - name: Set up Bun (default version, no input)
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Set up Node.js (the version the macOS run used)
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22.23.2
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -96,7 +104,6 @@ jobs:
           python-version: '3.12'
 
       - name: Set up uv
-        if: matrix.os == 'linux'
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
       - name: Set up Rust
@@ -105,61 +112,182 @@ jobs:
           toolchain: 1.99.1
 
       - name: Install locked dependencies and record the toolchain
+        id: install
         run: |
-          if [ "$G3H_OS" = "Windows" ]; then python -m pip install uv; fi
-          npm install -g pnpm@10.0.0
           bun install --frozen-lockfile
           uv --project backend sync --locked
-          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal"
+          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h-summary"
           rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
-
-      - name: Build the ps shim and put it first on PATH
-        if: matrix.os == 'windows'
-        run: |
-          cargo build --release --locked --manifest-path backend/tests/cli_regression/support/g3/hosted_ps_shim/Cargo.toml
-          echo "$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release" >> "$GITHUB_PATH"
 
       - name: Quiet gate before the run
         id: quiet
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_quiet_gate.py before "$RUNNER_TEMP/g3r2/rehearsal/quiet-pre"
 
       - name: Build the sidecars and the reader fixtures
         id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         timeout-minutes: 45
-        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre"
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
 
       - name: Build the packaged app
         id: packaged
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
         timeout-minutes: 45
-        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py packaged "$PWD" "$RUNNER_TEMP/g3r2h/pre"
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py packaged "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
 
       - name: Smoke
         id: smoke
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
         timeout-minutes: 20
-        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py smoke "$PWD" "$RUNNER_TEMP/g3r2h/smoke"
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py smoke "$PWD" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
+
+      - name: Prove the release sidecar has no fault hooks (the F0 sidecar and its harness)
+        id: proof
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}/g3r2h/pre/harness-target/release/navide-cli-runtime
+          G2_BASETEMP: ${{ runner.temp }}/g2-basetemp
+        run: |
+          bash tests/cli/g2-linux-proc-children.sh
+          bun tests/cli/g2Native.mjs proof --release "$NAVIDE_CLI_RUNTIME_BIN" --harness "$NAVIDE_CLI_RUNTIME_HARNESS_BIN"
+
+      - name: Rust tests
+        id: cargo
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast
+
+      - name: Install the G2 test environment (the interpreter path the Linux receipt pins were taken with)
+        id: g2env
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/g2-venv
+        run: uv --project backend sync --locked
+
+      - name: Required backend cases on the F0 sidecar (G2 required list)
+        id: pytest
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.g2env.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 75
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}/g3r2h/pre/harness-target/release/navide-cli-runtime
+          G2_BASETEMP: ${{ runner.temp }}/g2-basetemp
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/g2-venv
+        run: bash tests/cli/g2-linux-pytest.sh
+
+      - name: Require every listed case to be collected and passed
+        id: guard
+        if: ${{ !cancelled() && hashFiles('test-results/ci/g2-linux-junit.xml') != '' }}
+        continue-on-error: true
+        run: bun tests/cli/g2Native.mjs guard --platform linux --arch x64 --required tests/cli/g2-required-linux.txt --skip-allowed test_cli_runtime_recovery.py,test_cli_runtime_lifecycle.py,test_cli_runtime_claude.py --junit test-results/ci/g2-linux-junit.xml --out test-results/ci/g2-linux-outcomes.log
+
+      - name: Require every ready receipt to name the F0 sidecar and its harness
+        id: receipts
+        if: ${{ !cancelled() && steps.pytest.outcome != 'skipped' }}
+        continue-on-error: true
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}/g3r2h/pre/harness-target/release/navide-cli-runtime
+          G2_BASETEMP: ${{ runner.temp }}/g2-basetemp
+        run: |
+          rc=0
+          mkdir -p test-results/ci
+          bun tests/cli/g2Native.mjs receipts --root "$G2_BASETEMP" --sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_BIN" | cut -d' ' -f1)" --harness-sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_HARNESS_BIN" | cut -d' ' -f1)" --required tests/cli/g2-required-linux.txt --expect tests/cli/g2-receipt-expectations-linux.json > test-results/ci/g2-linux-receipts.txt || rc=$?
+          cat test-results/ci/g2-linux-receipts.txt
+          exit $rc
+
+      - name: Run the production WebSocket cases on the F0 sidecar
+        id: principal
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}/native/navide-cli-runtime/target/release/navide-cli-runtime
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}/g3r2h/pre/harness-target/release/navide-cli-runtime
+          G2_BASETEMP: ${{ runner.temp }}/g2-basetemp
+        run: bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts tests/cli/claudeRuntime.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request|native Claude production-client' --reporter=default --reporter=json --outputFile.json=test-results/ci/g2-linux-ts-results.json
+
+      - name: Require both shared WebSocket cases to be collected and pass
+        id: principal_guard
+        if: ${{ !cancelled() && hashFiles('test-results/ci/g2-linux-ts-results.json') != '' }}
+        continue-on-error: true
+        run: jq -e '[.testResults[].assertionResults[] | select(.fullName == "uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits" or .fullName == "sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime")] as $required | ($required | length) == 2 and ($required | all(.status == "passed"))' test-results/ci/g2-linux-ts-results.json
+
+      - name: Require the Claude production-client cases to be collected and pass
+        id: principal_cases
+        if: ${{ !cancelled() && hashFiles('test-results/ci/g2-linux-ts-results.json') != '' }}
+        continue-on-error: true
+        run: jq -e -f tests/cli/g2-linux-principal.jq test-results/ci/g2-linux-ts-results.json
+
+      - name: Correctness, the 21 G1-E rows from the gates registry on the F0 sidecar, gated by case (row table, collected-and-passed gate, sidecar receipt, E1, G1)
+        id: correctness
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 75
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py correctness "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Bind the G2 required cases (by name) and the receipts to the F0 sidecar (E1)
+        id: bind
+        if: ${{ !cancelled() && steps.correctness.outcome != 'skipped' }}
+        continue-on-error: true
+        env:
+          PYTHONPATH: backend
+        run: uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_correctness bind "$PWD" "$RUNNER_TEMP/g3r2h/pre" Linux test-results/ci/g2-linux-receipts.txt test-results/ci/g2-linux-outcomes.log test-results/ci/g2-linux-junit.xml tests/cli/g2-required-linux.txt
 
       - name: Build F0
         id: f0
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.packaged.outcome == 'success' }}
+        continue-on-error: true
         run: |
           H="uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_helper"
-          $H f0-spec "$PWD" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/f0-spec.json" eval/agent-cli-runtime
+          $H f0-spec "$PWD" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/f0-spec.json" "$GITHUB_REF_NAME"
           $H f0-build "$PWD" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/f0-spec.json"
 
       - name: Rehearsal cost run (NOT evidence)
         id: cost
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.smoke.outcome == 'success' }}
+        continue-on-error: true
         timeout-minutes: 300
         run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py cost "$PWD" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
 
       - name: Per-check verdicts of the receipt and byte-ledger validation (names and verdicts only)
         id: checks
         if: always()
+        continue-on-error: true
         env:
           PYTHONPATH: backend
         run: |
           mkdir -p "$RUNNER_TEMP/g3r2h-summary"
           python backend/tests/cli_regression/support/g3/hosted_checks.py "$RUNNER_TEMP/g3r2/rehearsal/rehearsal-verdict.json" "$RUNNER_TEMP/g3r2h-summary/rehearsal-checks.json" "$G3H_OS" "$RUNNER_TEMP/g3r2h/markers"
 
-      - name: Write the outcomes summary (step outcomes only)
+      - name: Stage the correctness records for the upload (G6)
+        id: stage
+        if: always()
+        continue-on-error: true
+        run: |
+          stage="$RUNNER_TEMP/g3r2h-summary/evidence"
+          mkdir -p "$stage"
+          pre="$RUNNER_TEMP/g3r2h/pre"
+          for f in "$pre/correctness-gate.json" "$pre/correctness-receipt.json" "$pre/g2-receipt-binding.json"; do
+            if [ -f "$f" ]; then cp "$f" "$stage/" && echo "staged $(basename "$f")" >> "$stage/staged.txt"; else echo "missing $f" >> "$stage/staged.txt"; fi
+          done
+          uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_diag.py stage-smoke "$RUNNER_TEMP/g3r2h/smoke" "$stage" >> "$stage/staged.txt" || echo "stage-smoke failed" >> "$stage/staged.txt"
+          cat "$stage/staged.txt"
+
+      - name: Write the outcomes summary (every step's id, outcome and conclusion; fails the job if any step failed)
+        id: summary
         if: always()
         env:
           JOB_STATUS: ${{ job.status }}
@@ -167,6 +295,8 @@ jobs:
           C_PINS: ${{ steps.pins.conclusion }}
           O_IDENTITY: ${{ steps.identity.outcome }}
           C_IDENTITY: ${{ steps.identity.conclusion }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          C_INSTALL: ${{ steps.install.conclusion }}
           O_QUIET: ${{ steps.quiet.outcome }}
           C_QUIET: ${{ steps.quiet.conclusion }}
           O_BUILD: ${{ steps.build.outcome }}
@@ -175,34 +305,80 @@ jobs:
           C_PACKAGED: ${{ steps.packaged.conclusion }}
           O_SMOKE: ${{ steps.smoke.outcome }}
           C_SMOKE: ${{ steps.smoke.conclusion }}
+          O_PROOF: ${{ steps.proof.outcome }}
+          C_PROOF: ${{ steps.proof.conclusion }}
+          O_CARGO: ${{ steps.cargo.outcome }}
+          C_CARGO: ${{ steps.cargo.conclusion }}
+          O_G2ENV: ${{ steps.g2env.outcome }}
+          C_G2ENV: ${{ steps.g2env.conclusion }}
+          O_PYTEST: ${{ steps.pytest.outcome }}
+          C_PYTEST: ${{ steps.pytest.conclusion }}
+          O_GUARD: ${{ steps.guard.outcome }}
+          C_GUARD: ${{ steps.guard.conclusion }}
+          O_RECEIPTS: ${{ steps.receipts.outcome }}
+          C_RECEIPTS: ${{ steps.receipts.conclusion }}
+          O_PRINCIPAL: ${{ steps.principal.outcome }}
+          C_PRINCIPAL: ${{ steps.principal.conclusion }}
+          O_PRINCIPAL_GUARD: ${{ steps.principal_guard.outcome }}
+          C_PRINCIPAL_GUARD: ${{ steps.principal_guard.conclusion }}
+          O_PRINCIPAL_CASES: ${{ steps.principal_cases.outcome }}
+          C_PRINCIPAL_CASES: ${{ steps.principal_cases.conclusion }}
+          O_CORRECTNESS: ${{ steps.correctness.outcome }}
+          C_CORRECTNESS: ${{ steps.correctness.conclusion }}
+          O_BIND: ${{ steps.bind.outcome }}
+          C_BIND: ${{ steps.bind.conclusion }}
           O_F0: ${{ steps.f0.outcome }}
           C_F0: ${{ steps.f0.conclusion }}
           O_COST: ${{ steps.cost.outcome }}
           C_COST: ${{ steps.cost.conclusion }}
           O_CHECKS: ${{ steps.checks.outcome }}
           C_CHECKS: ${{ steps.checks.conclusion }}
+          O_STAGE: ${{ steps.stage.outcome }}
+          C_STAGE: ${{ steps.stage.conclusion }}
         run: |
           mkdir -p "$RUNNER_TEMP/g3r2h-summary"
+          failed=0
+          report() {
+            printf 'step=%s outcome=%s conclusion=%s' "$1" "$2" "$3"
+            if [ "$2" = "skipped" ]; then printf ' note=skipped: missing %s' "$4"; fi
+            printf '\n'
+            case "$2" in failure|cancelled) failed=1 ;; esac
+          }
           {
             printf 'NOT-EVIDENCE\njob=%s\n' "$JOB_STATUS"
-            printf 'step=pins outcome=%s conclusion=%s\n' "$O_PINS" "$C_PINS"
-            printf 'step=identity outcome=%s conclusion=%s\n' "$O_IDENTITY" "$C_IDENTITY"
-            printf 'step=quiet outcome=%s conclusion=%s\n' "$O_QUIET" "$C_QUIET"
-            printf 'step=build outcome=%s conclusion=%s\n' "$O_BUILD" "$C_BUILD"
-            printf 'step=packaged outcome=%s conclusion=%s\n' "$O_PACKAGED" "$C_PACKAGED"
-            printf 'step=smoke outcome=%s conclusion=%s\n' "$O_SMOKE" "$C_SMOKE"
-            printf 'step=f0 outcome=%s conclusion=%s\n' "$O_F0" "$C_F0"
-            printf 'step=cost outcome=%s conclusion=%s\n' "$O_COST" "$C_COST"
-            printf 'step=checks outcome=%s conclusion=%s\n' "$O_CHECKS" "$C_CHECKS"
+            report pins "$O_PINS" "$C_PINS" "an earlier step"
+            report identity "$O_IDENTITY" "$C_IDENTITY" "an earlier step"
+            report install "$O_INSTALL" "$C_INSTALL" "an earlier step"
+            report quiet "$O_QUIET" "$C_QUIET" "the install step"
+            report build "$O_BUILD" "$C_BUILD" "the install step"
+            report packaged "$O_PACKAGED" "$C_PACKAGED" "the build output"
+            report smoke "$O_SMOKE" "$C_SMOKE" "the build output"
+            report proof "$O_PROOF" "$C_PROOF" "the build output (release and harness sidecars)"
+            report cargo "$O_CARGO" "$C_CARGO" "the install step"
+            report g2env "$O_G2ENV" "$C_G2ENV" "the install step"
+            report pytest "$O_PYTEST" "$C_PYTEST" "the build output or the G2 environment"
+            report guard "$O_GUARD" "$C_GUARD" "the pytest junit file"
+            report receipts "$O_RECEIPTS" "$C_RECEIPTS" "the pytest run"
+            report principal "$O_PRINCIPAL" "$C_PRINCIPAL" "the build output (sidecars)"
+            report principal_guard "$O_PRINCIPAL_GUARD" "$C_PRINCIPAL_GUARD" "the production WebSocket results file"
+            report principal_cases "$O_PRINCIPAL_CASES" "$C_PRINCIPAL_CASES" "the production WebSocket results file"
+            report correctness "$O_CORRECTNESS" "$C_CORRECTNESS" "the build output"
+            report bind "$O_BIND" "$C_BIND" "the correctness run"
+            report f0 "$O_F0" "$C_F0" "the build and packaged outputs"
+            report cost "$O_COST" "$C_COST" "F0, the build output or the smoke output"
+            report checks "$O_CHECKS" "$C_CHECKS" "nothing (always runs)"
+            report stage "$O_STAGE" "$C_STAGE" "nothing (always runs)"
+            printf 'failed=%s\n' "$failed"
           } > "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"
+          cat "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"
+          if grep -q '^failed=1$' "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"; then echo "at least one step failed"; exit 1; fi
 
       - name: Leak check (no token or runner secret in the upload)
         id: leak
         if: always()
-        run: |
-          if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/g3r2h-summary"; then echo "credential-like text found"; exit 1; fi
+        run: if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/g3r2h-summary"; then echo "credential-like text found"; exit 1; fi
 
-      - name: Upload the outcomes (exit codes and check verdicts only)
+      - name: Upload the outcomes (exit codes, check verdicts, the correctness records only)
         if: always() && steps.leak.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
