@@ -1,0 +1,328 @@
+name: G3 Hosted Rehearsal Windows (not evidence)
+
+# DRAFT (rf4f). Evaluation only. A full end-to-end rehearsal of the hosted G3 run on the real Windows x64 runner image (windows-2025). It is NOT evidence: it writes under $RUNNER_TEMP/g3r2/rehearsal (the only place the stamp
+# and the TS runners accept a rehearsal), is stamped NOT-EVIDENCE, and uploads only step outcomes and check verdicts, the READY raw capture and the G2 receipt files (staged under evidence/), never measurement data.
+# TRIGGER: pushes of the dedicated branch eval/agent-cli-runtime-windows-rehearsal ONLY. The tip of that branch holds this file and NOT the registered workflow; each push is one rehearsal (cap of 6 per platform, D11).
+# STAGE H5 FILLS, before this file is committed to the workflows directory of the branch: H5_FILL_PACK_COMMIT, H5_FILL_PACK_DIGEST.
+# Two distinct SHAs: the run head is $GITHUB_SHA (the pushed commit, which also holds this file), and FREEZE_H is the head of the rf3 freeze; the identity step is the registered one (D7).
+# No G1-E bundle: the cost run takes six path arguments and then --rehearsal.
+# The rehearsal runs the SAME correctness steps as the registered workflow (D8, E1, G1), so the exact gate is exercised before a registered push, and passes --rehearsal to build, packaged and smoke (D6): the
+# build-step diagnostics no longer depend on this workflow's `name:`.
+# The JavaScript runtime is plain default Bun (D2).
+# rf4f (H1-H5): the `correctness` step first stages the reader descriptor the runner built and verified (`pre/FIXTURES.json`) over the packed one, so the reader cases run on runner-built fixtures; it runs a real
+# `pytest --collect-only` with its own arguments (rootdir-relative `--deselect` ids, every variant of a parametrized case expected), and a required case that did not pass fails its row. On macOS the interpreter
+# preflight also checks the pinned build's compile stamp.
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime-windows-rehearsal
+
+permissions:
+  contents: read
+
+env:
+  FREEZE_H: 202084cf74eccb07bec366897ebf4c588799e72e
+  PACK_COMMIT: "6d16cfd8b23a19014218763795c34b12212f421c"
+  PACK_DIGEST: "474f316dd7e3b935b13c0e43eccb9e1dedb58a14dcee4847cab1be91941bc43a"
+
+jobs:
+  rehearsal:
+    name: rehearsal-${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            runner: windows-2025
+            system: Windows
+    defaults:
+      run:
+        shell: bash
+    env:
+      G3H_OS: ${{ matrix.system }}
+    steps:
+      - name: Pin line endings before any checkout
+        run: git config --global core.autocrlf false
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the harness pack
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PACK_COMMIT }}
+          path: pack
+          persist-credentials: false
+
+      - name: Check the run head and the checked-out bytes
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git config --get core.autocrlf)" = "false"
+          test -z "$(git status --porcelain -- . ':(exclude)pack')"
+
+      - name: Verify the pack digest, then overlay it
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" pack/backend/tests/cli_regression/support/g3/hosted_pack.py digest pack > "$RUNNER_TEMP/pack-digest.txt"
+          cat "$RUNNER_TEMP/pack-digest.txt"
+          grep -q -F "$PACK_DIGEST" "$RUNNER_TEMP/pack-digest.txt"
+          tar -C pack --exclude=.git -cf - . | tar -C . -xf -
+
+      - name: Verify the g1e pins and the hosted inputs (first step after the overlay)
+        id: pins
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
+
+      - name: Product identity against the freeze head (rf4c D7)
+        id: identity
+        run: |
+          git cat-file -e "$FREEZE_H^{commit}"
+          git diff --exit-code "$FREEZE_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain --ignored -- native src backend/agent_team_backend)"
+          test "$(git diff --name-only --no-renames "$FREEZE_H" "$GITHUB_SHA")" = ".github/workflows/eval-acr-g3-hosted-rehearsal-windows.yml"
+
+      - name: Set up Bun (default version, no input)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked dependencies and record the toolchain
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h-summary"
+          rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
+
+      - name: Build the ps shim and put it first on PATH
+        run: |
+          cargo build --release --locked --manifest-path backend/tests/cli_regression/support/g3/hosted_ps_shim/Cargo.toml
+          cygpath -w "$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release" >> "$GITHUB_PATH"
+
+      - name: Quiet gate before the run
+        id: quiet
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_quiet_gate.py before "$RUNNER_TEMP/g3r2/rehearsal/quiet-pre"
+
+      - name: Build the sidecars and the reader fixtures
+        id: build
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Build the packaged app
+        id: packaged
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py packaged "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Smoke
+        id: smoke
+        timeout-minutes: 20
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py smoke "$PWD" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
+
+      - name: Prove the release sidecar has no fault hooks (the F0 sidecar and its harness)
+        id: proof
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: bun tests/cli/g2Native.mjs proof --release "$NAVIDE_CLI_RUNTIME_BIN" --harness "$NAVIDE_CLI_RUNTIME_HARNESS_BIN"
+
+      - name: Rust tests
+        id: cargo
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml
+
+      - name: Required backend cases on the F0 sidecar (G2 required list)
+        id: pytest
+        timeout-minutes: 75
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: pwsh -NoProfile -File tests/cli/g2-windows-pytest.ps1
+
+      - name: Require every listed case to be collected and passed
+        id: guard
+        run: bun tests/cli/g2Native.mjs guard --platform windows --arch x64 --required tests/cli/g2-required-windows.txt --junit test-results/ci/g2-windows-junit.xml --out test-results/ci/g2-windows-outcomes.log
+
+      - name: Require every ready receipt to name the F0 sidecar and its harness
+        id: receipts
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: |
+          rc=0
+          mkdir -p test-results/ci
+          bun tests/cli/g2Native.mjs receipts --root "$G2_BASETEMP" --sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_BIN" | cut -d' ' -f1)" --harness-sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_HARNESS_BIN" | cut -d' ' -f1)" --required tests/cli/g2-required-windows.txt --expect tests/cli/g2-receipt-expectations-windows.json > test-results/ci/g2-windows-receipts.txt || rc=$?
+          cat test-results/ci/g2-windows-receipts.txt
+          exit $rc
+
+      - name: Run the production WebSocket cases on the F0 sidecar
+        id: principal
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request' --reporter=default --reporter=json --outputFile.json=test-results/ci/g2-windows-ts-results.json
+
+      - name: Require both shared WebSocket cases to be collected and pass
+        id: principal_guard
+        run: jq -e '[.testResults[].assertionResults[] | select(.fullName == "uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits" or .fullName == "sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime")] as $required | ($required | length) == 2 and ($required | all(.status == "passed"))' test-results/ci/g2-windows-ts-results.json
+
+      - name: Require the Windows-only production cases to be collected and pass
+        id: principal_cases
+        run: jq -e -f tests/cli/g2-windows-principal.jq test-results/ci/g2-windows-ts-results.json
+
+      - name: Correctness, the 21 G1-E rows from the gates registry on the F0 sidecar, gated by case (row table, collected-and-passed gate, sidecar receipt, E1, G1)
+        id: correctness
+        timeout-minutes: 75
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py correctness "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Bind the G2 required cases (by name) and the receipts to the F0 sidecar (E1)
+        id: bind
+        env:
+          PYTHONPATH: backend
+        run: uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_correctness bind "$PWD" "$RUNNER_TEMP/g3r2h/pre" Windows test-results/ci/g2-windows-receipts.txt test-results/ci/g2-windows-outcomes.log test-results/ci/g2-windows-junit.xml tests/cli/g2-required-windows.txt
+
+      - name: Build F0
+        id: f0
+        run: |
+          H="uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_helper"
+          $H f0-spec "$PWD" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/f0-spec.json" eval/agent-cli-runtime-windows-rehearsal
+          $H f0-build "$PWD" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/f0-spec.json"
+
+      - name: Rehearsal cost run (NOT evidence)
+        id: cost
+        timeout-minutes: 300
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py cost "$PWD" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
+
+      - name: Per-check verdicts of the receipt and byte-ledger validation (names and verdicts only)
+        id: checks
+        if: always()
+        env:
+          PYTHONPATH: backend
+        run: |
+          mkdir -p "$RUNNER_TEMP/g3r2h-summary"
+          python backend/tests/cli_regression/support/g3/hosted_checks.py "$RUNNER_TEMP/g3r2/rehearsal/rehearsal-verdict.json" "$RUNNER_TEMP/g3r2h-summary/rehearsal-checks.json" "$G3H_OS" "$RUNNER_TEMP/g3r2h/markers"
+
+      - name: Stage the READY raw capture and the G2 receipt files for the upload (ledger 1558, E6, G5)
+        id: stage
+        if: always()
+        env:
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: |
+          stage="$RUNNER_TEMP/g3r2h-summary/evidence"
+          mkdir -p "$stage/g2-receipts"
+          pre="$RUNNER_TEMP/g3r2h/pre"
+          for f in "$RUNNER_TEMP/g3r2h/pre/packaged-smoke/ready-raw-probe.json" "$pre/correctness-gate.json" "$pre/correctness-receipt.json" "$pre/g2-receipt-binding.json" test-results/ci/g2-windows-*; do
+            if [ -f "$f" ]; then cp "$f" "$stage/" && echo "staged $(basename "$f")" >> "$stage/staged.txt"; else echo "missing $f" >> "$stage/staged.txt"; fi
+          done
+          base="$(cygpath -u "$G2_BASETEMP")"
+          if [ -d "$base" ]; then (cd "$base" && find . -name runtime-receipts.jsonl -exec cp --parents {} "$stage/g2-receipts/" \;); fi
+          uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_diag.py stage-smoke "$RUNNER_TEMP/g3r2h/smoke" "$stage" >> "$stage/staged.txt" || echo "stage-smoke failed" >> "$stage/staged.txt"
+          echo "g2 receipt files: $(find "$stage/g2-receipts" -name runtime-receipts.jsonl | wc -l)" >> "$stage/staged.txt"
+          cat "$stage/staged.txt"
+
+      - name: Write the outcomes summary (step outcomes only)
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          O_PINS: ${{ steps.pins.outcome }}
+          C_PINS: ${{ steps.pins.conclusion }}
+          O_IDENTITY: ${{ steps.identity.outcome }}
+          C_IDENTITY: ${{ steps.identity.conclusion }}
+          O_QUIET: ${{ steps.quiet.outcome }}
+          C_QUIET: ${{ steps.quiet.conclusion }}
+          O_BUILD: ${{ steps.build.outcome }}
+          C_BUILD: ${{ steps.build.conclusion }}
+          O_PACKAGED: ${{ steps.packaged.outcome }}
+          C_PACKAGED: ${{ steps.packaged.conclusion }}
+          O_SMOKE: ${{ steps.smoke.outcome }}
+          C_SMOKE: ${{ steps.smoke.conclusion }}
+          O_PROOF: ${{ steps.proof.outcome }}
+          C_PROOF: ${{ steps.proof.conclusion }}
+          O_CARGO: ${{ steps.cargo.outcome }}
+          C_CARGO: ${{ steps.cargo.conclusion }}
+          O_PYTEST: ${{ steps.pytest.outcome }}
+          C_PYTEST: ${{ steps.pytest.conclusion }}
+          O_GUARD: ${{ steps.guard.outcome }}
+          C_GUARD: ${{ steps.guard.conclusion }}
+          O_RECEIPTS: ${{ steps.receipts.outcome }}
+          C_RECEIPTS: ${{ steps.receipts.conclusion }}
+          O_PRINCIPAL: ${{ steps.principal.outcome }}
+          C_PRINCIPAL: ${{ steps.principal.conclusion }}
+          O_PRINCIPAL_GUARD: ${{ steps.principal_guard.outcome }}
+          C_PRINCIPAL_GUARD: ${{ steps.principal_guard.conclusion }}
+          O_PRINCIPAL_CASES: ${{ steps.principal_cases.outcome }}
+          C_PRINCIPAL_CASES: ${{ steps.principal_cases.conclusion }}
+          O_CORRECTNESS: ${{ steps.correctness.outcome }}
+          C_CORRECTNESS: ${{ steps.correctness.conclusion }}
+          O_BIND: ${{ steps.bind.outcome }}
+          C_BIND: ${{ steps.bind.conclusion }}
+          O_F0: ${{ steps.f0.outcome }}
+          C_F0: ${{ steps.f0.conclusion }}
+          O_COST: ${{ steps.cost.outcome }}
+          C_COST: ${{ steps.cost.conclusion }}
+          O_CHECKS: ${{ steps.checks.outcome }}
+          C_CHECKS: ${{ steps.checks.conclusion }}
+          O_STAGE: ${{ steps.stage.outcome }}
+          C_STAGE: ${{ steps.stage.conclusion }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/g3r2h-summary"
+          {
+            printf 'NOT-EVIDENCE\njob=%s\n' "$JOB_STATUS"
+            printf 'step=pins outcome=%s conclusion=%s\n' "$O_PINS" "$C_PINS"
+            printf 'step=identity outcome=%s conclusion=%s\n' "$O_IDENTITY" "$C_IDENTITY"
+            printf 'step=quiet outcome=%s conclusion=%s\n' "$O_QUIET" "$C_QUIET"
+            printf 'step=build outcome=%s conclusion=%s\n' "$O_BUILD" "$C_BUILD"
+            printf 'step=packaged outcome=%s conclusion=%s\n' "$O_PACKAGED" "$C_PACKAGED"
+            printf 'step=smoke outcome=%s conclusion=%s\n' "$O_SMOKE" "$C_SMOKE"
+            printf 'step=proof outcome=%s conclusion=%s\n' "$O_PROOF" "$C_PROOF"
+            printf 'step=cargo outcome=%s conclusion=%s\n' "$O_CARGO" "$C_CARGO"
+            printf 'step=pytest outcome=%s conclusion=%s\n' "$O_PYTEST" "$C_PYTEST"
+            printf 'step=guard outcome=%s conclusion=%s\n' "$O_GUARD" "$C_GUARD"
+            printf 'step=receipts outcome=%s conclusion=%s\n' "$O_RECEIPTS" "$C_RECEIPTS"
+            printf 'step=principal outcome=%s conclusion=%s\n' "$O_PRINCIPAL" "$C_PRINCIPAL"
+            printf 'step=principal_guard outcome=%s conclusion=%s\n' "$O_PRINCIPAL_GUARD" "$C_PRINCIPAL_GUARD"
+            printf 'step=principal_cases outcome=%s conclusion=%s\n' "$O_PRINCIPAL_CASES" "$C_PRINCIPAL_CASES"
+            printf 'step=correctness outcome=%s conclusion=%s\n' "$O_CORRECTNESS" "$C_CORRECTNESS"
+            printf 'step=bind outcome=%s conclusion=%s\n' "$O_BIND" "$C_BIND"
+            printf 'step=f0 outcome=%s conclusion=%s\n' "$O_F0" "$C_F0"
+            printf 'step=cost outcome=%s conclusion=%s\n' "$O_COST" "$C_COST"
+            printf 'step=checks outcome=%s conclusion=%s\n' "$O_CHECKS" "$C_CHECKS"
+            printf 'step=stage outcome=%s conclusion=%s\n' "$O_STAGE" "$C_STAGE"
+          } > "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"
+
+      - name: Leak check (no token or runner secret in the upload)
+        id: leak
+        if: always()
+        run: if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/g3r2h-summary"; then echo "credential-like text found"; exit 1; fi
+
+      - name: Upload the outcomes (exit codes, check verdicts, the READY raw capture and the G2 receipt files only)
+        if: always() && steps.leak.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-rehearsal-${{ matrix.os }}
+          path: ${{ runner.temp }}/g3r2h-summary
+          if-no-files-found: warn
+          retention-days: 7
