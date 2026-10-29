@@ -1,0 +1,853 @@
+name: G3 Diag1 Windows (not evidence)
+
+# DRAFT (diag1). Evaluation only. A SHORT DIAGNOSTIC on the real Windows x64 runner image (windows-2025), built from the rh16 rehearsal draft. It is NOT evidence, it is NOT a rehearsal and it does not count
+# against the rehearsal cap (D11): it runs no cost run, no matrix, no smoke, no packaged build, no F0 and no measurement. It answers what only a real console can (rh16 review, B-1 to B-3).
+# TRIGGER: a push of eval/agent-cli-runtime-windows-diag-r1. The tip of that branch is the freeze head plus this one file.
+# STAGE H5 FILLS, before this file is committed to the workflows directory of the branch: H5_FILL_PACK_COMMIT, H5_FILL_PACK_DIGEST.
+# The pack is the rh16 pack, unchanged. The identity step is the registered one with this file's own name: the commit is the freeze head plus exactly this workflow file.
+# PREFIX, copied step for step from the rehearsal draft: checkouts, head check, pack digest and overlay, pins, identity, toolchains, install, the ps shim, the sidecar build. Dropped: the quiet gate, the
+# packaged build, Smoke, F0 and every test and cost step. The ConPTY probe reads none of them: its plan has one step, which takes the release sidecar, and its guard takes the ps shim (`hosted_driver.build_conpty_probe_plan`);
+# F0 would need the packaged build (its seed is the hash of packaged-build.json), and Smoke is a plan of its own (`build_smoke_plan`) whose output the probe does not read.
+# DIAG STEPS. `tools` writes three files that are in no branch and no pack: a patcher for the pack's termios shim, a launcher and a second probe file. Each of the six variant steps is `continue-on-error`,
+# has its own output directory under $RUNNER_TEMP/diag1/out and begins with the rehearsal's own ps-shim guard:
+#   (i)       the rehearsal's probe step itself; no file on the runner has been changed when it runs;
+#   (ii)      the second probe: three burst rounds, a resize inside the second window, a resize after the third, four resizes after FINAL; per step the count of each window's BEGIN and END lines;
+#   (iii)     the probe of (i) with the shim leaving the console OUTPUT modes as they are (the product peer's own state) and reporting OPOST and ONLCR as the peer asked;
+#   (iii)+(ii) the second probe under (iii);
+#   (iv)      the probe of (i) without the code page 65001;
+#   (iii)+(iv) both: the console state of the product's own Windows peer.
+# Every patched variant also records what the console holds around the peer's tcsetattr (modes, code pages, buffer size). Each probe writes raw.bin, view.bin and probe.json per arm.
+# No step fails the job before the upload except the strict setup steps and the leak check; the last step fails the job when the shim, the build or the tools step did not succeed.
+# The JavaScript runtime is plain default Bun; the pinned actions are the rehearsal draft's.
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime-windows-diag-r1
+
+permissions:
+  contents: read
+
+env:
+  FREEZE_H: 202084cf74eccb07bec366897ebf4c588799e72e
+  PACK_COMMIT: "1fa7381afeb5214fc5818a3e4cf9f68404da95b0"
+  PACK_DIGEST: "5c4ab25ed1a30a1ec298e565acef91e72a25472f0d34966c366fd44a8cc82670"
+
+jobs:
+  diag:
+    name: diag1-${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            runner: windows-2025
+            system: Windows
+    defaults:
+      run:
+        shell: bash
+    env:
+      G3H_OS: ${{ matrix.system }}
+    steps:
+      - name: Pin line endings before any checkout
+        run: git config --global core.autocrlf false
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the harness pack
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PACK_COMMIT }}
+          path: pack
+          persist-credentials: false
+
+      - name: Check the run head and the checked-out bytes
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git config --get core.autocrlf)" = "false"
+          test -z "$(git status --porcelain -- . ':(exclude)pack')"
+
+      - name: Verify the pack digest, then overlay it
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" pack/backend/tests/cli_regression/support/g3/hosted_pack.py digest pack > "$RUNNER_TEMP/pack-digest.txt"
+          cat "$RUNNER_TEMP/pack-digest.txt"
+          grep -q -F "$PACK_DIGEST" "$RUNNER_TEMP/pack-digest.txt"
+          tar -C pack --exclude=.git -cf - . | tar -C . -xf -
+
+      - name: Verify the g1e pins and the hosted inputs (first step after the overlay)
+        id: pins
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
+
+      - name: Product identity against the freeze head (rf4c D7)
+        id: identity
+        run: |
+          git cat-file -e "$FREEZE_H^{commit}"
+          git diff --exit-code "$FREEZE_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain --ignored -- native src backend/agent_team_backend)"
+          test "$(git diff --name-only --no-renames "$FREEZE_H" "$GITHUB_SHA")" = ".github/workflows/eval-acr-g3-diag-windows.yml"
+
+      - name: Set up Bun (default version, no input)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked dependencies and record the toolchain
+        id: install
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h-summary"
+          rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
+
+      - name: Build the ps shim and put it first on PATH
+        id: shim
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          cargo build --release --locked --manifest-path backend/tests/cli_regression/support/g3/hosted_ps_shim/Cargo.toml
+          cygpath -w "$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release" >> "$GITHUB_PATH"
+
+      - name: Build the sidecars and the reader fixtures
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: diag1, write the three diagnostic tools (they exist on this runner only) and check their bytes
+        id: tools
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag1/tools" "$RUNNER_TEMP/diag1/out"
+          test "$(sha256sum < pack/backend/tests/cli_regression/support/g3/hosted_termios.py | cut -d' ' -f1)" = "$(sha256sum < backend/tests/cli_regression/support/g3/hosted_termios.py | cut -d' ' -f1)"
+          cat > "$RUNNER_TEMP/diag1/tools/diag1_patch_termios.py" <<'DIAG1_EOF_PATCH_TERMIOS'
+          """diag1 (NOT evidence). Writes one variant of the pack's `hosted_termios.py` over the checked-out copy, always starting from the pristine file of the `pack/` checkout. Standard library only.
+
+              python -B diag1_patch_termios.py VARIANT LABEL PRISTINE TARGET OUT_JSON
+
+          VARIANT
+            rh16                        the pristine bytes: processed output cleared, DISABLE_NEWLINE_AUTO_RETURN set, both code pages 65001 (what the rh16 pack runs)
+            product-output              (iii) the two console OUTPUT modes stay as the console has them, which is what the product's own Windows peer does (it changes the input mode only); `tcgetattr`
+                                        reports OPOST and ONLCR as the peer last asked for them, so the frozen measured peer still runs. The input modes and the code pages are as in rh16
+            rh16-default-cp             (iv) rh16, but the console keeps the code pages it was created with
+            product-output-default-cp   (iii) and (iv) together
+
+          Every variant but `rh16` also appends a recorder: around the peer's `tcsetattr` it writes what the console holds (the two modes, both code pages, the screen buffer size) before and after, to
+          `diag1-console/<LABEL>-<pid>-<ns>.json` beside the module. The recorder never changes what `tcsetattr` does and never raises.
+
+          Each substitution's old text must occur exactly once in the pristine file; otherwise nothing is written and the exit code is 2. LABEL is `[a-z0-9-]+` (it becomes part of a file name).
+          """
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          VARIANTS = ("rh16", "product-output", "rh16-default-cp", "product-output-default-cp")
+          LABEL = re.compile(r"[a-z0-9-]+")
+
+          KEEP_OUTPUT = (
+              ("        mode_out = (mode_out | ENABLE_PROCESSED_OUTPUT) if oflag & OPOST else (mode_out & ~ENABLE_PROCESSED_OUTPUT)\n"
+               "        mode_out = (mode_out & ~DISABLE_NEWLINE_AUTO_RETURN) if oflag & ONLCR else (mode_out | DISABLE_NEWLINE_AUTO_RETURN)\n",
+               "        self._diag1_asked_oflag = oflag & (OPOST | ONLCR)      # diag1 (iii): the output modes stay as the console has them; what the peer asked for is what tcgetattr reports\n"),
+              ("        oflag = (OPOST if mode_out & ENABLE_PROCESSED_OUTPUT else 0) | (ONLCR if not mode_out & DISABLE_NEWLINE_AUTO_RETURN else 0)\n",
+               "        oflag = getattr(self, \"_diag1_asked_oflag\", (OPOST if mode_out & ENABLE_PROCESSED_OUTPUT else 0) | (ONLCR if not mode_out & DISABLE_NEWLINE_AUTO_RETURN else 0))      # diag1 (iii)\n"),
+          )
+          CODE_PAGE = (      # every patched variant: `_diag1_set_code_pages` (set by the recorder block) is False only in the `-default-cp` variants
+              ("        if set_code_pages is not None:\n            set_code_pages(UTF8_CODE_PAGE)\n",
+               "        if set_code_pages is not None and _diag1_set_code_pages:      # diag1 (iv): False = the console keeps the code pages it was created with\n            set_code_pages(UTF8_CODE_PAGE)\n"),
+          )
+
+          RECORDER = '''
+
+          # ---------------------------------------------------------------------------------------------------- diag1 (NOT evidence): appended on the runner by diag1_patch_termios.py
+          _diag1_variant = @VARIANT@
+          _diag1_label = @LABEL@
+          _diag1_set_code_pages = @SET_CODE_PAGES@
+          _diag1_original_tcsetattr = Termios.tcsetattr
+
+
+          def _diag1_snapshot(console) -> dict:
+              """What the console holds now: the two modes, both code pages and the screen buffer size. A value that cannot be read is an `error:<class>` string; nothing here raises."""
+              out: dict = {}
+              for name, std in (("modeIn", STD_INPUT), ("modeOut", STD_OUTPUT)):
+                  try:
+                      out[name] = console.get_mode(std)
+                  except Exception as error:  # noqa: BLE001 - a diagnostic never stops the peer
+                      out[name] = "error:" + type(error).__name__
+              kernel = getattr(console, "_kernel", None)
+              if kernel is None:
+                  return out
+              try:
+                  import ctypes
+
+                  class Coord(ctypes.Structure):
+                      _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+                  class Rect(ctypes.Structure):
+                      _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short), ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+
+                  class Info(ctypes.Structure):
+                      _fields_ = [("dwSize", Coord), ("dwCursorPosition", Coord), ("wAttributes", ctypes.c_ushort), ("srWindow", Rect), ("dwMaximumWindowSize", Coord)]
+
+                  out["inputCodePage"], out["outputCodePage"] = int(kernel.GetConsoleCP()), int(kernel.GetConsoleOutputCP())
+                  info = Info()
+                  if kernel.GetConsoleScreenBufferInfo(console._handle(STD_OUTPUT), ctypes.byref(info)):
+                      out["bufferColumns"], out["bufferRows"] = int(info.dwSize.X), int(info.dwSize.Y)
+                      out["windowColumns"], out["windowRows"] = int(info.srWindow.Right - info.srWindow.Left + 1), int(info.srWindow.Bottom - info.srWindow.Top + 1)
+                      out["cursor"] = [int(info.dwCursorPosition.X), int(info.dwCursorPosition.Y)]
+                  else:
+                      out["screenBuffer"] = "GetConsoleScreenBufferInfo returned 0"
+              except Exception as error:  # noqa: BLE001 - a diagnostic never stops the peer
+                  out["consoleInfo"] = "error:" + type(error).__name__
+              return out
+
+
+          def _diag1_write(record: dict) -> None:
+              try:
+                  import json
+                  import os
+                  import time
+                  from pathlib import Path
+                  directory = Path(__file__).resolve().parent / "diag1-console"
+                  directory.mkdir(parents=True, exist_ok=True)
+                  (directory / (_diag1_label + "-" + str(os.getpid()) + "-" + str(time.time_ns()) + ".json")).write_text(json.dumps(record, indent=1, sort_keys=True) + "\\n", encoding="utf-8")
+              except Exception:  # noqa: BLE001 - a diagnostic never stops the peer
+                  pass
+
+
+          def _diag1_tcsetattr(self, fd: int, when: int, attributes: list) -> None:
+              before = _diag1_snapshot(self.console)
+              failure = None
+              try:
+                  _diag1_original_tcsetattr(self, fd, when, attributes)
+              except BaseException as error:  # noqa: BLE001 - recorded, then raised again unchanged
+                  failure = error
+              reported = None
+              if failure is None:
+                  try:
+                      again = self.tcgetattr(fd)
+                      reported = {"oflag": again[1], "lflag": again[3]}
+                  except Exception as error:  # noqa: BLE001 - a diagnostic never stops the peer
+                      reported = "error:" + type(error).__name__
+              script = sys.argv[0].replace("\\\\", "/").rsplit("/", 1)[-1] if sys.argv else ""
+              _diag1_write({"schema": "acr-g3-diag1-console/1", "notEvidence": True, "variant": _diag1_variant, "label": _diag1_label, "script": script, "askedOflag": attributes[1], "askedLflag": attributes[3],
+                            "setCodePages": _diag1_set_code_pages, "before": before, "after": _diag1_snapshot(self.console), "reported": reported, "failure": type(failure).__name__ if failure is not None else None})
+              if failure is not None:
+                  raise failure
+
+
+          Termios.tcsetattr = _diag1_tcsetattr
+          '''
+
+
+          def substitutions(variant: str) -> tuple:
+              return (KEEP_OUTPUT if variant.startswith("product-output") else ()) + CODE_PAGE
+
+
+          def variant_text(pristine: str, variant: str, label: str) -> str:
+              """The text of `variant`, from the pristine text. Raises ValueError when a substitution's old text is not in the pristine text exactly once."""
+              if variant not in VARIANTS:
+                  raise ValueError(f"unknown variant {variant!r}")
+              if not LABEL.fullmatch(label):
+                  raise ValueError("the label is not [a-z0-9-]+")
+              if variant == "rh16":
+                  return pristine
+              text = pristine
+              for old, new in substitutions(variant):
+                  if pristine.count(old) != 1:
+                      raise ValueError(f"a substitution's old text occurs {pristine.count(old)} times in the pristine file, not once")
+                  text = text.replace(old, new)
+              recorder = RECORDER.replace("@VARIANT@", repr(variant)).replace("@LABEL@", repr(label)).replace("@SET_CODE_PAGES@", repr(not variant.endswith("-default-cp")))
+              return text + recorder
+
+
+          def main(argv: list[str]) -> int:
+              if len(argv) != 5:
+                  print(__doc__, file=sys.stderr)
+                  return 64
+              variant, label, pristine_path, target_path, out_json = argv
+              try:
+                  raw = Path(pristine_path).read_bytes()
+                  patched = variant_text(raw.decode("utf-8"), variant, label).encode("utf-8")
+              except (OSError, ValueError) as error:
+                  print(f"diag1 termios patch refused: {type(error).__name__}: {str(error)[:200]}", file=sys.stderr)
+                  return 2
+              target = Path(target_path)
+              target.write_bytes(patched)
+              removed = 0
+              for cached in (target.parent / "__pycache__").glob(f"{target.stem}.*.pyc"):      # a cached module of another variant must never be loaded
+                  cached.unlink()
+                  removed += 1
+              record = {"schema": "acr-g3-diag1-termios-patch/1", "notEvidence": True, "variant": variant, "label": label, "pristineSha256": hashlib.sha256(raw).hexdigest(),
+                        "targetSha256": hashlib.sha256(patched).hexdigest(), "equalsPristine": patched == raw, "substitutions": 0 if variant == "rh16" else len(substitutions(variant)),
+                        "recorder": variant != "rh16", "cachedModulesRemoved": removed}
+              Path(out_json).parent.mkdir(parents=True, exist_ok=True)
+              Path(out_json).write_text(json.dumps(record, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+              print(json.dumps(record, sort_keys=True))
+              return 0
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main(sys.argv[1:]))
+          DIAG1_EOF_PATCH_TERMIOS
+          cat > "$RUNNER_TEMP/diag1/tools/diag1_conpty_run.py" <<'DIAG1_EOF_CONPTY_RUN'
+          """diag1 (NOT evidence). Runs the diag ConPTY probe file through the pack's own `conpty-probe` path, so the step gets exactly the environment the rh16 probe step gets.
+
+              uv --project backend run python diag1_conpty_run.py REPO OUT        (from the repository root)
+
+          `hosted_driver.main(["conpty-probe", REPO, OUT, "--rehearsal"])` builds the one-step plan of the rh16 probe (the hosted environment, the Bun preload, the termios flag, the sidecar path). This tool hands it a
+          plan runner that replaces the rh16 test file by the diag one in that step's argv, adds the diag gate variable and names its own run record, then calls the pack's unchanged `_run_plan`. Nothing else differs.
+          """
+          from __future__ import annotations
+
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd() / "backend"))
+
+          RH16_TEST = "tests/cli/g3hConptyProbe.test.ts"
+          DIAG_TEST = "tests/cli/g3hDiag1Conpty.test.ts"
+          GATE = "ACR_DIAG1_CONPTY"
+          RECORD_NAME = "run-diag1-conpty.json"
+          SUMMARY_NAME = "diag1-conpty-summary.json"
+
+
+          def substituted(plan: list[dict]) -> list[dict]:
+              """The rh16 probe plan with the diag test file in the place of the rh16 one. Anything but that one-step plan is refused."""
+              if len(plan) != 1 or plan[0]["argv"].count(RH16_TEST) != 1 or "ACR_G3_OUT" not in plan[0]["env"]:
+                  raise RuntimeError("the pack's conpty-probe plan is not the one step this tool substitutes")
+              step = plan[0]
+              return [{**step, "argv": [DIAG_TEST if word == RH16_TEST else word for word in step["argv"]], "env": {**step["env"], GATE: "1"}, "outputs": [f"{step['env']['ACR_G3_OUT']}/{SUMMARY_NAME}"]}]
+
+
+          def main(argv: list[str], *, inner=None, **injected) -> int:
+              if len(argv) != 2:
+                  print(__doc__, file=sys.stderr)
+                  return 64
+              from tests.cli_regression.support.g3 import hosted_driver
+              run = hosted_driver._run_plan if inner is None else inner
+
+              def run_plan(plan: list[dict], out, _record_name: str, **kwargs) -> int:
+                  return run(substituted(plan), out, RECORD_NAME, **kwargs)
+              return hosted_driver.main(["conpty-probe", argv[0], argv[1], "--rehearsal"], run_plan=run_plan, **injected)
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main(sys.argv[1:]))
+          DIAG1_EOF_CONPTY_RUN
+          cat > tests/cli/g3hDiag1Conpty.test.ts <<'DIAG1_EOF_CONPTY_TEST'
+          // diag1 (NOT evidence). The diag workflow writes this file into tests/cli/ on the runner; it is in no branch and in no pack. Gated: it does nothing unless ACR_DIAG1_CONPTY=1 (diag1_conpty_run.py sets it).
+          //
+          // One measured-peer session per arm (the Python arm, then the Rust arm through the release sidecar), set up exactly as the rh16 probe sets it up (g3hConptyProbe.test.ts: the same driver, the same create
+          // parameters, the same `g3hConpty` view), with three burst rounds instead of one:
+          //   r00  no resize: the control window;
+          //   r01  a resize (the attempt's 100x30 -> 120x40, as `conptyColumns` widens it) sent as soon as the round's first burst line is on the stream, so a repaint, if there is one, falls inside the window (B-2);
+          //   r02  no resize inside; after its END line a resize back to the first size, then FINAL, then four more alternating resizes (the shape of the attempt's report-only resize probes, which come after FINAL
+          //        and before the attempt reads the whole stream for the ledger).
+          // Per arm it writes raw.bin (the bytes the renderer stream received), view.bin (the bytes after the rh16 view) and probe.json: where each step fell on the stream (raw and view byte offsets), how often each
+          // window's BEGIN and END line is on the stream at each step, each window's digest against the peer's own receipt, the reader counters at the origin, at the close and after the last resize, the peer's
+          // receipt, and the ledger record the pack's own `assembleLedger` builds from them. It decides nothing: the test fails only when a session could not be run to its FINAL line, and the files are written first.
+          import { spawn } from 'node:child_process'
+          import { createHash, randomBytes } from 'node:crypto'
+          import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+          import net from 'node:net'
+          import { tmpdir } from 'node:os'
+          import { join, resolve } from 'node:path'
+          import { setTimeout as delay } from 'node:timers/promises'
+          import { expect, it } from 'vitest'
+          import { buildAgentPaneCommand } from '../../src/main/plugins/agentPaneCommand'
+          import { createWsClient, type TerminalOutputFrame } from '../../src/shared/wsClient'
+          import { redactDiagnostic } from './baselineArtifacts'
+          import { doneLine } from './g1eBurst'
+          import { assembleLedger, beginLine, endLine, startLine, windowDigest } from './g1eLedger'
+          import { finalLine, readStable } from './g1eReceipt'
+          import { StreamBuffer } from './g1eStream'
+          import { conptyColumns, ConptyView } from './g3hConpty'
+
+          const enabled = process.env.ACR_DIAG1_CONPTY === '1'
+          const python = resolve('backend/.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+          const out = resolve(process.env.ACR_G3_OUT ?? 'test-results/ci/g3/diag1-conpty')
+          const sidecar = process.env.ACR_G3_SIDECAR ? resolve(process.env.ACR_G3_SIDECAR) : null
+          const workload = JSON.parse(readFileSync(resolve('tests/fixtures/cli-regression/runtime-workload-g1e.json'), 'utf8'))
+          const ROUNDS = 3
+          const ROUND_DEADLINE_MS = 40_000 // the driver ends a session after 240 s: three rounds at this bound, plus the waits around them, stay inside it. The attempt's own bound for a round is the workload's deadlineMs
+          const SETTLE_MS = 1_500 // the wait after a resize before the lines are counted (the rh16 probe's)
+          const sha256 = (data: Buffer): string => createHash('sha256').update(data).digest('hex')
+          const count = (haystack: Buffer, needle: Buffer): number => { let n = 0; for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) n++; return n }
+          const escaped = (bytes: Buffer): string => JSON.stringify(bytes.toString('latin1'))
+          const quiet = <T>(promise: Promise<T>): Promise<T> => { promise.catch(() => undefined); return promise } // a wait that is given up (an earlier step failed) must not become an unhandled rejection
+
+          const unix = (path: string) => (payload: Record<string, unknown>): Promise<any> => new Promise((resolveReply, reject) => {
+            const socket = net.connect(path)
+            let buffer = ''
+            const timer = setTimeout(() => { socket.destroy(); reject(new Error('counters socket deadline')) }, workload.deadlineMs)
+            socket.on('data', (chunk) => { buffer += chunk; if (buffer.endsWith('\n')) { clearTimeout(timer); socket.end(); resolveReply(JSON.parse(buffer)) } })
+            socket.on('error', (error) => { clearTimeout(timer); reject(error) })
+            socket.write(`${JSON.stringify(payload)}\n`)
+          })
+          const counters = (raw: Record<string, unknown>): { read_total: number; emitted_total: number; dropped_oldest_total: number } => {
+            const { read_total, emitted_total, dropped_oldest_total } = raw as Record<string, number>
+            return { read_total, emitted_total, dropped_oldest_total }
+          }
+
+          async function probeArm(mode: 'python' | 'rust-shell', directory: string): Promise<{ problems: string[]; finalSeen: boolean }> {
+            mkdirSync(directory, { recursive: true })
+            const problems: string[] = []
+            const sizes = { first: { cols: conptyColumns(100), rows: 30 }, second: { cols: conptyColumns(120), rows: 40 } }
+            const report: Record<string, unknown> = { schema: 'acr-g3-diag1-conpty/1', notEvidence: true, mode, platform: process.platform, sizes, rounds: ROUNDS, roundDeadlineMs: ROUND_DEADLINE_MS, attemptRoundDeadlineMs: workload.deadlineMs }
+            const root = realpathSync(mkdtempSync(join(tmpdir(), 'navide-g3h-diag1-')))
+            const driver = spawn(python, ['-m', 'tests.cli_regression.support.g1e.driver', root, '1', '0', mode], {
+              cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...(sidecar ? { ACR_SIDECAR_BIN: sidecar } : {}) },
+            })
+            let log = ''
+            let exited: number | null | undefined
+            driver.stdout.on('data', (chunk) => { log += chunk })
+            driver.stderr.on('data', (chunk) => { log += chunk })
+            driver.on('error', (error) => { log += error.message; exited = -1 })
+            driver.on('exit', (code) => { exited = code })
+            let connections = 0
+            const client = createWsClient({ onStatus: (status) => { if (status === 'connected') connections++ } })
+            const raw: Buffer[] = []
+            let rawLength = 0
+            const viewBytes: Buffer[] = []
+            const view = new ConptyView()
+            const stream = new StreamBuffer()
+            const started = performance.now()
+            let last = -Infinity
+            let finalSeen = false
+            const until = async (ok: () => boolean, message: string, timeout: number): Promise<void> => {
+              const deadline = performance.now() + timeout
+              while (!ok()) {
+                if (exited !== undefined) throw new Error(`${message}: driver exited: ${redactDiagnostic(log).slice(-300)}`)
+                if (performance.now() >= deadline) throw new Error(message)
+                await delay(20)
+              }
+            }
+            client.on('terminal.output', (payload) => {
+              const frame = payload as TerminalOutputFrame
+              const at = Math.max(performance.now(), last + 1e-6)
+              last = at
+              raw.push(Buffer.from(frame.data))
+              rawLength += frame.data.length
+              const seen = view.push(frame.data)
+              if (seen.length) { viewBytes.push(seen); stream.onChunk(at, seen) }
+            })
+            const wids = Array.from({ length: ROUNDS }, (_, round) => `b0r${String(round).padStart(2, '0')}`)
+            const events: Array<Record<string, unknown>> = []
+            const snapshots: Array<Record<string, unknown>> = []
+            const rounds: Array<Record<string, unknown>> = []
+            const elapsed = (): number => Math.round(performance.now() - started)
+            const mark = (name: string, extra: Record<string, unknown> = {}): void => { events.push({ name, atMs: elapsed(), rawOffset: rawLength, viewOffset: stream.length, ...extra }) }
+            /** How often each window's BEGIN and END line is on the stream now: on the view as the exact lines the ledger looks for, on the raw bytes as their text without the line end. */
+            const snapshot = (name: string): void => {
+              const whole = stream.toBuffer()
+              const rawAll = Buffer.concat(raw)
+              const windows: Record<string, unknown> = {}
+              for (const wid of wids) {
+                windows[wid] = { viewBegin: count(whole, beginLine(wid)), viewEnd: count(whole, endLine(wid)), rawBegin: count(rawAll, Buffer.from(`BASELINE_WIN:${wid}:BEGIN`)), rawEnd: count(rawAll, Buffer.from(`BASELINE_WIN:${wid}:END`)) }
+              }
+              snapshots.push({ name, atMs: elapsed(), rawOffset: rawAll.length, viewOffset: whole.length, windows, finalLinesOnView: count(whole, Buffer.from('BASELINE_FINAL:')), startMarkersOnView: count(whole, Buffer.from('BASELINE_LEDGER_START:')) })
+            }
+            let terminalId = ''
+            try {
+              await until(() => existsSync(join(root, 'endpoint.json')), 'backend readiness deadline', 60_000)
+              const endpoint = JSON.parse(readFileSync(join(root, 'endpoint.json'), 'utf8'))
+              const countersCall = unix(endpoint.countersSocket)
+              client.connect(endpoint.url)
+              await until(() => connections === 1, 'authenticated WS connection deadline', workload.deadlineMs)
+              const peer = endpoint.peers[0]
+              const nonce = randomBytes(16).toString('hex')
+              report.nonceSha256 = sha256(Buffer.from(nonce, 'utf8'))
+              writeFileSync(join(root, 'g1e', `${peer.pane}.nonce`), nonce)
+              const request = async (type: string, body: Record<string, unknown>): Promise<any> => {
+                const response = await client.send<any>(type, body, workload.deadlineMs)
+                if (!response.ok) throw new Error(`${type} refused: ${JSON.stringify(response).slice(0, 200)}`)
+                return response.payload
+              }
+              const resize = async (name: string, size: { cols: number; rows: number }): Promise<void> => {
+                mark(`${name}:sent`, size)
+                await request('terminal.resize', { terminal_session_id: terminalId, ...size })
+                mark(`${name}:replied`, size)
+              }
+              const created = await request('terminal.create', {
+                pane_id: peer.pane, agent_key: peer.vendor, cwd: peer.workspace,
+                command: peer.wrapped ? buildAgentPaneCommand(endpoint.shell, [peer.commandLine]) : peer.command,
+                cols: sizes.first.cols, rows: sizes.first.rows, create_generation: `${peer.pane}-generation`, output_log_file: peer.logPath,
+                metadata: { workspace_path: peer.workspace, session_marker: `at-pane:${peer.pane}`, ...(peer.vendor === 'claude' ? { explicit_session_id: peer.pane } : {}) },
+              })
+              terminalId = created.terminal_session_id
+              mark('created')
+              await stream.waitFor(Buffer.from('BASELINE_READY '), 'child READY deadline', workload.deadlineMs)
+              await stream.until((buffer) => buffer.includes('\n', buffer.indexOf('BASELINE_READY ')), 'READY line deadline', workload.deadlineMs)
+              mark('ready')
+              let ready: any = null
+              try { ready = JSON.parse(stream.toBuffer().toString('utf8').split('BASELINE_READY ')[1].split('\n')[0].split('\r')[0]) } catch (error) { problems.push(`READY line is not JSON after the view: ${(error as Error).message}`) }
+              report.readyCwdMatch = ready !== null && ready.cwd === peer.workspace
+              report.readyArgvMatch = ready !== null && JSON.stringify(ready.argv) === JSON.stringify(peer.argv)
+              report.readyHomeMatch = ready !== null && ready.home === endpoint.home
+              await stream.waitFor(startLine(nonce), 'ledger start marker deadline', workload.deadlineMs)
+              mark('start-marker')
+              const origin = await readStable(async () => counters(await countersCall({ op: 'snapshot', session: terminalId })), 8)
+              report.origin = origin
+              writeFileSync(join(root, 'g1e', `${peer.pane}.release`), 'go')
+              mark('released')
+
+              const ackNeedle = Buffer.from(`BASELINE_ACK 0:${workload.input}\n`, 'utf8')
+              const acked = quiet(stream.expect(ackNeedle, performance.now(), 'exact child ACK deadline', workload.deadlineMs))
+              await request('terminal.input', { terminal_session_id: terminalId, data: `0:${workload.input}\r` })
+              try { await acked; report.ackNeedleMatch = true } catch { report.ackNeedleMatch = false; problems.push('the exact ACK needle never arrived after the view') }
+              mark('io-ack')
+
+              let roundsDone = 0
+              for (let round = 0; round < ROUNDS; round++) {
+                const kk = String(round).padStart(2, '0')
+                const wid = wids[round]
+                const entry: Record<string, unknown> = { round, wid, resize: round === 1 ? 'inside the window, after its first burst line' : round === 2 ? 'after its END line' : 'none' }
+                rounds.push(entry)
+                const firstLine = quiet(stream.waitFor(Buffer.from(`BASELINE_BURST r${kk} 0000 `), `first burst line deadline (round ${kk})`, ROUND_DEADLINE_MS))
+                const done = quiet(stream.waitFor(doneLine(round), `burst completion deadline (round ${kk})`, ROUND_DEADLINE_MS))
+                const ended = quiet(stream.waitFor(endLine(wid), `window END line deadline (round ${kk})`, ROUND_DEADLINE_MS + workload.deadlineMs))
+                const sentAt = performance.now()
+                mark(`r${kk}:burst-sent`)
+                await request('terminal.input', { terminal_session_id: terminalId, data: `burst r${kk}\r` })
+                try {
+                  await firstLine
+                  entry.firstLineMs = Math.round(performance.now() - sentAt)
+                  mark(`r${kk}:first-line`)
+                  if (round === 1) {
+                    await resize(`r${kk}:resize-inside`, sizes.second)
+                    entry.endLineOnViewWhenResizeReplied = count(stream.toBuffer(), endLine(wid))
+                    entry.doneLineOnViewWhenResizeReplied = count(stream.toBuffer(), doneLine(round))
+                  }
+                  await done
+                  entry.doneMs = Math.round(performance.now() - sentAt)
+                  entry.overTheAttemptDeadline = (entry.doneMs as number) > workload.deadlineMs
+                  mark(`r${kk}:done`)
+                  await ended
+                  mark(`r${kk}:end-line`)
+                  snapshot(`after r${kk}`)
+                  if (round === 1) { await delay(SETTLE_MS); snapshot(`after r${kk}, ${SETTLE_MS} ms later`) }
+                  if (round === 2) {
+                    await resize(`r${kk}:resize-after`, sizes.first)
+                    await delay(SETTLE_MS)
+                    snapshot(`after the resize that follows r${kk}`)
+                  }
+                  roundsDone++
+                } catch (error) {
+                  entry.problem = redactDiagnostic(error instanceof Error ? error.message : String(error))
+                  problems.push(`round ${kk}: ${entry.problem}; the later rounds are not started (a second burst would write into an open window)`)
+                  snapshot(`round ${kk} stopped`)
+                  break
+                }
+              }
+              report.roundsDone = roundsDone
+
+              const finalWait = quiet(stream.until((buffer) => { const at = buffer.indexOf('BASELINE_FINAL:'); return at >= 0 && finalLine(buffer.subarray(at)) !== null }, 'FINAL line deadline', workload.deadlineMs))
+              mark('final-sent')
+              await request('terminal.input', { terminal_session_id: terminalId, data: 'g1e-final\r' })
+              try { await finalWait; finalSeen = true } catch { problems.push('the FINAL line never arrived after the view') }
+              mark('final-seen')
+              report.viewOffsetAtFinal = stream.length
+              report.rawOffsetAtFinal = rawLength
+              snapshot('at FINAL')
+              const close = await readStable(async () => counters(await countersCall({ op: 'snapshot', session: terminalId })), 8)
+              report.close = close
+
+              for (let n = 0; n < 4; n++) {
+                await resize(`post-final-resize-${n}`, n % 2 === 0 ? sizes.second : sizes.first)
+                await delay(400)
+              }
+              await delay(SETTLE_MS)
+              snapshot('after four resizes that follow FINAL')
+              report.afterResizes = await readStable(async () => counters(await countersCall({ op: 'snapshot', session: terminalId })), 8)
+
+              const receiptPath = join(root, 'g1e', `${peer.pane}.peer.json`)
+              await until(() => existsSync(receiptPath), 'peer receipt deadline', workload.deadlineMs)
+              const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
+              report.peerReceipt = receipt
+              const whole = stream.toBuffer()
+              const markerAt = whole.indexOf(startLine(nonce))
+              const post = markerAt >= 0 ? whole.subarray(markerAt + startLine(nonce).length) : Buffer.alloc(0)
+              const finalAt = post.indexOf('BASELINE_FINAL:')
+              const final = finalAt >= 0 ? finalLine(post.subarray(finalAt)) : null
+              report.final = final === null ? null : { accepted: final.accepted, digest: final.digest, viewBytesFromMarkerToFinal: finalAt, viewSha256FromMarkerToFinal: sha256(post.subarray(0, finalAt)) }
+              // The peer's digest covers every counted byte before its FINAL line, so this one comparison says whether the view reproduces the peer's bytes from the marker to FINAL.
+              report.viewEqualsPeerBytesToFinal = final !== null && finalAt === final.accepted && sha256(post.subarray(0, finalAt)) === final.digest
+              report.windowDigests = wids.map((wid) => {
+                const mine = windowDigest(post, wid)
+                const theirs = (receipt.windows ?? []).find((w: { wid: string }) => w.wid === wid)?.digest ?? null
+                return { wid, stream: mine, peer: theirs, equal: mine !== null && mine === theirs, viewBegin: count(post, beginLine(wid)), viewEnd: count(post, endLine(wid)) }
+              })
+              report.readerDeltaBytes = close.counters.read_total - origin.counters.read_total
+              report.peerAcceptedSinceOrigin = receipt.acceptedSinceOrigin
+              report.readerDeltaEqualsPeerAccepted = report.readerDeltaBytes === receipt.acceptedSinceOrigin
+              // The pack's own assembly. `logIdentity` and `logFile` are NOT taken here (the attempt takes them after the kill, through its helper): they are constants that pass, and are named so in `notModelled`.
+              report.ledgerRecord = assembleLedger(whole, nonce, {
+                peerIndex: peer.index ?? 0, burstRounds: ROUNDS, session: terminalId, pane: peer.pane, generation: 0, rawMode: receipt.rawMode,
+                origin: { ...origin.counters, stable: origin.stable, peerAcceptedAtOrigin: receipt.peerAcceptedAtOrigin }, close: close.counters,
+                peer: { acceptedSinceOrigin: receipt.acceptedSinceOrigin, finalLineBytes: receipt.finalLineBytes, totalDigest: receipt.totalDigest, writeFailed: receipt.writeFailed,
+                  windows: (receipt.windows ?? []).map(({ wid, digest }: { wid: string; digest: string }) => ({ wid, digest })) },
+                logIdentity: { startMarkerCount: 1, finalPresent: true, textEqual: true, windowsEqual: true, preOriginLogBytes: 0 },
+                logFile: { regular: true, dev: 1, ino: 2, inodeAtCreate: [1, 2], size: 1000, siblingExists: false, logSentUsed: false },
+              })
+              report.notModelled = ['logIdentity', 'logFile', 'the io window (one io round is sent, the workload has many more, so the peer never closes it)']
+              await request('terminal.kill', { terminal_session_id: terminalId })
+            } catch (error) {
+              problems.push(redactDiagnostic(error instanceof Error ? error.message : String(error)))
+            } finally {
+              client.dispose('diag1 conpty probe finished')
+              driver.stdin.end('\n')
+              try { await until(() => exited !== undefined, 'driver shutdown deadline', 60_000) } catch (error) { problems.push((error as Error).message) }
+              const rawAll = Buffer.concat(raw)
+              const viewAll = Buffer.concat(viewBytes)
+              writeFileSync(join(directory, 'raw.bin'), rawAll)
+              writeFileSync(join(directory, 'view.bin'), viewAll)
+              writeFileSync(join(directory, 'probe.json'), `${JSON.stringify({
+                ...report, events, snapshots, roundRecords: rounds, problems, finalSeen, rawBytes: rawAll.length, viewBytes: viewAll.length, heldBack: view.held().length,
+                rawSha256: sha256(rawAll), viewSha256: sha256(viewAll), driverExit: exited ?? null, rawHead: escaped(rawAll.subarray(0, 700)), driverLogTail: redactDiagnostic(log).slice(-400),
+              }, null, 1)}\n`)
+              rmSync(root, { recursive: true, force: true })
+            }
+            return { problems, finalSeen }
+          }
+
+          it.runIf(enabled)('diag1 ConPTY probe (NOT evidence): one three-round measured-peer session per arm, a resize inside a burst window, raw bytes and counts recorded', async () => {
+            const all: Record<string, { problems: string[]; finalSeen: boolean }> = {}
+            let failure: string | null = sidecar === null ? 'ACR_G3_SIDECAR is required' : null
+            if (failure === null) {
+              for (const mode of ['python', 'rust-shell'] as const) {
+                try { all[mode] = await probeArm(mode, join(out, mode)) } catch (error) { all[mode] = { problems: [redactDiagnostic(error instanceof Error ? error.message : String(error))], finalSeen: false } }
+              }
+              if (!Object.values(all).every((arm) => arm.finalSeen)) failure = 'a session did not reach its FINAL line'
+            }
+            mkdirSync(out, { recursive: true })
+            writeFileSync(join(out, 'diag1-conpty-summary.json'), `${JSON.stringify({ notEvidence: true, platform: process.platform, failure, arms: all }, null, 1)}\n`)
+            expect(failure).toBeNull()
+          }, 1_200_000)
+          DIAG1_EOF_CONPTY_TEST
+          test "$(sha256sum < "$RUNNER_TEMP/diag1/tools/diag1_patch_termios.py" | cut -d' ' -f1)" = "30e096f72231b5516f780841b5de4a5b88c6d8a6ea3646a83d99f3c761b37e1b"
+          test "$(sha256sum < "$RUNNER_TEMP/diag1/tools/diag1_conpty_run.py" | cut -d' ' -f1)" = "0bc769a5f6179babb25bcb985f2802b54c6a98b115349c5501c09a523b3ddcf4"
+          test "$(sha256sum < tests/cli/g3hDiag1Conpty.test.ts | cut -d' ' -f1)" = "b15e43b36e1d2ad423d6ebb6a0f9cc63933e3f409f6baf39962c62fe9839d34a"
+
+      - name: diag1 variant (i) the ConPTY probe as rh16 runs it (the rehearsal's own step; only the output directory differs) (NOT evidence)
+        id: probe_i
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py conpty-probe "$PWD" "$RUNNER_TEMP/diag1/out/variant-i/probe" --rehearsal
+
+      - name: diag1 variant (ii) three burst rounds with a resize inside a burst window, the rh16 shim (B-2) (NOT evidence)
+        id: probe_ii
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          mkdir -p "$RUNNER_TEMP/diag1/out/variant-ii"
+          uv --project backend run python -B "$RUNNER_TEMP/diag1/tools/diag1_patch_termios.py" rh16 variant-ii pack/backend/tests/cli_regression/support/g3/hosted_termios.py backend/tests/cli_regression/support/g3/hosted_termios.py "$RUNNER_TEMP/diag1/out/variant-ii/termios-patch.json"
+          uv --project backend run python "$RUNNER_TEMP/diag1/tools/diag1_conpty_run.py" "$PWD" "$RUNNER_TEMP/diag1/out/variant-ii/probe"
+
+      - name: diag1 variant (iii) the rh16 probe with the console OUTPUT modes left as the product peer has them, against (i) (B-3) (NOT evidence)
+        id: probe_iii
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          mkdir -p "$RUNNER_TEMP/diag1/out/variant-iii"
+          uv --project backend run python -B "$RUNNER_TEMP/diag1/tools/diag1_patch_termios.py" product-output variant-iii pack/backend/tests/cli_regression/support/g3/hosted_termios.py backend/tests/cli_regression/support/g3/hosted_termios.py "$RUNNER_TEMP/diag1/out/variant-iii/termios-patch.json"
+          uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py conpty-probe "$PWD" "$RUNNER_TEMP/diag1/out/variant-iii/probe" --rehearsal
+
+      - name: diag1 variant (iii)+(ii) the three-round resize probe under the product peer's output modes (B-2 under the B-3 candidate) (NOT evidence)
+        id: probe_iii_ii
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          mkdir -p "$RUNNER_TEMP/diag1/out/variant-iii-ii"
+          uv --project backend run python -B "$RUNNER_TEMP/diag1/tools/diag1_patch_termios.py" product-output variant-iii-ii pack/backend/tests/cli_regression/support/g3/hosted_termios.py backend/tests/cli_regression/support/g3/hosted_termios.py "$RUNNER_TEMP/diag1/out/variant-iii-ii/termios-patch.json"
+          uv --project backend run python "$RUNNER_TEMP/diag1/tools/diag1_conpty_run.py" "$PWD" "$RUNNER_TEMP/diag1/out/variant-iii-ii/probe"
+
+      - name: diag1 variant (iv) the rh16 probe with the console's default code page, against (i) which sets 65001 (NOT evidence)
+        id: probe_iv
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          mkdir -p "$RUNNER_TEMP/diag1/out/variant-iv"
+          uv --project backend run python -B "$RUNNER_TEMP/diag1/tools/diag1_patch_termios.py" rh16-default-cp variant-iv pack/backend/tests/cli_regression/support/g3/hosted_termios.py backend/tests/cli_regression/support/g3/hosted_termios.py "$RUNNER_TEMP/diag1/out/variant-iv/termios-patch.json"
+          uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py conpty-probe "$PWD" "$RUNNER_TEMP/diag1/out/variant-iv/probe" --rehearsal
+
+      - name: diag1 variant (iii)+(iv) the product peer's output modes and the default code page (the product peer's own console state) (NOT evidence)
+        id: probe_iii_iv
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          mkdir -p "$RUNNER_TEMP/diag1/out/variant-iii-iv"
+          uv --project backend run python -B "$RUNNER_TEMP/diag1/tools/diag1_patch_termios.py" product-output-default-cp variant-iii-iv pack/backend/tests/cli_regression/support/g3/hosted_termios.py backend/tests/cli_regression/support/g3/hosted_termios.py "$RUNNER_TEMP/diag1/out/variant-iii-iv/termios-patch.json"
+          uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py conpty-probe "$PWD" "$RUNNER_TEMP/diag1/out/variant-iii-iv/probe" --rehearsal
+
+      - name: diag1, put the pack's own termios shim back (always runs; nothing later reads it, the runner is discarded)
+        id: unpatch
+        if: always()
+        continue-on-error: true
+        run: |
+          cp pack/backend/tests/cli_regression/support/g3/hosted_termios.py backend/tests/cli_regression/support/g3/hosted_termios.py || echo "the shim could not be put back"
+
+      - name: diag1, stage the records and write the step outcomes (always runs; it decides nothing and cannot fail the job)
+        id: stage
+        if: always()
+        continue-on-error: true
+        env:
+          JOB_STATUS: ${{ job.status }}
+          O_PINS: ${{ steps.pins.outcome }}
+          O_IDENTITY: ${{ steps.identity.outcome }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          O_SHIM: ${{ steps.shim.outcome }}
+          O_BUILD: ${{ steps.build.outcome }}
+          O_TOOLS: ${{ steps.tools.outcome }}
+          O_PROBE_I: ${{ steps.probe_i.outcome }}
+          O_PROBE_II: ${{ steps.probe_ii.outcome }}
+          O_PROBE_III: ${{ steps.probe_iii.outcome }}
+          O_PROBE_III_II: ${{ steps.probe_iii_ii.outcome }}
+          O_PROBE_IV: ${{ steps.probe_iv.outcome }}
+          O_PROBE_III_IV: ${{ steps.probe_iii_iv.outcome }}
+          O_UNPATCH: ${{ steps.unpatch.outcome }}
+        run: |
+          out="$RUNNER_TEMP/diag1/out"
+          mkdir -p "$out"
+          mkdir -p "$out/console" "$out/markers"
+          if [ -d "backend/tests/cli_regression/support/g3/diag1-console" ]; then cp -r "backend/tests/cli_regression/support/g3/diag1-console/." "$out/console/" || echo "the console records could not be copied"; fi
+          if [ -d "$RUNNER_TEMP/g3r2h/markers" ]; then cp -r "$RUNNER_TEMP/g3r2h/markers/." "$out/markers/" || echo "the markers could not be copied"; fi
+          for f in "$RUNNER_TEMP/g3r2h/rustc-vV.txt" "$RUNNER_TEMP/g3r2h/pre/run-pre.json"; do if [ -f "$f" ]; then cp "$f" "$out/" || true; fi; done
+          {
+            printf 'NOT-EVIDENCE diag1\njob=%s\n' "$JOB_STATUS"
+            printf 'step=%s outcome=%s\n' pins "$O_PINS"
+            printf 'step=%s outcome=%s\n' identity "$O_IDENTITY"
+            printf 'step=%s outcome=%s\n' install "$O_INSTALL"
+            printf 'step=%s outcome=%s\n' shim "$O_SHIM"
+            printf 'step=%s outcome=%s\n' build "$O_BUILD"
+            printf 'step=%s outcome=%s\n' tools "$O_TOOLS"
+            printf 'step=%s outcome=%s\n' probe_i "$O_PROBE_I"
+            printf 'step=%s outcome=%s\n' probe_ii "$O_PROBE_II"
+            printf 'step=%s outcome=%s\n' probe_iii "$O_PROBE_III"
+            printf 'step=%s outcome=%s\n' probe_iii_ii "$O_PROBE_III_II"
+            printf 'step=%s outcome=%s\n' probe_iv "$O_PROBE_IV"
+            printf 'step=%s outcome=%s\n' probe_iii_iv "$O_PROBE_III_IV"
+            printf 'step=%s outcome=%s\n' unpatch "$O_UNPATCH"
+          } > "$out/diag-summary.txt" || echo "the summary could not be written"
+          cat "$out/diag-summary.txt" || true
+          find "$out" -type f | sort > "$RUNNER_TEMP/diag1/files.txt" || true
+          cp "$RUNNER_TEMP/diag1/files.txt" "$out/files.txt" || true
+
+      - name: Leak check (no token or runner secret in the upload)
+        id: leak
+        if: always()
+        run: if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/diag1/out"; then echo "credential-like text found"; exit 1; fi
+
+      - name: Upload everything the diagnostic recorded (always runs, after the leak check)
+        if: always() && steps.leak.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-diag1-windows
+          path: ${{ runner.temp }}/diag1/out
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: diag1, fail the job only when a prefix step failed (last step, after the upload; a probe or test outcome never fails the job)
+        id: verdict
+        if: always()
+        env:
+          O_SHIM: ${{ steps.shim.outcome }}
+          O_BUILD: ${{ steps.build.outcome }}
+          O_TOOLS: ${{ steps.tools.outcome }}
+        run: |
+          failed=0
+          for pair in "shim=$O_SHIM" "build=$O_BUILD" "tools=$O_TOOLS"; do
+            case "${pair#*=}" in success) ;; *) echo "the prefix step ${pair%%=*} did not succeed (${pair#*=}): the diagnostic steps that need it did not run"; failed=1 ;; esac
+          done
+          exit "$failed"
