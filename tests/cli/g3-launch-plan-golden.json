@@ -1,0 +1,1063 @@
+{
+ "calibrationPlan": [
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 0,
+   "slot": null,
+   "vendor": "claude",
+   "warmup": true
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 0,
+   "slot": 0,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 1,
+   "slot": 1,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 2,
+   "slot": 2,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 3,
+   "slot": 3,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 4,
+   "slot": 4,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 5,
+   "slot": 5,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 6,
+   "slot": 6,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 7,
+   "slot": 7,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 8,
+   "slot": 8,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 9,
+   "slot": 9,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 0,
+   "slot": null,
+   "vendor": "claude",
+   "warmup": true
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 0,
+   "slot": 0,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 1,
+   "slot": 1,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 2,
+   "slot": 2,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 3,
+   "slot": 3,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 4,
+   "slot": 4,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 5,
+   "slot": 5,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 6,
+   "slot": 6,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 7,
+   "slot": 7,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 8,
+   "slot": 8,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 9,
+   "slot": 9,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 0,
+   "slot": null,
+   "vendor": "aider",
+   "warmup": true
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 0,
+   "slot": 0,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 1,
+   "slot": 1,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 2,
+   "slot": 2,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 3,
+   "slot": 3,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 4,
+   "slot": 4,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 5,
+   "slot": 5,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 6,
+   "slot": 6,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 7,
+   "slot": 7,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 8,
+   "slot": 8,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "mode": "python",
+   "repeat": 9,
+   "slot": 9,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 0,
+   "slot": null,
+   "vendor": "aider",
+   "warmup": true
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 0,
+   "slot": 0,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 1,
+   "slot": 1,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 2,
+   "slot": 2,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 3,
+   "slot": 3,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 4,
+   "slot": 4,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 5,
+   "slot": 5,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 6,
+   "slot": 6,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 7,
+   "slot": 7,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 8,
+   "slot": 8,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "mode": "python",
+   "repeat": 9,
+   "slot": 9,
+   "vendor": "aider",
+   "warmup": false
+  }
+ ],
+ "plan": [
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": true
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": true
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 1,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 1,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 2,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 2,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 3,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 3,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 4,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 4,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 5,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 5,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 6,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 6,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 7,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 7,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 8,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 8,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 9,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 9,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": true
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": true
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 1,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 1,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 2,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 2,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 3,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 3,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 4,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 4,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 5,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 5,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 6,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 6,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 7,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 7,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 8,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 8,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 9,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 9,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": true
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": true
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 1,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 1,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 2,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 2,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 3,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 3,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 4,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 4,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 5,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 5,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 6,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 6,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 7,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 7,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 8,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 8,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 9,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 1,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 9,
+   "vendor": "aider",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": true
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": true
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 0,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 1,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 1,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 2,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 2,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 3,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 3,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 4,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 4,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 5,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 5,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 6,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 6,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 7,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 7,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "rust-shell",
+   "repeat": 8,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "rust-shell",
+   "mode": "python",
+   "repeat": 8,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "python",
+   "repeat": 9,
+   "vendor": "claude",
+   "warmup": false
+  },
+  {
+   "cell": 4,
+   "firstArm": "python",
+   "mode": "rust-shell",
+   "repeat": 9,
+   "vendor": "claude",
+   "warmup": false
+  }
+ ],
+ "seed": "00112233445566778899aabbccddeeff"
+}

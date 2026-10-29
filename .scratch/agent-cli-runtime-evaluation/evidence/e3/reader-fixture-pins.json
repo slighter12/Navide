@@ -1,0 +1,14 @@
+{
+ "claude": {
+  "sha256": "52d4b382b7b68627a0be6beb5bc1c8276261dc948925a00886aa4ffea8d206f6",
+  "golden_sha256": "14ed71e192e65294ba80680dba22a812c8a50bbe1550bae63ebd5a99f56c1504",
+  "bytes": 2918054,
+  "entries": 2400
+ },
+ "opencode": {
+  "sha256": "d58be6f1610a1502995ec04a7f5bff49d27b435085981dd9b057ebc4a34b5b26",
+  "golden_sha256": "777684afa9ddf92e998d19f098b218a61a56ec67e1d556186f2ad573d958357d",
+  "bytes": 1851392,
+  "entries": 2000
+ }
+}
