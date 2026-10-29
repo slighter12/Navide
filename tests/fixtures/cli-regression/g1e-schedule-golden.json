@@ -1,0 +1,2626 @@
+{
+ "schema": "acr-g1e-schedule-golden/1",
+ "source": "backend/tests/cli_regression/support/g1e/reference.py make_schedule/schedule_sha (E2 v10 C11); calibration_order and matrix_warmups (E2 v14-r2 V19)",
+ "cases": [
+  {
+   "seed": "seed-a",
+   "schedule": [
+    {
+     "slot": 0,
+     "cell": 4,
+     "repeat": 7,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 1,
+     "cell": 4,
+     "repeat": 2,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 2,
+     "cell": 4,
+     "repeat": 8,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 3,
+     "cell": 4,
+     "repeat": 6,
+     "firstArm": "python"
+    },
+    {
+     "slot": 4,
+     "cell": 1,
+     "repeat": 4,
+     "firstArm": "python"
+    },
+    {
+     "slot": 5,
+     "cell": 1,
+     "repeat": 1,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 6,
+     "cell": 1,
+     "repeat": 9,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 7,
+     "cell": 4,
+     "repeat": 9,
+     "firstArm": "python"
+    },
+    {
+     "slot": 8,
+     "cell": 4,
+     "repeat": 3,
+     "firstArm": "python"
+    },
+    {
+     "slot": 9,
+     "cell": 4,
+     "repeat": 5,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 10,
+     "cell": 1,
+     "repeat": 2,
+     "firstArm": "python"
+    },
+    {
+     "slot": 11,
+     "cell": 4,
+     "repeat": 1,
+     "firstArm": "python"
+    },
+    {
+     "slot": 12,
+     "cell": 1,
+     "repeat": 5,
+     "firstArm": "python"
+    },
+    {
+     "slot": 13,
+     "cell": 4,
+     "repeat": 4,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 14,
+     "cell": 1,
+     "repeat": 8,
+     "firstArm": "python"
+    },
+    {
+     "slot": 15,
+     "cell": 1,
+     "repeat": 0,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 16,
+     "cell": 1,
+     "repeat": 3,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 17,
+     "cell": 4,
+     "repeat": 0,
+     "firstArm": "python"
+    },
+    {
+     "slot": 18,
+     "cell": 1,
+     "repeat": 7,
+     "firstArm": "python"
+    },
+    {
+     "slot": 19,
+     "cell": 1,
+     "repeat": 6,
+     "firstArm": "rust-shell"
+    }
+   ],
+   "sha256": "343da08ea5388709210af99a80aa3ca2d83250528286825fd140801510cf3058"
+  },
+  {
+   "seed": "seed-b",
+   "schedule": [
+    {
+     "slot": 0,
+     "cell": 1,
+     "repeat": 9,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 1,
+     "cell": 1,
+     "repeat": 6,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 2,
+     "cell": 4,
+     "repeat": 7,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 3,
+     "cell": 4,
+     "repeat": 2,
+     "firstArm": "python"
+    },
+    {
+     "slot": 4,
+     "cell": 1,
+     "repeat": 8,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 5,
+     "cell": 4,
+     "repeat": 5,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 6,
+     "cell": 1,
+     "repeat": 7,
+     "firstArm": "python"
+    },
+    {
+     "slot": 7,
+     "cell": 4,
+     "repeat": 9,
+     "firstArm": "python"
+    },
+    {
+     "slot": 8,
+     "cell": 1,
+     "repeat": 3,
+     "firstArm": "python"
+    },
+    {
+     "slot": 9,
+     "cell": 4,
+     "repeat": 8,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 10,
+     "cell": 4,
+     "repeat": 6,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 11,
+     "cell": 1,
+     "repeat": 0,
+     "firstArm": "python"
+    },
+    {
+     "slot": 12,
+     "cell": 1,
+     "repeat": 2,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 13,
+     "cell": 4,
+     "repeat": 1,
+     "firstArm": "python"
+    },
+    {
+     "slot": 14,
+     "cell": 4,
+     "repeat": 4,
+     "firstArm": "python"
+    },
+    {
+     "slot": 15,
+     "cell": 1,
+     "repeat": 4,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 16,
+     "cell": 1,
+     "repeat": 1,
+     "firstArm": "python"
+    },
+    {
+     "slot": 17,
+     "cell": 4,
+     "repeat": 3,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 18,
+     "cell": 1,
+     "repeat": 5,
+     "firstArm": "python"
+    },
+    {
+     "slot": 19,
+     "cell": 4,
+     "repeat": 0,
+     "firstArm": "python"
+    }
+   ],
+   "sha256": "8e32a7ee37f130bf27309e035d44db5a8aaff69c03451800b81f4c18e00f0e21"
+  },
+  {
+   "seed": "x",
+   "schedule": [
+    {
+     "slot": 0,
+     "cell": 4,
+     "repeat": 4,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 1,
+     "cell": 4,
+     "repeat": 2,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 2,
+     "cell": 1,
+     "repeat": 2,
+     "firstArm": "python"
+    },
+    {
+     "slot": 3,
+     "cell": 1,
+     "repeat": 6,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 4,
+     "cell": 1,
+     "repeat": 7,
+     "firstArm": "python"
+    },
+    {
+     "slot": 5,
+     "cell": 1,
+     "repeat": 9,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 6,
+     "cell": 1,
+     "repeat": 1,
+     "firstArm": "python"
+    },
+    {
+     "slot": 7,
+     "cell": 4,
+     "repeat": 8,
+     "firstArm": "python"
+    },
+    {
+     "slot": 8,
+     "cell": 1,
+     "repeat": 3,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 9,
+     "cell": 4,
+     "repeat": 7,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 10,
+     "cell": 4,
+     "repeat": 1,
+     "firstArm": "python"
+    },
+    {
+     "slot": 11,
+     "cell": 1,
+     "repeat": 8,
+     "firstArm": "python"
+    },
+    {
+     "slot": 12,
+     "cell": 4,
+     "repeat": 0,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 13,
+     "cell": 1,
+     "repeat": 4,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 14,
+     "cell": 4,
+     "repeat": 9,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 15,
+     "cell": 4,
+     "repeat": 6,
+     "firstArm": "python"
+    },
+    {
+     "slot": 16,
+     "cell": 4,
+     "repeat": 5,
+     "firstArm": "python"
+    },
+    {
+     "slot": 17,
+     "cell": 4,
+     "repeat": 3,
+     "firstArm": "python"
+    },
+    {
+     "slot": 18,
+     "cell": 1,
+     "repeat": 0,
+     "firstArm": "python"
+    },
+    {
+     "slot": 19,
+     "cell": 1,
+     "repeat": 5,
+     "firstArm": "rust-shell"
+    }
+   ],
+   "sha256": "9f86019e8a00cdfce9dbbefc663bb3a29a95d1bf105a31a8965a310c003a4705"
+  },
+  {
+   "seed": "synthetic-e4-seed-1",
+   "schedule": [
+    {
+     "slot": 0,
+     "cell": 1,
+     "repeat": 0,
+     "firstArm": "python"
+    },
+    {
+     "slot": 1,
+     "cell": 1,
+     "repeat": 5,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 2,
+     "cell": 1,
+     "repeat": 6,
+     "firstArm": "python"
+    },
+    {
+     "slot": 3,
+     "cell": 4,
+     "repeat": 1,
+     "firstArm": "python"
+    },
+    {
+     "slot": 4,
+     "cell": 4,
+     "repeat": 0,
+     "firstArm": "python"
+    },
+    {
+     "slot": 5,
+     "cell": 4,
+     "repeat": 7,
+     "firstArm": "python"
+    },
+    {
+     "slot": 6,
+     "cell": 4,
+     "repeat": 4,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 7,
+     "cell": 1,
+     "repeat": 7,
+     "firstArm": "python"
+    },
+    {
+     "slot": 8,
+     "cell": 4,
+     "repeat": 2,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 9,
+     "cell": 1,
+     "repeat": 8,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 10,
+     "cell": 1,
+     "repeat": 4,
+     "firstArm": "python"
+    },
+    {
+     "slot": 11,
+     "cell": 1,
+     "repeat": 1,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 12,
+     "cell": 4,
+     "repeat": 6,
+     "firstArm": "python"
+    },
+    {
+     "slot": 13,
+     "cell": 4,
+     "repeat": 8,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 14,
+     "cell": 4,
+     "repeat": 9,
+     "firstArm": "python"
+    },
+    {
+     "slot": 15,
+     "cell": 1,
+     "repeat": 2,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 16,
+     "cell": 1,
+     "repeat": 3,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 17,
+     "cell": 4,
+     "repeat": 3,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 18,
+     "cell": 1,
+     "repeat": 9,
+     "firstArm": "python"
+    },
+    {
+     "slot": 19,
+     "cell": 4,
+     "repeat": 5,
+     "firstArm": "rust-shell"
+    }
+   ],
+   "sha256": "aed8e799e713eaf35728a63addc7839201c429b94905e3e4001acd3394e5aa24"
+  },
+  {
+   "seed": "café-seed-世界",
+   "schedule": [
+    {
+     "slot": 0,
+     "cell": 1,
+     "repeat": 6,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 1,
+     "cell": 4,
+     "repeat": 3,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 2,
+     "cell": 4,
+     "repeat": 5,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 3,
+     "cell": 4,
+     "repeat": 8,
+     "firstArm": "python"
+    },
+    {
+     "slot": 4,
+     "cell": 1,
+     "repeat": 4,
+     "firstArm": "python"
+    },
+    {
+     "slot": 5,
+     "cell": 4,
+     "repeat": 4,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 6,
+     "cell": 1,
+     "repeat": 2,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 7,
+     "cell": 4,
+     "repeat": 2,
+     "firstArm": "python"
+    },
+    {
+     "slot": 8,
+     "cell": 4,
+     "repeat": 9,
+     "firstArm": "python"
+    },
+    {
+     "slot": 9,
+     "cell": 4,
+     "repeat": 6,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 10,
+     "cell": 4,
+     "repeat": 1,
+     "firstArm": "python"
+    },
+    {
+     "slot": 11,
+     "cell": 1,
+     "repeat": 7,
+     "firstArm": "python"
+    },
+    {
+     "slot": 12,
+     "cell": 1,
+     "repeat": 1,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 13,
+     "cell": 1,
+     "repeat": 9,
+     "firstArm": "python"
+    },
+    {
+     "slot": 14,
+     "cell": 1,
+     "repeat": 3,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 15,
+     "cell": 1,
+     "repeat": 0,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 16,
+     "cell": 4,
+     "repeat": 7,
+     "firstArm": "python"
+    },
+    {
+     "slot": 17,
+     "cell": 4,
+     "repeat": 0,
+     "firstArm": "rust-shell"
+    },
+    {
+     "slot": 18,
+     "cell": 1,
+     "repeat": 5,
+     "firstArm": "python"
+    },
+    {
+     "slot": 19,
+     "cell": 1,
+     "repeat": 8,
+     "firstArm": "python"
+    }
+   ],
+   "sha256": "5c29d1bef2ab8722ee8b1a08bcb83fe7f3be157f77dd170931498b081082393f"
+  }
+ ],
+ "calibration": [
+  {
+   "seed": "seed-a",
+   "order": [
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "seed-b",
+   "order": [
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "x",
+   "order": [
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "synthetic-e4-seed-1",
+   "order": [
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "café-seed-世界",
+   "order": [
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-1",
+   "order": [
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-2",
+   "order": [
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-3",
+   "order": [
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-4",
+   "order": [
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-5",
+   "order": [
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-6",
+   "order": [
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-7",
+   "order": [
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  },
+  {
+   "seed": "calibration-seed-8",
+   "order": [
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": null,
+     "k": null,
+     "warmup": true
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 1,
+     "chain": 0,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 0,
+     "k": 0,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 1,
+     "k": 1,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 2,
+     "k": 2,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 3,
+     "k": 3,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 4,
+     "k": 4,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 5,
+     "k": 5,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 6,
+     "k": 6,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 7,
+     "k": 7,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 8,
+     "k": 8,
+     "warmup": false
+    },
+    {
+     "cell": 4,
+     "chain": 1,
+     "slot": 9,
+     "k": 9,
+     "warmup": false
+    }
+   ]
+  }
+ ],
+ "matrixWarmups": [
+  {
+   "mode": "python",
+   "cell": 4,
+   "index": 0
+  },
+  {
+   "mode": "rust-shell",
+   "cell": 4,
+   "index": 0
+  }
+ ]
+}

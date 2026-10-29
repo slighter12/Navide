@@ -1,0 +1,153 @@
+{
+ "files": [
+  {
+   "path": "backend/tests/cli_regression/support/g1e/__init__.py",
+   "sha256": "3b648a0e25f8be64d22378cfc65233f66e03b99d268edea2deefadb4e21d141b"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/assemble.py",
+   "sha256": "a39035c8b0b5e0f4d150729c91f1e9f5e691c3223c1fed41cb884a03895217fd"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/baseline_identity.py",
+   "sha256": "93fdd46c71989ebf9edd844dab400d1f009b7e1ba7a17c9898073789a50c5cf8"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/bundle.py",
+   "sha256": "1e1a5e638f2f6c981d036eb73f620d6e2c8308f9ffc02be29bfa074cc9232127"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/calibration.py",
+   "sha256": "24f536d96c4d6de0201879204cb393c0ef00b8b3376290481e87c1e719f30155"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/carry.py",
+   "sha256": "09fd2b4d11656a17af519416e1e7538683304dc80eef0f7adc444f0e6d37b5e0"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/cli.py",
+   "sha256": "ecb8e60927524ae78145db5f5a6f73161d822735f83dc69f469adbe2c45d2c20"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/decider.py",
+   "sha256": "364f2e2ae75334961df9b86fe4f86a05159922285c62f010780ad52de334a5d1"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/driver.py",
+   "sha256": "6d71d6473a670da19407d8bfceda70280b300308d5d148be72b1f227803deb78"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/dryrun_check.py",
+   "sha256": "cc38068bb6bba6b9967514d89ee6b81c054343aa1fa3bf6858dfce6e0cf11bce"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/e2-g1e-outcome.schema.json",
+   "sha256": "df5810c4991e6f8b15157e85b570cec64f57d4eab79f6e7e0c34646849ea014e"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/freeze.py",
+   "sha256": "cb755317d0fcc975fa0e32d1ef6da4ec913a14cc89b300ceff6d5e3547938d2a"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/gates.py",
+   "sha256": "72d0a99a4c397f6441dfce1be7d23792906259c1fa3aa94507b189bf86a1c246"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/helper.py",
+   "sha256": "9c3c7fb6f0518b7031afe6bdceeacb9f677ed995e35ee1464b0186c491ffe935"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/locality-allowlist.json",
+   "sha256": "a596490fcf1cd26abd95b0d9d8e8e57c3729ce1c3c92523a734df6ad034a67e2"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/locality_check.py",
+   "sha256": "e44c6c7fb98c71908629e5973858dc90b792d6eb132a2bb0ebdb58fa99b6111d"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/log_final.py",
+   "sha256": "51d029e429658e124802ddb875cd488bdd008faf7ba27190c25375a4d1ae2ddd"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/quiet_gate.py",
+   "sha256": "578dc6a0a534cba04630a02fc1936fe27338e4a85303b168b0a2469e2cb5a0fb"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/reference.py",
+   "sha256": "f6656090fb36d3e193b50175a8fd8333953162b87bcef490942a0fe340fa667a"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/report.py",
+   "sha256": "3c161574b85bbcf6a18529df3653ed44d5d28da3e531ffd6b305fa03ac83a537"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/runlog.py",
+   "sha256": "c0379cef708277983cb0ba6a03fcdc5852bdd09a006caa6d7ef64a4d4d9bcbb8"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/summarise.py",
+   "sha256": "820a6022b6781ad1e817de662e9d3366685cd35a68d68411a08506219b2f07cb"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/synthetic.py",
+   "sha256": "2397b39cdb9905c3ea2bbaa0ec1e7edc63e5c1fa41afae9a074c43dbfbdfb0d5"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/tokens.py",
+   "sha256": "b101c9ca5dad44abf0c4d00b3817c515406f57dd76c98fa63f65f71844124809"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e/toolchain.py",
+   "sha256": "6c62cf6cc608719158bf6c7bbe9d95b297e771c16efb96e94181f79c7a8c6b82"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e_counters_gate.py",
+   "sha256": "9f03beedee0849892ff2f30d02e11ba0fc15a0844671082ece96baa00b91d0d9"
+  },
+  {
+   "path": "backend/tests/cli_regression/support/g1e_peer.py",
+   "sha256": "9e4b00fb2ff0d8140ba01d77cdfc1e3fb1199c2f05a8bb5aedc916231b204f27"
+  },
+  {
+   "path": "tests/cli/g1eAttempt.ts",
+   "sha256": "685064ced39cfb6aa647d081017d8e98443e12f120d5fd277fed23fef33a50cd"
+  },
+  {
+   "path": "tests/cli/g1eBurst.ts",
+   "sha256": "6e0c47a7b6c2c7cd9257b973551ac28081ca82f80ab0ea2e98cccd4477cffb10"
+  },
+  {
+   "path": "tests/cli/g1eLedger.ts",
+   "sha256": "4878fe205a6d601702c3ae907d9da44fdd91386a3586e1af63bf7809b510a401"
+  },
+  {
+   "path": "tests/cli/g1eReceipt.ts",
+   "sha256": "4f6a694469ab40a30d1babfe5767ac0a3dea2a7956a02db0174f2be3fd64d4eb"
+  },
+  {
+   "path": "tests/cli/g1eRun.ts",
+   "sha256": "bb267dd89a94f575cfbb2f032c4c9830e2c9b2bb07504a729d635cb8a1411f33"
+  },
+  {
+   "path": "tests/cli/g1eSchedule.ts",
+   "sha256": "0a2812a945fbd964ba0e2e889b83bd91a4dedfe1e8a83f834c8d6d6d1f8ccfd7"
+  },
+  {
+   "path": "tests/cli/g1eStream.ts",
+   "sha256": "85f4d1352dd9db0c27b28c291a082844e210b6dec25d7bc35275a1a6ecb3127d"
+  },
+  {
+   "path": "tests/cli/g1eWait.ts",
+   "sha256": "c2dc7e7bea476098d97beb0eedb9dd7ffafe59a009dd1e9914c4f00872f5bd6c"
+  },
+  {
+   "path": "tests/fixtures/cli-regression/g1e-schedule-golden.json",
+   "sha256": "351a400d2114fe51d91fd315d906b4263b7d569e9ba87ca2dd7283c54a7edb60"
+  },
+  {
+   "path": "tests/fixtures/cli-regression/runtime-workload-g1e.json",
+   "sha256": "22b2cc5d73a4c88a75645c9d21a240ac597a2c9cebb69f6c3f551153d6ab21f4"
+  }
+ ],
+ "schema": "acr-g3-g1e-pins/1"
+}

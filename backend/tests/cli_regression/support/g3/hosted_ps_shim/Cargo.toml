@@ -1,0 +1,12 @@
+[package]
+name = "ps-shim"
+version = "0.1.0"
+edition = "2021"
+description = "A Windows stand-in for the two `ps` calls of tests/cli/g1eAttempt.ts (G3-r2-hosted). Not part of the product."
+publish = false
+
+[[bin]]
+name = "ps"
+path = "src/main.rs"
+
+[dependencies]

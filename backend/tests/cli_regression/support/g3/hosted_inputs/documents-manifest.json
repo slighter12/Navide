@@ -1,0 +1,17 @@
+{
+ "documents": {
+  "proposal": {
+   "path": ".scratch/agent-cli-runtime-evaluation/evidence/g2/10-final/prereg/g3-prereg-proposal.md",
+   "sha256": "d81ccb2897a1c652ef4fc968dbb6b133bc6d4db28075f820d2f040553efb6b43"
+  },
+  "v10": {
+   "path": ".scratch/agent-cli-runtime-evaluation/design/e2-g1e-prereg-proposal-v10.md",
+   "sha256": "aa69dbcea6d4c6ee248e99f50102dd5924cdcc970fd878461b03fdbc75d9523e"
+  },
+  "v14r2": {
+   "path": ".scratch/agent-cli-runtime-evaluation/design/e2-g1e-prereg-proposal-v14-r2.md",
+   "sha256": "67ab288132cbab8fae90d7e7ab2ffc93ee56c8224f3eaa43777aae87dca710a8"
+  }
+ },
+ "schema": "acr-g3h-documents-manifest/1"
+}

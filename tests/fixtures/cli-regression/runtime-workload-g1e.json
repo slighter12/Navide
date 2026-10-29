@@ -1,0 +1,20 @@
+{
+  "version": 10,
+  "methodRevision": "method-10-e",
+  "basedOn": "runtime-workload.json",
+  "sessionCounts": [1, 4],
+  "measurementRepeats": 10,
+  "idleMs": 10000,
+  "ioRounds": 1500,
+  "burstLines": 128,
+  "burstWidth": 2048,
+  "burstRounds": { "1": 40, "4": 10 },
+  "resizeProbes": 20,
+  "resourceIntervalMs": 50,
+  "observationSettleMs": 50,
+  "deadlineMs": 15000,
+  "vendors": ["claude", "opencode"],
+  "input": "café 世界 \\ quote' \" ; | &",
+  "reply": "Regression reply: café 完成\n---MSG-END---",
+  "baselineRevision": "f4e9fd50136ea84f38f99e3c96f2c924f21d244f"
+}

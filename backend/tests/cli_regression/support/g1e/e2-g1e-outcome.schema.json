@@ -1,0 +1,9186 @@
+{
+ "$defs": {
+  "evidenceRef": {
+   "additionalProperties": false,
+   "properties": {
+    "date": {
+     "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+     "type": "string"
+    },
+    "ledger": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "quote": {
+     "pattern": "\\S",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ledger",
+    "date",
+    "quote"
+   ],
+   "type": "object"
+  },
+  "hashRef": {
+   "additionalProperties": false,
+   "properties": {
+    "path": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "sha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path",
+    "sha256"
+   ],
+   "type": "object"
+  },
+  "pair0": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 0
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair1": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 1
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair2": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 2
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair3": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 3
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair4": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 4
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair5": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 5
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair6": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 6
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair7": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 7
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair8": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 8
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "pair9": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "valid": {
+        "const": true
+       }
+      },
+      "required": [
+       "valid"
+      ]
+     },
+     "then": {
+      "properties": {
+       "rust": {
+        "type": "number"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "python": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "repeat": {
+     "const": 9
+    },
+    "rust": {
+     "minimum": 0,
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "valid": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "repeat",
+    "python",
+    "rust",
+    "valid"
+   ],
+   "type": "object"
+  },
+  "readerRow": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "validPairs": {
+        "maximum": 9
+       }
+      },
+      "required": [
+       "validPairs"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "unresolved"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "const": 10
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "adverse"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "status": {
+        "const": "noisy"
+       }
+      },
+      "required": [
+       "status"
+      ]
+     },
+     "then": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8
+       },
+       "validPairs": {
+        "const": 10
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 1
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "enum": [
+         "pass",
+         "noisy"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8,
+        "minimum": 2
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "enum": [
+         "unresolved",
+         "noisy"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "const": 9
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "unresolved"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "exceedCount": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "id": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "margin": {
+     "additionalProperties": false,
+     "properties": {
+      "frozenIn": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "mode": {
+       "const": "absolute"
+      },
+      "value": {
+       "exclusiveMinimum": 0,
+       "type": "number"
+      }
+     },
+     "required": [
+      "mode",
+      "value",
+      "frozenIn"
+     ],
+     "type": "object"
+    },
+    "pairs": {
+     "items": false,
+     "maxItems": 10,
+     "minItems": 10,
+     "prefixItems": [
+      {
+       "$ref": "#/$defs/pair0"
+      },
+      {
+       "$ref": "#/$defs/pair1"
+      },
+      {
+       "$ref": "#/$defs/pair2"
+      },
+      {
+       "$ref": "#/$defs/pair3"
+      },
+      {
+       "$ref": "#/$defs/pair4"
+      },
+      {
+       "$ref": "#/$defs/pair5"
+      },
+      {
+       "$ref": "#/$defs/pair6"
+      },
+      {
+       "$ref": "#/$defs/pair7"
+      },
+      {
+       "$ref": "#/$defs/pair8"
+      },
+      {
+       "$ref": "#/$defs/pair9"
+      }
+     ],
+     "type": "array"
+    },
+    "status": {
+     "enum": [
+      "pass",
+      "adverse",
+      "unresolved"
+     ]
+    },
+    "unit": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "validPairs": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "unit",
+    "margin",
+    "pairs",
+    "validPairs",
+    "exceedCount",
+    "status"
+   ],
+   "type": "object"
+  },
+  "rowBeat": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "validPairs": {
+        "maximum": 9
+       }
+      },
+      "required": [
+       "validPairs"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "unresolved"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "const": 10
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "adverse"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "status": {
+        "const": "noisy"
+       }
+      },
+      "required": [
+       "status"
+      ]
+     },
+     "then": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8
+       },
+       "validPairs": {
+        "const": 10
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8
+       },
+       "notImprovedCount": {
+        "const": 0
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount",
+       "notImprovedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "improved"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8
+       },
+       "notImprovedCount": {
+        "const": 1
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount",
+       "notImprovedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "enum": [
+         "improved",
+         "noisy"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8
+       },
+       "notImprovedCount": {
+        "minimum": 2
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount",
+       "notImprovedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "enum": [
+         "not_improved",
+         "noisy"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "const": 9
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "enum": [
+         "not_improved",
+         "unresolved"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "cell": {
+     "enum": [
+      1,
+      4
+     ]
+    },
+    "class": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "exceedCount": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "id": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "kind": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "margin": {
+     "type": "object"
+    },
+    "medianExcess": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "metric": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "notImprovedCount": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "pairs": {
+     "items": false,
+     "maxItems": 10,
+     "minItems": 10,
+     "prefixItems": [
+      {
+       "$ref": "#/$defs/pair0"
+      },
+      {
+       "$ref": "#/$defs/pair1"
+      },
+      {
+       "$ref": "#/$defs/pair2"
+      },
+      {
+       "$ref": "#/$defs/pair3"
+      },
+      {
+       "$ref": "#/$defs/pair4"
+      },
+      {
+       "$ref": "#/$defs/pair5"
+      },
+      {
+       "$ref": "#/$defs/pair6"
+      },
+      {
+       "$ref": "#/$defs/pair7"
+      },
+      {
+       "$ref": "#/$defs/pair8"
+      },
+      {
+       "$ref": "#/$defs/pair9"
+      }
+     ],
+     "type": "array"
+    },
+    "source": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "status": {
+     "enum": [
+      "improved",
+      "not_improved",
+      "adverse",
+      "unresolved",
+      "noisy"
+     ]
+    },
+    "unit": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "validPairs": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "class",
+    "metric",
+    "cell",
+    "kind",
+    "unit",
+    "source",
+    "margin",
+    "pairs",
+    "validPairs",
+    "exceedCount",
+    "medianExcess",
+    "status",
+    "notImprovedCount"
+   ],
+   "type": "object"
+  },
+  "rowStd": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "validPairs": {
+        "maximum": 9
+       }
+      },
+      "required": [
+       "validPairs"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "unresolved"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "const": 10
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "adverse"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "status": {
+        "const": "noisy"
+       }
+      },
+      "required": [
+       "status"
+      ]
+     },
+     "then": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8
+       },
+       "validPairs": {
+        "const": 10
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 1
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "enum": [
+         "pass",
+         "noisy"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "maximum": 8,
+        "minimum": 2
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "enum": [
+         "unresolved",
+         "noisy"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "exceedCount": {
+        "const": 9
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount"
+      ]
+     },
+     "then": {
+      "properties": {
+       "status": {
+        "const": "unresolved"
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "cell": {
+     "enum": [
+      1,
+      4
+     ]
+    },
+    "class": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "exceedCount": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "id": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "kind": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "margin": {
+     "type": "object"
+    },
+    "medianExcess": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "metric": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "pairs": {
+     "items": false,
+     "maxItems": 10,
+     "minItems": 10,
+     "prefixItems": [
+      {
+       "$ref": "#/$defs/pair0"
+      },
+      {
+       "$ref": "#/$defs/pair1"
+      },
+      {
+       "$ref": "#/$defs/pair2"
+      },
+      {
+       "$ref": "#/$defs/pair3"
+      },
+      {
+       "$ref": "#/$defs/pair4"
+      },
+      {
+       "$ref": "#/$defs/pair5"
+      },
+      {
+       "$ref": "#/$defs/pair6"
+      },
+      {
+       "$ref": "#/$defs/pair7"
+      },
+      {
+       "$ref": "#/$defs/pair8"
+      },
+      {
+       "$ref": "#/$defs/pair9"
+      }
+     ],
+     "type": "array"
+    },
+    "source": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "status": {
+     "enum": [
+      "pass",
+      "adverse",
+      "unresolved",
+      "noisy"
+     ]
+    },
+    "unit": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "validPairs": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "class",
+    "metric",
+    "cell",
+    "kind",
+    "unit",
+    "source",
+    "margin",
+    "pairs",
+    "validPairs",
+    "exceedCount",
+    "medianExcess",
+    "status"
+   ],
+   "type": "object"
+  }
+ },
+ "$id": "acr-g1e-outcome/14",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "additionalProperties": false,
+ "allOf": [
+  {
+   "properties": {
+    "limitations": {
+     "contains": {
+      "pattern": "descendant snapshot",
+      "type": "string"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "readerRequired": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "calibration": {
+          "const": "rows+reader"
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "calibration": {
+          "const": "rows+reader"
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "readerRequired": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "calibration": {
+          "const": "none"
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "maxItems": 0
+         },
+         "receipts": {
+          "maxItems": 0
+         },
+         "uncalibratedRows": {
+          "maxItems": 0
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "calibration": {
+          "const": "none"
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "allOf": [
+     {
+      "properties": {
+       "preregistration": {
+        "properties": {
+         "options": {
+          "properties": {
+           "noisyGuard": {
+            "const": "n/a"
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    ],
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "c1Noisy": {
+          "const": "n/a"
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "calibration": {
+          "enum": [
+           "rows",
+           "rows+reader"
+          ]
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "allOf": [
+     {
+      "properties": {
+       "preregistration": {
+        "properties": {
+         "options": {
+          "properties": {
+           "noisyGuard": {
+            "const": 8
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    ],
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "c1Noisy": {
+          "const": "b"
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "else": {
+    "properties": {
+     "limitations": {
+      "contains": {
+       "pattern": "^noisy rows: k = [0-9]+ \\(",
+       "type": "string"
+      }
+     }
+    }
+   },
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "maxItems": 0
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "noisyReport": {
+      "maxItems": 0
+     }
+    }
+   }
+  },
+  {
+   "else": {
+    "properties": {
+     "interpretation": {
+      "not": {
+       "required": [
+        "killReap"
+       ]
+      }
+     }
+    }
+   },
+   "if": {
+    "properties": {
+     "c1Report": {
+      "properties": {
+       "medianD": {
+        "exclusiveMaximum": 0
+       },
+       "validPairs": {
+        "const": 10
+       }
+      },
+      "required": [
+       "validPairs",
+       "medianD"
+      ]
+     }
+    },
+    "required": [
+     "c1Report"
+    ]
+   },
+   "then": {
+    "properties": {
+     "interpretation": {
+      "required": [
+       "killReap"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:io_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:io_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:io_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:io_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:io_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:io_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:io_ms:p95|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:io_ms:p95|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:io_ms:p95|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:io_ms:p95|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:io_ms:p95|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:io_ms:p95|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:burst_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:burst_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:burst_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:burst_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:burst_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:burst_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:burst_input_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:burst_input_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:burst_input_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:burst_input_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:burst_input_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:burst_input_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:reconnect_recovery_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:reconnect_recovery_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:reconnect_recovery_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|lat:reconnect_recovery_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|lat:reconnect_recovery_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|lat:reconnect_recovery_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:input_output:component:backend:cpuOneCorePercent|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:input_output:component:backend:cpuOneCorePercent|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:input_output:component:backend:cpuOneCorePercent|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:input_output:component:backend:cpuOneCorePercent|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:input_output:component:backend:cpuOneCorePercent|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:input_output:component:backend:cpuOneCorePercent|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:input_output:view:combined:cpuOneCorePercent|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:input_output:view:combined:cpuOneCorePercent|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:input_output:view:combined:cpuOneCorePercent|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:input_output:view:combined:cpuOneCorePercent|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:input_output:view:combined:cpuOneCorePercent|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:input_output:view:combined:cpuOneCorePercent|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:input_output:component:backend:rssMiB|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:input_output:component:backend:rssMiB|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:input_output:component:backend:rssMiB|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:input_output:component:backend:rssMiB|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:input_output:component:backend:rssMiB|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:input_output:component:backend:rssMiB|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:live_idle:component:backend:rssMiB|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:live_idle:component:backend:rssMiB|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:live_idle:component:backend:rssMiB|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:live_idle:component:backend:rssMiB|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:live_idle:component:backend:rssMiB|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:live_idle:component:backend:rssMiB|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:empty_started_idle:component:backend:rssMiB|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:empty_started_idle:component:backend:rssMiB|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:empty_started_idle:component:backend:rssMiB|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "stream|res:empty_started_idle:component:backend:rssMiB|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "stream|res:empty_started_idle:component:backend:rssMiB|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "stream|res:empty_started_idle:component:backend:rssMiB|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:first_shell_ready_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:first_shell_ready_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:first_shell_ready_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:first_shell_ready_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:first_shell_ready_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:first_shell_ready_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:warm_shell_ready_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:warm_shell_ready_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:warm_shell_ready_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:warm_shell_ready_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:warm_shell_ready_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:warm_shell_ready_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:cold_to_first_usable_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:cold_to_first_usable_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:cold_to_first_usable_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:cold_to_first_usable_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:cold_to_first_usable_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:cold_to_first_usable_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:observation_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:observation_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:observation_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "lifecycle|lat:kill_reap_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "lifecycle|lat:kill_reap_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "lifecycle|lat:kill_reap_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "budget|lat:first_shell_ack_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "budget|lat:first_shell_ack_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "budget|lat:first_shell_ack_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "budget|lat:first_shell_ack_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "budget|lat:first_shell_ack_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "budget|lat:first_shell_ack_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "budget|lat:warm_shell_ack_ms|cell1": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "budget|lat:warm_shell_ack_ms|cell1"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "budget|lat:warm_shell_ack_ms|cell1"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "budget|lat:warm_shell_ack_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "budget|lat:warm_shell_ack_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "budget|lat:warm_shell_ack_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "rows": {
+      "properties": {
+       "beat|lat:kill_reap_ms|cell4": {
+        "properties": {
+         "status": {
+          "const": "noisy"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       }
+      },
+      "required": [
+       "beat|lat:kill_reap_ms|cell4"
+      ]
+     }
+    },
+    "required": [
+     "rows"
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "noisyRows": {
+          "contains": {
+           "const": "beat|lat:kill_reap_ms|cell4"
+          }
+         }
+        },
+        "required": [
+         "noisyRows"
+        ]
+       }
+      },
+      "required": [
+       "calibration"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "allOf": [
+     {
+      "properties": {
+       "preregistration": {
+        "properties": {
+         "options": {
+          "properties": {
+           "calibration": {
+            "enum": [
+             "rows",
+             "rows+reader"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     {
+      "properties": {
+       "derivation": {
+        "properties": {
+         "path": {
+          "const": "matrix"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "then": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "calibration": {
+        "properties": {
+         "receipts": {
+          "minItems": 1
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "derivation": {
+      "properties": {
+       "path": {
+        "const": "matrix"
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "baselineIdentity": {
+      "type": "object"
+     },
+     "decision": {
+      "properties": {
+       "facts": {
+        "properties": {
+         "baselineIdentity": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "budgetStatus": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "c1Status": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "calibrationRows": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "designCompliant": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "independenceScreen": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "localityViolation": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "maintainabilityComplete": {
+          "not": {
+           "const": "not_derivable"
+          }
+         },
+         "streamStatus": {
+          "not": {
+           "const": "not_derivable"
+          }
+         }
+        }
+       }
+      }
+     },
+     "locality": {
+      "type": "object"
+     },
+     "maintainability": {
+      "type": "object"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "derivation": {
+      "properties": {
+       "path": {
+        "const": "no-matrix"
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "decision": {
+      "properties": {
+       "facts": {
+        "properties": {
+         "matrixComplete": {
+          "const": false
+         }
+        }
+       }
+      }
+     },
+     "matrix": {
+      "properties": {
+       "accepted": {
+        "const": 0
+       },
+       "complete": {
+        "const": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "readerRequired": {
+          "const": false
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "correctness": {
+      "properties": {
+       "E-observation-equality": {
+        "properties": {
+         "status": {
+          "const": "not-required"
+         }
+        }
+       }
+      }
+     },
+     "readerBenchmark": {
+      "properties": {
+       "rows": {
+        "maxProperties": 0
+       },
+       "status": {
+        "const": "not_required"
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "preregistration": {
+      "properties": {
+       "options": {
+        "properties": {
+         "readerRequired": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "correctness": {
+      "properties": {
+       "E-observation-equality": {
+        "properties": {
+         "status": {
+          "not": {
+           "const": "not-required"
+          }
+         }
+        }
+       }
+      }
+     },
+     "readerBenchmark": {
+      "properties": {
+       "status": {
+        "enum": [
+         "pass",
+         "worse",
+         "unresolved",
+         "not_run"
+        ]
+       }
+      }
+     }
+    }
+   }
+  }
+ ],
+ "description": "Structure plus the per-pair values every status is derived from. A decider re-derives every count, status, fact and the outcome from the pairs and the lists and rejects any difference; gates are necessary, not sufficient. exampleOnly=true marks synthetic illustrations that a production decider rejects.",
+ "properties": {
+  "baselineIdentity": {
+   "anyOf": [
+    {
+     "type": "null"
+    },
+    {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "identical"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "properties": {
+         "changedFiles": {
+          "maxItems": 0
+         }
+        }
+       }
+      },
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "enum": [
+           "refactor_reviewed",
+           "changed"
+          ]
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "properties": {
+         "changedFiles": {
+          "minItems": 1
+         }
+        }
+       }
+      },
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "refactor_reviewed"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "properties": {
+         "changedFiles": {
+          "items": {
+           "properties": {
+            "verdicts": {
+             "items": {
+              "properties": {
+               "verdict": {
+                "const": "behaviour-neutral"
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "changedFiles": {
+       "items": {
+        "additionalProperties": false,
+        "properties": {
+         "diff": {
+          "$ref": "#/$defs/hashRef"
+         },
+         "loadedSha256": {
+          "pattern": "^([0-9a-f]{64}|absent)$",
+          "type": "string"
+         },
+         "path": {
+          "pattern": "\\S",
+          "type": "string"
+         },
+         "referenceSha256": {
+          "pattern": "^([0-9a-f]{64}|absent)$",
+          "type": "string"
+         },
+         "verdicts": {
+          "items": {
+           "additionalProperties": false,
+           "properties": {
+            "loadedSha256": {
+             "pattern": "^[0-9a-f]{64}$",
+             "type": "string"
+            },
+            "report": {
+             "$ref": "#/$defs/hashRef"
+            },
+            "reviewer": {
+             "pattern": "\\S",
+             "type": "string"
+            },
+            "session": {
+             "pattern": "\\S",
+             "type": "string"
+            },
+            "verdict": {
+             "enum": [
+              "behaviour-neutral",
+              "other"
+             ]
+            }
+           },
+           "required": [
+            "reviewer",
+            "session",
+            "report",
+            "verdict",
+            "loadedSha256"
+           ],
+           "type": "object"
+          },
+          "minItems": 2,
+          "type": "array"
+         }
+        },
+        "required": [
+         "path",
+         "loadedSha256",
+         "referenceSha256",
+         "diff",
+         "verdicts"
+        ],
+        "type": "object"
+       },
+       "type": "array"
+      },
+      "e3Commit": {
+       "pattern": "^[0-9a-f]{40}$",
+       "type": "string"
+      },
+      "e3Parent": {
+       "pattern": "^[0-9a-f]{40}$",
+       "type": "string"
+      },
+      "e3Set": {
+       "items": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "type": "array",
+       "uniqueItems": true
+      },
+      "pythonArmFileList": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "referenceManifest": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "identical",
+        "refactor_reviewed",
+        "changed"
+       ]
+      },
+      "upstreamMerge": {
+       "pattern": "^[0-9a-f]{40}$",
+       "type": "string"
+      }
+     },
+     "required": [
+      "status",
+      "upstreamMerge",
+      "e3Parent",
+      "e3Commit",
+      "e3Set",
+      "pythonArmFileList",
+      "referenceManifest",
+      "changedFiles"
+     ],
+     "type": "object"
+    }
+   ]
+  },
+  "c1Report": {
+   "additionalProperties": false,
+   "properties": {
+    "bandD": {
+     "items": {
+      "type": "number"
+     },
+     "maxItems": 2,
+     "minItems": 2,
+     "type": [
+      "array",
+      "null"
+     ]
+    },
+    "bandExcess": {
+     "items": {
+      "type": "number"
+     },
+     "maxItems": 2,
+     "minItems": 2,
+     "type": [
+      "array",
+      "null"
+     ]
+    },
+    "d": {
+     "items": {
+      "type": "number"
+     },
+     "maxItems": 10,
+     "minItems": 10,
+     "type": [
+      "array",
+      "null"
+     ]
+    },
+    "dExcess": {
+     "items": {
+      "type": "number"
+     },
+     "maxItems": 10,
+     "minItems": 10,
+     "type": [
+      "array",
+      "null"
+     ]
+    },
+    "exceedCount": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "id": {
+     "const": "beat|lat:kill_reap_ms|cell4"
+    },
+    "meanD": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "medianD": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "medianExcess": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "pythonMean": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "pythonSd": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "rawRange": {
+     "items": {
+      "type": "number"
+     },
+     "maxItems": 2,
+     "minItems": 2,
+     "type": [
+      "array",
+      "null"
+     ]
+    },
+    "rustMean": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "rustSd": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "sdD": {
+     "type": [
+      "number",
+      "null"
+     ]
+    },
+    "status": {
+     "enum": [
+      "improved",
+      "not_improved",
+      "adverse",
+      "unresolved",
+      "noisy"
+     ]
+    },
+    "validPairs": {
+     "maximum": 10,
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "id",
+    "status",
+    "validPairs",
+    "exceedCount",
+    "d",
+    "dExcess",
+    "medianD",
+    "medianExcess",
+    "bandD",
+    "bandExcess",
+    "rawRange",
+    "meanD",
+    "sdD",
+    "pythonMean",
+    "pythonSd",
+    "rustMean",
+    "rustSd"
+   ],
+   "type": "object"
+  },
+  "claudeObservation": {
+   "additionalProperties": false,
+   "properties": {
+    "findings": {
+     "items": {
+      "pattern": "\\S",
+      "type": "string"
+     },
+     "type": "array",
+     "uniqueItems": true
+    },
+    "state": {
+     "enum": [
+      "ok",
+      "rust_only_failure",
+      "other_failure",
+      "incomplete"
+     ]
+    }
+   },
+   "required": [
+    "state",
+    "findings"
+   ],
+   "type": "object"
+  },
+  "continuationAuthority": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "recorded": {
+        "const": true
+       }
+      },
+      "required": [
+       "recorded"
+      ]
+     },
+     "then": {
+      "required": [
+       "evidence"
+      ]
+     }
+    }
+   ],
+   "properties": {
+    "evidence": {
+     "$ref": "#/$defs/evidenceRef"
+    },
+    "recorded": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "recorded"
+   ],
+   "type": "object"
+  },
+  "correctness": {
+   "additionalProperties": false,
+   "properties": {
+    "02-bounds-failures": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "02-shell-runtime": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "03-claude-reference": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "04-codex-principal": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "04-opencode-principal": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "05-cancel-cleanup-recovery": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-bounded-reader-backpressure": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-cancel-handoff-no-leak": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-cleanup-no-difference": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-drop-oldest-integrity": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-failure-isolation": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-fd-hygiene": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-handoff-binding": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-log-replay-identity": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-observation-equality": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed",
+        "not-required"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-ordering-terminal-stream": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-ordinary-shell": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-output-split-64k": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-resize-baseline-ordering": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-sidecar-loss-uniform": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    },
+    "E-stale-generation": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "status": {
+          "const": "pass-current"
+         }
+        },
+        "required": [
+         "status"
+        ]
+       },
+       "then": {
+        "required": [
+         "receipt"
+        ]
+       }
+      }
+     ],
+     "properties": {
+      "attribution": {
+       "enum": [
+        "rust-design",
+        "other",
+        "unknown"
+       ]
+      },
+      "boundedCorrectivePath": {
+       "enum": [
+        true,
+        false,
+        "unknown"
+       ]
+      },
+      "note": {
+       "type": "string"
+      },
+      "receipt": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "status": {
+       "enum": [
+        "pass-current",
+        "not-rerun",
+        "unknown",
+        "failed"
+       ]
+      }
+     },
+     "required": [
+      "status"
+     ],
+     "type": "object"
+    }
+   },
+   "required": [
+    "02-shell-runtime",
+    "02-bounds-failures",
+    "03-claude-reference",
+    "04-codex-principal",
+    "04-opencode-principal",
+    "05-cancel-cleanup-recovery",
+    "E-cleanup-no-difference",
+    "E-failure-isolation",
+    "E-sidecar-loss-uniform",
+    "E-handoff-binding",
+    "E-ordering-terminal-stream",
+    "E-bounded-reader-backpressure",
+    "E-drop-oldest-integrity",
+    "E-output-split-64k",
+    "E-log-replay-identity",
+    "E-cancel-handoff-no-leak",
+    "E-fd-hygiene",
+    "E-stale-generation",
+    "E-resize-baseline-ordering",
+    "E-ordinary-shell",
+    "E-observation-equality"
+   ],
+   "type": "object"
+  },
+  "decision": {
+   "additionalProperties": false,
+   "properties": {
+    "facts": {
+     "additionalProperties": false,
+     "properties": {
+      "baselineIdentity": {
+       "enum": [
+        "identical",
+        "refactor_reviewed",
+        "changed",
+        "not_derivable"
+       ]
+      },
+      "budgetStatus": {
+       "enum": [
+        "pass",
+        "adverse",
+        "unresolved",
+        "not_derivable"
+       ]
+      },
+      "c1Status": {
+       "enum": [
+        "improved",
+        "not_improved",
+        "adverse",
+        "unresolved",
+        "noisy",
+        "not_derivable"
+       ]
+      },
+      "calibrationRows": {
+       "enum": [
+        "not_run",
+        "clear",
+        "noisy_listed",
+        "uncalibrated",
+        "not_derivable"
+       ]
+      },
+      "claudeObservation": {
+       "enum": [
+        "ok",
+        "rust_only_failure",
+        "other_failure",
+        "incomplete"
+       ]
+      },
+      "correctness": {
+       "enum": [
+        "ok",
+        "missing",
+        "failed_other",
+        "failed_rust_bounded",
+        "failed_rust_unbounded"
+       ]
+      },
+      "designCompliant": {
+       "enum": [
+        true,
+        false,
+        "not_derivable"
+       ]
+      },
+      "independenceScreen": {
+       "enum": [
+        "pass",
+        "fail",
+        "not_derivable"
+       ]
+      },
+      "isolationBreach": {
+       "type": "boolean"
+      },
+      "localityViolation": {
+       "enum": [
+        true,
+        false,
+        "not_derivable"
+       ]
+      },
+      "maintainabilityComplete": {
+       "enum": [
+        true,
+        false,
+        "not_derivable"
+       ]
+      },
+      "matrixComplete": {
+       "type": "boolean"
+      },
+      "readerBenchmark": {
+       "enum": [
+        "pass",
+        "worse",
+        "unresolved",
+        "not_run",
+        "not_required"
+       ]
+      },
+      "streamStatus": {
+       "enum": [
+        "pass",
+        "adverse",
+        "unresolved",
+        "not_derivable"
+       ]
+      },
+      "survivorsRustArm": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "matrixComplete",
+      "designCompliant",
+      "independenceScreen",
+      "calibrationRows",
+      "baselineIdentity",
+      "survivorsRustArm",
+      "isolationBreach",
+      "correctness",
+      "claudeObservation",
+      "streamStatus",
+      "budgetStatus",
+      "c1Status",
+      "readerBenchmark",
+      "localityViolation",
+      "maintainabilityComplete"
+     ],
+     "type": "object"
+    },
+    "reasons": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "detail": {
+        "type": "string"
+       },
+       "rule": {
+        "pattern": "\\S",
+        "type": "string"
+       }
+      },
+      "required": [
+       "rule"
+      ],
+      "type": "object"
+     },
+     "minItems": 1,
+     "type": "array"
+    },
+    "tableVersion": {
+     "const": "prereg-e/14"
+    }
+   },
+   "required": [
+    "tableVersion",
+    "facts",
+    "reasons"
+   ],
+   "type": "object"
+  },
+  "derivation": {
+   "additionalProperties": false,
+   "properties": {
+    "earlierRuns": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "kind": {
+        "enum": [
+         "calibration",
+         "reader-calibration",
+         "matrix",
+         "reader-measure"
+        ]
+       },
+       "manifestSha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+       },
+       "stopFacts": {
+        "items": {
+         "enum": [
+          "S1",
+          "S2",
+          "S3",
+          "S4",
+          "S5",
+          "S6"
+         ]
+        },
+        "type": "array",
+        "uniqueItems": true
+       },
+       "stopReason": {
+        "type": [
+         "string",
+         "null"
+        ]
+       }
+      },
+      "required": [
+       "manifestSha256",
+       "kind",
+       "stopReason",
+       "stopFacts"
+      ],
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "path": {
+     "enum": [
+      "matrix",
+      "no-matrix"
+     ]
+    }
+   },
+   "required": [
+    "path",
+    "earlierRuns"
+   ],
+   "type": "object"
+  },
+  "design": {
+   "additionalProperties": false,
+   "properties": {
+    "backendIdentities": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "pid": {
+        "minimum": 1,
+        "type": "integer"
+       },
+       "start": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "trial": {
+        "pattern": "^(python|rust-shell):(1|4):[0-9]$",
+        "type": "string"
+       }
+      },
+      "required": [
+       "trial",
+       "pid",
+       "start"
+      ],
+      "type": "object"
+     },
+     "maxItems": 40,
+     "type": "array"
+    },
+    "compliant": {
+     "type": "boolean"
+    },
+    "logPolicy": {
+     "additionalProperties": false,
+     "properties": {
+      "logComparedAfterExitFdReleasedStable": {
+       "const": true
+      },
+      "logFdReleasedAfterExit": {
+       "const": true
+      },
+      "logLimitBytes": {
+       "const": 16777216
+      },
+      "logStableGapMs": {
+       "const": 250
+      },
+      "logStableReads": {
+       "const": 2
+      },
+      "originFromRendererStream": {
+       "const": true
+      },
+      "peerMaxBytes": {
+       "const": 12582912
+      },
+      "preOriginReadMaxBytes": {
+       "const": 262144
+      },
+      "rotationInvalidatesTrial": {
+       "const": true
+      }
+     },
+     "required": [
+      "logLimitBytes",
+      "peerMaxBytes",
+      "preOriginReadMaxBytes",
+      "rotationInvalidatesTrial",
+      "logComparedAfterExitFdReleasedStable",
+      "originFromRendererStream",
+      "logFdReleasedAfterExit",
+      "logStableReads",
+      "logStableGapMs"
+     ],
+     "type": "object"
+    },
+    "schedule": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "cell": {
+        "enum": [
+         1,
+         4
+        ]
+       },
+       "firstArm": {
+        "enum": [
+         "python",
+         "rust-shell"
+        ]
+       },
+       "repeat": {
+        "maximum": 9,
+        "minimum": 0,
+        "type": "integer"
+       },
+       "slot": {
+        "maximum": 19,
+        "minimum": 0,
+        "type": "integer"
+       }
+      },
+      "required": [
+       "slot",
+       "cell",
+       "repeat",
+       "firstArm"
+      ],
+      "type": "object"
+     },
+     "maxItems": 20,
+     "minItems": 20,
+     "type": "array"
+    },
+    "scheduleSeed": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "scheduleSha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    }
+   },
+   "required": [
+    "scheduleSeed",
+    "schedule",
+    "scheduleSha256",
+    "backendIdentities",
+    "compliant",
+    "logPolicy"
+   ],
+   "type": "object"
+  },
+  "evaluated": {
+   "additionalProperties": false,
+   "properties": {
+    "branch": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "e1ProtocolSha256": {
+     "const": "39b82cb84fde56284f94af93bd09088f6f9dce29c60e3ca3601209a5b566451d"
+    },
+    "evidenceRevision": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "freezeSha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    },
+    "head": {
+     "pattern": "^[0-9a-f]{40}$",
+     "type": "string"
+    },
+    "inputsSha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    },
+    "methodRevision": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "receiptsManifestSha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    },
+    "sidecarSha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    },
+    "summarySha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    }
+   },
+   "required": [
+    "head",
+    "branch",
+    "sidecarSha256",
+    "methodRevision",
+    "freezeSha256",
+    "e1ProtocolSha256",
+    "evidenceRevision",
+    "summarySha256",
+    "inputsSha256",
+    "receiptsManifestSha256"
+   ],
+   "type": "object"
+  },
+  "exampleOnly": {
+   "const": true
+  },
+  "exploratory": {
+   "items": {
+    "additionalProperties": false,
+    "properties": {
+     "description": {
+      "pattern": "\\S",
+      "type": "string"
+     },
+     "id": {
+      "pattern": "\\S",
+      "type": "string"
+     },
+     "nonDecisional": {
+      "const": true
+     }
+    },
+    "required": [
+     "id",
+     "description",
+     "nonDecisional"
+    ],
+    "type": "object"
+   },
+   "type": "array"
+  },
+  "gateSemantics": {
+   "const": "necessary-not-sufficient"
+  },
+  "gates": {
+   "additionalProperties": false,
+   "properties": {
+    "g2": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "open": {
+          "const": true
+         }
+        },
+        "required": [
+         "open"
+        ]
+       },
+       "then": {
+        "properties": {
+         "missing": {
+          "maxItems": 0
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "missing": {
+       "items": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "type": "array",
+       "uniqueItems": true
+      },
+      "open": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "open",
+      "missing"
+     ],
+     "type": "object"
+    },
+    "ticketE5": {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "open": {
+          "const": true
+         }
+        },
+        "required": [
+         "open"
+        ]
+       },
+       "then": {
+        "properties": {
+         "missing": {
+          "maxItems": 0
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "missing": {
+       "items": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "type": "array",
+       "uniqueItems": true
+      },
+      "open": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "open",
+      "missing"
+     ],
+     "type": "object"
+    }
+   },
+   "required": [
+    "ticketE5",
+    "g2"
+   ],
+   "type": "object"
+  },
+  "independence": {
+   "additionalProperties": false,
+   "properties": {
+    "canaries": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "S": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "id": {
+        "enum": [
+         "canary|python|cell1|lat:cold_backend_ready_ms",
+         "canary|python|cell1|res:live_idle:component:backend:rssMiB",
+         "canary|python|cell1|lat:io_ms",
+         "canary|python|cell4|lat:cold_backend_ready_ms",
+         "canary|python|cell4|res:live_idle:component:backend:rssMiB",
+         "canary|python|cell4|lat:io_ms",
+         "canary|rust-shell|cell1|lat:cold_backend_ready_ms",
+         "canary|rust-shell|cell1|res:live_idle:component:backend:rssMiB",
+         "canary|rust-shell|cell1|lat:io_ms",
+         "canary|rust-shell|cell4|lat:cold_backend_ready_ms",
+         "canary|rust-shell|cell4|res:live_idle:component:backend:rssMiB",
+         "canary|rust-shell|cell4|lat:io_ms"
+        ]
+       },
+       "trip": {
+        "type": [
+         "boolean",
+         "null"
+        ]
+       },
+       "values": {
+        "items": {
+         "minimum": 0,
+         "type": [
+          "number",
+          "null"
+         ]
+        },
+        "maxItems": 10,
+        "minItems": 10,
+        "type": "array"
+       }
+      },
+      "required": [
+       "id",
+       "values",
+       "S",
+       "trip"
+      ],
+      "type": "object"
+     },
+     "maxItems": 12,
+     "minItems": 12,
+     "type": "array"
+    },
+    "status": {
+     "enum": [
+      "pass",
+      "fail"
+     ]
+    }
+   },
+   "required": [
+    "canaries",
+    "status"
+   ],
+   "type": "object"
+  },
+  "interpretation": {
+   "additionalProperties": false,
+   "properties": {
+    "continueScope": {
+     "const": "CONTINUE means at most that no performance regression was found on the decision-bearing rows, together with the C1 result, given the registered correctness and baseline checks it also requires. It says nothing about maintainability or any other non-performance value."
+    },
+    "killReap": {
+     "const": "A faster Rust kill/reap may come from an implementation choice, not from the language: the Python backend scans the whole host process table with psutil on every kill (`terminals.py kill()` \u2192 `_descendant_pids`), a step that Python could also remove or bound. It is not evidence that the language is faster."
+    }
+   },
+   "required": [
+    "continueScope"
+   ],
+   "type": "object"
+  },
+  "isolation": {
+   "additionalProperties": false,
+   "properties": {
+    "breach": {
+     "type": "boolean"
+    },
+    "trials": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "backendPidAfter": {
+        "minimum": 1,
+        "type": "integer"
+       },
+       "backendPidBefore": {
+        "minimum": 1,
+        "type": "integer"
+       },
+       "backendStartAfter": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "backendStartBefore": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "trial": {
+        "pattern": "\\S",
+        "type": "string"
+       }
+      },
+      "required": [
+       "trial",
+       "backendPidBefore",
+       "backendPidAfter",
+       "backendStartBefore",
+       "backendStartAfter"
+      ],
+      "type": "object"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "breach",
+    "trials"
+   ],
+   "type": "object"
+  },
+  "jointReview": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "status": {
+        "const": "pass"
+       }
+      },
+      "required": [
+       "status"
+      ]
+     },
+     "then": {
+      "properties": {
+       "reports": {
+        "minItems": 2
+       }
+      },
+      "required": [
+       "recordedBy"
+      ]
+     }
+    }
+   ],
+   "properties": {
+    "recordedBy": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "reports": {
+     "items": {
+      "$ref": "#/$defs/hashRef"
+     },
+     "type": "array"
+    },
+    "status": {
+     "enum": [
+      "pass",
+      "pending",
+      "fail"
+     ]
+    }
+   },
+   "required": [
+    "status",
+    "reports"
+   ],
+   "type": "object"
+  },
+  "limitations": {
+   "items": {
+    "pattern": "\\S",
+    "type": "string"
+   },
+   "minItems": 1,
+   "type": "array",
+   "uniqueItems": true
+  },
+  "locality": {
+   "anyOf": [
+    {
+     "type": "null"
+    },
+    {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "violation": {
+          "const": false
+         }
+        },
+        "required": [
+         "violation"
+        ]
+       },
+       "then": {
+        "properties": {
+         "findings": {
+          "maxItems": 0
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "allowlist": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "checkScript": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "findings": {
+       "items": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "type": "array",
+       "uniqueItems": true
+      },
+      "referenceManifestSha256": {
+       "pattern": "^[0-9a-f]{64}$",
+       "type": "string"
+      },
+      "scopeList": {
+       "$ref": "#/$defs/hashRef"
+      },
+      "violation": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "violation",
+      "checkScript",
+      "scopeList",
+      "allowlist",
+      "findings",
+      "referenceManifestSha256"
+     ],
+     "type": "object"
+    }
+   ]
+  },
+  "maintainability": {
+   "anyOf": [
+    {
+     "type": "null"
+    },
+    {
+     "additionalProperties": false,
+     "allOf": [
+      {
+       "if": {
+        "properties": {
+         "complete": {
+          "const": true
+         }
+        },
+        "required": [
+         "complete"
+        ]
+       },
+       "then": {
+        "properties": {
+         "analyses": {
+          "minItems": 1
+         },
+         "manualCompositionSites": {
+          "minItems": 1
+         },
+         "repeatedFacts": {
+          "minItems": 1
+         },
+         "touchedResponsibilities": {
+          "minItems": 1
+         }
+        }
+       }
+      }
+     ],
+     "properties": {
+      "analyses": {
+       "items": {
+        "$ref": "#/$defs/hashRef"
+       },
+       "type": "array"
+      },
+      "complete": {
+       "type": "boolean"
+      },
+      "manualCompositionSites": {
+       "items": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "type": "array",
+       "uniqueItems": true
+      },
+      "repeatedFacts": {
+       "items": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "type": "array",
+       "uniqueItems": true
+      },
+      "touchedResponsibilities": {
+       "items": {
+        "pattern": "\\S",
+        "type": "string"
+       },
+       "type": "array",
+       "uniqueItems": true
+      }
+     },
+     "required": [
+      "complete",
+      "analyses",
+      "touchedResponsibilities",
+      "repeatedFacts",
+      "manualCompositionSites"
+     ],
+     "type": "object"
+    }
+   ]
+  },
+  "matrix": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "complete": {
+        "const": true
+       }
+      },
+      "required": [
+       "complete"
+      ]
+     },
+     "then": {
+      "properties": {
+       "accepted": {
+        "const": 40
+       },
+       "evidenceInvalidTrials": {
+        "maxItems": 0
+       },
+       "integrityFailures": {
+        "maxItems": 0
+       },
+       "missingSlots": {
+        "maxItems": 0
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "accepted": {
+     "maximum": 40,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "attempted": {
+     "const": 40
+    },
+    "complete": {
+     "type": "boolean"
+    },
+    "evidenceInvalidTrials": {
+     "items": {
+      "pattern": "^(python|rust-shell):(1|4):[0-9]$",
+      "type": "string"
+     },
+     "type": "array",
+     "uniqueItems": true
+    },
+    "integrityFailures": {
+     "items": {
+      "pattern": "\\S",
+      "type": "string"
+     },
+     "type": "array",
+     "uniqueItems": true
+    },
+    "missingSlots": {
+     "items": {
+      "pattern": "^(python|rust-shell):(1|4):[0-9]$",
+      "type": "string"
+     },
+     "type": "array",
+     "uniqueItems": true
+    }
+   },
+   "required": [
+    "attempted",
+    "accepted",
+    "complete",
+    "integrityFailures",
+    "evidenceInvalidTrials",
+    "missingSlots"
+   ],
+   "type": "object"
+  },
+  "noisyReport": {
+   "items": {
+    "additionalProperties": false,
+    "properties": {
+     "bandReading": {
+      "enum": [
+       "within",
+       "beyond",
+       "straddles",
+       null
+      ]
+     },
+     "calibration": {
+      "additionalProperties": false,
+      "properties": {
+       "calMedAbs": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "calP90Abs": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "calValues": {
+        "items": {
+         "type": [
+          "number",
+          "null"
+         ]
+        },
+        "maxItems": 10,
+        "minItems": 10,
+        "type": "array"
+       },
+       "marginAtMedian": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "marginOverCalMedAbs": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "qHat": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+       },
+       "qHatAllPairs": {
+        "type": [
+         "number",
+         "null"
+        ]
+       }
+      },
+      "required": [
+       "qHat",
+       "qHatAllPairs",
+       "calValues",
+       "calMedAbs",
+       "calP90Abs",
+       "marginAtMedian",
+       "marginOverCalMedAbs"
+      ],
+      "type": "object"
+     },
+     "id": {
+      "enum": [
+       "stream|lat:io_ms|cell1",
+       "stream|lat:io_ms|cell4",
+       "stream|lat:io_ms:p95|cell1",
+       "stream|lat:io_ms:p95|cell4",
+       "stream|lat:burst_ms|cell1",
+       "stream|lat:burst_ms|cell4",
+       "stream|lat:burst_input_ms|cell1",
+       "stream|lat:burst_input_ms|cell4",
+       "stream|lat:reconnect_recovery_ms|cell1",
+       "stream|lat:reconnect_recovery_ms|cell4",
+       "stream|res:input_output:component:backend:cpuOneCorePercent|cell1",
+       "stream|res:input_output:component:backend:cpuOneCorePercent|cell4",
+       "stream|res:input_output:view:combined:cpuOneCorePercent|cell1",
+       "stream|res:input_output:view:combined:cpuOneCorePercent|cell4",
+       "stream|res:input_output:component:backend:rssMiB|cell1",
+       "stream|res:input_output:component:backend:rssMiB|cell4",
+       "stream|res:live_idle:component:backend:rssMiB|cell1",
+       "stream|res:live_idle:component:backend:rssMiB|cell4",
+       "stream|res:empty_started_idle:component:backend:rssMiB|cell1",
+       "stream|res:empty_started_idle:component:backend:rssMiB|cell4",
+       "lifecycle|lat:first_shell_ready_ms|cell1",
+       "lifecycle|lat:first_shell_ready_ms|cell4",
+       "lifecycle|lat:warm_shell_ready_ms|cell1",
+       "lifecycle|lat:warm_shell_ready_ms|cell4",
+       "lifecycle|lat:cold_to_first_usable_ms|cell1",
+       "lifecycle|lat:cold_to_first_usable_ms|cell4",
+       "lifecycle|lat:observation_ms|cell4",
+       "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1",
+       "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4",
+       "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1",
+       "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4",
+       "lifecycle|lat:kill_reap_ms|cell1",
+       "budget|lat:first_shell_ack_ms|cell1",
+       "budget|lat:first_shell_ack_ms|cell4",
+       "budget|lat:warm_shell_ack_ms|cell1",
+       "budget|lat:warm_shell_ack_ms|cell4",
+       "beat|lat:kill_reap_ms|cell4"
+      ]
+     },
+     "label": {
+      "const": "noisy (reported with error, not decision-bearing)"
+     },
+     "matrix": {
+      "additionalProperties": false,
+      "properties": {
+       "bandD": {
+        "items": {
+         "type": "number"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": [
+         "array",
+         "null"
+        ]
+       },
+       "bandExcess": {
+        "items": {
+         "type": "number"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": [
+         "array",
+         "null"
+        ]
+       },
+       "d": {
+        "items": {
+         "type": "number"
+        },
+        "maxItems": 10,
+        "minItems": 10,
+        "type": [
+         "array",
+         "null"
+        ]
+       },
+       "dExcess": {
+        "items": {
+         "type": "number"
+        },
+        "maxItems": 10,
+        "minItems": 10,
+        "type": [
+         "array",
+         "null"
+        ]
+       },
+       "exceedCount": {
+        "maximum": 10,
+        "minimum": 0,
+        "type": "integer"
+       },
+       "matrixPythonMedAbs": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "meanD": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "medianD": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "medianExcess": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "pythonMean": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "pythonSd": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "rawRange": {
+        "items": {
+         "type": "number"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": [
+         "array",
+         "null"
+        ]
+       },
+       "rustMean": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "rustSd": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "sdD": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "validPairs": {
+        "maximum": 10,
+        "minimum": 0,
+        "type": "integer"
+       }
+      },
+      "required": [
+       "validPairs",
+       "exceedCount",
+       "d",
+       "dExcess",
+       "medianD",
+       "medianExcess",
+       "bandD",
+       "bandExcess",
+       "rawRange",
+       "meanD",
+       "sdD",
+       "pythonMean",
+       "pythonSd",
+       "rustMean",
+       "rustSd",
+       "matrixPythonMedAbs"
+      ],
+      "type": "object"
+     }
+    },
+    "required": [
+     "id",
+     "label",
+     "calibration",
+     "matrix",
+     "bandReading"
+    ],
+    "type": "object"
+   },
+   "maxItems": 37,
+   "type": "array",
+   "uniqueItems": true
+  },
+  "notAdoption": {
+   "const": true
+  },
+  "outcome": {
+   "enum": [
+    "continue",
+    "stop",
+    "inconclusive"
+   ]
+  },
+  "preregistration": {
+   "additionalProperties": false,
+   "properties": {
+    "calibration": {
+     "additionalProperties": false,
+     "properties": {
+      "noisyRows": {
+       "items": {
+        "enum": [
+         "stream|lat:io_ms|cell1",
+         "stream|lat:io_ms|cell4",
+         "stream|lat:io_ms:p95|cell1",
+         "stream|lat:io_ms:p95|cell4",
+         "stream|lat:burst_ms|cell1",
+         "stream|lat:burst_ms|cell4",
+         "stream|lat:burst_input_ms|cell1",
+         "stream|lat:burst_input_ms|cell4",
+         "stream|lat:reconnect_recovery_ms|cell1",
+         "stream|lat:reconnect_recovery_ms|cell4",
+         "stream|res:input_output:component:backend:cpuOneCorePercent|cell1",
+         "stream|res:input_output:component:backend:cpuOneCorePercent|cell4",
+         "stream|res:input_output:view:combined:cpuOneCorePercent|cell1",
+         "stream|res:input_output:view:combined:cpuOneCorePercent|cell4",
+         "stream|res:input_output:component:backend:rssMiB|cell1",
+         "stream|res:input_output:component:backend:rssMiB|cell4",
+         "stream|res:live_idle:component:backend:rssMiB|cell1",
+         "stream|res:live_idle:component:backend:rssMiB|cell4",
+         "stream|res:empty_started_idle:component:backend:rssMiB|cell1",
+         "stream|res:empty_started_idle:component:backend:rssMiB|cell4",
+         "lifecycle|lat:first_shell_ready_ms|cell1",
+         "lifecycle|lat:first_shell_ready_ms|cell4",
+         "lifecycle|lat:warm_shell_ready_ms|cell1",
+         "lifecycle|lat:warm_shell_ready_ms|cell4",
+         "lifecycle|lat:cold_to_first_usable_ms|cell1",
+         "lifecycle|lat:cold_to_first_usable_ms|cell4",
+         "lifecycle|lat:observation_ms|cell4",
+         "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1",
+         "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4",
+         "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1",
+         "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4",
+         "lifecycle|lat:kill_reap_ms|cell1",
+         "budget|lat:first_shell_ack_ms|cell1",
+         "budget|lat:first_shell_ack_ms|cell4",
+         "budget|lat:warm_shell_ack_ms|cell1",
+         "budget|lat:warm_shell_ack_ms|cell4",
+         "beat|lat:kill_reap_ms|cell4"
+        ]
+       },
+       "type": "array",
+       "uniqueItems": true
+      },
+      "receipts": {
+       "items": {
+        "$ref": "#/$defs/hashRef"
+       },
+       "type": "array"
+      },
+      "uncalibratedRows": {
+       "items": {
+        "enum": [
+         "stream|lat:io_ms|cell1",
+         "stream|lat:io_ms|cell4",
+         "stream|lat:io_ms:p95|cell1",
+         "stream|lat:io_ms:p95|cell4",
+         "stream|lat:burst_ms|cell1",
+         "stream|lat:burst_ms|cell4",
+         "stream|lat:burst_input_ms|cell1",
+         "stream|lat:burst_input_ms|cell4",
+         "stream|lat:reconnect_recovery_ms|cell1",
+         "stream|lat:reconnect_recovery_ms|cell4",
+         "stream|res:input_output:component:backend:cpuOneCorePercent|cell1",
+         "stream|res:input_output:component:backend:cpuOneCorePercent|cell4",
+         "stream|res:input_output:view:combined:cpuOneCorePercent|cell1",
+         "stream|res:input_output:view:combined:cpuOneCorePercent|cell4",
+         "stream|res:input_output:component:backend:rssMiB|cell1",
+         "stream|res:input_output:component:backend:rssMiB|cell4",
+         "stream|res:live_idle:component:backend:rssMiB|cell1",
+         "stream|res:live_idle:component:backend:rssMiB|cell4",
+         "stream|res:empty_started_idle:component:backend:rssMiB|cell1",
+         "stream|res:empty_started_idle:component:backend:rssMiB|cell4",
+         "lifecycle|lat:first_shell_ready_ms|cell1",
+         "lifecycle|lat:first_shell_ready_ms|cell4",
+         "lifecycle|lat:warm_shell_ready_ms|cell1",
+         "lifecycle|lat:warm_shell_ready_ms|cell4",
+         "lifecycle|lat:cold_to_first_usable_ms|cell1",
+         "lifecycle|lat:cold_to_first_usable_ms|cell4",
+         "lifecycle|lat:observation_ms|cell4",
+         "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1",
+         "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4",
+         "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1",
+         "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4",
+         "lifecycle|lat:kill_reap_ms|cell1",
+         "budget|res:live_idle:component:sidecar:rssMiB|cell1",
+         "budget|res:live_idle:component:sidecar:rssMiB|cell4",
+         "budget|res:input_output:component:sidecar:rssMiB|cell1",
+         "budget|res:input_output:component:sidecar:rssMiB|cell4",
+         "budget|res:empty_started_idle:component:sidecar:rssMiB|cell1",
+         "budget|res:empty_started_idle:component:sidecar:rssMiB|cell4",
+         "budget|lat:first_shell_ack_ms|cell1",
+         "budget|lat:first_shell_ack_ms|cell4",
+         "budget|lat:warm_shell_ack_ms|cell1",
+         "budget|lat:warm_shell_ack_ms|cell4",
+         "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell1",
+         "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell4",
+         "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell1",
+         "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell4",
+         "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell1",
+         "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell4",
+         "beat|lat:kill_reap_ms|cell4"
+        ]
+       },
+       "type": "array",
+       "uniqueItems": true
+      }
+     },
+     "required": [
+      "receipts",
+      "noisyRows",
+      "uncalibratedRows"
+     ],
+     "type": "object"
+    },
+    "document": {
+     "pattern": "\\S",
+     "type": "string"
+    },
+    "options": {
+     "additionalProperties": false,
+     "properties": {
+      "c1Noisy": {
+       "enum": [
+        "b",
+        "n/a"
+       ]
+      },
+      "calibration": {
+       "enum": [
+        "none",
+        "rows",
+        "rows+reader"
+       ]
+      },
+      "descendantSnapshot": {
+       "const": "deferred"
+      },
+      "noisyGuard": {
+       "enum": [
+        8,
+        "n/a"
+       ]
+      },
+      "pairsPerCell": {
+       "const": 10
+      },
+      "readerRequired": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "readerRequired",
+      "descendantSnapshot",
+      "calibration",
+      "pairsPerCell",
+      "c1Noisy",
+      "noisyGuard"
+     ],
+     "type": "object"
+    },
+    "sha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    },
+    "userApproval": {
+     "$ref": "#/$defs/evidenceRef"
+    }
+   },
+   "required": [
+    "document",
+    "sha256",
+    "userApproval",
+    "options",
+    "calibration"
+   ],
+   "type": "object"
+  },
+  "readerBenchmark": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "status": {
+        "enum": [
+         "pass",
+         "worse",
+         "unresolved"
+        ]
+       }
+      },
+      "required": [
+       "status"
+      ]
+     },
+     "then": {
+      "properties": {
+       "calibrationRuns": {
+        "minimum": 10
+       },
+       "fixtures": {
+        "minItems": 2
+       },
+       "goldenEvents": {
+        "$ref": "#/$defs/hashRef"
+       },
+       "rows": {
+        "required": [
+         "reader|m1_wall_ms|claude",
+         "reader|m2_cpu_s|claude",
+         "reader|m3_peak_rss_mib|claude",
+         "reader|m1_wall_ms|opencode",
+         "reader|m2_cpu_s|opencode",
+         "reader|m3_peak_rss_mib|opencode"
+        ]
+       },
+       "runs": {
+        "minimum": 10
+       }
+      },
+      "required": [
+       "rows"
+      ]
+     }
+    }
+   ],
+   "properties": {
+    "calibrationRuns": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "findings": {
+     "items": {
+      "pattern": "\\S",
+      "type": "string"
+     },
+     "type": "array",
+     "uniqueItems": true
+    },
+    "fixtures": {
+     "items": {
+      "$ref": "#/$defs/hashRef"
+     },
+     "type": "array"
+    },
+    "goldenEvents": {
+     "oneOf": [
+      {
+       "$ref": "#/$defs/hashRef"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "m0": {
+     "additionalProperties": false,
+     "properties": {
+      "claude": {
+       "additionalProperties": false,
+       "properties": {
+        "python": {
+         "type": "boolean"
+        },
+        "rust": {
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "python",
+        "rust"
+       ],
+       "type": "object"
+      },
+      "opencode": {
+       "additionalProperties": false,
+       "properties": {
+        "python": {
+         "type": "boolean"
+        },
+        "rust": {
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "python",
+        "rust"
+       ],
+       "type": "object"
+      }
+     },
+     "required": [
+      "claude",
+      "opencode"
+     ],
+     "type": "object"
+    },
+    "rows": {
+     "additionalProperties": false,
+     "properties": {
+      "reader|m1_wall_ms|claude": {
+       "allOf": [
+        {
+         "$ref": "#/$defs/readerRow"
+        }
+       ],
+       "properties": {
+        "id": {
+         "const": "reader|m1_wall_ms|claude"
+        },
+        "unit": {
+         "const": "ms"
+        }
+       }
+      },
+      "reader|m1_wall_ms|opencode": {
+       "allOf": [
+        {
+         "$ref": "#/$defs/readerRow"
+        }
+       ],
+       "properties": {
+        "id": {
+         "const": "reader|m1_wall_ms|opencode"
+        },
+        "unit": {
+         "const": "ms"
+        }
+       }
+      },
+      "reader|m2_cpu_s|claude": {
+       "allOf": [
+        {
+         "$ref": "#/$defs/readerRow"
+        }
+       ],
+       "properties": {
+        "id": {
+         "const": "reader|m2_cpu_s|claude"
+        },
+        "unit": {
+         "const": "s"
+        }
+       }
+      },
+      "reader|m2_cpu_s|opencode": {
+       "allOf": [
+        {
+         "$ref": "#/$defs/readerRow"
+        }
+       ],
+       "properties": {
+        "id": {
+         "const": "reader|m2_cpu_s|opencode"
+        },
+        "unit": {
+         "const": "s"
+        }
+       }
+      },
+      "reader|m3_peak_rss_mib|claude": {
+       "allOf": [
+        {
+         "$ref": "#/$defs/readerRow"
+        }
+       ],
+       "properties": {
+        "id": {
+         "const": "reader|m3_peak_rss_mib|claude"
+        },
+        "unit": {
+         "const": "MiB"
+        }
+       }
+      },
+      "reader|m3_peak_rss_mib|opencode": {
+       "allOf": [
+        {
+         "$ref": "#/$defs/readerRow"
+        }
+       ],
+       "properties": {
+        "id": {
+         "const": "reader|m3_peak_rss_mib|opencode"
+        },
+        "unit": {
+         "const": "MiB"
+        }
+       }
+      }
+     },
+     "type": "object"
+    },
+    "runs": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "status": {
+     "enum": [
+      "pass",
+      "worse",
+      "unresolved",
+      "not_run",
+      "not_required"
+     ]
+    }
+   },
+   "required": [
+    "status",
+    "fixtures",
+    "goldenEvents",
+    "calibrationRuns",
+    "runs",
+    "findings",
+    "m0",
+    "rows"
+   ],
+   "type": "object"
+  },
+  "receiptsManifest": {
+   "additionalProperties": false,
+   "properties": {
+    "evidence": {
+     "$ref": "#/$defs/evidenceRef"
+    },
+    "sha256": {
+     "pattern": "^[0-9a-f]{64}$",
+     "type": "string"
+    }
+   },
+   "required": [
+    "sha256",
+    "evidence"
+   ],
+   "type": "object"
+  },
+  "reportOnly": {
+   "additionalProperties": false,
+   "properties": {
+    "nonDecisional": {
+     "const": true
+    },
+    "resizeAckMs": {
+     "additionalProperties": false,
+     "properties": {
+      "1": {
+       "additionalProperties": false,
+       "properties": {
+        "medianDelta": {
+         "type": [
+          "number",
+          "null"
+         ]
+        },
+        "validPairs": {
+         "maximum": 10,
+         "minimum": 0,
+         "type": "integer"
+        }
+       },
+       "required": [
+        "validPairs",
+        "medianDelta"
+       ],
+       "type": "object"
+      },
+      "4": {
+       "additionalProperties": false,
+       "properties": {
+        "medianDelta": {
+         "type": [
+          "number",
+          "null"
+         ]
+        },
+        "validPairs": {
+         "maximum": 10,
+         "minimum": 0,
+         "type": "integer"
+        }
+       },
+       "required": [
+        "validPairs",
+        "medianDelta"
+       ],
+       "type": "object"
+      }
+     },
+     "required": [
+      "1",
+      "4"
+     ],
+     "type": "object"
+    }
+   },
+   "required": [
+    "nonDecisional",
+    "resizeAckMs"
+   ],
+   "type": "object"
+  },
+  "rows": {
+   "additionalProperties": false,
+   "properties": {
+    "beat|lat:kill_reap_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowBeat"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "beat"
+      },
+      "id": {
+       "const": "beat|lat:kill_reap_ms|cell4"
+      },
+      "kind": {
+       "const": "beat"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": 20,
+        "mode": "relative",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "lat:kill_reap_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "budget|lat:first_shell_ack_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|lat:first_shell_ack_ms|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 15
+       }
+      },
+      "metric": {
+       "const": "lat:first_shell_ack_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "budget|lat:first_shell_ack_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|lat:first_shell_ack_ms|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 15
+       }
+      },
+      "metric": {
+       "const": "lat:first_shell_ack_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "budget|lat:warm_shell_ack_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|lat:warm_shell_ack_ms|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 4
+       }
+      },
+      "metric": {
+       "const": "lat:warm_shell_ack_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "budget|lat:warm_shell_ack_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|lat:warm_shell_ack_ms|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 4
+       }
+      },
+      "metric": {
+       "const": "lat:warm_shell_ack_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.05
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:component:sidecar:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.05
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:component:sidecar:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "budget|res:empty_started_idle:component:sidecar:rssMiB|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:empty_started_idle:component:sidecar:rssMiB|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 6.5
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:component:sidecar:rssMiB"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "budget|res:empty_started_idle:component:sidecar:rssMiB|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:empty_started_idle:component:sidecar:rssMiB|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 6.5
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:component:sidecar:rssMiB"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.3
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:sidecar:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.3
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:sidecar:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "budget|res:input_output:component:sidecar:rssMiB|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:input_output:component:sidecar:rssMiB|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 6.5
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:sidecar:rssMiB"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "budget|res:input_output:component:sidecar:rssMiB|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:input_output:component:sidecar:rssMiB|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 6.5
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:sidecar:rssMiB"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:component:sidecar:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:component:sidecar:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "budget|res:live_idle:component:sidecar:rssMiB|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:live_idle:component:sidecar:rssMiB|cell1"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 6.5
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:component:sidecar:rssMiB"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "budget|res:live_idle:component:sidecar:rssMiB|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "budget"
+      },
+      "id": {
+       "const": "budget|res:live_idle:component:sidecar:rssMiB|cell4"
+      },
+      "kind": {
+       "const": "budget"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 6.5
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:component:sidecar:rssMiB"
+      },
+      "source": {
+       "const": "rust-value"
+      },
+      "status": {
+       "not": {
+        "const": "noisy"
+       }
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "lifecycle|lat:cold_to_first_usable_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:cold_to_first_usable_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": 30,
+        "mode": "relative",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "lat:cold_to_first_usable_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|lat:cold_to_first_usable_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:cold_to_first_usable_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": 30,
+        "mode": "relative",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "lat:cold_to_first_usable_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|lat:first_shell_ready_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:first_shell_ready_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 20
+       }
+      },
+      "metric": {
+       "const": "lat:first_shell_ready_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|lat:first_shell_ready_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:first_shell_ready_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 20
+       }
+      },
+      "metric": {
+       "const": "lat:first_shell_ready_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|lat:kill_reap_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:kill_reap_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 40
+       }
+      },
+      "metric": {
+       "const": "lat:kill_reap_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|lat:observation_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:observation_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 5
+       }
+      },
+      "metric": {
+       "const": "lat:observation_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|lat:warm_shell_ready_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:warm_shell_ready_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 20
+       }
+      },
+      "metric": {
+       "const": "lat:warm_shell_ready_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|lat:warm_shell_ready_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|lat:warm_shell_ready_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 20
+       }
+      },
+      "metric": {
+       "const": "lat:warm_shell_ready_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:view:combined:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:view:combined:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:view:combined:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "lifecycle"
+      },
+      "id": {
+       "const": "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.1
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:view:combined:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "stream|lat:burst_input_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:burst_input_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 10
+       }
+      },
+      "metric": {
+       "const": "lat:burst_input_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:burst_input_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:burst_input_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 10
+       }
+      },
+      "metric": {
+       "const": "lat:burst_input_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:burst_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:burst_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 10
+       }
+      },
+      "metric": {
+       "const": "lat:burst_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:burst_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:burst_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 10
+       }
+      },
+      "metric": {
+       "const": "lat:burst_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:io_ms:p95|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:io_ms:p95|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "lat:io_ms:p95"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:io_ms:p95|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:io_ms:p95|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "lat:io_ms:p95"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:io_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:io_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.5
+       }
+      },
+      "metric": {
+       "const": "lat:io_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:io_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:io_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 0.5
+       }
+      },
+      "metric": {
+       "const": "lat:io_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:reconnect_recovery_ms|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:reconnect_recovery_ms|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 3
+       }
+      },
+      "metric": {
+       "const": "lat:reconnect_recovery_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|lat:reconnect_recovery_ms|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|lat:reconnect_recovery_ms|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "P",
+        "floor": null,
+        "mode": "absolute",
+        "value": 3
+       }
+      },
+      "metric": {
+       "const": "lat:reconnect_recovery_ms"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "ms"
+      }
+     }
+    },
+    "stream|res:empty_started_idle:component:backend:rssMiB|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:empty_started_idle:component:backend:rssMiB|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:component:backend:rssMiB"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "stream|res:empty_started_idle:component:backend:rssMiB|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:empty_started_idle:component:backend:rssMiB|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "res:empty_started_idle:component:backend:rssMiB"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "stream|res:input_output:component:backend:cpuOneCorePercent|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:input_output:component:backend:cpuOneCorePercent|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": 0.15,
+        "mode": "relative",
+        "value": 0.12
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:backend:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "stream|res:input_output:component:backend:cpuOneCorePercent|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:input_output:component:backend:cpuOneCorePercent|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": 0.15,
+        "mode": "relative",
+        "value": 0.12
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:backend:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "stream|res:input_output:component:backend:rssMiB|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:input_output:component:backend:rssMiB|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:backend:rssMiB"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "stream|res:input_output:component:backend:rssMiB|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:input_output:component:backend:rssMiB|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "res:input_output:component:backend:rssMiB"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "stream|res:input_output:view:combined:cpuOneCorePercent|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:input_output:view:combined:cpuOneCorePercent|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": 0.2,
+        "mode": "relative",
+        "value": 0.15
+       }
+      },
+      "metric": {
+       "const": "res:input_output:view:combined:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "stream|res:input_output:view:combined:cpuOneCorePercent|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:input_output:view:combined:cpuOneCorePercent|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": 0.2,
+        "mode": "relative",
+        "value": 0.15
+       }
+      },
+      "metric": {
+       "const": "res:input_output:view:combined:cpuOneCorePercent"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "pt"
+      }
+     }
+    },
+    "stream|res:live_idle:component:backend:rssMiB|cell1": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 1
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:live_idle:component:backend:rssMiB|cell1"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:component:backend:rssMiB"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    },
+    "stream|res:live_idle:component:backend:rssMiB|cell4": {
+     "allOf": [
+      {
+       "$ref": "#/$defs/rowStd"
+      }
+     ],
+     "properties": {
+      "cell": {
+       "const": 4
+      },
+      "class": {
+       "const": "stream"
+      },
+      "id": {
+       "const": "stream|res:live_idle:component:backend:rssMiB|cell4"
+      },
+      "kind": {
+       "const": "parity"
+      },
+      "margin": {
+       "const": {
+        "basis": "J",
+        "floor": null,
+        "mode": "absolute",
+        "value": 1.0
+       }
+      },
+      "metric": {
+       "const": "res:live_idle:component:backend:rssMiB"
+      },
+      "source": {
+       "const": "paired-delta"
+      },
+      "unit": {
+       "const": "MiB"
+      }
+     }
+    }
+   },
+   "required": [
+    "stream|lat:io_ms|cell1",
+    "stream|lat:io_ms|cell4",
+    "stream|lat:io_ms:p95|cell1",
+    "stream|lat:io_ms:p95|cell4",
+    "stream|lat:burst_ms|cell1",
+    "stream|lat:burst_ms|cell4",
+    "stream|lat:burst_input_ms|cell1",
+    "stream|lat:burst_input_ms|cell4",
+    "stream|lat:reconnect_recovery_ms|cell1",
+    "stream|lat:reconnect_recovery_ms|cell4",
+    "stream|res:input_output:component:backend:cpuOneCorePercent|cell1",
+    "stream|res:input_output:component:backend:cpuOneCorePercent|cell4",
+    "stream|res:input_output:view:combined:cpuOneCorePercent|cell1",
+    "stream|res:input_output:view:combined:cpuOneCorePercent|cell4",
+    "stream|res:input_output:component:backend:rssMiB|cell1",
+    "stream|res:input_output:component:backend:rssMiB|cell4",
+    "stream|res:live_idle:component:backend:rssMiB|cell1",
+    "stream|res:live_idle:component:backend:rssMiB|cell4",
+    "stream|res:empty_started_idle:component:backend:rssMiB|cell1",
+    "stream|res:empty_started_idle:component:backend:rssMiB|cell4",
+    "lifecycle|lat:first_shell_ready_ms|cell1",
+    "lifecycle|lat:first_shell_ready_ms|cell4",
+    "lifecycle|lat:warm_shell_ready_ms|cell1",
+    "lifecycle|lat:warm_shell_ready_ms|cell4",
+    "lifecycle|lat:cold_to_first_usable_ms|cell1",
+    "lifecycle|lat:cold_to_first_usable_ms|cell4",
+    "lifecycle|lat:observation_ms|cell4",
+    "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell1",
+    "lifecycle|res:live_idle:view:combined:cpuOneCorePercent|cell4",
+    "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell1",
+    "lifecycle|res:empty_started_idle:view:combined:cpuOneCorePercent|cell4",
+    "lifecycle|lat:kill_reap_ms|cell1",
+    "budget|res:live_idle:component:sidecar:rssMiB|cell1",
+    "budget|res:live_idle:component:sidecar:rssMiB|cell4",
+    "budget|res:input_output:component:sidecar:rssMiB|cell1",
+    "budget|res:input_output:component:sidecar:rssMiB|cell4",
+    "budget|res:empty_started_idle:component:sidecar:rssMiB|cell1",
+    "budget|res:empty_started_idle:component:sidecar:rssMiB|cell4",
+    "budget|lat:first_shell_ack_ms|cell1",
+    "budget|lat:first_shell_ack_ms|cell4",
+    "budget|lat:warm_shell_ack_ms|cell1",
+    "budget|lat:warm_shell_ack_ms|cell4",
+    "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell1",
+    "budget|res:input_output:component:sidecar:cpuOneCorePercent|cell4",
+    "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell1",
+    "budget|res:live_idle:component:sidecar:cpuOneCorePercent|cell4",
+    "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell1",
+    "budget|res:empty_started_idle:component:sidecar:cpuOneCorePercent|cell4",
+    "beat|lat:kill_reap_ms|cell4"
+   ],
+   "type": "object"
+  },
+  "schema": {
+   "const": "acr-g1e-outcome/14"
+  },
+  "survivors": {
+   "additionalProperties": false,
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "rustArm": {
+        "const": false
+       }
+      },
+      "required": [
+       "rustArm"
+      ]
+     },
+     "then": {
+      "properties": {
+       "trials": {
+        "maxItems": 0
+       }
+      }
+     }
+    }
+   ],
+   "properties": {
+    "rustArm": {
+     "type": "boolean"
+    },
+    "trials": {
+     "items": {
+      "pattern": "\\S",
+      "type": "string"
+     },
+     "type": "array",
+     "uniqueItems": true
+    }
+   },
+   "required": [
+    "rustArm",
+    "trials"
+   ],
+   "type": "object"
+  },
+  "ticket": {
+   "const": "E4"
+  }
+ },
+ "required": [
+  "schema",
+  "ticket",
+  "derivation",
+  "evaluated",
+  "preregistration",
+  "design",
+  "independence",
+  "matrix",
+  "survivors",
+  "isolation",
+  "claudeObservation",
+  "baselineIdentity",
+  "locality",
+  "maintainability",
+  "readerBenchmark",
+  "correctness",
+  "rows",
+  "reportOnly",
+  "exploratory",
+  "decision",
+  "outcome",
+  "limitations",
+  "receiptsManifest",
+  "jointReview",
+  "continuationAuthority",
+  "gates",
+  "gateSemantics",
+  "notAdoption",
+  "noisyReport",
+  "c1Report",
+  "interpretation"
+ ],
+ "title": "G1-E outcome (ticket E4) \u2014 complete standalone schema v10; ticket-06 schema acr-g1-outcome/5 and schemas acr-g1e-outcome/1 (E2 v2), /2 (v3), /3 (v4), /4 (v5), /5 (v6), /6 (v7), /7 (v8) and /8 (v9) stay history",
+ "type": "object"
+}

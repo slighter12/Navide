@@ -1,0 +1,245 @@
+{
+ "entries": [
+  {
+   "category": "bare-deadline",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 740,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line. Base create alone calls this Python-spawn failure cleanup (terminals.py:657-700,724-740); Rust creation selects create_async (ws_handlers.py:8917-8939; cli_runtime.py:1120-1123). B: Only base create calls it (terminals.py:657,660,700); RustTerminalService.create raises (cli_runtime.py:1120-1121) and the Rust arm creates via create_async (:1123; ws_handlers.py:8917-8918); RuntimeProcessView has no wait (cli_runtime.py:102-108).",
+   "referenceLine": 740,
+   "symbol": "_abort_failed_create",
+   "text": "proc.wait(timeout=1.0)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  },
+  {
+   "category": "sleep-wait",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 1375,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line. Base kill alone starts _kill_gracefully (terminals.py:1149-1228,1325-1375); RustTerminalService.kill overrides it (cli_runtime.py:1722-1744). B: Only base kill calls it (terminals.py:1224); overridden by RustTerminalService.kill (cli_runtime.py:1722).",
+   "referenceLine": 1375,
+   "symbol": "_kill_gracefully",
+   "text": "await asyncio.sleep(0.05)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  },
+  {
+   "category": "sleep-wait",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 1436,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line. Base kill, graceful kill and Python read-error survivor cleanup call this helper (terminals.py:1262-1269,1394-1398,1410-1436); Rust overrides kill and _close and uses native kill after read error (cli_runtime.py:1539-1552,1625-1643,1722-1744). B: Callers base kill (:1268), _kill_gracefully (:1395), _put_down_error_survivor (:1421 <- _finish_close :2114 <- base _close); overridden by RustTerminalService.kill (cli_runtime.py:1722) and _close (:1539).",
+   "referenceLine": 1436,
+   "symbol": "_escalate_kill",
+   "text": "await asyncio.sleep(0.05)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  },
+  {
+   "category": "sleep-wait",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 1553,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line. Only base _queue_exit_reap schedules the sweeper, from base _finish_close/_settle_exit (terminals.py:2064-2152); Rust overrides _close and runs native cleanup instead (cli_runtime.py:1539-1552,1680-1720). B: Started only by _queue_exit_reap (:2130) from _finish_close (:2107) / _settle_exit (:2152), both reached only from base _close, overridden by RustTerminalService._close (cli_runtime.py:1539).",
+   "referenceLine": 1553,
+   "symbol": "_reap_pending_orphans",
+   "text": "await asyncio.sleep(_EXIT_ORPHAN_GRACE_S)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  },
+  {
+   "category": "sleep-wait",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 1660,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line. Base kill_all polls Python child processes (terminals.py:1591-1673); RustTerminalService.kill_all overrides that shutdown path (cli_runtime.py:1760-1785). B: Overridden by RustTerminalService.kill_all (cli_runtime.py:1760), which never calls the base; app.py:2547 dispatches to the override.",
+   "referenceLine": 1660,
+   "symbol": "kill_all",
+   "text": "await asyncio.sleep(0.05)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  },
+  {
+   "category": "bare-deadline",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 1670,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line. Base kill_all reaps a Python child (terminals.py:1660-1673); RustTerminalService.kill_all overrides it (cli_runtime.py:1760-1785), and its RuntimeProcessView is not that child handle (cli_runtime.py:109-122). B: Overridden by RustTerminalService.kill_all (cli_runtime.py:1760); target is a Python-spawned session.proc, and RuntimeProcessView has no wait (cli_runtime.py:102-108).",
+   "referenceLine": 1670,
+   "symbol": "kill_all",
+   "text": "session.proc.wait(timeout=1.0)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  },
+  {
+   "category": "sleep-wait",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 2060,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line, although added at U relative to older history. Base _close schedules this Python-child EOF wait (terminals.py:1986-2062); Rust overrides _close and starts _finish_stream instead (cli_runtime.py:1539-1552,1576-1604). B: Created only by base _close (terminals.py:2035), overridden by RustTerminalService._close (cli_runtime.py:1539). Added by U: baseline by definition (V5 item 7).",
+   "referenceLine": 2060,
+   "symbol": "_close_after_reap",
+   "text": "await asyncio.sleep(0.01)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  },
+  {
+   "category": "sleep-wait",
+   "classification": "python-arm-lifecycle-only",
+   "file": "backend/agent_team_backend/terminals.py",
+   "loadedLine": 2143,
+   "reason": "Both reviewers: unchanged U line reachable only from the Python arm's own lifecycle code. A: Unchanged U line. Base _close/_close_after_reap reach this Python-child EOF settler (terminals.py:2039-2062,2132-2152); Rust overrides _close and settles via native SESSION_EXITED/SESSION_CLEANED (cli_runtime.py:1539-1552,1576-1643,1680-1720). B: Called only by base _close (:2045) and _close_after_reap (:2062), both unreachable on the Rust arm: RustTerminalService._close overrides _close (cli_runtime.py:1539).",
+   "referenceLine": 2143,
+   "symbol": "_settle_exit",
+   "text": "await asyncio.sleep(0.05)",
+   "verdicts": [
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-a.md",
+      "sha256": "82d9ee35f7476e4d3b1863ad13732af8cf21ab7d5e99b445608d2ed0bf535c5d"
+     },
+     "reviewer": "A",
+     "session": "7ec4c904-69af-4ca6-8391-11774de69ab5"
+    },
+    {
+     "classification": "python-arm-lifecycle-only",
+     "report": {
+      "path": ".scratch/agent-cli-runtime-evaluation/evidence/e4/verdicts/reviewer-v5v6-b.md",
+      "sha256": "4f391346e7f56cdbf90afbaccde3cebfb486b3d03bc1dcf2c05acbc026533d07"
+     },
+     "reviewer": "B",
+     "session": "82a06dea-bd11-46a6-852c-514c588baef8"
+    }
+   ]
+  }
+ ],
+ "schema": "acr-g1e-locality-allowlist/2"
+}
