@@ -1,0 +1,1450 @@
+name: G3 Diag5 Windows (not evidence)
+
+# DRAFT (diag5). Evaluation only. A FIFTH SHORT DIAGNOSTIC on the real Windows x64 runner image (windows-2025), built from the rehearsal draft on the rh21 pack. It is NOT evidence, it is NOT a rehearsal
+# and it does not count against the rehearsal cap (D11): it runs no cost run, no matrix, no calibration chain and no measurement. diag4 (run 43263564083) passed every step but `correctness`, where five
+# node ids of one pytest file failed on a POSIX-only fixture (OUT/diag4/results.md, D4-1 and D4-2); the rh21 pack lists those two cases as not runnable on Windows and deselects them there.
+# TRIGGER: a push of a branch whose name matches eval/agent-cli-runtime-windows-diag-r5* (first eval/agent-cli-runtime-windows-diag-r5; a retry is the same commit under a longer name). The tip is the freeze head plus this one file.
+# STAGE H5 FILLS, before this file is committed to the workflows directory of the branch: H5_FILL_PACK_COMMIT, H5_FILL_PACK_DIGEST.
+# The identity step is the registered one with this file's own name: the commit is the freeze head plus exactly this workflow file.
+# STEPS, copied block for block from the rehearsal draft, in its order: checkouts, head check, pack digest and overlay, pins, identity, toolchains, install, the ps shim, the sidecar build, the packaged
+# build, Smoke, the ConPTY probe, then the rehearsal's own test steps: the fault-hook proof, `Rust tests` (pwsh, --no-fail-fast), the G2 environment and pytest with its two guards, the three principal
+# steps, the correctness step and `bind`; then `Build F0`, also the rehearsal's own block. A copied step that has no bound in the rehearsal draft gets a `timeout-minutes` line here and nothing else
+# changes in it. Not copied: the quiet gate and the cost run.
+# DIAG STEPS. `queue`, the job's first step, records how long the job waited for its runner (the push time of the event against the clock, and the run's and the job's own times from the API when it
+# answers without a token; information only). `teststeps`, after `bind`, runs the `receipts` and `principal_cases` commands once more with their error output kept and lists their input files
+# (information only: in diag3 both failed with nothing on record, in diag4 both passed). The stage step keeps the redacted tail of every plan step's log and the correctness result files.
+# `image` records the runner image and the inbox console's file version. `tools` writes four files that are in no branch and no pack. `holdsprobe` runs the log final check's open-files
+# test on a held file, a released one and a process that is gone; `identityprobe` takes one file's identity with Python and with the runner's stat. `shellready_python` and `shellready_rust` (information
+# only) record the raw bytes of the ordinary shells' READY lines. Then four shell attempts, each its own step: cell 1 and cell 4 (four peers, 21 size changes to peer 0) of the Python arm and of the
+# Rust arm. `diag5_attempt_run.py` asks the pack's own `hosted_driver` for the rehearsal's cost plan, takes its `calibrate-shell` step (its environment, its argv), puts the diag test file in the place
+# of the matrix file and runs that ONE step through the pack's plan runner; the test file calls the pack's `g3ShellAttempt.runAttempt` once: a discarded warm-up, its root kept when it did not pass.
+# The attempt steps run whatever the test steps, Smoke and the probes did, as long as F0, the sidecar build and the tools exist; each begins with the cost step's own ps-shim guard. `verdicts` then
+# writes one verdict per check of each attempt (every phase, the ledger rules, `delta - accepted - L` per peer, the three stages of the rehearsal verdict's per-receipt check).
+# UPLOADED per attempt: the receipt (its latency arrays as lengths, but for the 20 report-only resize probes) and its failure text, every phase outcome, the redacted tail of the driver's output and of the
+# step log, the ledger records, per peer `delta - accepted - L`, `logFile.size` and `resize_ack_ms`, and from a kept root the peer receipts, the redacted backend log tails, the peer logs and peer bytes.
+# The resource samples and the full latency arrays stay on the runner. Every step after install is `continue-on-error` with an id; the last step, after the upload, fails the job when a decisive step did
+# not succeed. Every step has a bound and the job's timeout is their sum. The JavaScript runtime is plain default Bun; the pinned actions are the rehearsal draft's.
+
+on:
+  push:
+    branches:
+      - 'eval/agent-cli-runtime-windows-diag-r5*'
+
+permissions:
+  contents: read
+
+env:
+  FREEZE_H: 202084cf74eccb07bec366897ebf4c588799e72e
+  PACK_COMMIT: "7940a6b7b416bdfe75f1c8a397123cf6696305ee"
+  PACK_DIGEST: "e892106514f243129b833707cf621a8026f7cf3f7d545ce84e1e4b8732eb9511"
+
+jobs:
+  diag:
+    name: diag5-${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 613
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            runner: windows-2025
+            system: Windows
+    defaults:
+      run:
+        shell: bash
+    env:
+      G3H_OS: ${{ matrix.system }}
+    steps:
+      - name: diag5, record how long the job waited for its runner (first step; information only, it cannot fail the job)
+        id: queue
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          PUSHED_AT: ${{ github.event.repository.pushed_at }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          now="$(date -u +%s)"
+          mkdir -p "$RUNNER_TEMP/diag5/out"
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$RUN_ATTEMPT"
+          run="$(curl -sS --max-time 20 -H 'Accept: application/vnd.github+json' "$api" 2>/dev/null | jq -c '{created_at, run_started_at}' 2>/dev/null || true)"
+          jobs="$(curl -sS --max-time 20 -H 'Accept: application/vnd.github+json' "$api/jobs" 2>/dev/null | jq -c '[.jobs[]? | {created_at, started_at}]' 2>/dev/null || true)"
+          jq -n --arg now "$now" --arg pushed "$PUSHED_AT" --arg attempt "$RUN_ATTEMPT" --arg ref "$REF_NAME" --argjson run "${run:-null}" --argjson jobs "${jobs:-null}" \
+            '($pushed | tonumber? // null) as $p | {schema: "acr-g3h-diag5-queue/1", notEvidence: true, ref: $ref, runAttempt: $attempt, firstStepAtEpoch: ($now | tonumber), pushedAtEpoch: $p, secondsFromThePushToTheFirstStep: (if $p then ($now | tonumber) - $p else null end), apiRun: $run, apiJobs: $jobs}' \
+            > "$RUNNER_TEMP/diag5/out/queue-wait.json" || echo "the queue record could not be written"
+          cat "$RUNNER_TEMP/diag5/out/queue-wait.json" || true
+
+      - name: Pin line endings before any checkout
+        timeout-minutes: 1
+        run: git config --global core.autocrlf false
+
+      - name: Check out evaluation branch
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the harness pack
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PACK_COMMIT }}
+          path: pack
+          persist-credentials: false
+
+      - name: Check the run head and the checked-out bytes
+        timeout-minutes: 1
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git config --get core.autocrlf)" = "false"
+          test -z "$(git status --porcelain -- . ':(exclude)pack')"
+
+      - name: Verify the pack digest, then overlay it
+        timeout-minutes: 3
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" pack/backend/tests/cli_regression/support/g3/hosted_pack.py digest pack > "$RUNNER_TEMP/pack-digest.txt"
+          cat "$RUNNER_TEMP/pack-digest.txt"
+          grep -q -F "$PACK_DIGEST" "$RUNNER_TEMP/pack-digest.txt"
+          tar -C pack --exclude=.git -cf - . | tar -C . -xf -
+
+      - name: Verify the g1e pins and the hosted inputs (first step after the overlay)
+        timeout-minutes: 3
+        id: pins
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
+
+      - name: Product identity against the freeze head (rf4c D7)
+        timeout-minutes: 2
+        id: identity
+        run: |
+          git cat-file -e "$FREEZE_H^{commit}"
+          git diff --exit-code "$FREEZE_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain --ignored -- native src backend/agent_team_backend)"
+          test "$(git diff --name-only --no-renames "$FREEZE_H" "$GITHUB_SHA")" = ".github/workflows/eval-acr-g3-diag5-windows.yml"
+
+      - name: Set up Bun (default version, no input)
+        timeout-minutes: 5
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Set up Python
+        timeout-minutes: 5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        timeout-minutes: 5
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        timeout-minutes: 10
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked dependencies and record the toolchain
+        timeout-minutes: 15
+        id: install
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h-summary"
+          rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
+
+      - name: Build the ps shim and put it first on PATH
+        timeout-minutes: 10
+        id: shim
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          cargo build --release --locked --manifest-path backend/tests/cli_regression/support/g3/hosted_ps_shim/Cargo.toml
+          cygpath -w "$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release" >> "$GITHUB_PATH"
+
+      - name: Build the sidecars and the reader fixtures
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Build the packaged app
+        id: packaged
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py packaged "$PWD" "$RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Smoke
+        id: smoke
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py smoke "$PWD" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
+
+      - name: ConPTY probe (NOT evidence, rh16 windows-4c)
+        id: conptyprobe
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py conpty-probe "$PWD" "$RUNNER_TEMP/g3r2h/conpty-probe" --rehearsal
+
+      - name: Prove the release sidecar has no fault hooks (the F0 sidecar and its harness)
+        timeout-minutes: 5
+        id: proof
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: bun tests/cli/g2Native.mjs proof --release "$NAVIDE_CLI_RUNTIME_BIN" --harness "$NAVIDE_CLI_RUNTIME_HARNESS_BIN"
+
+      - name: Rust tests
+        timeout-minutes: 60
+        id: cargo
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        shell: pwsh
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml --no-fail-fast
+
+      - name: Install the G2 test environment (the interpreter path the G2 receipt pins were taken with)
+        timeout-minutes: 10
+        id: g2env
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        shell: pwsh
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}\g2-venv
+        run: uv --project backend sync --locked
+
+      - name: Required backend cases on the F0 sidecar (G2 required list)
+        id: pytest
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.g2env.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 75
+        shell: pwsh
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}\g2-venv
+        run: pwsh -NoProfile -File tests/cli/g2-windows-pytest.ps1
+
+      - name: Require every listed case to be collected and passed
+        timeout-minutes: 3
+        id: guard
+        if: ${{ !cancelled() && hashFiles('test-results/ci/g2-windows-junit.xml') != '' }}
+        continue-on-error: true
+        run: bun tests/cli/g2Native.mjs guard --platform windows --arch x64 --required tests/cli/g2-required-windows.txt --junit test-results/ci/g2-windows-junit.xml --out test-results/ci/g2-windows-outcomes.log
+
+      - name: Require every ready receipt to name the F0 sidecar and its harness
+        timeout-minutes: 5
+        id: receipts
+        if: ${{ !cancelled() && steps.pytest.outcome != 'skipped' }}
+        continue-on-error: true
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: |
+          rc=0
+          mkdir -p test-results/ci
+          bun tests/cli/g2Native.mjs receipts --root "$G2_BASETEMP" --sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_BIN" | cut -d' ' -f1)" --harness-sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_HARNESS_BIN" | cut -d' ' -f1)" --required tests/cli/g2-required-windows.txt --expect tests/cli/g2-receipt-expectations-windows.json > test-results/ci/g2-windows-receipts.txt || rc=$?
+          cat test-results/ci/g2-windows-receipts.txt
+          exit $rc
+
+      - name: Run the production WebSocket cases on the F0 sidecar
+        timeout-minutes: 20
+        id: principal
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        shell: pwsh
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts -t 'uses one actual native runtime|sidecar death with sessions and a pending request' --reporter=default --reporter=json --outputFile.json=test-results/ci/g2-windows-ts-results.json
+
+      - name: Require both shared WebSocket cases to be collected and pass
+        timeout-minutes: 2
+        id: principal_guard
+        if: ${{ !cancelled() && hashFiles('test-results/ci/g2-windows-ts-results.json') != '' }}
+        continue-on-error: true
+        run: jq -e '[.testResults[].assertionResults[] | select(.fullName == "uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits" or .fullName == "sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime")] as $required | ($required | length) == 2 and ($required | all(.status == "passed"))' test-results/ci/g2-windows-ts-results.json
+
+      - name: Require the Windows-only production cases to be collected and pass
+        timeout-minutes: 2
+        id: principal_cases
+        if: ${{ !cancelled() && hashFiles('test-results/ci/g2-windows-ts-results.json') != '' }}
+        continue-on-error: true
+        run: jq -e -f tests/cli/g2-windows-principal.jq test-results/ci/g2-windows-ts-results.json
+
+      - name: Correctness, the 21 G1-E rows from the gates registry on the F0 sidecar, gated by case (row table, collected-and-passed gate, sidecar receipt, E1, G1)
+        id: correctness
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 75
+        shell: pwsh
+        run: |
+          $shim = [IO.Path]::GetFullPath((Join-Path $PWD.Path 'backend\tests\cli_regression\support\g3\hosted_ps_shim\target\release'))
+          $psCommand = Get-Command ps -CommandType Application -ErrorAction Stop | Select-Object -First 1
+          if ([IO.Path]::GetFullPath($psCommand.Source) -ne [IO.Path]::GetFullPath((Join-Path $shim 'ps.exe'))) { throw "ps does not resolve to the G3 shim: $($psCommand.Source)" }
+          $listing = @(& $psCommand.Source -A -o pid=)
+          if ($LASTEXITCODE -ne 0 -or $listing.Count -eq 0 -or @($listing | Where-Object { $_ -notmatch '^\s*\d+\s*$' }).Count -gt 0) { throw 'ps -A -o pid= is not shim-shaped' }
+          uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py correctness "$PWD" "$env:RUNNER_TEMP/g3r2h/pre" --rehearsal
+
+      - name: Bind the G2 required cases (by name) and the receipts to the F0 sidecar (E1)
+        timeout-minutes: 5
+        id: bind
+        if: ${{ !cancelled() && steps.correctness.outcome != 'skipped' }}
+        continue-on-error: true
+        env:
+          PYTHONPATH: backend
+        run: uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_correctness bind "$PWD" "$RUNNER_TEMP/g3r2h/pre" Windows test-results/ci/g2-windows-receipts.txt test-results/ci/g2-windows-outcomes.log test-results/ci/g2-windows-junit.xml tests/cli/g2-required-windows.txt
+
+      - name: diag5, the receipts and principal_cases commands once more with their error output kept (always runs; information only, it cannot fail the job)
+        id: teststeps
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          NAVIDE_CLI_RUNTIME_BIN: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_T05_SIDECAR: ${{ github.workspace }}\native\navide-cli-runtime\target\release\navide-cli-runtime.exe
+          NAVIDE_CLI_RUNTIME_HARNESS_BIN: ${{ runner.temp }}\g3r2h\pre\harness-target\release\navide-cli-runtime.exe
+          G2_BASETEMP: ${{ runner.temp }}\g2-basetemp
+        run: |
+          record="$RUNNER_TEMP/diag5/out/test-steps-record"
+          mkdir -p "$record"
+          {
+            for f in tests/cli/g2-receipt-expectations-windows.json tests/cli/g2-windows-principal.jq tests/cli/g2-required-windows.txt tests/cli/g2Native.mjs test-results/ci/g2-windows-junit.xml test-results/ci/g2-windows-ts-results.json; do
+              if [ -f "$f" ]; then echo "present $(sha256sum < "$f" | cut -d' ' -f1) $f"; else echo "MISSING $f"; fi
+            done
+            if [ -d "$G2_BASETEMP" ]; then echo "receipt files under the G2 basetemp: $(find "$G2_BASETEMP" -name runtime-receipts.jsonl | wc -l | tr -d ' ')"; else echo "MISSING the G2 basetemp"; fi
+          } > "$record/inputs.txt" 2>&1 || true
+          cat "$record/inputs.txt" || true
+          rc=0
+          bun tests/cli/g2Native.mjs receipts --root "$G2_BASETEMP" --sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_BIN" | cut -d' ' -f1)" --harness-sha "$(sha256sum < "$NAVIDE_CLI_RUNTIME_HARNESS_BIN" | cut -d' ' -f1)" --required tests/cli/g2-required-windows.txt --expect tests/cli/g2-receipt-expectations-windows.json > "$record/receipts-rerun.txt" 2>&1 || rc=$?
+          echo "exit=$rc" >> "$record/receipts-rerun.txt"
+          rc=0
+          jq -e -f tests/cli/g2-windows-principal.jq test-results/ci/g2-windows-ts-results.json > "$record/principal-cases-rerun.txt" 2>&1 || rc=$?
+          echo "exit=$rc" >> "$record/principal-cases-rerun.txt"
+          tail -n 40 "$record/receipts-rerun.txt" "$record/principal-cases-rerun.txt" || true
+
+      - name: diag5, record the runner image version (rh17 review N-6; information only, it cannot fail the job)
+        id: image
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag5/out"
+          {
+            echo "ImageOS: ${ImageOS:-unknown}"
+            echo "ImageVersion: ${ImageVersion:-unknown}"
+            echo "RUNNER_OS: ${RUNNER_OS:-unknown}"
+            echo "RUNNER_ARCH: ${RUNNER_ARCH:-unknown}"
+            echo "uname -sr: $(uname -sr 2>&1 || true)"
+            echo "ver: $(cmd.exe //c ver 2>&1 | tr -d '\r' | grep -v '^$' || true)"
+            echo "conhost.exe: $(pwsh -NoProfile -Command '(Get-Item "$env:SystemRoot\System32\conhost.exe").VersionInfo.ProductVersion' 2>&1 || echo unavailable)"
+          } | tee "$RUNNER_TEMP/diag5/out/image.txt"
+
+      - name: diag5, write the four diagnostic tools (they exist on this runner only) and check their bytes
+        id: tools
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          mkdir -p "$RUNNER_TEMP/diag5/tools" "$RUNNER_TEMP/diag5/out" "$RUNNER_TEMP/diag5/private"
+          cat > "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" <<'DIAG5_EOF_ATTEMPT_RUN'
+          """diag5 (NOT evidence). Runs ONE step of the diag test file through the pack's own cost path, so the step gets exactly the plan step, the environment and the sequencer the rehearsal's cost run gives
+          its shell attempts.
+
+              uv --project backend run python diag5_attempt_run.py REPO PLAN_OUT F0 BUILD_RECORD PRE_OUT SMOKE_OUT ARM CELL KIND RECORDS PRIVATE        (from the repository root)
+
+          ARM is python or rust-shell, CELL is 1 or 4, KIND is `attempt` (one whole shell attempt of that arm and cell) or `shell-ready` (no attempt: the READY line of the two ordinary shells of that arm).
+          `hosted_driver.main(["cost", REPO, PLAN_OUT, F0, BUILD_RECORD, PRE_OUT, SMOKE_OUT, "--rehearsal"])` builds the rehearsal's real cost plan (the hosted environment, the Bun preload, the termios flag, the
+          freeze and sidecar variables, the rehearsal flag) and hands it to its plan runner. This tool is that plan runner: it takes the plan's `calibrate-shell` step and nothing else, puts the diag test file in
+          the place of `g3Matrix.test.ts` in its argv, adds the diag variables, and runs that one step through the pack's unchanged `_run_plan` under its own record name. The cost run's precondition, its F0
+          re-check before each step and every other step of the plan are NOT run: the diag test file makes the per-attempt freeze and toolchain checks itself and records what they say. No cost run, no matrix,
+          no measurement. PLAN_OUT must be a rehearsal output directory (`$RUNNER_TEMP/g3r2/rehearsal/attempt-<n>`): `hosted_driver` refuses any other.
+          Afterwards the redacted tail of the step's own log (the vitest output) is written to RECORDS/step-log-tail.txt.
+          """
+          from __future__ import annotations
+
+          import json
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd() / "backend"))
+
+          STEP = "calibrate-shell"
+          MATRIX_TEST = "tests/cli/g3Matrix.test.ts"
+          DIAG_TEST = "tests/cli/g3hDiag5Attempt.test.ts"
+          GATE = "ACR_DIAG5_ATTEMPT"
+          RECORD_NAME = "run-diag5-attempt.json"
+          MODES = ("python", "rust-shell")
+          CELLS = ("1", "4")
+          KINDS = {"attempt": "attempt.json", "shell-ready": "shell-ready.json"}      # the kind and the file its test writes into RECORDS
+          TAIL_CHARS = 20000
+
+
+          def substituted(plan: list[dict], mode: str, cell: str, kind: str, records: str, private: str) -> list[dict]:
+              """The cost plan's own shell-attempt step with the diag test file in the place of the matrix one. Anything but a plan that holds that step once, as the pack builds it, is refused."""
+              steps = [step for step in plan if step["name"] == STEP]
+              if len(steps) != 1 or steps[0]["argv"].count(MATRIX_TEST) != 1 or steps[0]["env"].get("ACR_G3") != "calibrate" or "ACR_G3_FREEZE" not in steps[0]["env"] or "ACR_G3_SIDECAR" not in steps[0]["env"]:
+                  raise RuntimeError("the pack's cost plan does not hold the one calibrate-shell step this tool substitutes")
+              if mode not in MODES or cell not in CELLS or kind not in KINDS:
+                  raise RuntimeError("ARM is python or rust-shell, CELL is 1 or 4, KIND is attempt or shell-ready")
+              step = steps[0]
+              env = {**step["env"], "ACR_G3": "diag5", GATE: "1", "ACR_DIAG5_ARM": mode, "ACR_DIAG5_CELL": cell, "ACR_DIAG5_KIND": kind, "ACR_G3_OUT": records, "ACR_DIAG5_PRIVATE": private, "ACR_G1E_KEEP": "1"}
+              return [{**step, "argv": [DIAG_TEST if word == MATRIX_TEST else word for word in step["argv"]], "env": env, "outputs": [f"{records}/{KINDS[kind]}"]}]
+
+
+          def main(argv: list[str], *, inner=None, **injected) -> int:
+              if len(argv) != 11:
+                  print(__doc__, file=sys.stderr)
+                  return 64
+              repo, plan_out, f0, build_record, pre_out, smoke_out, mode, cell, kind, records, private = argv
+              from tests.cli_regression.support.g3 import hosted_driver
+              run = hosted_driver._run_plan if inner is None else inner
+              records, private = str(Path(records).resolve()), str(Path(private).resolve())
+              seen: dict = {}
+
+              def run_plan(plan: list[dict], out, _record_name: str, **kwargs) -> int:
+                  seen["planSteps"] = [step["name"] for step in plan]
+                  return run(substituted(plan, mode, cell, kind, records, private), out, RECORD_NAME, record_extra=kwargs.get("record_extra"))
+
+              code = hosted_driver.main(["cost", repo, plan_out, f0, build_record, pre_out, smoke_out, "--rehearsal"], run_plan=run_plan, **injected)
+              try:
+                  Path(records).mkdir(parents=True, exist_ok=True)
+                  log = Path(plan_out).resolve() / "logs" / f"{STEP}.log"
+                  tail = "\n".join(hosted_driver.redacted_tail(log.read_text(encoding="utf-8", errors="replace"))) if log.is_file() else "the step wrote no log"
+                  (Path(records) / "step-log-tail.txt").write_text(tail[-TAIL_CHARS:] + "\n", encoding="utf-8")
+                  (Path(records) / "launcher.json").write_text(json.dumps({"schema": "acr-g3h-diag5-launcher/1", "notEvidence": True, "mode": mode, "cell": int(cell) if cell in CELLS else cell, "kind": kind, "exit": code,
+                                                                        "costPlanSteps": seen.get("planSteps"), "stepRun": STEP, "testFile": DIAG_TEST}, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+              except Exception as error:  # noqa: BLE001 - the records are information; the step's exit code is the result
+                  print(f"diag5: the step log tail could not be written: {type(error).__name__}")
+              return code
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main(sys.argv[1:]))
+          DIAG5_EOF_ATTEMPT_RUN
+          cat > "$RUNNER_TEMP/diag5/tools/diag5_attempt_report.py" <<'DIAG5_EOF_ATTEMPT_REPORT'
+          """diag5 (NOT evidence). What one attempt's records say, check by check, written as fixed verdict words and the checks' own texts.
+
+              uv --project backend run python -B diag5_attempt_report.py RECORDS PRIVATE F0 MODE        (from the repository root)
+
+          RECORDS holds what `g3hDiag5Attempt.test.ts` wrote for the upload (`attempt.json`); PRIVATE holds the whole receipt and the resource samples, which are read here and never copied. Writes
+          RECORDS/attempt-report.json:
+            phases    every phase of the attempt with its outcome (`passed`, `failed`, `running`, or `not reached`)
+            peers     per measured peer: the reader's delta, what the peer accepted, the registered line count L of the cell, `delta - accepted - L`, whether that is inside the Windows bound, `logFile.size`,
+                      whether the log file's identity at the close is the one taken at create (with the bit lengths of the four numbers, not the numbers), and the problems the ledger rule reports for the
+                      record (with the hosted seams of this platform installed)
+            resizeAckMs   the 20 report-only resize probes
+            processes what the driver sampled, as names only: per (component, category, executable name, version probe) how many processes, the pids named `sidecar`, and whether every sampled process that
+                      is not the backend has a sampled parent. No time, CPU or memory value is read.
+            decider   the three stages of the rehearsal verdict's per-receipt check, EACH run and listed (`rehearsal_verdict._trial_check` returns at its first failed stage, which hid the later ones in diag2):
+                      `summarise.structure_problems`, `summarise.consistency_problems`, `summarise.trial_problems`
+            verdicts  one line per check, `pass` / `FAIL` / `not reached` / `not run`, so that every failure of the attempt is listed
+          It always exits 0 and writes the file: a check that cannot run is listed with the class of its error.
+          """
+          from __future__ import annotations
+
+          import json
+          import platform
+          import sys
+          from collections import Counter
+          from pathlib import Path, PureWindowsPath
+
+          sys.path.insert(0, str(Path.cwd() / "backend"))
+
+          SCHEMA = "acr-g3h-diag5-report/1"
+
+
+          class Files:
+              """The two private files, in the shape the decider reads a bundle: the receipt by name, the resource samples under the name it derives from it."""
+              def __init__(self, private: Path) -> None:
+                  self.private = private
+
+              def read_json(self, _name: str):
+                  return json.loads((self.private / "receipt.json").read_text(encoding="utf-8"))
+
+              def exists(self, _name: str) -> bool:
+                  return (self.private / "resources.jsonl").is_file()
+
+              def read_jsonl(self, _name: str):
+                  return [json.loads(line) for line in (self.private / "resources.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+          def load(path: Path):
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, ValueError):
+                  return None
+
+
+          def guarded(errors: dict, name: str, run, default=None):
+              try:
+                  return run()
+              except Exception as error:  # noqa: BLE001 - one check that cannot run must not hide the others
+                  key = error.args[0] if isinstance(error, KeyError) and error.args and isinstance(error.args[0], str) and error.args[0].isidentifier() else None
+                  errors[name] = type(error).__name__ + (f": {key}" if key else "")      # the class, and for a missing key its name (an identifier, never a value or a path)
+                  return default
+
+
+          def bits(value) -> int | None:
+              return value.bit_length() if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+          def peer_rows(receipt: dict, count: int, hosted_seams, summarise, errors: dict) -> list[dict]:
+              rows = []
+              for index, record in enumerate(receipt.get("ledgers") or []):
+                  row = {"peer": index}
+                  try:
+                      delta = record["close"]["read_total"] - record["origin"]["read_total"]
+                      accepted = record["peer"]["acceptedSinceOrigin"]
+                      lines = hosted_seams.registered_lines(count)
+                      log_file = record.get("logFile") or {}
+                      created = log_file.get("inodeAtCreate") if isinstance(log_file.get("inodeAtCreate"), list) and len(log_file.get("inodeAtCreate")) == 2 else [None, None]
+                      row.update(readerDelta=delta, peerAccepted=accepted, registeredLines=lines, deltaMinusAccepted=delta - accepted, deltaMinusAcceptedMinusLines=delta - accepted - lines,
+                                 slackBytes=hosted_seams.LEDGER_SLACK_BYTES, insideTheWindowsBound=hosted_seams.ledger_bound_problem(delta, accepted, lines) is None,
+                                 logFileSize=log_file.get("size"), logIdentity=record.get("logIdentity"),
+                                 logFileIdentityAtCloseIsTheOneAtCreate=[log_file.get("dev"), log_file.get("ino")] == created,
+                                 logFileIdentityBits={"devAtClose": bits(log_file.get("dev")), "devAtCreate": bits(created[0]), "inoAtClose": bits(log_file.get("ino")), "inoAtCreate": bits(created[1])},
+                                 originReadTotal=record["origin"]["read_total"], originStable=record["origin"].get("stable"))
+                  except Exception as error:  # noqa: BLE001
+                      row["recordError"] = type(error).__name__
+                  row["ledgerProblems"] = guarded(errors, f"ledger_problems[{index}]", lambda record=record, index=index: summarise.ledger_problems(record, index, count))
+                  rows.append(row)
+              return rows
+
+
+          def process_rows(private: Path, receipt: dict) -> dict:
+              """Names only, from the driver's samples: which kinds of process were sampled and how they hang together. A Windows executable is named by `PureWindowsPath`, which also reads a POSIX path."""
+              seen: dict[int, dict] = {}
+              samples = 0
+              for line in (private / "resources.jsonl").read_text(encoding="utf-8").splitlines():
+                  if not line.strip():
+                      continue
+                  samples += 1
+                  for process in json.loads(line).get("processes") or []:
+                      seen.setdefault(process["pid"], process)
+              backend = (receipt.get("backend") or {}).get("pid")
+              kinds = Counter((p.get("component"), p.get("category"), PureWindowsPath(str(p.get("executable") or "")).name, bool(p.get("versionProbe"))) for p in seen.values())
+              sidecars = sorted(pid for pid, p in seen.items() if p.get("component") == "sidecar")
+              return {"samples": samples, "processesSeen": len(seen), "sidecarPids": sidecars, "sidecarParentIsTheBackend": [seen[pid].get("ppid") == backend for pid in sidecars],
+                      "processesWhoseParentWasNotSampled": sum(1 for pid, p in seen.items() if pid != backend and p.get("ppid") not in seen),
+                      "kinds": [{"component": c, "category": k, "executable": name, "versionProbe": probe, "processes": n} for (c, k, name, probe), n in sorted(kinds.items(), key=lambda item: tuple(str(x) for x in item[0]))]}
+
+
+          def build(records: Path, private: Path, f0_path: Path, mode: str, system: str | None = None) -> dict:
+              from tests.cli_regression.support.g3 import hosted_posix_stubs
+              hosted_posix_stubs.install()      # before the imports below, as the hosted helper does (Windows has no os.getloadavg, which a g1e module reads at import)
+              from tests.cli_regression.support.g1e import summarise
+              from tests.cli_regression.support.g3 import bundle as g3bundle, hosted_seams
+
+              system = system or platform.system()
+              errors: dict = {}
+              out: dict = {"schema": SCHEMA, "notEvidence": True, "mode": mode, "system": system, "verdicts": []}
+              attempt = load(records / "attempt.json")
+              receipt = load(private / "receipt.json")
+              f0 = load(f0_path)
+              undo = guarded(errors, "install-seams", lambda: hosted_seams.install(system))
+              try:
+                  say = lambda check, verdict, detail=None: out["verdicts"].append({"check": check, "verdict": verdict, **({"detail": detail} if detail not in (None, [], "") else {})})
+                  say("the attempt step wrote its record (attempt.json)", "pass" if isinstance(attempt, dict) else "FAIL")
+                  for step in (attempt or {}).get("steps") or []:
+                      say(f"helper step {step.get('step')}", "pass" if step.get("ok") else "FAIL", step.get("detail"))
+                  if isinstance(attempt, dict):
+                      say("freeze-verify reports no problem", "not run" if attempt.get("freezeProblems") is None else "pass" if attempt["freezeProblems"] == [] else "FAIL", attempt.get("freezeProblems"))
+                      say("the toolchain check matches", "not run" if attempt.get("toolchainMatch") is None else "pass" if attempt["toolchainMatch"] is True else "FAIL", attempt.get("toolchainMismatches"))
+                      say("the attempt code returned a receipt", "pass" if attempt.get("attemptRan") else "FAIL", attempt.get("thrown"))
+                      out.update(driverLogTee=attempt.get("driverLogTee"), driverLogBytes=attempt.get("driverLogBytes"), rootKept=attempt.get("rootKept"), wallSeconds=attempt.get("wallSeconds"))
+                  if not isinstance(receipt, dict):
+                      say("every phase", "not reached", "no receipt")
+                      out.update(attemptRan=False, phases=[], peers=[], resizeAckMs=[], decider=None, processes=None)
+                      return out
+                  count = receipt.get("count")
+                  outcomes = receipt.get("phaseOutcomes") or {}
+                  out.update(attemptRan=True, count=count, passed=receipt.get("passed"), evidenceValid=receipt.get("evidenceValid"), stopReason=receipt.get("stopReason"), failure=receipt.get("failure"))
+                  out["phases"] = [{"phase": name, "outcome": outcomes.get(name, "not reached")} for name in (*summarise.PHASE_SEQUENCE, "cleanup")]
+                  for row in out["phases"]:
+                      say(f"phase {row['phase']}", {"passed": "pass", "failed": "FAIL", "running": "FAIL"}.get(row["outcome"], "not reached"), None if row["outcome"] == "passed" else row["outcome"])
+                  say("the attempt passed with valid evidence", "pass" if receipt.get("passed") is True and receipt.get("evidenceValid") is True and not receipt.get("stopReason") else "FAIL", receipt.get("failure"))
+                  proof = receipt.get("proof")
+                  say("the runtime proof", "not reached" if not isinstance(proof, dict) else "pass" if proof.get("ok") is True else "FAIL", (proof or {}).get("failures") if isinstance(proof, dict) else None)
+                  out["processes"] = guarded(errors, "processes", lambda: process_rows(private, receipt))
+                  if mode == "rust-shell" and isinstance(out["processes"], dict):
+                      named = out["processes"]["sidecarPids"]
+                      say("the driver's samples name exactly one sidecar, a child of the backend", "pass" if len(named) == 1 and out["processes"]["sidecarParentIsTheBackend"] == [True] else "FAIL", {"sidecarsNamed": len(named)})
+                  out["peers"] = peer_rows(receipt, count, hosted_seams, summarise, errors) if isinstance(count, int) else []
+                  if not out["peers"]:
+                      say("the byte ledger of every peer", "not reached", "the receipt holds no ledger record (the attempt stopped before its after-exit checks)")
+                  for row in out["peers"]:
+                      say(f"peer {row['peer']}: the ledger rules (with this platform's seams)", "FAIL" if row["ledgerProblems"] or row["ledgerProblems"] is None else "pass", row["ledgerProblems"])
+                      say(f"peer {row['peer']}: delta - accepted - L inside [0, slack]", "not run" if system != "Windows" else "pass" if row.get("insideTheWindowsBound") else "FAIL",
+                          {key: row.get(key) for key in ("deltaMinusAcceptedMinusLines", "deltaMinusAccepted", "registeredLines", "slackBytes")})
+                      say(f"peer {row['peer']}: the log file's identity at the close is the one at create", "pass" if row.get("logFileIdentityAtCloseIsTheOneAtCreate") else "FAIL", row.get("logFileIdentityBits"))
+                  latencies = receipt.get("latencies") or {}
+                  out["resizeAckMs"] = latencies.get("resize_ack_ms") or []
+                  say("20 resize probes recorded", "pass" if len(out["resizeAckMs"]) == 20 else "not reached" if outcomes.get("resize_ack") is None else "FAIL", len(out["resizeAckMs"]))
+                  for index, burst in enumerate(receipt.get("burstChecks") or []):
+                      say(f"peer {index}: the burst endpoint check", "pass" if isinstance(burst, dict) and burst.get("kind") == "pass" else "FAIL", burst if isinstance(burst, dict) else None)
+                  stages: dict = {}
+                  if isinstance(f0, dict):
+                      files = Files(private)
+                      trial = files.read_json("receipt.json")
+                      resources = "receipt" + summarise.RESOURCES_SUFFIX
+                      # diag5 (D3-5): the freeze the rehearsal verdict gives these checks is `bundle.freeze_view(F0)` (`rehearsal_verdict.admission`), not F0 itself. diag3 passed F0, whose `workload` record is not
+                      # the one `structure_problems` reads, so the structure stage raised KeyError in all four real attempts and was never run.
+                      view = guarded(errors, "bundle.freeze_view", lambda: g3bundle.freeze_view(f0))
+                      if view is not None:
+                          stages["structure"] = guarded(errors, "summarise.structure_problems", lambda: list(summarise.structure_problems(trial, view, files, resources)[0]))
+                          stages["consistency"] = guarded(errors, "summarise.consistency_problems", lambda: list(summarise.consistency_problems(trial)))
+                          stages["trial"] = guarded(errors, "summarise.trial_problems", lambda: list(summarise.trial_problems({k: v for k, v in trial.items() if k != "_samples"}, view, mode, trial.get("count"))))
+                  out["decider"] = {"check": "the three stages of rehearsal_verdict._trial_check, each run whatever the others said", "stages": stages}
+                  for name, text in (("structure", "the receipt's structure (summarise.structure_problems)"), ("consistency", "the receipt's consistency (summarise.consistency_problems)"),
+                                     ("trial", "the trial's evidence (summarise.trial_problems)")):
+                      problems = stages.get(name)
+                      say(text, "not run" if problems is None else "pass" if problems == [] else "FAIL", problems)
+                  return out
+              finally:
+                  out["checkErrors"] = errors
+                  if callable(undo):
+                      undo()
+
+
+          def main(argv: list[str]) -> int:
+              if len(argv) != 4:
+                  print(__doc__, file=sys.stderr)
+                  return 64
+              records, private, f0_path, mode = Path(argv[0]), Path(argv[1]), Path(argv[2]), argv[3]
+              try:
+                  report = build(records, private, f0_path, mode)
+              except Exception as error:  # noqa: BLE001 - the report is information; it never fails its step
+                  report = {"schema": SCHEMA, "notEvidence": True, "mode": mode, "reportError": type(error).__name__, "verdicts": [{"check": "the report itself", "verdict": "FAIL", "detail": type(error).__name__}]}
+              records.mkdir(parents=True, exist_ok=True)
+              (records / "attempt-report.json").write_text(json.dumps(report, indent=1, sort_keys=True, default=str) + "\n", encoding="utf-8")
+              for row in report.get("verdicts", []):
+                  print(f"{mode}: {row['verdict']:<11} {row['check']}")
+              return 0
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main(sys.argv[1:]))
+          DIAG5_EOF_ATTEMPT_REPORT
+          cat > "$RUNNER_TEMP/diag5/tools/diag5_probes.py" <<'DIAG5_EOF_PROBES'
+          """diag5 (NOT evidence). Two small probes of what the log final check and the ledger's log-file rule rest on, run on the runner with this platform's hosted seams installed.
+
+              uv --project backend run python -B diag5_probes.py holds OUT.json        (from the repository root)
+              uv --project backend run python -B diag5_probes.py identity OUT.json
+
+          holds     `log_final.holds` as an attempt's helper calls it: for a file a child process holds open (expected True), for this process (False), for the child after it closed the file (False), and
+                    for the child after it ended (an inspection error, never a silent False). On Windows the check is psutil's open-files list, which no hosted run has shown to list a held file.
+          identity  one file's identity as the two tools of an attempt take it: Python's `os.stat` (the close side, `log_final.read_once`, read once without the seams and once with them) and the runner's
+                    `statSync` on Bun (the create side, as `g3ShellAttempt.ts` reduces it). It records the bit length of every number and whether the pairs are equal, raw and as the attempt compares them.
+                    The numbers themselves are a volume serial number and a file index of the runner's temporary directory.
+          Exit 0 when what the attempt relies on holds on this platform, 1 when it does not; the record is written either way.
+
+              uv --project backend run python -B diag5_probes.py steplogs OUT_DIR LOG_DIR [LOG_DIR ...]
+
+          steplogs  (diag5) the redacted tail of every `*.log` a plan step wrote into a LOG_DIR (the plan runner keeps each step's stdout and stderr in `<plan out>/logs/<step>.log`), as
+                    `OUT_DIR/<plan directory>-<step>-tail.txt`, through the pack's own `hosted_diag.redacted_tail`. In diag3 the correctness step's log stayed on the runner, so its failure text was in no record.
+                    Always exits 0; a log that cannot be read is named in `OUT_DIR/steplogs.json` by its error class.
+          """
+          from __future__ import annotations
+
+          import json
+          import os
+          import platform
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          import time
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd() / "backend"))
+
+          SCHEMA = "acr-g3h-diag5-probe/1"
+          # The holder prints its own pid: under a Windows venv `sys.executable` is a launcher whose child is the interpreter, and the interpreter is the process that holds the file.
+          HOLDER = ("import os, sys\nf = open(sys.argv[1], 'ab')\nprint('open', os.getpid(), flush=True)\nsys.stdin.readline()\nf.close()\nprint('closed', flush=True)\nsys.stdin.readline()\n")
+          STAT_JS = ("const fs=require('fs');const i=fs.statSync(process.env.DIAG5_STAT_PATH,{bigint:true});"
+                     "console.log(JSON.stringify({dev:String(i.dev),ino:String(i.ino),devAsTheAttemptTakesIt:String(process.platform==='win32'?BigInt.asUintN(32,i.dev):i.dev)}))")
+
+
+          def seams():
+              from tests.cli_regression.support.g3 import hosted_posix_stubs
+              hosted_posix_stubs.install()
+              from tests.cli_regression.support.g1e import log_final
+              from tests.cli_regression.support.g3 import hosted_seams
+              return log_final, hosted_seams
+
+
+          def timed(call) -> tuple[object, float]:
+              start = time.perf_counter()
+              try:
+                  value = call()
+              except Exception as error:  # noqa: BLE001 - the class of the error is the result
+                  value = f"raised {type(error).__name__}"
+              return value, round((time.perf_counter() - start) * 1000, 1)
+
+
+          def holds(system: str) -> dict:
+              log_final, hosted_seams = seams()
+              with tempfile.TemporaryDirectory(prefix="diag5-holds-") as scratch:
+                  target = Path(scratch) / "held.log"
+                  target.write_bytes(b"x")
+                  child = subprocess.Popen([sys.executable, "-c", HOLDER, str(target)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                  undo = hosted_seams.install(system)
+                  try:
+                      identity = log_final.identity(target)
+                      word, _, pid_text = child.stdout.readline().strip().partition(" ")
+                      said, holder = [word], int(pid_text)
+                      held, held_ms = timed(lambda: log_final.holds(holder, identity))
+                      own, own_ms = timed(lambda: log_final.holds(os.getpid(), identity))
+                      child.stdin.write("\n")
+                      child.stdin.flush()
+                      said.append(child.stdout.readline().strip())
+                      released, released_ms = timed(lambda: log_final.holds(holder, identity))
+                      child.stdin.write("\n")
+                      child.stdin.flush()
+                      child.wait(timeout=30)
+                      time.sleep(0.5)      # the interpreter behind a launcher ends a moment after the launcher does
+                      gone, gone_ms = timed(lambda: log_final.holds(holder, identity))
+                  finally:
+                      undo()
+                      if child.poll() is None:
+                          child.kill()
+              got = {"aChildThatHoldsTheFile": held, "thisProcess": own, "theChildAfterItClosedTheFile": released, "theChildAfterItEnded": gone}
+              want = {"aChildThatHoldsTheFile": True, "thisProcess": False, "theChildAfterItClosedTheFile": False, "theChildAfterItEnded": "raised InspectionError"}
+              return {"probe": "holds", "checkInstalled": getattr(hosted_seams.hosted_host.holds_for(system), "__name__", "?"), "childSaid": said, "holderIsTheStartedProcess": holder == child.pid, "got": got, "expected": want,
+                      "callMs": {"held": held_ms, "own": own_ms, "released": released_ms, "gone": gone_ms}, "ok": got == want}
+
+
+          def identity(system: str) -> dict:
+              log_final, hosted_seams = seams()
+              bun = shutil.which("bun")
+              with tempfile.TemporaryDirectory(prefix="diag5-identity-") as scratch:
+                  target = Path(scratch) / "peer-0.log"
+                  target.write_bytes(b"x")
+                  info = os.stat(target)
+                  raw = log_final.read_once(target)
+                  undo = hosted_seams.install(system)
+                  try:
+                      seamed = log_final.read_once(target)
+                  finally:
+                      undo()
+                  runner = None
+                  if bun:
+                      done = subprocess.run([bun, "-e", STAT_JS], capture_output=True, text=True, timeout=60, env={**os.environ, "DIAG5_STAT_PATH": str(target)})
+                      lines = [line for line in done.stdout.splitlines() if line.strip()]
+                      runner = json.loads(lines[-1]) if done.returncode == 0 and lines else None
+              bit = lambda value: int(value).bit_length() if value is not None else None
+              out = {"probe": "identity", "bunFound": bool(bun), "bunAnswered": runner is not None,
+                     "pythonBits": {"dev": bit(info.st_dev), "ino": bit(info.st_ino)}, "pythonBehindTheSeamsBits": {"dev": bit(seamed["dev"]), "ino": bit(seamed["ino"])},
+                     "readOnceWithoutTheSeamsIsOsStat": (raw["dev"], raw["ino"]) == (info.st_dev, info.st_ino)}
+              if runner is not None:
+                  dev, ino, taken = int(runner["dev"]), int(runner["ino"]), int(runner["devAsTheAttemptTakesIt"])
+                  out.update(runnerBits={"dev": bit(dev), "ino": bit(ino), "devAsTheAttemptTakesIt": bit(taken)},
+                             rawPairsEqual=(dev, ino) == (info.st_dev, info.st_ino), rawDevEqual=dev == info.st_dev, rawInoEqual=ino == info.st_ino,
+                             # both sides reach the receipt as JavaScript numbers (doubles): Python's through the helper's JSON, the runner's through `Number(...)`
+                             pairsEqualAsTheAttemptComparesThem=float(seamed["dev"]) == float(taken) and float(seamed["ino"]) == float(ino),
+                             lowHalfOfPythonsDevIsTheRunnersDev=(info.st_dev & 0xFFFFFFFF) == (dev & 0xFFFFFFFF))
+              out["ok"] = bool(out.get("pairsEqualAsTheAttemptComparesThem"))
+              return out
+
+
+          STEPLOG_LINES = 120
+
+
+          def steplogs(out_dir: Path, log_dirs: list[Path]) -> dict:
+              from tests.cli_regression.support.g3 import hosted_diag
+              out_dir.mkdir(parents=True, exist_ok=True)
+              rows = {}
+              for directory in log_dirs:
+                  for log in sorted(directory.glob("*.log")) if directory.is_dir() else []:
+                      name = f"{directory.parent.name}-{log.stem}-tail.txt"
+                      try:
+                          text = log.read_text(encoding="utf-8", errors="replace")
+                          lines = hosted_diag.redacted_tail(text, STEPLOG_LINES)
+                          (out_dir / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
+                          rows[name] = {"bytes": log.stat().st_size, "lines": text.count("\n"), "tailLines": len(lines)}
+                      except Exception as error:  # noqa: BLE001 - one unreadable log must not hide the others
+                          rows[name] = {"error": type(error).__name__}
+              record = {"schema": SCHEMA, "notEvidence": True, "probe": "steplogs", "directoriesGiven": len(log_dirs), "directoriesFound": sum(1 for directory in log_dirs if directory.is_dir()), "logs": rows}
+              (out_dir / "steplogs.json").write_text(json.dumps(record, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+              return record
+
+
+          def main(argv: list[str]) -> int:
+              if len(argv) >= 3 and argv[0] == "steplogs":
+                  try:
+                      record = steplogs(Path(argv[1]), [Path(item) for item in argv[2:]])
+                      print(json.dumps({name: row.get("tailLines", row.get("error")) for name, row in record["logs"].items()}, sort_keys=True))
+                  except Exception as error:  # noqa: BLE001 - information only
+                      print(f"steplogs could not run: {type(error).__name__}")
+                  return 0
+              if len(argv) != 2 or argv[0] not in ("holds", "identity"):
+                  print(__doc__, file=sys.stderr)
+                  return 64
+              system = platform.system()
+              try:
+                  record = holds(system) if argv[0] == "holds" else identity(system)
+              except Exception as error:  # noqa: BLE001 - a probe that cannot run says so and fails its step
+                  record = {"probe": argv[0], "ok": False, "probeError": type(error).__name__}
+              record = {"schema": SCHEMA, "notEvidence": True, "system": system, **record}
+              out = Path(argv[1])
+              out.parent.mkdir(parents=True, exist_ok=True)
+              out.write_text(json.dumps(record, indent=1, sort_keys=True, default=str) + "\n", encoding="utf-8")
+              print(json.dumps(record, indent=1, sort_keys=True, default=str))
+              return 0 if record.get("ok") else 1
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main(sys.argv[1:]))
+          DIAG5_EOF_PROBES
+          cat > tests/cli/g3hDiag5Attempt.test.ts <<'DIAG5_EOF_ATTEMPT_TEST'
+          // diag5 (NOT evidence). The diag workflow writes this file into tests/cli/ on the runner; it is in no branch and in no pack. Gated: it does nothing unless ACR_DIAG5_ATTEMPT=1 (diag5_attempt_run.py sets it).
+          //
+          // ACR_DIAG5_KIND=attempt: ONE shell attempt of ONE arm (ACR_DIAG5_ARM: python | rust-shell) and ONE cell (ACR_DIAG5_CELL: 1 | 4) through the pack's own attempt code, `g3ShellAttempt.runAttempt`, with
+          // the spec `g3Matrix.test.ts` builds for a discarded warm-up of kind `calibration` (repeat 0) and the same helper calls before it (freeze-verify, toolchain-check, checked-inputs, constants). Two things
+          // differ from `g3Matrix`, both so that one run lists every failure: a freeze or toolchain problem is RECORDED and the attempt still runs (g3Matrix would not start it), and the attempt's root is kept when
+          // it did not pass (ACR_G1E_KEEP=1, the attempt's own rule for a non-measured attempt). The attempt code itself is untouched.
+          //
+          // ACR_DIAG5_KIND=shell-ready: no attempt. For one arm it starts the attempt's own driver three times and creates the two ordinary shells exactly as the attempt does, records the raw bytes of each up to
+          // its READY line, and says where the console's title sequence stood (inside the line or after it) and whether the line parses with CSI sequences removed only (rh18) and through the pack's view (rh19).
+          // It exists because the cause of diag2's first Rust-arm failure was inferred: this records the shape itself.
+          //
+          // What an attempt writes:
+          //   <ACR_DIAG5_PRIVATE>/receipt.json, resources.jsonl   the whole receipt and the resource samples; NOT uploaded: diag5_attempt_report.py reads them on the runner and writes verdict texts only
+          //   <ACR_G3_OUT>/receipt.json    the receipt with every latency array given as its length, but for `resize_ack_ms` (the 20 report-only resize probes), which is kept
+          //   <ACR_G3_OUT>/attempt.json    the helper steps, the failure text, every phase outcome, the redacted tail of the driver's own output, and what the kept root holds
+          //   <ACR_G3_OUT>/root/           from a kept root: the peer receipts, the CK proof, the identities, the runtime receipts, the redacted tails of the backend logs, the peer logs and the peer bytes
+          // The driver's output: `runAttempt` owns the driver process, so this file wraps `ChildProcess.prototype.spawn`, through which every spawn goes, and adds its own listener to the driver's stdout and
+          // stderr (nothing is taken away from the attempt, which adds its listeners right after). If that cannot be installed the attempt runs all the same and `driverLogTee` says so.
+          import childProcess, { execFileSync, spawn } from 'node:child_process'
+          import { createHash } from 'node:crypto'
+          import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+          import { tmpdir } from 'node:os'
+          import { join, resolve } from 'node:path'
+          import { setTimeout as delay } from 'node:timers/promises'
+          import { expect, it } from 'vitest'
+          import { buildAgentPaneCommand } from '../../src/main/plugins/agentPaneCommand'
+          import { createWsClient, type TerminalOutputFrame } from '../../src/shared/wsClient'
+          import { redactDiagnostic } from './baselineArtifacts'
+          import { classifyAttempt, type ToolchainRecord } from './g1eRun'
+          import { conptyColumns, conptyView } from './g3hConpty'
+          import { runAttempt, type AttemptSpec, type FreezeBinding } from './g3ShellAttempt'
+
+          const enabled = process.env.ACR_DIAG5_ATTEMPT === '1'
+          const selfCheck = process.env.ACR_DIAG5_SELFCHECK === '1'
+          const kind = process.env.ACR_DIAG5_KIND ?? 'attempt'
+          const mode = process.env.ACR_DIAG5_ARM ?? ''
+          const cell = Number(process.env.ACR_DIAG5_CELL ?? '1') // the registered cells: 1 (one measured peer, 40 burst rounds) and 4 (four peers, 10 rounds each; peer 0 gets the 20 resize probes)
+          const DRIVER_MODULE = 'tests.cli_regression.support.g1e.driver'
+          const ROOT_PREFIX = 'navide-g1e-' // `runAttempt`: mkdtempSync(join(tmpdir(), 'navide-g1e-'))
+          const TAIL_CHARS = 20_000
+          const COPY_LIMIT = 24 * 1024 * 1024
+          const python = resolve('backend/.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+          const out = resolve(process.env.ACR_G3_OUT ?? 'test-results/ci/g3/diag5-attempt')
+          const priv = resolve(process.env.ACR_DIAG5_PRIVATE ?? join(out, 'private'))
+          const sidecar = process.env.ACR_G3_SIDECAR ? resolve(process.env.ACR_G3_SIDECAR) : null
+          const sidecarArg = sidecar ?? '-'
+          const root = resolve('.')
+          const helper = (args: string[]): string => execFileSync(python, ['-B', '-m', 'tests.cli_regression.support.g3.helper', ...args], { cwd: resolve('backend'), encoding: 'utf8', timeout: 180_000, maxBuffer: 64 * 1024 * 1024 })
+          const sha256 = (data: Buffer | string): string => createHash('sha256').update(data).digest('hex')
+          const brief = (error: unknown, limit = 2000): string => redactDiagnostic(error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, limit)
+
+          // ---------------------------------------------------------------------------------------------------------------- the driver's own output
+          const driverLog: string[] = []
+          let driverSpawns = 0
+          let teeState = 'not installed'
+          try {
+            // Every `spawn` of node:child_process goes through this one method, whichever way a module imported `spawn`; `options.args` is the argv of the child (argv[0] included).
+            const proto = (childProcess as unknown as { ChildProcess?: { prototype: Record<string, any> } }).ChildProcess?.prototype
+            const original = proto ? proto.spawn : undefined
+            if (!proto || typeof original !== 'function') teeState = 'not installed: ChildProcess.prototype.spawn is not a function on this runtime'
+            else {
+              proto.spawn = function (this: any, options: any, ...rest: unknown[]): unknown {
+                const result = original.call(this, options, ...rest)
+                try {
+                  if (options && Array.isArray(options.args) && options.args.includes(DRIVER_MODULE)) {
+                    driverSpawns++
+                    for (const stream of [this.stdout, this.stderr]) if (stream) stream.on('data', (chunk: Buffer | string) => { driverLog.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8')) })
+                  }
+                } catch { /* the listener is information only: the spawn itself is the attempt's and has already happened */ }
+                return result
+              }
+              teeState = 'installed'
+            }
+          } catch (error) {
+            teeState = `failed: ${error instanceof Error ? error.name : 'error'}`
+          }
+
+          // ---------------------------------------------------------------------------------------------------------------- pure helpers
+          /** The receipt as it is uploaded: every latency array as its length, but for the 20 report-only resize probes. */
+          export function trimmedReceipt(receipt: Record<string, any>): Record<string, unknown> {
+            const latencies = (receipt.latencies ?? {}) as Record<string, unknown[]>
+            const { latencies: _dropped, ...rest } = receipt
+            return { ...rest, diag5: 'NOT evidence; the latency arrays are given as their lengths (latencyCounts), but for resize_ack_ms', latencyCounts: Object.fromEntries(Object.entries(latencies).map(([key, values]) => [key, Array.isArray(values) ? values.length : null])),
+              resizeAckMs: Array.isArray(latencies.resize_ack_ms) ? latencies.resize_ack_ms : [] }
+          }
+
+          function walk(directory: string, relative = '', found: Array<{ path: string; bytes: number }> = []): Array<{ path: string; bytes: number }> {
+            for (const name of readdirSync(directory).sort()) {
+              if (found.length >= 600) break
+              const rel = relative ? `${relative}/${name}` : name
+              try {
+                const info = statSync(join(directory, name))
+                if (info.isDirectory()) walk(join(directory, name), rel, found)
+                else found.push({ path: rel, bytes: info.size })
+              } catch { found.push({ path: rel, bytes: -1 }) }
+            }
+            return found
+          }
+
+          const flat = (rel: string): string => rel.replace(/[\\/]/g, '__')
+          const REDACTED_COPIES = [/^identity\.json$/, /^first-identity\.json$/, /^restart-identity\.json$/, /^runtime-receipts\.jsonl$/, /^g1e\/[^/]+\.peer\.json$/, /^g1e\/ck-proof\.json$/, /^g1e\/ts-final\.json$/]
+          const TAILS = [/^first-backend\.log$/, /^restart-backend\.log$/, /^data\/logs\/backend\.log$/]
+          const RAW_COPIES = [/^logs\/peer-\d+\.log$/, /^g1e\/[^/]+\.peerbytes$/]
+
+          /** What a kept attempt root holds (names and sizes, 600 entries at most), and the files copied from it into `target`. `endpoint.json` (it carries the backend's URL), the home and the stores are never copied. */
+          export function stageRoot(kept: string, target: string): { files: Array<{ path: string; bytes: number }>; staged: string[]; problems: string[] } {
+            const files = walk(kept)
+            const staged: string[] = []
+            const problems: string[] = []
+            mkdirSync(target, { recursive: true })
+            for (const file of files) {
+              try {
+                const source = join(kept, file.path)
+                if (REDACTED_COPIES.some((rule) => rule.test(file.path)) && file.bytes <= 4 * 1024 * 1024) { writeFileSync(join(target, flat(file.path)), redactDiagnostic(readFileSync(source, 'utf8'))); staged.push(file.path) }
+                else if (TAILS.some((rule) => rule.test(file.path))) { writeFileSync(join(target, `${flat(file.path)}.tail.txt`), redactDiagnostic(readFileSync(source, 'utf8')).slice(-TAIL_CHARS)); staged.push(file.path) }
+                else if (RAW_COPIES.some((rule) => rule.test(file.path)) && file.bytes <= COPY_LIMIT) { copyFileSync(source, join(target, flat(file.path))); staged.push(file.path) }
+              } catch (error) { problems.push(`${file.path}: ${error instanceof Error ? error.name : 'error'}`) }
+            }
+            return { files, staged, problems }
+          }
+
+          const rootsNow = (): string[] => { try { return readdirSync(tmpdir()).filter((name) => name.startsWith(ROOT_PREFIX)) } catch { return [] } }
+
+          const ESC = 0x1b
+          /** The attempt's own reading of a READY line (`g3ShellAttempt.ts:242`). */
+          const readyOf = (text: string): unknown => JSON.parse(text.split('BASELINE_READY ')[1].split('\n')[0].split('\r')[0])
+          /** Where the console's title sequence stands in the raw bytes of one shell, and whether its READY line parses with CSI sequences removed only (the rh18 view) and through the pack's view. */
+          export function shellReadyFacts(raw: Buffer): Record<string, unknown> {
+            const readyAt = raw.indexOf(Buffer.from('BASELINE_READY '))
+            const lineEnd = readyAt >= 0 ? raw.indexOf(0x0a, readyAt) : -1
+            const oscAt = raw.indexOf(Buffer.from([ESC, 0x5d]))
+            const parses = (text: string): string | null => { try { readyOf(text); return null } catch (error) { return error instanceof Error ? error.message : 'error' } }
+            const csiOnly = raw.toString('utf8').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\r\n/g, '\n')
+            return { rawBytes: raw.length, readyAt, lineEnd, oscSequences: raw.toString('latin1').split('\u001b]').length - 1, firstOscAt: oscAt,
+              titleInsideTheLine: readyAt >= 0 && lineEnd >= 0 && oscAt > readyAt && oscAt < lineEnd, titleAfterTheLine: lineEnd >= 0 && oscAt > lineEnd,
+              csiOnlyError: readyAt < 0 || lineEnd < 0 ? 'no READY line' : parses(csiOnly), viewError: readyAt < 0 || lineEnd < 0 ? 'no READY line' : parses(conptyView(raw).toString('utf8')) }
+          }
+
+          // ---------------------------------------------------------------------------------------------------------------- the attempt
+          it.runIf(enabled && !selfCheck && kind === 'attempt')('G3 diag5 (NOT evidence): one shell attempt of one arm and one cell through the attempt code, every failure recorded', async () => {
+            expect(['python', 'rust-shell'], 'ACR_DIAG5_ARM is python or rust-shell').toContain(mode)
+            expect([1, 4], 'ACR_DIAG5_CELL is 1 or 4').toContain(cell)
+            mkdirSync(out, { recursive: true })
+            mkdirSync(priv, { recursive: true })
+            const steps: Array<{ step: string; ok: boolean; detail?: string }> = []
+            const tryStep = <T>(name: string, run: () => T): T | null => {
+              try { const value = run(); steps.push({ step: name, ok: true }); return value } catch (error) { steps.push({ step: name, ok: false, detail: brief(error, 800) }); return null }
+            }
+            const f0 = resolve(process.env.ACR_G3_FREEZE ?? '')
+            const freeze = tryStep('read-f0', () => JSON.parse(readFileSync(f0, 'utf8')) as Record<string, any>)
+            const freezeProblems = tryStep('freeze-verify', () => (JSON.parse(helper(['freeze-verify', root, f0, sidecarArg])) as { problems: string[] }).problems)
+            const check = tryStep('toolchain-check', () => JSON.parse(helper(['toolchain-check', root, f0, sidecarArg])) as ToolchainRecord)
+            const checkedInputs = tryStep('checked-inputs', () => (JSON.parse(helper(['checked-inputs', f0])) as { checkedInputs: number }).checkedInputs)
+            const fixture = tryStep('constants', () => JSON.parse(helper(['constants'])) as { fixtureRegistrySha256: string; logPolicySha256: string })
+            const spec = tryStep('spec', (): AttemptSpec => {
+              if (!freeze || !check || checkedInputs === null || !fixture) throw new Error('an input of the attempt spec is missing (see the steps above)')
+              const binding: FreezeBinding = { sha256: sha256(readFileSync(f0)), checkedInputs, evidenceRevision: freeze.evidenceRevision, methodRevision: freeze.methodRevision, sidecarSha256: freeze.sidecarSha256, vendors: freeze.vendors }
+              return { kind: 'calibration', mode: mode as AttemptSpec['mode'], count: cell, repeat: 0, slot: null, firstArm: null, warmup: true, freeze: binding, python, sidecarBin: sidecar,
+                fixtureRegistrySha256: fixture.fixtureRegistrySha256, logPolicySha256: fixture.logPolicySha256, toolchain: check, expectedReadyVersion: freeze.toolchain.sidecar.readyVersion }
+            })
+            const rootsBefore = new Set(rootsNow())
+            const startedAt = Date.now()
+            let receipt: Record<string, any> | null = null
+            let failures: string[] = []
+            let thrown: string | null = null
+            if (spec) {
+              try {
+                const result = await runAttempt(spec, out)
+                receipt = result.receipt as Record<string, any>
+                failures = result.failures
+                writeFileSync(join(priv, 'receipt.json'), `${redactDiagnostic(JSON.stringify(receipt, null, 1))}\n`)
+                writeFileSync(join(priv, 'resources.jsonl'), result.resourcesJsonl)
+                writeFileSync(join(out, 'receipt.json'), `${redactDiagnostic(JSON.stringify(trimmedReceipt(receipt), null, 1))}\n`)
+              } catch (error) { thrown = brief(error) }
+            }
+            const kept = rootsNow().filter((name) => !rootsBefore.has(name))
+            const roots = kept.map((name, index) => {
+              try { return { name, ...stageRoot(join(tmpdir(), name), join(out, kept.length === 1 ? 'root' : `root-${index}`)) } } catch (error) { return { name, files: [], staged: [], problems: [brief(error, 300)] } }
+            })
+            const verdict = receipt ? classifyAttempt(receipt) : null
+            const log = driverLog.join('')
+            const record = {
+              schema: 'acr-g3h-diag5-attempt/1', notEvidence: true, mode, count: cell, kind: 'calibration', warmup: true, platform: process.platform, wallSeconds: Math.round((Date.now() - startedAt) / 1000),
+              steps, freezeProblems, toolchainMatch: check ? check.match : null, toolchainMismatches: check ? check.mismatches : null,
+              attemptRan: receipt !== null, thrown, validity: verdict ? verdict.validity : null, stopReason: verdict ? verdict.stopReason : null,
+              passed: receipt ? receipt.passed : null, evidenceValid: receipt ? receipt.evidenceValid : null, failure: receipt ? (receipt.failure ?? null) : null, failures: failures.map((text) => redactDiagnostic(text)),
+              phaseOutcomes: receipt ? receipt.phaseOutcomes : null, phases: receipt ? receipt.phases : null, driverExitCode: receipt ? (receipt.driverExitCode ?? null) : null,
+              driverLogTee: teeState, driverSpawnsSeen: driverSpawns, driverLogBytes: Buffer.byteLength(log), driverLogTail: redactDiagnostic(log).slice(-4000),
+              rootKept: kept.length > 0, roots,
+            }
+            writeFileSync(join(out, 'attempt.json'), `${redactDiagnostic(JSON.stringify(record, null, 1))}\n`)
+            process.stdout.write(`diag5 attempt ${mode} cell ${cell}: ${verdict ? verdict.validity : 'not run'}${receipt && receipt.failure ? ` failure=${String(receipt.failure).slice(0, 600)}` : ''}${thrown ? ` thrown=${thrown.slice(0, 300)}` : ''}\n`)
+            expect({ thrown, validity: record.validity, freezeProblems, toolchainMatch: record.toolchainMatch }).toEqual({ thrown: null, validity: 'clean', freezeProblems: [], toolchainMatch: true })
+          }, 900_000)
+
+          // ---------------------------------------------------------------------------------------------------------------- the READY line of the ordinary shells (no attempt)
+          const ROUNDS = 3
+          it.runIf(enabled && !selfCheck && kind === 'shell-ready')('G3 diag5 (NOT evidence): the READY line of the two ordinary shells of one arm, three driver starts, the raw bytes recorded', async () => {
+            expect(['python', 'rust-shell'], 'ACR_DIAG5_ARM is python or rust-shell').toContain(mode)
+            mkdirSync(out, { recursive: true })
+            const workload = JSON.parse(readFileSync(resolve('tests/fixtures/cli-regression/runtime-workload-g1e.json'), 'utf8'))
+            const rows: Array<Record<string, unknown>> = []
+            const problems: string[] = []
+            for (let round = 0; round < ROUNDS; round++) {
+              const isolated = realpathSync(mkdtempSync(join(tmpdir(), 'navide-g3h-shellready-')))
+              const driver = spawn(python, ['-m', DRIVER_MODULE, isolated, '1', String(round), mode], { cwd: resolve('backend'), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...(sidecar ? { ACR_SIDECAR_BIN: sidecar } : {}) } })
+              let exited: number | null | undefined
+              let log = ''
+              driver.stdout.on('data', (chunk) => { log += chunk })
+              driver.stderr.on('data', (chunk) => { log += chunk })
+              driver.on('error', (error) => { log += error.message; exited = -1 })
+              driver.on('exit', (code) => { exited = code })
+              let connections = 0
+              const client = createWsClient({ onStatus: (status) => { if (status === 'connected') connections++ } })
+              const raw = new Map<string, Buffer[]>()
+              client.on('terminal.output', (payload) => {
+                const frame = payload as TerminalOutputFrame
+                raw.set(frame.terminal_session_id, [...(raw.get(frame.terminal_session_id) ?? []), Buffer.from(frame.data)])
+              })
+              const until = async (ok: () => boolean, message: string, timeout: number): Promise<void> => {
+                const deadline = performance.now() + timeout
+                while (!ok()) {
+                  if (exited !== undefined) throw new Error(`${message}: driver exited: ${log.slice(-300)}`)
+                  if (performance.now() >= deadline) throw new Error(message)
+                  await delay(20)
+                }
+              }
+              try {
+                await until(() => existsSync(join(isolated, 'endpoint.json')), 'backend readiness deadline', 60_000)
+                const endpoint = JSON.parse(readFileSync(join(isolated, 'endpoint.json'), 'utf8'))
+                client.connect(endpoint.url)
+                await until(() => connections === 1, 'authenticated WS connection deadline', workload.deadlineMs)
+                for (const [index, shell] of (endpoint.shells as Array<Record<string, any>>).entries()) {
+                  const response = await client.send<{ terminal_session_id: string }>('terminal.create', {
+                    pane_id: shell.pane, agent_key: shell.vendor, cwd: shell.workspace, command: shell.wrapped ? buildAgentPaneCommand(endpoint.shell, [shell.commandLine]) : shell.command,
+                    cols: conptyColumns(100), rows: 30, create_generation: `${shell.pane}-generation`, metadata: { workspace_path: shell.workspace, session_marker: `at-pane:${shell.pane}` },
+                  }, workload.deadlineMs)
+                  if (!response.ok) { problems.push(`round ${round} shell ${index}: terminal.create refused`); continue }
+                  const tid = response.payload!.terminal_session_id
+                  const bytes = (): Buffer => Buffer.concat(raw.get(tid) ?? [])
+                  let reached = true
+                  try { await until(() => { const view = conptyView(bytes()); const at = view.indexOf('BASELINE_READY '); return at >= 0 && view.includes('\n', at) }, 'READY line deadline', workload.deadlineMs) } catch { reached = false }
+                  await delay(300) // the frame that holds the line may end after it: take what follows too
+                  const seen = bytes()
+                  const name = `round-${round}-shell-${index}.bin`
+                  mkdirSync(join(out, 'raw'), { recursive: true })
+                  writeFileSync(join(out, 'raw', name), seen)
+                  rows.push({ round, shell: index, wrapped: shell.wrapped === true, readyLineReached: reached, raw: `raw/${name}`, ...shellReadyFacts(seen) })
+                  await client.send('terminal.kill', { terminal_session_id: tid }, workload.deadlineMs)
+                }
+              } catch (error) {
+                problems.push(`round ${round}: ${brief(error, 400)}`)
+              } finally {
+                client.dispose('diag5 shell-ready finished')
+                driver.stdin.end('\n')
+                try { await until(() => exited !== undefined, 'driver shutdown deadline', 60_000) } catch (error) { problems.push(`round ${round}: ${brief(error, 200)}`) }
+                rmSync(isolated, { recursive: true, force: true })
+              }
+            }
+            const count = (key: string): number => rows.filter((row) => row[key] === true).length
+            const summary = { schema: 'acr-g3h-diag5-shell-ready/1', notEvidence: true, mode, platform: process.platform, shellsCreated: rows.length, shellsExpected: ROUNDS * 2,
+              titleInsideTheLine: count('titleInsideTheLine'), titleAfterTheLine: count('titleAfterTheLine'), withAnOscSequence: rows.filter((row) => (row.oscSequences as number) > 0).length,
+              readWithCsiRemovedOnly: rows.filter((row) => row.csiOnlyError === null).length, readThroughTheView: rows.filter((row) => row.viewError === null).length, problems, rows }
+            writeFileSync(join(out, 'shell-ready.json'), `${redactDiagnostic(JSON.stringify(summary, null, 1))}\n`)
+            process.stdout.write(`diag5 shell-ready ${mode}: ${summary.readThroughTheView} of ${rows.length} READY lines read through the view, the title inside the line in ${summary.titleInsideTheLine}\n`)
+            expect({ problems, created: rows.length, readThroughTheView: summary.readThroughTheView }).toEqual({ problems: [], created: ROUNDS * 2, readThroughTheView: ROUNDS * 2 })
+          }, 600_000)
+
+          // ---------------------------------------------------------------------------------------------------------------- self-check (no backend, no driver, no attempt): run off the runner by test_g3h_diag5.py
+          it.runIf(enabled && selfCheck)('diag5 self-check: the driver-output listener sees a child started through the named `spawn`, and the record helpers do what they say', async () => {
+            expect(teeState).toBe('installed')
+            const child = spawn(process.execPath, ['-e', "console.log('diag5-selfcheck-line')", DRIVER_MODULE], { stdio: ['ignore', 'pipe', 'pipe'] })
+            const own: string[] = []
+            child.stdout!.on('data', (chunk) => { own.push(String(chunk)) }) // the attempt's own listener: it must still get every byte
+            await new Promise<void>((done) => { child.on('close', () => done()) })
+            expect(driverSpawns).toBe(1)
+            expect(driverLog.join('')).toContain('diag5-selfcheck-line')
+            expect(own.join('')).toContain('diag5-selfcheck-line')
+            const other = spawn(process.execPath, ['-e', "console.log('not the driver')"], { stdio: ['ignore', 'pipe', 'pipe'] })
+            await new Promise<void>((done) => { other.on('close', () => done()) })
+            expect(driverSpawns).toBe(1) // only a command that names the driver module is listened to
+            const trimmed = trimmedReceipt({ passed: false, failure: 'x', latencies: { io_ms: [1, 2, 3], resize_ack_ms: [4, 5] }, ledgers: [{ logFile: { size: 9 } }] }) as Record<string, any>
+            expect(trimmed.latencies).toBeUndefined()
+            expect(trimmed.latencyCounts).toEqual({ io_ms: 3, resize_ack_ms: 2 })
+            expect(trimmed.resizeAckMs).toEqual([4, 5])
+            expect(trimmed.ledgers).toEqual([{ logFile: { size: 9 } }])
+            const kept = mkdtempSync(join(tmpdir(), 'diag5-selfcheck-'))
+            for (const directory of ['g1e', 'logs', 'home', 'data/logs']) mkdirSync(join(kept, directory), { recursive: true })
+            const token = 'S'.repeat(24) // a backend URL token as `redactDiagnostic` knows it (`?token=...`), made here at run time
+            writeFileSync(join(kept, 'endpoint.json'), `{"url": "ws://127.0.0.1:1/?token=${token}"}`)
+            writeFileSync(join(kept, 'g1e/pane.peer.json'), `{"acceptedSinceOrigin": 5, "note": "ws://127.0.0.1:1/?token=${token}"}`)
+            writeFileSync(join(kept, 'first-backend.log'), `${'line\n'.repeat(10_000)}last line ws://127.0.0.1:1/?token=${token}\n`)
+            writeFileSync(join(kept, 'logs/peer-0.log'), 'peer text\n')
+            writeFileSync(join(kept, 'home/secret.txt'), 'never copied')
+            const target = join(kept, 'staged')
+            const staged = stageRoot(kept, target)
+            expect(staged.staged.sort()).toEqual(['first-backend.log', 'g1e/pane.peer.json', 'logs/peer-0.log'])
+            expect(staged.problems).toEqual([])
+            expect(readdirSync(target).sort()).toEqual(['first-backend.log.tail.txt', 'g1e__pane.peer.json', 'logs__peer-0.log'])
+            expect(readFileSync(join(target, 'g1e__pane.peer.json'), 'utf8')).not.toContain(token)
+            const tail = readFileSync(join(target, 'first-backend.log.tail.txt'), 'utf8')
+            expect(tail.length).toBeLessThanOrEqual(TAIL_CHARS)
+            expect(tail).toContain('last line')
+            expect(tail).not.toContain(token)
+            expect(staged.files.map((file) => file.path)).toContain('endpoint.json') // listed by name and size, never copied
+            expect(existsSync(join(target, 'endpoint.json'))).toBe(false)
+            // the two shapes of an ordinary shell's READY line on the inbox console: the title after the line's CR LF (read by rh18 too), and between the text and the CR LF (diag2's first Rust-arm failure)
+            const head = '\u001b[?9001h\u001b[?1004h\u001b[?25l\u001b[2J\u001b[m\u001b[H'
+            const title = '\u001b]0;C:\\hostedtoolcache\\python.exe\u0007'
+            const after = shellReadyFacts(Buffer.from(`${head}BASELINE_READY {"pid":7}\r\n${title}\u001b[?25h`))
+            expect([after.titleInsideTheLine, after.titleAfterTheLine, after.csiOnlyError, after.viewError]).toEqual([false, true, null, null])
+            const inside = shellReadyFacts(Buffer.from(`${head}BASELINE_READY {"pid":7}${title}\u001b[?25h\r\n`))
+            expect([inside.titleInsideTheLine, inside.titleAfterTheLine, inside.viewError, inside.oscSequences]).toEqual([true, false, null, 1])
+            expect(inside.csiOnlyError).not.toBeNull()
+            expect(shellReadyFacts(Buffer.from('no line yet')).viewError).toBe('no READY line')
+            mkdirSync(out, { recursive: true })
+            writeFileSync(join(out, 'selfcheck.json'), `${JSON.stringify({ teeState, runtime: process.versions.bun ? 'bun' : 'node', cell, kind })}\n`)
+          }, 60_000)
+          DIAG5_EOF_ATTEMPT_TEST
+          test "$(sha256sum < "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" | cut -d' ' -f1)" = "4f9d99182ae3ddcbbfef57455a51db808da02ee2e4aeb4148b4a8ae469492bd6"
+          test "$(sha256sum < "$RUNNER_TEMP/diag5/tools/diag5_attempt_report.py" | cut -d' ' -f1)" = "2c41fbaed879fa5f6ff82c3c2a2c8076476a051c0f5acbeb6e98e5d8866ef104"
+          test "$(sha256sum < "$RUNNER_TEMP/diag5/tools/diag5_probes.py" | cut -d' ' -f1)" = "144c71ac603b9c23bb0d43e0dea039b1b1b8b278b27f32671d215a799dc27168"
+          test "$(sha256sum < tests/cli/g3hDiag5Attempt.test.ts | cut -d' ' -f1)" = "50452f2ceb936cebfde83ef73af48de83879918c22dc2f4f9fbdc607288cb698"
+
+      - name: diag5, the log final check's open-files test sees a held file, a released one and a process that is gone (NOT evidence)
+        id: holdsprobe
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          uv --project backend run python -B "$RUNNER_TEMP/diag5/tools/diag5_probes.py" holds "$RUNNER_TEMP/diag5/out/holds-probe.json"
+
+      - name: diag5, the log file's identity as Python and the runner take it, raw and as the attempt compares them (NOT evidence)
+        id: identityprobe
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          uv --project backend run python -B "$RUNNER_TEMP/diag5/tools/diag5_probes.py" identity "$RUNNER_TEMP/diag5/out/identity-probe.json"
+
+      - name: Build F0
+        timeout-minutes: 10
+        id: f0
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.packaged.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          H="uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_helper"
+          $H f0-spec "$PWD" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/f0-spec.json" "$GITHUB_REF_NAME"
+          $H f0-build "$PWD" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/f0-spec.json"
+
+      - name: diag5, the READY line of the two ordinary shells of the Python arm, three driver starts, raw bytes recorded (NOT evidence; information only, it cannot fail the job)
+        id: shellready_python
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" "$PWD" "$RUNNER_TEMP/g3r2/rehearsal/attempt-5" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" python 1 shell-ready "$RUNNER_TEMP/diag5/out/shell-ready-python" "$RUNNER_TEMP/diag5/private/shell-ready-python"
+
+      - name: diag5, the READY line of the two ordinary shells of the Rust arm, three driver starts, raw bytes recorded (NOT evidence; information only, it cannot fail the job)
+        id: shellready_rust
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" "$PWD" "$RUNNER_TEMP/g3r2/rehearsal/attempt-6" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" rust-shell 1 shell-ready "$RUNNER_TEMP/diag5/out/shell-ready-rust" "$RUNNER_TEMP/diag5/private/shell-ready-rust"
+
+      - name: diag5, one cell-1 shell attempt of the Python arm through the attempt code and the cost plan's own step (NOT evidence, not a measurement)
+        id: attempt_python_c1
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" "$PWD" "$RUNNER_TEMP/g3r2/rehearsal/attempt-1" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" python 1 attempt "$RUNNER_TEMP/diag5/out/attempt-python-c1" "$RUNNER_TEMP/diag5/private/attempt-python-c1"
+
+      - name: diag5, one cell-1 shell attempt of the Rust arm through the attempt code and the cost plan's own step (NOT evidence, not a measurement)
+        id: attempt_rust_c1
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" "$PWD" "$RUNNER_TEMP/g3r2/rehearsal/attempt-2" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" rust-shell 1 attempt "$RUNNER_TEMP/diag5/out/attempt-rust-c1" "$RUNNER_TEMP/diag5/private/attempt-rust-c1"
+
+      - name: diag5, one cell-4 shell attempt of the Python arm through the attempt code and the cost plan's own step (NOT evidence, not a measurement)
+        id: attempt_python_c4
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" "$PWD" "$RUNNER_TEMP/g3r2/rehearsal/attempt-3" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" python 4 attempt "$RUNNER_TEMP/diag5/out/attempt-python-c4" "$RUNNER_TEMP/diag5/private/attempt-python-c4"
+
+      - name: diag5, one cell-4 shell attempt of the Rust arm through the attempt code and the cost plan's own step (NOT evidence, not a measurement)
+        id: attempt_rust_c4
+        if: ${{ !cancelled() && steps.f0.outcome == 'success' && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          shim="$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release"
+          export PATH="$shim:$PATH"
+          case "$(command -v ps)" in "$shim"/ps|"$shim"/ps.exe) ;; *) echo "ps does not resolve to the G3 shim: $(command -v ps)"; exit 1 ;; esac
+          listing="$(ps -A -o pid=)"
+          if [ -z "$listing" ] || printf '%s\n' "$listing" | grep -v -E '^ *[0-9]+$' > /dev/null; then echo "ps -A -o pid= is not shim-shaped"; exit 1; fi
+          shaped=""
+          for pid in $(printf '%s\n' "$listing" | tr -d ' ' | head -n 20); do
+            if ps -o lstart= -p "$pid" | grep -q -E '^[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4}$'; then shaped=1; break; fi
+          done
+          test -n "$shaped"
+          uv --project backend run python "$RUNNER_TEMP/diag5/tools/diag5_attempt_run.py" "$PWD" "$RUNNER_TEMP/g3r2/rehearsal/attempt-4" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" rust-shell 4 attempt "$RUNNER_TEMP/diag5/out/attempt-rust-c4" "$RUNNER_TEMP/diag5/private/attempt-rust-c4"
+
+      - name: diag5, one verdict per check of each attempt (always runs; information only, it cannot fail the job)
+        id: verdicts
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          uv --project backend run python -B "$RUNNER_TEMP/diag5/tools/diag5_attempt_report.py" "$RUNNER_TEMP/diag5/out/attempt-python-c1" "$RUNNER_TEMP/diag5/private/attempt-python-c1" "$RUNNER_TEMP/g3r2h/F0.json" python || echo "the report of the python cell-1 attempt could not be written"
+          uv --project backend run python -B "$RUNNER_TEMP/diag5/tools/diag5_attempt_report.py" "$RUNNER_TEMP/diag5/out/attempt-rust-c1" "$RUNNER_TEMP/diag5/private/attempt-rust-c1" "$RUNNER_TEMP/g3r2h/F0.json" rust-shell || echo "the report of the rust-shell cell-1 attempt could not be written"
+          uv --project backend run python -B "$RUNNER_TEMP/diag5/tools/diag5_attempt_report.py" "$RUNNER_TEMP/diag5/out/attempt-python-c4" "$RUNNER_TEMP/diag5/private/attempt-python-c4" "$RUNNER_TEMP/g3r2h/F0.json" python || echo "the report of the python cell-4 attempt could not be written"
+          uv --project backend run python -B "$RUNNER_TEMP/diag5/tools/diag5_attempt_report.py" "$RUNNER_TEMP/diag5/out/attempt-rust-c4" "$RUNNER_TEMP/diag5/private/attempt-rust-c4" "$RUNNER_TEMP/g3r2h/F0.json" rust-shell || echo "the report of the rust-shell cell-4 attempt could not be written"
+
+      - name: diag5, stage the records and write the step outcomes (always runs; it decides nothing and cannot fail the job)
+        id: stage
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          JOB_STATUS: ${{ job.status }}
+          O_QUEUE: ${{ steps.queue.outcome }}
+          O_PINS: ${{ steps.pins.outcome }}
+          O_IDENTITY: ${{ steps.identity.outcome }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          O_SHIM: ${{ steps.shim.outcome }}
+          O_BUILD: ${{ steps.build.outcome }}
+          O_PACKAGED: ${{ steps.packaged.outcome }}
+          O_SMOKE: ${{ steps.smoke.outcome }}
+          O_CONPTYPROBE: ${{ steps.conptyprobe.outcome }}
+          O_PROOF: ${{ steps.proof.outcome }}
+          O_CARGO: ${{ steps.cargo.outcome }}
+          O_G2ENV: ${{ steps.g2env.outcome }}
+          O_PYTEST: ${{ steps.pytest.outcome }}
+          O_GUARD: ${{ steps.guard.outcome }}
+          O_RECEIPTS: ${{ steps.receipts.outcome }}
+          O_PRINCIPAL: ${{ steps.principal.outcome }}
+          O_PRINCIPAL_GUARD: ${{ steps.principal_guard.outcome }}
+          O_PRINCIPAL_CASES: ${{ steps.principal_cases.outcome }}
+          O_CORRECTNESS: ${{ steps.correctness.outcome }}
+          O_BIND: ${{ steps.bind.outcome }}
+          O_TESTSTEPS: ${{ steps.teststeps.outcome }}
+          O_IMAGE: ${{ steps.image.outcome }}
+          O_TOOLS: ${{ steps.tools.outcome }}
+          O_HOLDSPROBE: ${{ steps.holdsprobe.outcome }}
+          O_IDENTITYPROBE: ${{ steps.identityprobe.outcome }}
+          O_F0: ${{ steps.f0.outcome }}
+          O_SHELLREADY_PYTHON: ${{ steps.shellready_python.outcome }}
+          O_SHELLREADY_RUST: ${{ steps.shellready_rust.outcome }}
+          O_ATTEMPT_PYTHON_C1: ${{ steps.attempt_python_c1.outcome }}
+          O_ATTEMPT_RUST_C1: ${{ steps.attempt_rust_c1.outcome }}
+          O_ATTEMPT_PYTHON_C4: ${{ steps.attempt_python_c4.outcome }}
+          O_ATTEMPT_RUST_C4: ${{ steps.attempt_rust_c4.outcome }}
+          O_VERDICTS: ${{ steps.verdicts.outcome }}
+        run: |
+          out="$RUNNER_TEMP/diag5/out"
+          mkdir -p "$out"
+          mkdir -p "$out/journals" "$out/markers" "$out/smoke"
+          for f in "$RUNNER_TEMP"/g3r2h/pre/run-*.json "$RUNNER_TEMP"/g3r2h/smoke/run-*.json "$RUNNER_TEMP"/g3r2h/conpty-probe/run-*.json; do if [ -f "$f" ]; then cp "$f" "$out/journals/$(basename "$(dirname "$f")")-$(basename "$f")" || true; fi; done
+          if [ -f "$RUNNER_TEMP/g3r2/rehearsal/attempt-1/run-diag5-attempt.json" ]; then mkdir -p "$out/attempt-python-c1" && cp "$RUNNER_TEMP/g3r2/rehearsal/attempt-1/run-diag5-attempt.json" "$out/attempt-python-c1/plan-journal.json" || true; fi
+          if [ -f "$RUNNER_TEMP/g3r2/rehearsal/attempt-2/run-diag5-attempt.json" ]; then mkdir -p "$out/attempt-rust-c1" && cp "$RUNNER_TEMP/g3r2/rehearsal/attempt-2/run-diag5-attempt.json" "$out/attempt-rust-c1/plan-journal.json" || true; fi
+          if [ -f "$RUNNER_TEMP/g3r2/rehearsal/attempt-3/run-diag5-attempt.json" ]; then mkdir -p "$out/attempt-python-c4" && cp "$RUNNER_TEMP/g3r2/rehearsal/attempt-3/run-diag5-attempt.json" "$out/attempt-python-c4/plan-journal.json" || true; fi
+          if [ -f "$RUNNER_TEMP/g3r2/rehearsal/attempt-4/run-diag5-attempt.json" ]; then mkdir -p "$out/attempt-rust-c4" && cp "$RUNNER_TEMP/g3r2/rehearsal/attempt-4/run-diag5-attempt.json" "$out/attempt-rust-c4/plan-journal.json" || true; fi
+          if [ -f "$RUNNER_TEMP/g3r2/rehearsal/attempt-5/run-diag5-attempt.json" ]; then mkdir -p "$out/shell-ready-python" && cp "$RUNNER_TEMP/g3r2/rehearsal/attempt-5/run-diag5-attempt.json" "$out/shell-ready-python/plan-journal.json" || true; fi
+          if [ -f "$RUNNER_TEMP/g3r2/rehearsal/attempt-6/run-diag5-attempt.json" ]; then mkdir -p "$out/shell-ready-rust" && cp "$RUNNER_TEMP/g3r2/rehearsal/attempt-6/run-diag5-attempt.json" "$out/shell-ready-rust/plan-journal.json" || true; fi
+          if [ -d "$RUNNER_TEMP/g3r2h/markers" ]; then cp -r "$RUNNER_TEMP/g3r2h/markers/." "$out/markers/" || echo "the markers could not be copied"; fi
+          uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_diag.py stage-smoke "$RUNNER_TEMP/g3r2h/smoke" "$out/smoke" > "$out/smoke/staged.txt" 2>&1 || echo "stage-smoke failed" >> "$out/smoke/staged.txt"
+          for f in "$RUNNER_TEMP/g3r2h/rustc-vV.txt" "$RUNNER_TEMP/g3r2h/pre/correctness-gate.json" "$RUNNER_TEMP/g3r2h/pre/correctness-receipt.json" "$RUNNER_TEMP/g3r2h/pre/g2-receipt-binding.json"; do if [ -f "$f" ]; then cp "$f" "$out/" || true; fi; done
+          uv --project backend run python -B "$RUNNER_TEMP/diag5/tools/diag5_probes.py" steplogs "$out/step-logs" "$RUNNER_TEMP/g3r2h/pre/logs" "$RUNNER_TEMP/g3r2h/smoke/logs" "$RUNNER_TEMP/g3r2h/conpty-probe/logs" || echo "the step logs could not be staged"
+          mkdir -p "$out/correctness"
+          for f in "$RUNNER_TEMP/g3r2h/pre/correctness-junit.xml" "$RUNNER_TEMP/g3r2h/pre/correctness-vitest.json"; do if [ -f "$f" ]; then cp "$f" "$out/correctness/" || true; fi; done
+          mkdir -p "$out/test-steps"
+          for f in test-results/ci/g2-windows-*; do if [ -f "$f" ]; then cp "$f" "$out/test-steps/" || true; fi; done
+          if [ -d "$RUNNER_TEMP/g3r2h/conpty-probe" ]; then cp -r "$RUNNER_TEMP/g3r2h/conpty-probe" "$out/conpty-probe" || echo "the ConPTY probe records could not be copied"; fi
+          {
+            printf 'NOT-EVIDENCE diag5\njob=%s\n' "$JOB_STATUS"
+            printf 'step=%s outcome=%s%s\n' queue "$O_QUEUE" " kind=information-only"
+            printf 'step=%s outcome=%s%s\n' pins "$O_PINS" ""
+            printf 'step=%s outcome=%s%s\n' identity "$O_IDENTITY" ""
+            printf 'step=%s outcome=%s%s\n' install "$O_INSTALL" ""
+            printf 'step=%s outcome=%s%s\n' shim "$O_SHIM" ""
+            printf 'step=%s outcome=%s%s\n' build "$O_BUILD" ""
+            printf 'step=%s outcome=%s%s\n' packaged "$O_PACKAGED" ""
+            printf 'step=%s outcome=%s%s\n' smoke "$O_SMOKE" ""
+            printf 'step=%s outcome=%s%s\n' conptyprobe "$O_CONPTYPROBE" ""
+            printf 'step=%s outcome=%s%s\n' proof "$O_PROOF" ""
+            printf 'step=%s outcome=%s%s\n' cargo "$O_CARGO" ""
+            printf 'step=%s outcome=%s%s\n' g2env "$O_G2ENV" ""
+            printf 'step=%s outcome=%s%s\n' pytest "$O_PYTEST" ""
+            printf 'step=%s outcome=%s%s\n' guard "$O_GUARD" ""
+            printf 'step=%s outcome=%s%s\n' receipts "$O_RECEIPTS" ""
+            printf 'step=%s outcome=%s%s\n' principal "$O_PRINCIPAL" ""
+            printf 'step=%s outcome=%s%s\n' principal_guard "$O_PRINCIPAL_GUARD" ""
+            printf 'step=%s outcome=%s%s\n' principal_cases "$O_PRINCIPAL_CASES" ""
+            printf 'step=%s outcome=%s%s\n' correctness "$O_CORRECTNESS" ""
+            printf 'step=%s outcome=%s%s\n' bind "$O_BIND" ""
+            printf 'step=%s outcome=%s%s\n' teststeps "$O_TESTSTEPS" " kind=information-only"
+            printf 'step=%s outcome=%s%s\n' image "$O_IMAGE" " kind=information-only"
+            printf 'step=%s outcome=%s%s\n' tools "$O_TOOLS" ""
+            printf 'step=%s outcome=%s%s\n' holdsprobe "$O_HOLDSPROBE" ""
+            printf 'step=%s outcome=%s%s\n' identityprobe "$O_IDENTITYPROBE" ""
+            printf 'step=%s outcome=%s%s\n' f0 "$O_F0" ""
+            printf 'step=%s outcome=%s%s\n' shellready_python "$O_SHELLREADY_PYTHON" " kind=information-only"
+            printf 'step=%s outcome=%s%s\n' shellready_rust "$O_SHELLREADY_RUST" " kind=information-only"
+            printf 'step=%s outcome=%s%s\n' attempt_python_c1 "$O_ATTEMPT_PYTHON_C1" ""
+            printf 'step=%s outcome=%s%s\n' attempt_rust_c1 "$O_ATTEMPT_RUST_C1" ""
+            printf 'step=%s outcome=%s%s\n' attempt_python_c4 "$O_ATTEMPT_PYTHON_C4" ""
+            printf 'step=%s outcome=%s%s\n' attempt_rust_c4 "$O_ATTEMPT_RUST_C4" ""
+            printf 'step=%s outcome=%s%s\n' verdicts "$O_VERDICTS" " kind=information-only"
+          } > "$out/diag-summary.txt" || echo "the summary could not be written"
+          cat "$out/diag-summary.txt" || true
+          find "$out" -type f | sort > "$RUNNER_TEMP/diag5/files.txt" || true
+          cp "$RUNNER_TEMP/diag5/files.txt" "$out/files.txt" || true
+
+      - name: Leak check (no token or runner secret in the upload)
+        id: leak
+        if: always()
+        timeout-minutes: 2
+        run: if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/diag5/out"; then echo "credential-like text found"; exit 1; fi
+
+      - name: Upload everything the diagnostic recorded (always runs, after the leak check)
+        if: always() && steps.leak.outcome == 'success'
+        timeout-minutes: 10
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-diag5-windows
+          path: ${{ runner.temp }}/diag5/out
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: diag5, fail the job when a decisive step did not succeed (last step, after the upload; an information-only step never fails the job)
+        id: verdict
+        if: always()
+        timeout-minutes: 1
+        env:
+          O_PINS: ${{ steps.pins.outcome }}
+          O_IDENTITY: ${{ steps.identity.outcome }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          O_SHIM: ${{ steps.shim.outcome }}
+          O_BUILD: ${{ steps.build.outcome }}
+          O_PACKAGED: ${{ steps.packaged.outcome }}
+          O_SMOKE: ${{ steps.smoke.outcome }}
+          O_CONPTYPROBE: ${{ steps.conptyprobe.outcome }}
+          O_PROOF: ${{ steps.proof.outcome }}
+          O_CARGO: ${{ steps.cargo.outcome }}
+          O_G2ENV: ${{ steps.g2env.outcome }}
+          O_PYTEST: ${{ steps.pytest.outcome }}
+          O_GUARD: ${{ steps.guard.outcome }}
+          O_RECEIPTS: ${{ steps.receipts.outcome }}
+          O_PRINCIPAL: ${{ steps.principal.outcome }}
+          O_PRINCIPAL_GUARD: ${{ steps.principal_guard.outcome }}
+          O_PRINCIPAL_CASES: ${{ steps.principal_cases.outcome }}
+          O_CORRECTNESS: ${{ steps.correctness.outcome }}
+          O_BIND: ${{ steps.bind.outcome }}
+          O_TOOLS: ${{ steps.tools.outcome }}
+          O_HOLDSPROBE: ${{ steps.holdsprobe.outcome }}
+          O_IDENTITYPROBE: ${{ steps.identityprobe.outcome }}
+          O_F0: ${{ steps.f0.outcome }}
+          O_ATTEMPT_PYTHON_C1: ${{ steps.attempt_python_c1.outcome }}
+          O_ATTEMPT_RUST_C1: ${{ steps.attempt_rust_c1.outcome }}
+          O_ATTEMPT_PYTHON_C4: ${{ steps.attempt_python_c4.outcome }}
+          O_ATTEMPT_RUST_C4: ${{ steps.attempt_rust_c4.outcome }}
+        run: |
+          failed=0
+          for pair in "pins=$O_PINS" "identity=$O_IDENTITY" "install=$O_INSTALL" "shim=$O_SHIM" "build=$O_BUILD" "packaged=$O_PACKAGED" "smoke=$O_SMOKE" "conptyprobe=$O_CONPTYPROBE" "proof=$O_PROOF" "cargo=$O_CARGO" "g2env=$O_G2ENV" "pytest=$O_PYTEST" "guard=$O_GUARD" "receipts=$O_RECEIPTS" "principal=$O_PRINCIPAL" "principal_guard=$O_PRINCIPAL_GUARD" "principal_cases=$O_PRINCIPAL_CASES" "correctness=$O_CORRECTNESS" "bind=$O_BIND" "tools=$O_TOOLS" "holdsprobe=$O_HOLDSPROBE" "identityprobe=$O_IDENTITYPROBE" "f0=$O_F0" "attempt_python_c1=$O_ATTEMPT_PYTHON_C1" "attempt_rust_c1=$O_ATTEMPT_RUST_C1" "attempt_python_c4=$O_ATTEMPT_PYTHON_C4" "attempt_rust_c4=$O_ATTEMPT_RUST_C4"; do
+            case "${pair#*=}" in success) ;; *) echo "the step ${pair%%=*} did not succeed (${pair#*=})"; failed=1 ;; esac
+          done
+          exit "$failed"
