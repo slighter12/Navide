@@ -89,3 +89,17 @@ def hosted_environment(repo: str, base: dict | None = None, system: str | None =
         out[TERMIOS_FLAG] = "1"
         out["NODE_OPTIONS"] = " ".join(part for part in (existing_node, f'--require "{os.path.join(site, "hosted-net-preload.cjs")}"') if part)      # maps the counters socket path to its pipe
     return out
+
+
+NODE_DEFER_FLAG = "ACR_G3_HOSTED_WS_DEFER"
+
+
+def node_client_environment(repo: str, base: dict | None = None, system: str | None = None) -> dict:
+    """What the steps that run a Node WebSocket client (the vitest steps) add on Linux: the preload that creates the real WebSocket only once its port accepts (`hosted-net-preload.cjs`), and the flag that arms it.
+    Kept apart from `hosted_environment` because that one reaches every step, including Electron and electron-builder; the backend writes its port file before it listens, and Node 22's WebSocket never retries
+    a handshake that failed before the TCP connection existed (rehearsal 5)."""
+    if system != "Linux":
+        return {}
+    existing = (base if base is not None else os.environ).get("NODE_OPTIONS", "")
+    preload = os.path.join(repo, "backend", "tests", "cli_regression", "support", "g3", "hosted_site", "hosted-net-preload.cjs")
+    return {NODE_DEFER_FLAG: "1", "NODE_OPTIONS": " ".join(part for part in (existing, f'--require "{preload}"') if part)}

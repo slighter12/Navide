@@ -2,7 +2,7 @@
 // stage it reached and what the caught error was. `runPackagedAttempt` swallows the reason (`catch { passed = false }`) and shows only `passed=false`; the rehearsal-4 Linux probe (Python client) reached READY while
 // the Node attempt did not, so the difference is on the Node side. Copied from `runPackagedAttempt`, unchanged: the isolated environment, the spawn, the port and token discovery, the connect, the waiter registered
 // before `terminal.create`, the create payload (same `buildAgentPaneCommand('/bin/bash', [READY_COMMAND])`), the deadlines. Added: the stage log, a recording subclass of the global WebSocket (event names and the
-// JS type of every message `data`, not a count), the runtime facts, and `redactDiag`. No port, no token, no timing value and no count is ever printed.
+// JS type of every message `data`), the runtime facts, the facts of the deferral preload (`preloadFacts`: loaded or not, and its refusal count: a count, never a timing), and `redactDiag`. No port, no token and no timing value is ever printed.
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, realpathSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -47,7 +47,14 @@ export function runtimeFacts(): string[] {
   ]
 }
 
-type SocketLike = { addEventListener: (type: string, listener: (event: any) => void) => void }
+/** What the Linux deferral preload (`hosted-net-preload.cjs`) says about this process: loaded or not and, when loaded, how many TCP connects it saw refused before the first accept (counts only, never a timing). */
+export function preloadFacts(): string[] {
+  const stats = (globalThis as unknown as Record<symbol, { loaded?: boolean; deferred?: number; refused?: number; bounded?: number } | undefined>)[Symbol.for('acr.g3h.wsDefer')]
+  if (!stats?.loaded) return ['ws deferral preload loaded in this process=false']
+  return ['ws deferral preload loaded in this process=true', `ws deferral sockets deferred=${stats.deferred}`, `refused TCP connects before the first accept=${stats.refused}`, `bounded fallbacks (real socket created without an accept)=${stats.bounded}`]
+}
+
+type SocketLike ={ addEventListener: (type: string, listener: (event: any) => void) => void }
 type SocketCtor = new (url: string) => SocketLike
 
 /** A subclass of the global WebSocket that logs its event names and the type of each distinct message payload; undefined when the runtime has no global WebSocket (the client then fails by itself, and says so). */
@@ -77,6 +84,7 @@ export async function runPackagedDiagnostic(spec: DiagSpec, emit: (line: string)
   const say = (line: string): void => emit(`${DIAG_PREFIX}${redactDiag(line, secrets)}`)
   const stage = (name: string): void => say(`stage reached: ${name}`)
   for (const fact of runtimeFacts()) say(fact)
+  say(preloadFacts()[0])
   let child: ReturnType<typeof spawn> | null = null
   let client: ReturnType<typeof createWsClient> | null = null
   let exited = false
@@ -139,6 +147,7 @@ export async function runPackagedDiagnostic(spec: DiagSpec, emit: (line: string)
     say(`attempt failed: ${e?.constructor?.name ?? e?.name ?? 'unknown'}: ${String(e?.message ?? error).slice(0, MESSAGE_CAP)}`)
   }
   say(`ws status sequence: ${statuses.length ? statuses.join(' > ') : 'none'}`)
+  for (const fact of preloadFacts().slice(1)) say(fact)      // this attempt's own backend start: its sockets are the only ones the process opened
   try { client?.dispose('g3 packaged diagnostic finished') } catch { /* already torn down */ }
   try { child?.stdin?.write('shutdown\n') } catch { /* the backend is already gone */ }
   if (child && !exited) {

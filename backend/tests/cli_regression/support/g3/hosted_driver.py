@@ -45,6 +45,7 @@ class Env:
         self.python = f"{repo}/{self.layout.python_rel}"
         self.sidecar = f"{repo}/{self.layout.sidecar_rel}"
         self.hosted_env = hosted_seams.hosted_environment(repo, {}, system)
+        self.node_client_env = hosted_seams.node_client_environment(repo, {}, system)
 
     def helper(self, *args: str) -> list[str]:
         return [self.python, "-B", "-m", f"{G3}.hosted_helper", *args]
@@ -53,7 +54,8 @@ class Env:
         return [self.python, "-B", "-m", f"{G3}.{name}", *args]
 
     def step(self, name: str, argv: list[str], *, cwd: str, env: dict | None = None, outputs: list[str] | None = None, stdout: str | None = None) -> dict:
-        return {"name": name, "argv": argv, "cwd": cwd, "env": {**self.hosted_env, **(env or {})}, "outputs": outputs or [], "stdout": stdout, "expectedMinutes": EXPECTED_MINUTES[name][0]}
+        node_clients = self.node_client_env if "vitest" in argv else {}      # the steps whose Node process opens the WebSocket to the backend; never the builds or Electron
+        return {"name": name, "argv": argv, "cwd": cwd, "env": {**self.hosted_env, **node_clients, **(env or {})}, "outputs": outputs or [], "stdout": stdout, "expectedMinutes": EXPECTED_MINUTES[name][0]}
 
     def packaged_variant(self, bun: str) -> tuple[list[str], dict]:
         """The vitest argv and the extra environment of the two packaged attempts (`packaged-smoke`, `packaged-cold`): unchanged on Linux; on Windows the hosted variant with the Windows-native READY command."""

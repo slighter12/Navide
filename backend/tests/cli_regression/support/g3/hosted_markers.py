@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 ENV = "ACR_G3_HOSTED_MARKERS"
-KINDS = ("python-seams", "termios-shim", "counters-server", "counters-connection", "node-preload", "reader-rss-bytes")
+KINDS = ("python-seams", "termios-shim", "counters-server", "counters-connection", "node-preload", "reader-rss-bytes", "ws-defer")      # `ws-defer`: the Linux Node preload had to wait for a port (written by the preload; informative, never required)
 EXPECTED = {"Linux": ("python-seams", "reader-rss-bytes"), "Windows": KINDS[:5]}
 SUFFIX = ".marker"
 

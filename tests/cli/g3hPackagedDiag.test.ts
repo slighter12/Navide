@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, it } from 'vitest'
-import { DIAG_PREFIX, describeData, recordingSocket, redactDiag, runPackagedDiagnostic, runtimeFacts } from './g3hPackagedDiag'
+import { DIAG_PREFIX, describeData, preloadFacts, recordingSocket, redactDiag, runPackagedDiagnostic, runtimeFacts } from './g3hPackagedDiag'
 
 const selected = process.env.ACR_G3 ?? ''
 const python = resolve('backend/.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
@@ -33,6 +33,20 @@ it('runtimeFacts name the Node version, the executable, the global WebSocket and
   expect(facts.map((line) => line.split('=')[0])).toEqual(['node version', 'execPath basename', 'typeof globalThis.WebSocket', 'bun version', 'platform'])
   expect(facts[0]).toBe(`node version=${process.version}`)
   expect(facts[1]).not.toContain('/')
+})
+
+it('preloadFacts says whether the deferral preload is loaded in this process and, if so, its refusal and fallback counts (counts only)', () => {
+  const holder = globalThis as unknown as Record<symbol, unknown>
+  const key = Symbol.for('acr.g3h.wsDefer')
+  const saved = holder[key]
+  try {
+    delete holder[key]
+    expect(preloadFacts()).toEqual(['ws deferral preload loaded in this process=false'])
+    holder[key] = { loaded: true, deferred: 1, refused: 7, bounded: 0 }
+    expect(preloadFacts()).toEqual(['ws deferral preload loaded in this process=true', 'ws deferral sockets deferred=1', 'refused TCP connects before the first accept=7', 'bounded fallbacks (real socket created without an accept)=0'])
+  } finally {
+    if (saved === undefined) delete holder[key]; else holder[key] = saved
+  }
 })
 
 it('recordingSocket logs the events and each distinct payload type once, and is undefined without a global WebSocket', () => {
