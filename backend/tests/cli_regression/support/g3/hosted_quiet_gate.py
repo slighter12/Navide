@@ -16,7 +16,10 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from tests.cli_regression.support.g1e import quiet_gate as qg
+from tests.cli_regression.support.g3 import hosted_posix_stubs
+
+hosted_posix_stubs.install()      # before the import below: `g1e/quiet_gate.py` binds `os.getloadavg` as a default argument, which Windows lacks
+from tests.cli_regression.support.g1e import quiet_gate as qg  # noqa: E402
 
 LINUX_LIMIT = 1.0
 WINDOWS_CPU_LIMIT = 25.0

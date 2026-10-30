@@ -20,7 +20,7 @@ import re
 import sys
 from pathlib import Path
 
-from tests.cli_regression.support.g3 import driver, f0 as f0mod, helper, hosted_packaged, hosted_seams, packaged
+from tests.cli_regression.support.g3 import driver, f0 as f0mod, helper, hosted_diag, hosted_packaged, hosted_seams, packaged
 
 G3 = driver.G3
 PRE_RUN_NAME, PACKAGED_RUN_NAME, SMOKE_RUN_NAME, RUN_NAME = driver.PRE_RUN_NAME, driver.PACKAGED_RUN_NAME, driver.SMOKE_RUN_NAME, driver.RUN_NAME
@@ -169,28 +169,21 @@ def _run_plan(plan: list[dict], out: Path, record_name: str, **kwargs) -> int:
     return driver._run_plan(plan, out, record_name, **kwargs)
 
 
-TAIL_LINES = 40
-TOKEN_PATTERNS = (re.compile(r"(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}"), re.compile(r"github_pat_[A-Za-z0-9_]{20,}"))      # the leak-check token shapes
+TAIL_LINES, TOKEN_PATTERNS, redacted_tail = hosted_diag.TAIL_LINES, hosted_diag.TOKEN_PATTERNS, hosted_diag.redacted_tail      # the redaction lives with the other rehearsal diagnostics
 REHEARSAL_WORKFLOW = "G3 Hosted Rehearsal (not evidence)"      # `name:` of the rehearsal workflow, which runs build/packaged/smoke without the flag
 
 
-def redacted_tail(text: str, lines: int = TAIL_LINES) -> list[str]:
-    """The last `lines` lines of `text`, every token-shaped string replaced with `[redacted]`."""
-    out = text.splitlines()[-lines:]
-    for pattern in TOKEN_PATTERNS:
-        out = [pattern.sub("[redacted]", line) for line in out]
-    return out
-
-
 def diagnostic_runner(base, *, emit=print):
-    """`base` (the unchanged runner) that, when a step exits non-zero, prints the redacted tail of that step's own log to the console. Rehearsal diagnostics of the pre-measurement build steps only:
-    the cost command never gets it (a measured step stays blind) and nothing is written anywhere."""
+    """`base` (the unchanged runner) that, when a step exits non-zero, prints the redacted tail of that step's own log to the console, then the reason fields of its receipt (and, for the packaged
+    smoke, one probe of the frozen backend; `hosted_diag`). Rehearsal diagnostics of the pre-measurement build steps only: the cost command never gets it (a measured step stays blind) and nothing is written anywhere."""
     def run(step: dict, stdout_path: Path | None) -> int:
         code = base(step, stdout_path)
-        if code != 0 and stdout_path is not None and Path(stdout_path).is_file():
-            emit(f"--- {step['name']}: last {TAIL_LINES} lines of its log (rehearsal diagnostics) ---")
-            for line in redacted_tail(Path(stdout_path).read_text(encoding="utf-8", errors="replace")):
-                emit(line)
+        if code != 0:
+            if stdout_path is not None and Path(stdout_path).is_file():
+                emit(f"--- {step['name']}: last {TAIL_LINES} lines of its log (rehearsal diagnostics) ---")
+                for line in redacted_tail(Path(stdout_path).read_text(encoding="utf-8", errors="replace")):
+                    emit(line)
+            hosted_diag.step_reasons(step, emit)
         return code
     return run
 

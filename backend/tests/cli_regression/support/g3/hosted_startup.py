@@ -29,17 +29,24 @@ def _seams() -> object:
     return hosted_seams.install_from_env()
 
 
+def _posix_names() -> object:
+    from tests.cli_regression.support.g3 import hosted_posix_stubs
+    return hosted_posix_stubs.install()
+
+
 def _rss_bytes() -> object:
     from tests.cli_regression.support.g3 import hosted_rss
     return hosted_rss.install()
 
 
 def install_all(env: dict | None = None, os_name: str | None = None, *, seams: Callable[[], object] = _seams, termios: Callable[[], object] = _termios, counters: Callable[[], object] = _counters,
-                rss_bytes: Callable[[], object] = _rss_bytes, write: Callable[..., bool] = hosted_markers.write) -> list[str]:
+                rss_bytes: Callable[[], object] = _rss_bytes, write: Callable[..., bool] = hosted_markers.write, posix_names: Callable[[], object] = _posix_names) -> list[str]:
     """The marker kinds written, in install order. The Linux reader child (`ACR_G3_HOSTED_RSS_BYTES=1`, posix) normalises `ru_maxrss` to bytes and writes `reader-rss-bytes` only if that install happened."""
     env = os.environ if env is None else env
     os_name = os.name if os_name is None else os_name
     done: list[str] = []
+    if os_name == "nt":      # before any harness module is imported: unchanged g1e modules read POSIX-only names at import time (`hosted_posix_stubs`); no marker, nothing to report when none was missing
+        posix_names()
     if env.get("ACR_G3_HOSTED_TERMIOS") == "1" and os_name == "nt":
         termios()
         write("termios-shim")

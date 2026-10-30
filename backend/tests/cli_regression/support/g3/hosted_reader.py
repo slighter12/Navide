@@ -105,13 +105,37 @@ def build_for(names: tuple[str, ...]) -> Callable[[Path], dict]:
     return build
 
 
+def descriptor_build_for(names: tuple[str, ...]) -> Callable[[Path, Path, Path], dict]:
+    """`g3.fixtures.build` for a runner without `os.O_NOFOLLOW` (Windows): the same refusal to touch an existing file, the same exclusive create and the same verification against the registered
+    digests, the descriptor of `names` only. A platform with no readers writes the empty descriptor `{}`: the pre plan still runs `reader-fixtures` (the unchanged precondition names the step), and
+    its `FIXTURES.json` output has to exist, but nothing reads a fixture from it."""
+    def build(root: Path, directory: Path, descriptor_path: Path) -> dict:
+        directory, descriptor_path = Path(directory), Path(descriptor_path)
+        if directory.exists() or descriptor_path.exists():
+            raise FileExistsError("reader fixtures exist: refusing to overwrite")
+        directory.mkdir(parents=True)
+        descriptor = build_for(names)(directory)
+        fd = os.open(descriptor_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o600)
+        try:
+            os.write(fd, (json.dumps(descriptor, indent=1) + "\n").encode())
+        finally:
+            os.close(fd)
+        problems = g3_fixtures.descriptor_problems(descriptor_path)
+        if problems:
+            raise ValueError("; ".join(problems))
+        return descriptor
+    return build
+
+
 def targets(system: str) -> list[tuple[object, str, object]]:
     """(module, attribute, replacement) for `hosted_seams`: the registry on every platform, the G1-E reader runners (and the Linux unit seam of their fresh child) where there are readers to run,
-    and the reader fixture registration and builder of `g3.fixtures` for the same readers."""
+    and the reader fixture registration and builder of `g3.fixtures` for the same readers. A platform with no readers registers no fixture and builds the empty descriptor portably."""
     out: list[tuple[object, str, object]] = [(rows, "reader_fixtures", fixtures_for(system))]
     if READERS[system]:
         out += [(rb, "FIXTURES", READERS[system]), (g1e_assemble, "reader_measure_record", measure_record_for(READERS[system])), (rb, "run_in_fresh_process", fresh_process_runner()),
                 (g3_fixtures, "REGISTERED_SHA256", registered_for(READERS[system])), (rf, "build", build_for(READERS[system]))]
+    else:
+        out += [(g3_fixtures, "REGISTERED_SHA256", registered_for(READERS[system])), (g3_fixtures, "build", descriptor_build_for(READERS[system]))]
     return out
 
 
