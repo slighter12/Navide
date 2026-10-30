@@ -289,7 +289,7 @@ import {
   type WorkspaceRestoreSession,
 } from './lib/resumeBehavior'
 import { shouldQueuePtyLostResume } from './lib/ptyLostRecovery'
-import { closePaneHidden, settlePaneTerminals } from './lib/paneRetirement'
+import { closePaneHidden, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
 import { WakeClaims, joinedRealizeOutcome, paneOpenAnswer, sessionHeldElsewhere, type SessionHolder } from './lib/paneOpenAnswer'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
 import { cliPermissionKey, parseCliPermissionMode, skipPermissionFlagFor } from '@navide/plugin-shell'
@@ -8073,6 +8073,10 @@ async function closeFocusedPane(paneId: string): Promise<void> {
 // (so the CLI's shutdown output is never shown) but still in `panes`, so every check that reads
 // the list still sees them as unsettled. Shown again when the settlement is not proven.
 const closingPaneIds = ref(new Set<string>())
+
+// What the sidebar cards, tab strip and pane lists draw: no closing pane, so a close removes the pane from every surface at once.
+const listedPanes = computed(() => withoutClosing(panes.value, closingPaneIds.value))
+const listedPaneViews = computed(() => withoutClosing(paneViews.value, closingPaneIds.value))
 
 function onUserClosePane(paneId: string, opts: Parameters<typeof onKill>[1] = {}): Promise<boolean> {
   return closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId, opts))
@@ -19425,7 +19429,7 @@ if (!isDetachedWindow) {
  *  it, and a mode that is only a way of looking must not widen what they
  *  destroy or file under the wrong path. */
 const panesOnStage = computed<readonly ActivePane[]>(() =>
-  sidebarMode.value === 'free' ? panes.value : panesInView.value
+  withoutClosing(sidebarMode.value === 'free' ? panes.value : panesInView.value, closingPaneIds.value)
 )
 
 /** Free mode draws other workspaces' panes on this stage, while the actions
@@ -19827,7 +19831,7 @@ onMounted(async () => {
 })
 
 const paneLineage = computed<PaneLineageRow[]>(() =>
-  buildPaneLineage(panes.value, collapsedPanes.value)
+  buildPaneLineage(listedPanes.value, collapsedPanes.value)
 )
 
 /** Workspaces that have been folded shut in the sidebar. Per window and not
@@ -20591,7 +20595,7 @@ const workspaceGroups = computed<WorkspaceGroupRow[]>(() =>
   buildWorkspaceGroups({
     here: currentWorkspace.value,
     order: workspaceOrder.value,
-    panes: panes.value,
+    panes: listedPanes.value,
     lineage: paneLineage.value,
     runGroups: runGroups.value,
     runGroupsByWorkspace: runGroupsByWorkspace.value,
@@ -21856,7 +21860,7 @@ const stageSurfaceOrderedIds = computed<string[]>(() =>
  *  its panes from a surface with no way to bring them back. */
 const NOTHING_FOLDED: ReadonlySet<string> = new Set()
 const paneListLineage = computed<PaneLineageRow[]>(() =>
-  buildPaneLineage(panes.value, NOTHING_FOLDED)
+  buildPaneLineage(listedPanes.value, NOTHING_FOLDED)
 )
 
 /** Families closed up in the lists. Everything starts open: a pane you cannot
@@ -21890,13 +21894,13 @@ const tabFamilyToggleDisabledReason = computed<'grid' | 'empty' | undefined>(() 
  *  Structure and status stay separate right up to here, where they are joined
  *  for one frame. */
 const auxiliaryListPanes = computed(() => {
-  const views = new Map(paneViews.value.map((v) => [v.id, v] as const))
+  const views = new Map(listedPaneViews.value.map((v) => [v.id, v] as const))
   // The entries are what this tab shows on its own. Every descendant of one
   // joins the list wherever it lives — minimized, another tab, another
   // workspace — because the parent's count includes it and opening the family
   // is how the user reaches it.
   const entries = new Set(
-    paneViews.value.filter((v) => !v.isMinimized && tabFilteredPaneIds.value.has(v.id)).map((v) => v.id)
+    listedPaneViews.value.filter((v) => !v.isMinimized && tabFilteredPaneIds.value.has(v.id)).map((v) => v.id)
   )
   const rows = paneListLineage.value.filter(
     (r) => views.has(r.id) && (entries.has(r.id) || r.ancestors.some((id) => entries.has(id)))
@@ -22531,7 +22535,7 @@ function paneIsCommander(p: ActivePane): boolean {
       :agent-specs="enabledAgentSpecs"
       :roles="rolesApi.roles.value"
       :stages="stagesApi.stages.value"
-      :panes="paneViews"
+      :panes="listedPaneViews"
       :lineage="paneLineage"
       :workspaces="workspaceGroups"
       :workspace-aliases="workspaceAliases.aliases.value"

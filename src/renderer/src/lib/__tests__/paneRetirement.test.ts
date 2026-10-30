@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { closePaneHidden, settlePaneTerminals } from '../paneRetirement'
+import { closePaneHidden, settlePaneTerminals, withoutClosing } from '../paneRetirement'
 
 describe('settlePaneTerminals — the settlement answer is the only proof', () => {
   it('a proven settlement after a successful own kill retires', async () => {
@@ -91,5 +91,26 @@ describe('closePaneHidden — the pane is hidden while settlement is pending', (
     late.resolve(null)
     await pending
     expect(replacements).toEqual([])
+  })
+})
+
+describe('withoutClosing — a closing pane is not listed on any surface', () => {
+  const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+
+  it('drops exactly the closing panes and keeps the order of the rest', () => {
+    expect(withoutClosing(items, new Set(['b']))).toEqual([{ id: 'a' }, { id: 'c' }])
+  })
+  it('returns the input unchanged when nothing is closing', () => {
+    expect(withoutClosing(items, new Set())).toBe(items)
+  })
+  it('lists the pane again once its close is refused', async () => {
+    const closing = new Set<string>()
+    let refuse: (retired: boolean) => void = () => {}
+    const late = new Promise<boolean>((resolve) => { refuse = resolve })
+    const pending = closePaneHidden(closing, 'b', () => late)
+    expect(withoutClosing(items, closing).map((p) => p.id)).toEqual(['a', 'c'])
+    refuse(false)
+    await pending
+    expect(withoutClosing(items, closing).map((p) => p.id)).toEqual(['a', 'b', 'c'])
   })
 })
