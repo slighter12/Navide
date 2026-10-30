@@ -14,7 +14,7 @@ from typing import Callable
 
 from tests.cli_regression.support import backend_process
 from tests.cli_regression.support.g1e import assemble as g1e_assemble, log_final, toolchain as tc
-from tests.cli_regression.support.g3 import driver, f0 as f0mod, hosted_f0, hosted_host, hosted_markers, hosted_packaged, hosted_reader, hosted_toolchain, packaged, probe
+from tests.cli_regression.support.g3 import driver, f0 as f0mod, hosted_f0, hosted_host, hosted_markers, hosted_packaged, hosted_pins, hosted_reader, hosted_toolchain, packaged, pins, probe
 
 ENV_FLAG = "ACR_G3_HOSTED"
 _PACKAGED_NAMES = ("APP_REL", "BIN_REL", "BACKEND_NAME", "RUNTIME_NAME")
@@ -26,7 +26,8 @@ def targets(system: str) -> list[tuple[object, str, object]]:
            (log_final, "holds", hosted_host.holds_for(system)), (driver, "sidecar_path", lambda repo, _rel=hosted_packaged.layout(system).sidecar_rel: f"{repo}/{_rel}"),
            *hosted_reader.targets(system)]
     if system == "Windows":
-        out += [(tc, "observe_python", lambda root, runner: hosted_toolchain.observe_python(root, runner, windows=True)), (probe, "probe_ready_version", hosted_toolchain.probe_ready_version_stdio),
+        out += [(pins, "pinned_paths", hosted_pins.posix_keys(pins.pinned_paths)),      # the manifest keys are POSIX; `str(relative_to)` is not on Windows
+                (tc, "observe_python", lambda root, runner: hosted_toolchain.observe_python(root, runner, windows=True)), (probe, "probe_ready_version", hosted_toolchain.probe_ready_version_stdio),
                 (backend_process.BackendProcess, "__init__", wrap_backend_init(backend_process.BackendProcess.__init__))]
     return out
 

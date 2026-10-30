@@ -54,6 +54,7 @@ backend/tests/cli_regression/support/g3/hosted_markers.py
 backend/tests/cli_regression/support/g3/hosted_pack.py
 backend/tests/cli_regression/support/g3/hosted_pack_allowlist.txt
 backend/tests/cli_regression/support/g3/hosted_packaged.py
+backend/tests/cli_regression/support/g3/hosted_pins.py
 backend/tests/cli_regression/support/g3/hosted_preflight.py
 backend/tests/cli_regression/support/g3/hosted_ps_shim/Cargo.lock
 backend/tests/cli_regression/support/g3/hosted_ps_shim/Cargo.toml

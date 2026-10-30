@@ -10,14 +10,15 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from tests.cli_regression.support import reader_benchmark as rb
+from tests.cli_regression.support import reader_benchmark as rb, reader_fixtures as rf
 from tests.cli_regression.support.g1e import assemble as g1e_assemble, calibration
-from tests.cli_regression.support.g3 import hosted_markers, hosted_rss, rows
+from tests.cli_regression.support.g3 import fixtures as g3_fixtures, hosted_markers, hosted_rss, rows
 
 SITE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hosted_site")
 READERS = {"Linux": ("claude",), "Windows": ()}
 EMPTY_READER_RECORD = {"fixtures": [], "goldenEvents": {}, "calibrationRuns": 0, "runs": 0, "findings": [], "m0": {}, "rows": {}}
 _ORIGINAL_FIXTURES = rows.reader_fixtures
+_ORIGINAL_REGISTERED = dict(g3_fixtures.REGISTERED_SHA256)
 
 
 def fixtures_for(system: str, original: Callable[..., dict] = _ORIGINAL_FIXTURES) -> Callable[..., dict]:
@@ -82,11 +83,35 @@ def fresh_process_runner(site_dir: str = SITE_DIR) -> Callable[..., dict]:
     return run_in_fresh_process
 
 
+def registered_for(names: tuple[str, ...], original: dict[str, str] = _ORIGINAL_REGISTERED) -> dict[str, str]:
+    """`g3.fixtures.REGISTERED_SHA256` restricted to `names`: the same registered digests, only the fixtures the platform registers (`descriptor_problems` and `f0_record` read it at call time)."""
+    return {name: digest for name, digest in original.items() if name in names}
+
+
+def build_for(names: tuple[str, ...]) -> Callable[[Path], dict]:
+    """`reader_fixtures.build` for `names`: the unchanged generators and descriptor entries, only the fixtures of `names`. The opencode database header (bytes 96-99) records the SQLite library
+    version of the machine that wrote it, so its digest is the registered one on the registering host only; a Linux runner registers and builds the claude fixture and never writes the database."""
+    generators = {"claude": rf.generate_claude, "opencode": rf.generate_opencode}
+
+    def build(directory: Path) -> dict:
+        out = {}
+        for name in names:
+            path, golden = generators[name](directory / name)
+            golden_path = directory / f"{name}-golden.json"
+            golden_path.write_text(json.dumps(golden, separators=(",", ":")))
+            out[name] = {"path": str(path), "golden": str(golden_path), "bytes": path.stat().st_size, "entries": len(golden), "sha256": rf.sha256_file(path), "golden_sha256": rf.sha256_file(golden_path)}
+            assert out[name]["bytes"] >= rf.MIN_BYTES and out[name]["entries"] >= rf.MIN_ENTRIES, out[name]
+        return out
+    return build
+
+
 def targets(system: str) -> list[tuple[object, str, object]]:
-    """(module, attribute, replacement) for `hosted_seams`: the registry on every platform, the G1-E reader runners (and the Linux unit seam of their fresh child) where there are readers to run."""
+    """(module, attribute, replacement) for `hosted_seams`: the registry on every platform, the G1-E reader runners (and the Linux unit seam of their fresh child) where there are readers to run,
+    and the reader fixture registration and builder of `g3.fixtures` for the same readers."""
     out: list[tuple[object, str, object]] = [(rows, "reader_fixtures", fixtures_for(system))]
     if READERS[system]:
-        out += [(rb, "FIXTURES", READERS[system]), (g1e_assemble, "reader_measure_record", measure_record_for(READERS[system])), (rb, "run_in_fresh_process", fresh_process_runner())]
+        out += [(rb, "FIXTURES", READERS[system]), (g1e_assemble, "reader_measure_record", measure_record_for(READERS[system])), (rb, "run_in_fresh_process", fresh_process_runner()),
+                (g3_fixtures, "REGISTERED_SHA256", registered_for(READERS[system])), (rf, "build", build_for(READERS[system]))]
     return out
 
 

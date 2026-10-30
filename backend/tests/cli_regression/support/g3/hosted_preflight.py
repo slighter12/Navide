@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 G3 = "backend/tests/cli_regression/support/g3"
-PINS_REL, PIN_MANIFEST_REL = f"{G3}/pins.py", f"{G3}/g1e-pins.json"
+PINS_REL, PIN_MANIFEST_REL, HOSTED_PINS_REL = f"{G3}/pins.py", f"{G3}/g1e-pins.json", f"{G3}/hosted_pins.py"
 MANIFEST_REL = f"{G3}/hosted_inputs/documents-manifest.json"
 LEDGER_REL = ".scratch/agent-cli-runtime-evaluation/progress.md"
 MANIFEST_SCHEMA = "acr-g3h-documents-manifest/1"
@@ -27,11 +27,19 @@ APPROVAL_LABELS = ("G3 cost pre-registration", "G3-r2", "G3-r2-hosted")
 SECRET_MARKERS = ("ghs_", "ghp_", "github_pat_", "BEGIN PRIVATE KEY", "Bearer ")
 
 
-def pin_problems(root: Path) -> list[str]:
+def load(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def pin_problems(root: Path, windows: bool | None = None) -> list[str]:
+    """`windows` (default: this interpreter is Windows) wraps `pinned_paths` so the g1e package keys are POSIX like the manifest's (`hosted_pins.py`, loaded by path as well)."""
     try:
-        spec = importlib.util.spec_from_file_location("g3_pins_preflight", Path(root) / PINS_REL)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load("g3_pins_preflight", Path(root) / PINS_REL)
+        if sys.platform == "win32" if windows is None else windows:
+            module.pinned_paths = load("g3_hosted_pins", Path(root) / HOSTED_PINS_REL).posix_keys(module.pinned_paths)
         manifest = json.loads((Path(root) / PIN_MANIFEST_REL).read_text(encoding="utf-8"))
     except (OSError, ValueError, AttributeError, ImportError) as error:
         return [f"the g1e pin check cannot run: {error.__class__.__name__}"]

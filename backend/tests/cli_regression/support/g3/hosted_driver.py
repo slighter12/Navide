@@ -169,7 +169,34 @@ def _run_plan(plan: list[dict], out: Path, record_name: str, **kwargs) -> int:
     return driver._run_plan(plan, out, record_name, **kwargs)
 
 
-def main(argv: list[str], *, system: str | None = None, runner_temp: str | None = None, install=hosted_seams.install, run_plan=_run_plan) -> int:
+TAIL_LINES = 40
+TOKEN_PATTERNS = (re.compile(r"(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}"), re.compile(r"github_pat_[A-Za-z0-9_]{20,}"))      # the leak-check token shapes
+REHEARSAL_WORKFLOW = "G3 Hosted Rehearsal (not evidence)"      # `name:` of the rehearsal workflow, which runs build/packaged/smoke without the flag
+
+
+def redacted_tail(text: str, lines: int = TAIL_LINES) -> list[str]:
+    """The last `lines` lines of `text`, every token-shaped string replaced with `[redacted]`."""
+    out = text.splitlines()[-lines:]
+    for pattern in TOKEN_PATTERNS:
+        out = [pattern.sub("[redacted]", line) for line in out]
+    return out
+
+
+def diagnostic_runner(base, *, emit=print):
+    """`base` (the unchanged runner) that, when a step exits non-zero, prints the redacted tail of that step's own log to the console. Rehearsal diagnostics of the pre-measurement build steps only:
+    the cost command never gets it (a measured step stays blind) and nothing is written anywhere."""
+    def run(step: dict, stdout_path: Path | None) -> int:
+        code = base(step, stdout_path)
+        if code != 0 and stdout_path is not None and Path(stdout_path).is_file():
+            emit(f"--- {step['name']}: last {TAIL_LINES} lines of its log (rehearsal diagnostics) ---")
+            for line in redacted_tail(Path(stdout_path).read_text(encoding="utf-8", errors="replace")):
+                emit(line)
+        return code
+    return run
+
+
+def main(argv: list[str], *, system: str | None = None, runner_temp: str | None = None, install=hosted_seams.install, run_plan=_run_plan, base_runner=driver.default_runner, emit=print,
+         environ: dict | None = None) -> int:
     from tests.cli_regression.support.g3 import incomplete
     argv = absolutize(argv)
     cmd, args = (argv[0], argv[1:]) if argv else ("", [])
@@ -179,12 +206,15 @@ def main(argv: list[str], *, system: str | None = None, runner_temp: str | None 
         rehearsal = "--rehearsal" in args
         args = [a for a in args if a != "--rehearsal"]
         if cmd in ("build", "packaged", "smoke") and len(args) == 2:
-            env = Env(args[0], system)
+            plan_env = Env(args[0], system)
+            out = Path(args[1])
+            diagnostics = rehearsal or (os.environ if environ is None else environ).get("GITHUB_WORKFLOW") == REHEARSAL_WORKFLOW
+            kwargs = {"runner": diagnostic_runner(base_runner, emit=emit) if diagnostics else base_runner}
             if cmd == "build":
-                return run_plan(build_pre_plan(env, args[1], str(Path(args[1]).parent)), Path(args[1]), PRE_RUN_NAME)
+                return run_plan(build_pre_plan(plan_env, args[1], str(out.parent)), out, PRE_RUN_NAME, **kwargs)
             if cmd == "packaged":
-                return run_plan(build_packaged_plan(env, args[1]), Path(args[1]), PACKAGED_RUN_NAME)
-            return run_plan(build_smoke_plan(env, args[1]), Path(args[1]), SMOKE_RUN_NAME)
+                return run_plan(build_packaged_plan(plan_env, args[1]), out, PACKAGED_RUN_NAME, **kwargs)
+            return run_plan(build_smoke_plan(plan_env, args[1]), out, SMOKE_RUN_NAME, **kwargs)
         if cmd in ("cost", "recover") and len(args) == 6:
             repo, out, f0_path, build_record, pre_out, smoke_out = args
             temp = runner_temp or os.environ["RUNNER_TEMP"]
