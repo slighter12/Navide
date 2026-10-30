@@ -1,0 +1,238 @@
+name: G3 Hosted Agent CLI Runtime
+
+# Evaluation only (G3-r2-hosted, registered run). Runs on pushes to the evaluation branch, holds no secrets and publishes nothing.
+# STAGE H3 FILLS, before this file is committed to .github/workflows/:
+#   H3_FILL_PACK_COMMIT_SHA the commit of the orphan harness-pack branch (`hosted_pack.py tree`)
+#   H3_FILL_PACK_DIGEST     the archive digest recorded by `hosted_pack.py archive` / `digest`
+# Two distinct SHAs: the run head is $GITHUB_SHA (the pushed commit, which also holds this workflow file), and MACOS_H is the fixed head the macOS G3 measured; the product paths are diffed against MACOS_H.
+# Windows is not measured (port not verified), per addendum D8: the Windows port used its 3 fix rounds, so this registered run is Linux only and Windows cost is reported "Not measured (port not verified)".
+# Two jobs: correctness-linux (the g2 required cases, copied step for step) and cost-linux (needs: correctness-linux, so the correctness precondition is a separate runner's green job).
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime
+
+permissions:
+  contents: read
+
+env:
+  MACOS_H: 1e85e93880326ad50d65362dbc8e907474440c94
+  PACK_COMMIT: 8adf77e8a1c67c92c391352a3ffd5b80d57ab92c
+  PACK_DIGEST: 8b300c3bf53f8968132c37c862c218231645ddb1df0c7014773e22bc38edee7b
+
+jobs:
+  correctness-linux:
+    name: correctness-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Set evaluation paths
+        run: echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/g2-venv" >> "$GITHUB_ENV"
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked test dependencies
+        run: |
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+
+      - name: Build the harness and release sidecars and prove the release one has no fault hooks
+        id: build
+        run: bash tests/cli/g2-linux-build.sh
+
+      - name: Rust tests
+        id: cargo
+        if: always() && steps.build.outcome == 'success'
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml
+
+      - name: Required backend cases through the real sidecar
+        id: pytest
+        if: always() && steps.build.outcome == 'success'
+        run: bash tests/cli/g2-linux-pytest.sh
+
+      - name: Require every listed case to be collected and passed
+        id: guard
+        if: always() && steps.build.outcome == 'success'
+        run: node tests/cli/g2Native.mjs guard --platform linux --arch x64 --required tests/cli/g2-required-linux.txt --skip-allowed test_cli_runtime_recovery.py,test_cli_runtime_lifecycle.py,test_cli_runtime_claude.py --junit test-results/ci/g2-linux-junit.xml --out test-results/ci/g2-linux-outcomes.log
+
+      - name: Require every ready receipt to name the freshly built sidecar
+        id: receipts
+        if: always() && steps.pytest.outcome != 'skipped'
+        run: node tests/cli/g2Native.mjs receipts --root ${{ runner.temp }}/g2-basetemp --sha ${{ env.G2_SIDECAR_SHA }} --harness-sha ${{ env.G2_HARNESS_SHA }} --required tests/cli/g2-required-linux.txt --expect tests/cli/g2-receipt-expectations-linux.json
+
+      - name: Run the two required production WebSocket cases
+        id: principal
+        if: always() && steps.build.outcome == 'success'
+        run: >
+          bun run vitest run tests/cli/shellRuntime.test.ts tests/cli/runtimeRecovery.test.ts tests/cli/claudeRuntime.test.ts
+          -t 'uses one actual native runtime|sidecar death with sessions and a pending request|native Claude production-client'
+          --reporter=default --reporter=json --outputFile.json=test-results/ci/g2-linux-ts-results.json
+
+      - name: Require both WebSocket cases to be collected and pass
+        id: principal_guard
+        if: always() && steps.principal.outcome == 'success'
+        run: >
+          jq -e '[.testResults[].assertionResults[] | select(.fullName == "uses one actual native runtime for concurrent shells, ordered Unicode, resize, reconnect and exits" or .fullName == "sidecar death with sessions and a pending request fails visibly, cleans owned trees only and recovers on a fresh runtime")] as $required | ($required | length) == 2 and ($required | all(.status == "passed"))'
+          test-results/ci/g2-linux-ts-results.json
+
+      - name: Require the Claude production-client cases to be collected and pass
+        id: claude_guard
+        if: always() && steps.principal.outcome == 'success'
+        run: jq -e -f tests/cli/g2-linux-principal.jq test-results/ci/g2-linux-ts-results.json
+
+      - name: Upload redacted outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-correctness-linux
+          path: |
+            test-results/ci/g2-linux-outcomes.log
+            test-results/ci/g2-linux-ts-results.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  cost-linux:
+    name: cost-linux
+    needs: correctness-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    defaults:
+      run:
+        shell: bash
+    env:
+      G3H_OS: Linux
+      PY: backend/.venv/bin/python
+    steps:
+      - name: Pin line endings before any checkout
+        run: git config --global core.autocrlf false
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the harness pack
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PACK_COMMIT }}
+          path: pack
+          persist-credentials: false
+
+      - name: Check the run head and the checked-out bytes
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git config --get core.autocrlf)" = "false"
+          test -z "$(git status --porcelain -- . ':(exclude)pack')"
+
+      - name: Verify the pack digest, then overlay it
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" pack/backend/tests/cli_regression/support/g3/hosted_pack.py digest pack > "$RUNNER_TEMP/pack-digest.txt"
+          cat "$RUNNER_TEMP/pack-digest.txt"
+          grep -q -F "$PACK_DIGEST" "$RUNNER_TEMP/pack-digest.txt"
+          tar -C pack --exclude=.git -cf - . | tar -C . -xf -
+
+      - name: Verify the g1e pins and the hosted inputs (first step after the overlay)
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
+
+      - name: Product identity against the registered macOS head
+        run: |
+          git cat-file -e "$MACOS_H^{commit}"
+          git diff --exit-code "$MACOS_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain -- native src backend/agent_team_backend)"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Set up Node.js (the version the macOS run used)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.23.2
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked dependencies and record the toolchain
+        run: |
+          npm install -g pnpm@10.0.0
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+          mkdir -p "$RUNNER_TEMP/g3r2h"
+          rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
+
+      - name: Quiet gate before the run
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_quiet_gate.py before "$RUNNER_TEMP/g3r2h/quiet-pre"
+
+      - name: Build the sidecars and the reader fixtures
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre"
+
+      - name: Build the packaged app
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py packaged "$PWD" "$RUNNER_TEMP/g3r2h/pre"
+
+      - name: Smoke
+        timeout-minutes: 20
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py smoke "$PWD" "$RUNNER_TEMP/g3r2h/smoke"
+
+      - name: Build F0
+        run: |
+          H="uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_helper"
+          $H f0-spec "$PWD" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/f0-spec.json" eval/agent-cli-runtime
+          $H f0-build "$PWD" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/f0-spec.json"
+
+      - name: Cost run (calibration, matrix, launch matrix, decision)
+        timeout-minutes: 300
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py cost "$PWD" "$RUNNER_TEMP/g3r2h/out" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke"
+
+      - name: Leak check (no token or runner secret in the upload)
+        id: leak
+        if: always()
+        run: |
+          if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/g3r2h"; then echo "credential-like text found"; exit 1; fi
+
+      - name: Upload the evidence
+        if: always() && steps.leak.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-evidence-linux
+          path: ${{ runner.temp }}/g3r2h
+          if-no-files-found: warn
+          retention-days: 30
