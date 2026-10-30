@@ -1095,6 +1095,16 @@ fn snapshot_cadence(started: Instant) -> Duration {
     )
 }
 
+/// When the session's next snapshot is due. On Linux it is moved back onto a sidecar-wide 5 s grid (never
+/// later than `started`'s own cadence), so sessions snapshot together and share their scans.
+fn next_snapshot_due(started: Instant) -> Instant {
+    let own = Instant::now() + snapshot_cadence(started);
+    #[cfg(target_os = "linux")]
+    return linux::grid_due(own);
+    #[cfg(not(target_os = "linux"))]
+    own
+}
+
 /// `SESSION_EXITED`: the root was reaped (5.5). Nothing about the stream or the descendants.
 fn send_exited(handle: &SessionHandle, state: &mut State, wire: &Wire) {
     if state.exited_sent {
@@ -1397,7 +1407,19 @@ fn ownership_snapshot(handle: &SessionHandle, state: &mut State, wire: &Wire) {
     let known = known_owned(&state.owned);
     #[cfg(target_os = "linux")]
     let pid = state.owned.pid;
-    let Ok(table) = snapshot(None, &known, &mut state.owned.births) else {
+    // On Linux every session due at the same grid instant shares its /proc scans (the cadence is unchanged).
+    #[cfg(target_os = "linux")]
+    let result = linux::snapshot_with(
+        None,
+        &known,
+        &mut state.owned.births,
+        linux::Reads::Shared {
+            due: state.next_snapshot,
+        },
+    );
+    #[cfg(target_os = "macos")]
+    let result = snapshot(None, &known, &mut state.owned.births);
+    let Ok(table) = result else {
         return;
     };
     #[cfg(target_os = "linux")]
@@ -1439,7 +1461,7 @@ fn session_thread(
         exited_sent: false,
         eof: false,
         eof_deadline: None,
-        next_snapshot: Instant::now() + snapshot_cadence(handle.started),
+        next_snapshot: next_snapshot_due(handle.started),
     };
     loop {
         let mut wake = state.next_snapshot;
@@ -1490,7 +1512,7 @@ fn session_thread(
                 }
                 if now >= state.next_snapshot {
                     ownership_snapshot(&handle, &mut state, &wire);
-                    state.next_snapshot = Instant::now() + snapshot_cadence(handle.started);
+                    state.next_snapshot = next_snapshot_due(handle.started);
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return,

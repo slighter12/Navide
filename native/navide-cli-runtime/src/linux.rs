@@ -2,7 +2,7 @@
 use super::Table;
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const MAX_PIDS: usize = 4 * 1024 * 1024 / std::mem::size_of::<i32>();
@@ -299,11 +299,12 @@ fn scan_all(deadline: Instant) -> io::Result<(HashMap<i32, Process>, Vec<i32>)> 
     Ok((all, unreadable))
 }
 
+/// One session's owned set, derived from the full `all` read of /proc (its own or a shared one).
 fn owned_scan(
     seeds: &HashMap<i32, Process>,
+    all: &HashMap<i32, Process>,
     deadline: Instant,
 ) -> io::Result<HashMap<i32, Process>> {
-    let all = scan(deadline)?;
     let mut owned = HashMap::new();
     let mut pending: Vec<_> = seeds
         .iter()
@@ -331,7 +332,7 @@ fn owned_scan(
         if value.group <= 0 {
             return Err(io::Error::other("unverified owned group"));
         }
-        for (&child, candidate) in &all {
+        for (&child, candidate) in all {
             if child != pid && (candidate.parent == pid || candidate.group == value.group) {
                 if let Some(old) = queued.get(&child) {
                     if old.birth_ticks != candidate.birth_ticks {
@@ -357,10 +358,87 @@ fn owned_scan(
     Ok(owned)
 }
 
+/// A full read of /proc, numbered so a session can tell a scan it already used from a new one.
+#[derive(Clone)]
+struct Shared {
+    seq: u64,
+    /// Taken before the first `/proc` entry was read.
+    started: Instant,
+    all: Arc<HashMap<i32, Process>>,
+}
+
+/// The sidecar-wide scan cache: the last two scans, oldest first. Its lock also serialises scans, so scan `k + 1`
+/// always starts after scan `k` ended: two sequence numbers are two independent reads. Two are kept so a session
+/// that wakes a moment late still finds the pair a faster one used.
+struct Board(Mutex<Vec<Shared>>);
+
+impl Board {
+    /// The oldest cached scan with a sequence number above `after` that started at or after `not_before`, else a
+    /// new read. A scan taken before `not_before` is never returned.
+    fn scan_after(
+        &self,
+        after: u64,
+        not_before: Instant,
+        read: impl FnOnce() -> io::Result<HashMap<i32, Process>>,
+    ) -> io::Result<Shared> {
+        let mut scans = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = scans
+            .iter()
+            .find(|cached| cached.seq > after && cached.started >= not_before)
+        {
+            return Ok(cached.clone());
+        }
+        let started = Instant::now();
+        let all = Arc::new(read()?);
+        let seq = scans.last().map_or(1, |shared| shared.seq + 1);
+        let shared = Shared { seq, started, all };
+        if scans.len() == 2 {
+            scans.remove(0);
+        }
+        scans.push(shared.clone());
+        Ok(shared)
+    }
+}
+
+static BOARD: Board = Board(Mutex::new(Vec::new()));
+
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+
+/// The latest point of the sidecar-wide 5 s grid at or before `own_due`. Never later than the session's own due
+/// time, so the "at most every 5 s / 30 s" bound holds; sessions snapshotting on the grid share their scans.
+pub(super) fn grid_due(own_due: Instant) -> Instant {
+    grid_due_from(*EPOCH.get_or_init(Instant::now), own_due)
+}
+
+fn grid_due_from(epoch: Instant, own_due: Instant) -> Instant {
+    let step = super::SNAPSHOT_YOUNG_MS;
+    let since = own_due.saturating_duration_since(epoch).as_millis() as u64;
+    epoch + Duration::from_millis(since / step * step)
+}
+
+/// Where a snapshot gets its `/proc` reads.
+#[derive(Clone, Copy)]
+pub(super) enum Reads {
+    /// Every scan is this snapshot's own (`terminal.create`).
+    Own,
+    /// Scans are shared with the other sessions due at the same time. `due` is when this snapshot became
+    /// due; no scan taken before it is used.
+    Shared { due: Instant },
+}
+
 pub(super) fn snapshot(
     initial_child: Option<i32>,
     seeds: &Table,
     births: &mut Births,
+) -> io::Result<Table> {
+    snapshot_with(initial_child, seeds, births, Reads::Own)
+}
+
+pub(super) fn snapshot_with(
+    initial_child: Option<i32>,
+    seeds: &Table,
+    births: &mut Births,
+    reads: Reads,
 ) -> io::Result<Table> {
     let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
     let boot = boot_seconds()?;
@@ -390,6 +468,7 @@ pub(super) fn snapshot(
         }
     }
     let mut previous = None;
+    let mut used = 0;
     loop {
         if Instant::now() >= deadline {
             return Err(io::Error::new(
@@ -397,7 +476,15 @@ pub(super) fn snapshot(
                 "unstable owned snapshot",
             ));
         }
-        let current = match owned_scan(&known, deadline) {
+        let all = match reads {
+            Reads::Own => Arc::new(scan(deadline)?),
+            Reads::Shared { due } => {
+                let shared = BOARD.scan_after(used, due, || scan(deadline))?;
+                used = shared.seq;
+                shared.all
+            }
+        };
+        let current = match owned_scan(&known, &all, deadline) {
             Ok(current) => current,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
             Err(error) => return Err(error),
@@ -1002,5 +1089,76 @@ mod tests {
         unsafe { libc::kill(bystander, libc::SIGKILL) };
         // SAFETY: the orphaned members are this test's own sleepers.
         unsafe { libc::kill(-pid, libc::SIGKILL) };
+    }
+
+    fn reader(counter: &std::sync::atomic::AtomicUsize) -> io::Result<HashMap<i32, Process>> {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(60));
+        Ok(HashMap::new())
+    }
+
+    #[test]
+    fn sessions_due_together_share_one_scan_sequence() {
+        let board = Board(Mutex::new(Vec::new()));
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let due = Instant::now();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    // Each session needs two independent scans for its equal-twice rule.
+                    let first = board.scan_after(0, due, || reader(&reads)).unwrap();
+                    let second = board
+                        .scan_after(first.seq, due, || reader(&reads))
+                        .unwrap();
+                    assert!(second.seq > first.seq);
+                });
+            }
+        });
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_session_never_uses_a_scan_taken_before_its_request() {
+        let board = Board(Mutex::new(Vec::new()));
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let old = board
+            .scan_after(0, Instant::now(), || reader(&reads))
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        let due = Instant::now();
+        let fresh = board.scan_after(0, due, || reader(&reads)).unwrap();
+        assert!(fresh.seq > old.seq && fresh.started >= due);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // A scan that began after the request, and was not used yet, is reused.
+        let again = board.scan_after(old.seq, due, || reader(&reads)).unwrap();
+        assert_eq!(again.seq, fresh.seq);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_failed_scan_is_not_cached() {
+        let board = Board(Mutex::new(Vec::new()));
+        let due = Instant::now();
+        assert!(board
+            .scan_after(0, due, || Err(io::Error::other("boom")))
+            .is_err());
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        board.scan_after(0, due, || reader(&reads)).unwrap();
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn the_grid_never_moves_a_snapshot_later_and_aligns_sessions() {
+        let epoch = Instant::now();
+        let ms = |n: u64| epoch + Duration::from_millis(n);
+        // Two sessions with different own due times land on the same grid point.
+        assert_eq!(grid_due_from(epoch, ms(15_200)), ms(15_000));
+        assert_eq!(grid_due_from(epoch, ms(15_900)), ms(15_000));
+        assert_eq!(grid_due_from(epoch, ms(15_000)), ms(15_000));
+        // The steady 30 s cadence stays on the same 5 s grid and is never later than its own due time.
+        assert_eq!(grid_due_from(epoch, ms(47_300)), ms(45_000));
+        // One cadence step after a snapshot is still strictly in the future.
+        let now = ms(12_040);
+        assert!(grid_due_from(epoch, now + Duration::from_millis(5000)) > now);
     }
 }

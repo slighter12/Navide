@@ -778,3 +778,60 @@ fn a_create_whose_worst_case_owned_frame_cannot_fit_is_refused_before_any_proces
     std::thread::sleep(Duration::from_millis(200));
     assert!(!ran.exists());
 }
+
+/// Descriptive cost probe, not a gate (`cargo test -- --ignored --nocapture idle_cost`): the sidecar's CPU ticks
+/// over an idle window with `NAVIDE_PROBE_SHELLS` idle sessions, and the `terminal.create` round trips.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore]
+fn idle_cost_probe() {
+    let env = |name: &str, default: u64| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default)
+    };
+    let (shells, window) = (env("NAVIDE_PROBE_SHELLS", 4), env("NAVIDE_PROBE_SECONDS", 10));
+    let mut sidecar = start("idle-cost");
+    sidecar.line();
+    let pid = sidecar.child.lock().unwrap().id();
+    let ticks = || {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+        let fields: Vec<_> = stat[stat.rfind(") ").unwrap() + 2..].split(' ').collect();
+        fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap()
+    };
+    let dir = sidecar.dir.clone();
+    // Unrelated processes, so /proc is as crowded as on a busy host (`NAVIDE_PROBE_NOISE`).
+    let mut noise: Vec<_> = (0..env("NAVIDE_PROBE_NOISE", 0))
+        .map(|_| {
+            std::process::Command::new("/bin/sleep")
+                .arg("600")
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let mut masters = Vec::new();
+    let mut creates = Vec::new();
+    for index in 0..shells {
+        let started = Instant::now();
+        sidecar.send(
+            code::CREATE,
+            create_meta(&dir, &["/bin/cat"], &format!("probe-{index}")),
+        );
+        let (_, fd) = sidecar.recv_until(|f| f.code == code::SESSION_OWNED);
+        sidecar.recv_until(|f| f.frame_type == FrameType::Response && f.code == code::CREATE);
+        creates.push(started.elapsed().as_micros());
+        masters.push(fd.unwrap());
+    }
+    let before = ticks();
+    std::thread::sleep(Duration::from_secs(window));
+    let used = ticks() - before;
+    println!("probe shells={shells} window_s={window} sidecar_ticks={used} (1 tick = 10 ms) create_us={creates:?}");
+    for child in &mut noise {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    for master in masters {
+        unsafe { libc::close(master) };
+    }
+}
