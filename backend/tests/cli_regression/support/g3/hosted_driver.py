@@ -183,9 +183,14 @@ TAIL_LINES, TOKEN_PATTERNS, redacted_tail = hosted_diag.TAIL_LINES, hosted_diag.
 REHEARSAL_WORKFLOW = "G3 Hosted Rehearsal (not evidence)"      # `name:` of the rehearsal workflow, which runs build/packaged/smoke without the flag
 
 
-def diagnostic_runner(base, *, emit=print):
+def node_runner_for(base_runner):
+    """The runner of the extra Node attempt (`hosted_diag.node_diagnostic`): the real one only when the step runner is the real one. A test that substitutes the step runner must not start a process."""
+    return hosted_diag.run_capture if base_runner is driver.default_runner else None
+
+
+def diagnostic_runner(base, *, emit=print, node_run=None):
     """`base` (the unchanged runner) that, when a step exits non-zero, prints the redacted tail of that step's own log to the console, then the reason fields of its receipt (and, for the packaged
-    smoke, one probe of the frozen backend; `hosted_diag`). Rehearsal diagnostics of the pre-measurement build steps only: the cost command never gets it (a measured step stays blind) and nothing is written anywhere."""
+    smoke, one probe of the frozen backend and, with `node_run`, one attempt through Node; `hosted_diag`). Rehearsal diagnostics of the pre-measurement build steps only: the cost command never gets it (a measured step stays blind) and nothing is written anywhere."""
     def run(step: dict, stdout_path: Path | None) -> int:
         code = base(step, stdout_path)
         if code != 0:
@@ -193,13 +198,13 @@ def diagnostic_runner(base, *, emit=print):
                 emit(f"--- {step['name']}: last {TAIL_LINES} lines of its log (rehearsal diagnostics) ---")
                 for line in redacted_tail(Path(stdout_path).read_text(encoding="utf-8", errors="replace")):
                     emit(line)
-            hosted_diag.step_reasons(step, emit)
+            hosted_diag.step_reasons(step, emit, node_run)
         return code
     return run
 
 
 def main(argv: list[str], *, system: str | None = None, runner_temp: str | None = None, install=hosted_seams.install, run_plan=_run_plan, base_runner=driver.default_runner, emit=print,
-         environ: dict | None = None) -> int:
+         environ: dict | None = None, node_run=None) -> int:
     from tests.cli_regression.support.g3 import incomplete
     argv = absolutize(argv)
     cmd, args = (argv[0], argv[1:]) if argv else ("", [])
@@ -212,7 +217,7 @@ def main(argv: list[str], *, system: str | None = None, runner_temp: str | None 
             plan_env = Env(args[0], system)
             out = Path(args[1])
             diagnostics = rehearsal or (os.environ if environ is None else environ).get("GITHUB_WORKFLOW") == REHEARSAL_WORKFLOW
-            kwargs = {"runner": diagnostic_runner(base_runner, emit=emit) if diagnostics else base_runner}
+            kwargs = {"runner": diagnostic_runner(base_runner, emit=emit, node_run=node_run or node_runner_for(base_runner)) if diagnostics else base_runner}
             if cmd == "build":
                 return run_plan(build_pre_plan(plan_env, args[1], str(out.parent)), out, PRE_RUN_NAME, **kwargs)
             if cmd == "packaged":

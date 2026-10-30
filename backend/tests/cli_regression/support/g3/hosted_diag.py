@@ -233,8 +233,59 @@ def _stop(process, sleep, clock) -> None:
         process.kill()
 
 
-def step_reasons(step: dict, emit: Callable[[str], None]) -> None:
-    """After a failed step: the reason fields of its receipt, and (packaged smoke only) the backend probe."""
+NODE_DIAG_ENTRY = "tests/cli/g3hPackagedDiag.test.ts"      # mirrors `runPackagedAttempt` and says which stage it reached (rehearsal-4: the Python probe reached READY, the Node attempt did not)
+NODE_DIAG_SELECTOR = "packaged-diag"      # the `ACR_G3` value that makes the entry run its attempt
+NODE_DIAG_PREFIX = "g3h-diag "      # every line the entry means to print starts with this; nothing else of the vitest output is shown
+NODE_DIAG_LINES = 80
+NODE_DIAG_TAIL = 15
+NODE_DIAG_TIMEOUT_S = 300
+VERSION_COMMANDS = (("node", "--version"), ("bun", "--version"))
+URL_PATTERN = re.compile(r"ws://[^\s\"']+")
+LINUX_ENTRY = "tests/cli/g3Matrix.test.ts"      # `hosted_packaged.MATRIX_ENTRY`: the Linux `packaged-smoke` runs the unchanged entry; the Windows variant is closed out
+
+
+def run_capture(argv: list[str], env: dict, cwd: str, timeout: float) -> tuple[int, str]:
+    """`(exit code, stdout and stderr)` of one command. Raises `subprocess.TimeoutExpired` or `OSError`; `node_diagnostic` reports those by class only."""
+    done = subprocess.run(argv, env=env, cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout, check=False)
+    return done.returncode, done.stdout + done.stderr
+
+
+def _redact_line(line: str) -> str:
+    return URL_PATTERN.sub("ws://[redacted]", redact(line))
+
+
+def node_diagnostic(step: dict, emit: Callable[[str], None], run: Callable[..., tuple[int, str]] = run_capture) -> None:
+    """After a failed Linux `packaged-smoke`: ONE extra attempt through Node, exactly as the step runs it (same command, same environment) but on `NODE_DIAG_ENTRY`, which prints the stages it reaches and the caught
+    error. Also the Node and Bun versions the runner has. Only the lines the entry prefixes are shown, each redacted (token shapes, websocket URLs); no port, no token, no timing value. A run that cannot start or times out
+    is reported by exception class alone."""
+    argv = list(step["argv"])
+    if not argv or argv[-1] != LINUX_ENTRY:
+        return
+    emit(f"--- {step['name']}: one attempt through Node, as the attempt does (rehearsal diagnostics) ---")
+    env = {**os.environ, **step["env"], "ACR_G3": NODE_DIAG_SELECTOR}
+    for command in VERSION_COMMANDS:
+        try:
+            _, text = run(list(command), env, step["cwd"], 30)
+            emit(f"{' '.join(command)}: {_redact_line(text.strip().splitlines()[0]) if text.strip() else 'no output'}")
+        except Exception as error:  # noqa: BLE001 - the finding is that the runtime is missing
+            emit(f"{' '.join(command)}: could not run ({type(error).__name__})")
+    try:
+        code, text = run([*argv[:-1], NODE_DIAG_ENTRY], env, step["cwd"], NODE_DIAG_TIMEOUT_S)
+    except Exception as error:  # noqa: BLE001 - every failure is the finding
+        emit(f"the Node attempt could not finish: {type(error).__name__}")
+        return
+    shown = [_redact_line(line) for line in text.splitlines() if line.startswith(NODE_DIAG_PREFIX)]
+    for line in shown[:NODE_DIAG_LINES]:
+        emit(line)
+    emit(f"the Node attempt's own run ended with exit code={code}; diagnostic lines printed={'none' if not shown else 'yes'}")
+    if not shown:      # the entry never ran (vitest could not start, the file did not load): the tail of the run is then the only explanation
+        emit(f"--- the Node attempt printed no diagnostic line: last {NODE_DIAG_TAIL} lines of its own output ---")
+        for line in redacted_tail(text, NODE_DIAG_TAIL):
+            emit(_redact_line(line))
+
+
+def step_reasons(step: dict, emit: Callable[[str], None], node_run: Callable[..., tuple[int, str]] | None = None) -> None:
+    """After a failed step: the reason fields of its receipt, and (packaged smoke only) the backend probe and, when `node_run` is given, the Node attempt (`node_diagnostic`)."""
     for output in step.get("outputs", []):
         path = Path(output)
         if path.name in RECEIPTS and path.is_file():
@@ -248,3 +299,5 @@ def step_reasons(step: dict, emit: Callable[[str], None]) -> None:
         emit("--- packaged-smoke: one start of the frozen backend, as the attempt does (rehearsal diagnostics) ---")
         for line in probe_backend(step["env"]["ACR_G3_PACKAGED_BACKEND"], terminal=terminal_stage, log_level=DIAG_LOG_LEVEL, tail_lines=DIAG_TAIL_LINES, thread_dump=True):
             emit(line)
+        if node_run is not None:
+            node_diagnostic(step, emit, node_run)
