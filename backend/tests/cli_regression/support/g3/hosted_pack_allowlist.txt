@@ -106,6 +106,8 @@ tests/cli/g3Ready.ts
 tests/cli/g3Rehearsal.ts
 tests/cli/g3ShellAttempt.ts
 tests/cli/g3Smoke.ts
+tests/cli/g3hPackagedWindows.test.ts
+tests/cli/g3hPackagedWindows.ts
 tests/fixtures/cli-regression/g1e-burst-golden.json
 tests/fixtures/cli-regression/g1e-ledger-golden.json
 tests/fixtures/cli-regression/g1e-schedule-golden.json

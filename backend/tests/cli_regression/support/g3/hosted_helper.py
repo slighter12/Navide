@@ -22,8 +22,11 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from tests.cli_regression.support.g1e import bundle as g1e_bundle
-from tests.cli_regression.support.g3 import assemble, bundle as g3bundle, f0 as f0mod, f1 as f1mod, helper, hosted_f0, hosted_hostclass, hosted_packaged, hosted_reader, hosted_rows, hosted_seams, launch, packaged, pins, regression
+from tests.cli_regression.support.g3 import hosted_posix_stubs
+
+hosted_posix_stubs.install()      # before the imports below: this entry process is not under the hosted startup, and `g3.f0` -> `g1e.quiet_gate` reads `os.getloadavg` at import (Windows lacks it)
+from tests.cli_regression.support.g1e import bundle as g1e_bundle  # noqa: E402
+from tests.cli_regression.support.g3 import assemble, bundle as g3bundle, f0 as f0mod, f1 as f1mod, helper, hosted_f0, hosted_hostclass, hosted_packaged, hosted_reader, hosted_rows, hosted_seams, launch, packaged, pins, regression  # noqa: E402
 
 ALL = "all"
 # command -> argument positions that are paths ("all" = every argument). Arguments not listed (modes, digests, counts) are left as they are.

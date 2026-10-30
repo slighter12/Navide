@@ -37,7 +37,7 @@ SUPPORT = "backend/tests/cli_regression/support/"
 ALLOWLIST_REL = SUPPORT + "g3/hosted_pack_allowlist.txt"
 RELATIVE_PATH = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._/-]*")
 INCLUDE_PREFIXES = (SUPPORT + "g1e/", SUPPORT + "g3/")
-INCLUDE_FILES = (SUPPORT + "g1e_peer.py", SUPPORT + "g1e_counters_gate.py", SUPPORT + "backend_entry.py", SUPPORT + "baseline_peer.py", "tests/cli/g3-launch-plan-golden.json", "tests/cli/g3Matrix.test.ts",
+INCLUDE_FILES = (SUPPORT + "g1e_peer.py", SUPPORT + "g1e_counters_gate.py", SUPPORT + "backend_entry.py", SUPPORT + "baseline_peer.py", "tests/cli/g3-launch-plan-golden.json", "tests/cli/g3Matrix.test.ts", "tests/cli/g3hPackagedWindows.test.ts",
                  "tests/fixtures/cli-regression/g1e-burst-golden.json", "tests/fixtures/cli-regression/g1e-ledger-golden.json", "tests/fixtures/cli-regression/g1e-schedule-golden.json",
                  "tests/fixtures/cli-regression/runtime-workload-g1e.json")
 TS_PREFIXES = ("tests/cli/g1e", "tests/cli/g3")

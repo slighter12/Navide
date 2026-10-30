@@ -20,7 +20,10 @@ import re
 import sys
 from pathlib import Path
 
-from tests.cli_regression.support.g3 import driver, f0 as f0mod, helper, hosted_diag, hosted_packaged, hosted_seams, packaged
+from tests.cli_regression.support.g3 import hosted_posix_stubs
+
+hosted_posix_stubs.install()      # before the import below: this entry process is not under the hosted startup (no `ACR_G3_HOSTED`, no `hosted_site`), and `g3.driver` -> `g3.f0` -> `g1e.quiet_gate` reads `os.getloadavg` at import
+from tests.cli_regression.support.g3 import driver, f0 as f0mod, helper, hosted_diag, hosted_packaged, hosted_seams, packaged  # noqa: E402
 
 G3 = driver.G3
 PRE_RUN_NAME, PACKAGED_RUN_NAME, SMOKE_RUN_NAME, RUN_NAME = driver.PRE_RUN_NAME, driver.PACKAGED_RUN_NAME, driver.SMOKE_RUN_NAME, driver.RUN_NAME
@@ -52,6 +55,11 @@ class Env:
     def step(self, name: str, argv: list[str], *, cwd: str, env: dict | None = None, outputs: list[str] | None = None, stdout: str | None = None) -> dict:
         return {"name": name, "argv": argv, "cwd": cwd, "env": {**self.hosted_env, **(env or {})}, "outputs": outputs or [], "stdout": stdout, "expectedMinutes": EXPECTED_MINUTES[name][0]}
 
+    def packaged_variant(self, bun: str) -> tuple[list[str], dict]:
+        """The vitest argv and the extra environment of the two packaged attempts (`packaged-smoke`, `packaged-cold`): unchanged on Linux; on Windows the hosted variant with the Windows-native READY command."""
+        argv = [bun, "vitest", "run", "--project", "cli", hosted_packaged.packaged_entry(self.system)]
+        return argv, ({hosted_packaged.READY_COMMAND_ENV: hosted_packaged.windows_ready_command(self.python)} if self.system == "Windows" else {})
+
     def harness(self, pre_out: str) -> str:
         return f"{pre_out}/harness-target/release/navide-cli-runtime{'.exe' if self.system == 'Windows' else ''}"
 
@@ -72,6 +80,7 @@ def build_packaged_plan(env: Env, pre_out: str, bun: str = "bunx") -> list[dict]
     smoke_out, record = f"{pre_out}/packaged-smoke", f"{pre_out}/{PACKAGED_RECORD_NAME}"
     backend_exe = str(packaged.backend_path(env.repo))
     output = f"{env.repo}/{packaged.OUTPUT_REL}"
+    smoke_argv, smoke_extra = env.packaged_variant(bun)
     return [
         env.step("packaged-toolchain", env.helper("package-toolchain"), cwd=f"{env.repo}/backend"),
         env.step("packaged-pyinstaller", ["uv", "--directory", "backend", "run", "pyinstaller", "--noconfirm", "agent_team_backend.spec"], cwd=env.repo, outputs=[f"{env.repo}/backend/dist"]),
@@ -80,8 +89,8 @@ def build_packaged_plan(env: Env, pre_out: str, bun: str = "bunx") -> list[dict]
         env.step("packaged-build", ["bun", "run", "build"], cwd=env.repo, outputs=[f"{env.repo}/out"]),
         env.step("packaged-electron", hosted_packaged.electron_argv(env.system, output), cwd=env.repo, env={"CSC_IDENTITY_AUTO_DISCOVERY": "false"}, outputs=[f"{env.repo}/{packaged.APP_REL}"]),
         env.step("packaged-record", env.helper("packaged-record", env.repo, env.sidecar, record), cwd=f"{env.repo}/backend", outputs=[record]),
-        env.step("packaged-smoke", [bun, "vitest", "run", "--project", "cli", "tests/cli/g3Matrix.test.ts"], cwd=env.repo,
-                 env={"ACR_G3": "packaged-smoke", "ACR_G3_OUT": smoke_out, "ACR_G3_PACKAGED_BACKEND": backend_exe, "ACR_G3_PACKAGED_RECORD": record, "ACR_G3_SIDECAR": env.sidecar},
+        env.step("packaged-smoke", smoke_argv, cwd=env.repo,
+                 env={"ACR_G3": "packaged-smoke", "ACR_G3_OUT": smoke_out, "ACR_G3_PACKAGED_BACKEND": backend_exe, "ACR_G3_PACKAGED_RECORD": record, "ACR_G3_SIDECAR": env.sidecar, **smoke_extra},
                  outputs=[f"{smoke_out}/packaged-smoke.json"]),
     ]
 
@@ -98,7 +107,8 @@ def build_plan(env: Env, *, out: str, f0_path: str, build_record: str, reader_fi
     """The cost plan: the macOS order with the hosted helper and quiet gate, without `python-arm-identity`, and (Windows) without the reader steps."""
     f1, cal, sidecar, repo = f"{out}/freeze-f1.json", f"{out}/calibration", env.sidecar, env.repo
     env_ts = {"ACR_G3_FREEZE": f0_path, "ACR_G3_SIDECAR": sidecar}
-    ts = [bun, "vitest", "run", "--project", "cli", "tests/cli/g3Matrix.test.ts"]
+    ts = [bun, "vitest", "run", "--project", "cli", hosted_packaged.MATRIX_ENTRY]
+    cold_argv, cold_extra = env.packaged_variant(bun)
     backend = f"{repo}/backend"
     quiet = lambda tag: env.module("hosted_quiet_gate", "before", f"{out}/{tag}")
     readers = env.system == "Linux"
@@ -118,8 +128,8 @@ def build_plan(env: Env, *, out: str, f0_path: str, build_record: str, reader_fi
         env.step("quiet-3", quiet("q3"), cwd=backend, outputs=[f"{out}/q3/quiet-01.json"]),
         *([env.step("reader-measure", env.helper("reader-measure", repo, f0_path, f1, sidecar, reader_fixtures, f"{out}/reader-root", f"{out}/bundle-reader"), cwd=backend, outputs=[f"{out}/bundle-reader/reader.json"])]
           if readers else []),
-        env.step("packaged-cold", ts, cwd=repo, env={**env_ts, "ACR_G3": "packaged", "ACR_G3_OUT": f"{out}/m", "ACR_G3_PACKAGED_BACKEND": str(packaged.backend_path(repo)),
-                                                      "ACR_G3_PACKAGED_RECORD": str(Path(build_record).with_name(PACKAGED_RECORD_NAME))}, outputs=[f"{out}/m/packaged-trials/run.json"]),
+        env.step("packaged-cold", cold_argv, cwd=repo, env={**env_ts, "ACR_G3": "packaged", "ACR_G3_OUT": f"{out}/m", "ACR_G3_PACKAGED_BACKEND": str(packaged.backend_path(repo)),
+                                                             "ACR_G3_PACKAGED_RECORD": str(Path(build_record).with_name(PACKAGED_RECORD_NAME)), **cold_extra}, outputs=[f"{out}/m/packaged-trials/run.json"]),
         env.step("assemble-bundle", env.helper("assemble-bundle", repo, f0_path, f1, out, f"{out}/bundle"), cwd=backend, outputs=[f"{out}/bundle/freeze.json"]),
         env.step("seal", env.helper("seal", f"{out}/bundle"), cwd=backend, stdout=f"{out}/logs/manifest.sha256"),
         env.step("decide", env.helper("decide", repo, f0_path, f1, f"{out}/bundle", f"{out}/logs/manifest.sha256", f"{out}/outcome.json", build_record), cwd=backend, outputs=[f"{out}/outcome.json"]),

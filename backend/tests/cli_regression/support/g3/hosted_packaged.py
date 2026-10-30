@@ -46,6 +46,24 @@ def install(system: str, module=packaged) -> Layout:
     return chosen
 
 
+MATRIX_ENTRY = "tests/cli/g3Matrix.test.ts"
+WINDOWS_PACKAGED_ENTRY = "tests/cli/g3hPackagedWindows.test.ts"
+READY_COMMAND_ENV = "ACR_G3H_READY_COMMAND"
+
+
+def packaged_entry(system: str) -> str:
+    """The vitest entry of the `packaged-smoke` and `packaged-cold` steps: the unchanged `g3Matrix.test.ts` everywhere except Windows, whose hosted variant differs only in the READY command."""
+    return WINDOWS_PACKAGED_ENTRY if system == "Windows" else MATRIX_ENTRY
+
+
+def windows_ready_command(python: str) -> str:
+    """The pane command of the Windows packaged attempt, as the string a Windows agent pane receives (no shell; the backend splits it with `CommandLineToArgvW`): `"<python>" -c "<script>"`.
+    The script prints one `BASELINE_READY {"packaged":true}` line and sleeps 120 s, the macOS line's `printf ...; exec sleep 120`. It holds no double quote (the JSON quotes are `chr(34)`) and splits the token
+    (`'BASELINE'+'_READY '`), so neither a window title nor an echo of the command line can contain the token the waiter looks for. The interpreter is the plan's own absolute path, not a PATH lookup."""
+    script = "import time;print('BASELINE'+'_READY '+chr(123)+chr(34)+'packaged'+chr(34)+':true'+chr(125),flush=True);time.sleep(120)"
+    return f'"{python}" -c "{script}"'
+
+
 def electron_argv(system: str, output: str) -> list[str]:
     """The packaged-electron step: unsigned, `--dir`, into the same output directory the record reads (x64 only; no arm64 job exists)."""
     return ["bunx", "electron-builder", *layout(system).builder, "--dir", "--publish", "never", f"-c.directories.output={output}"]

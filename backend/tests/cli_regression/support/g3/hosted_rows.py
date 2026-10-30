@@ -35,4 +35,5 @@ def row_set_record(system: str) -> dict:
     ids = decision_ids(system)
     not_applicable = ["reader|*|opencode"] if system == "Linux" else ["reader|*|claude", "reader|*|opencode"]
     return {"system": system, "mode": "full", "count": len(ids), "idsSha256": hashlib.sha256(json.dumps(ids).encode()).hexdigest(), "notApplicable": not_applicable,
-            "agentLaunchObserver": WINDOWS_OBSERVER if system == "Windows" else "as-macos"}
+            "agentLaunchObserver": WINDOWS_OBSERVER if system == "Windows" else "as-macos",
+            "packagedReadyCommand": "windows-native" if system == "Windows" else "as-macos"}      # the descriptive packaged row's pane command: Windows runs `g3hPackagedWindows.test.ts` (a Windows-native READY command), never the macOS row
