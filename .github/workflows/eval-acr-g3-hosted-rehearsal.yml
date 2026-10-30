@@ -1,0 +1,210 @@
+name: G3 Hosted Rehearsal (not evidence)
+
+# Evaluation only. A full end-to-end rehearsal of the hosted G3 run on the real runner images. It is NOT evidence: it writes under $RUNNER_TEMP/g3r2/rehearsal (the only place the stamp and the TS runners
+# accept a rehearsal), is stamped NOT-EVIDENCE, and uploads only step outcomes and check verdicts, never measurement data.
+# STAGE H3 FILLS, before this file is committed to .github/workflows/: H3_FILL_PACK_COMMIT_SHA, H3_FILL_PACK_DIGEST (see eval-acr-g3-hosted.yml).
+# Two distinct SHAs: the run head is $GITHUB_SHA (the pushed commit, which also holds this workflow file), and MACOS_H is the fixed head the macOS G3 measured; the product paths are diffed against MACOS_H.
+# The correctness precondition is not rehearsed here: the rehearsal runs the cost path only.
+
+on:
+  push:
+    branches:
+      - eval/agent-cli-runtime
+
+permissions:
+  contents: read
+
+env:
+  MACOS_H: 1e85e93880326ad50d65362dbc8e907474440c94
+  PACK_COMMIT: fc5d5ea786f82ff8db67a741bad3f5d334e30617
+  PACK_DIGEST: 9a03e1b2610a0d5404d4b21720559c357a364246e6202be4920d68ad1012cfb6
+
+jobs:
+  rehearsal:
+    name: rehearsal-${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-24.04
+            system: Linux
+          - os: windows
+            runner: windows-2025
+            system: Windows
+    defaults:
+      run:
+        shell: bash
+    env:
+      G3H_OS: ${{ matrix.system }}
+    steps:
+      - name: Pin line endings before any checkout
+        run: git config --global core.autocrlf false
+
+      - name: Check out evaluation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the harness pack
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PACK_COMMIT }}
+          path: pack
+          persist-credentials: false
+
+      - name: Check the run head and the checked-out bytes
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git config --get core.autocrlf)" = "false"
+          test -z "$(git status --porcelain -- . ':(exclude)pack')"
+
+      - name: Verify the pack digest, then overlay it
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" pack/backend/tests/cli_regression/support/g3/hosted_pack.py digest pack > "$RUNNER_TEMP/pack-digest.txt"
+          cat "$RUNNER_TEMP/pack-digest.txt"
+          grep -q -F "$PACK_DIGEST" "$RUNNER_TEMP/pack-digest.txt"
+          tar -C pack --exclude=.git -cf - . | tar -C . -xf -
+
+      - name: Verify the g1e pins and the hosted inputs (first step after the overlay)
+        id: pins
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then PYBIN=python; else PYBIN=python3; fi
+          "$PYBIN" -B backend/tests/cli_regression/support/g3/hosted_preflight.py "$PWD"
+
+      - name: Product identity against the registered macOS head
+        id: identity
+        run: |
+          git cat-file -e "$MACOS_H^{commit}"
+          git diff --exit-code "$MACOS_H" -- native src backend/agent_team_backend
+          test -z "$(git status --porcelain -- native src backend/agent_team_backend)"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        if: matrix.os == 'linux'
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install locked dependencies and record the toolchain
+        run: |
+          if [ "$G3H_OS" = "Windows" ]; then python -m pip install uv; fi
+          npm install -g pnpm@10.0.0
+          bun install --frozen-lockfile
+          uv --project backend sync --locked
+          mkdir -p "$RUNNER_TEMP/g3r2h" "$RUNNER_TEMP/g3r2/rehearsal"
+          rustc -vV | tee "$RUNNER_TEMP/g3r2h/rustc-vV.txt"
+
+      - name: Build the ps shim and put it first on PATH
+        if: matrix.os == 'windows'
+        run: |
+          cargo build --release --locked --manifest-path backend/tests/cli_regression/support/g3/hosted_ps_shim/Cargo.toml
+          echo "$PWD/backend/tests/cli_regression/support/g3/hosted_ps_shim/target/release" >> "$GITHUB_PATH"
+
+      - name: Quiet gate before the run
+        id: quiet
+        run: uv --project backend run python -B backend/tests/cli_regression/support/g3/hosted_quiet_gate.py before "$RUNNER_TEMP/g3r2/rehearsal/quiet-pre"
+
+      - name: Build the sidecars and the reader fixtures
+        id: build
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py build "$PWD" "$RUNNER_TEMP/g3r2h/pre"
+
+      - name: Build the packaged app
+        id: packaged
+        timeout-minutes: 45
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py packaged "$PWD" "$RUNNER_TEMP/g3r2h/pre"
+
+      - name: Smoke
+        id: smoke
+        timeout-minutes: 20
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py smoke "$PWD" "$RUNNER_TEMP/g3r2h/smoke"
+
+      - name: Build F0
+        id: f0
+        run: |
+          H="uv --project backend run python -B -m tests.cli_regression.support.g3.hosted_helper"
+          $H f0-spec "$PWD" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/f0-spec.json" eval/agent-cli-runtime
+          $H f0-build "$PWD" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/f0-spec.json"
+
+      - name: Rehearsal cost run (NOT evidence)
+        id: cost
+        timeout-minutes: 300
+        run: uv --project backend run python backend/tests/cli_regression/support/g3/hosted_run_driver.py cost "$PWD" "$RUNNER_TEMP/g3r2/rehearsal" "$RUNNER_TEMP/g3r2h/F0.json" "$RUNNER_TEMP/g3r2h/pre/sidecar-build.json" "$RUNNER_TEMP/g3r2h/pre" "$RUNNER_TEMP/g3r2h/smoke" --rehearsal
+
+      - name: Per-check verdicts of the receipt and byte-ledger validation (names and verdicts only)
+        id: checks
+        if: always()
+        env:
+          PYTHONPATH: backend
+        run: |
+          mkdir -p "$RUNNER_TEMP/g3r2h-summary"
+          python backend/tests/cli_regression/support/g3/hosted_checks.py "$RUNNER_TEMP/g3r2/rehearsal/rehearsal-verdict.json" "$RUNNER_TEMP/g3r2h-summary/rehearsal-checks.json" "$G3H_OS" "$RUNNER_TEMP/g3r2h/markers"
+
+      - name: Write the outcomes summary (step outcomes only)
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          O_PINS: ${{ steps.pins.outcome }}
+          C_PINS: ${{ steps.pins.conclusion }}
+          O_IDENTITY: ${{ steps.identity.outcome }}
+          C_IDENTITY: ${{ steps.identity.conclusion }}
+          O_QUIET: ${{ steps.quiet.outcome }}
+          C_QUIET: ${{ steps.quiet.conclusion }}
+          O_BUILD: ${{ steps.build.outcome }}
+          C_BUILD: ${{ steps.build.conclusion }}
+          O_PACKAGED: ${{ steps.packaged.outcome }}
+          C_PACKAGED: ${{ steps.packaged.conclusion }}
+          O_SMOKE: ${{ steps.smoke.outcome }}
+          C_SMOKE: ${{ steps.smoke.conclusion }}
+          O_F0: ${{ steps.f0.outcome }}
+          C_F0: ${{ steps.f0.conclusion }}
+          O_COST: ${{ steps.cost.outcome }}
+          C_COST: ${{ steps.cost.conclusion }}
+          O_CHECKS: ${{ steps.checks.outcome }}
+          C_CHECKS: ${{ steps.checks.conclusion }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/g3r2h-summary"
+          {
+            printf 'NOT-EVIDENCE\njob=%s\n' "$JOB_STATUS"
+            printf 'step=pins outcome=%s conclusion=%s\n' "$O_PINS" "$C_PINS"
+            printf 'step=identity outcome=%s conclusion=%s\n' "$O_IDENTITY" "$C_IDENTITY"
+            printf 'step=quiet outcome=%s conclusion=%s\n' "$O_QUIET" "$C_QUIET"
+            printf 'step=build outcome=%s conclusion=%s\n' "$O_BUILD" "$C_BUILD"
+            printf 'step=packaged outcome=%s conclusion=%s\n' "$O_PACKAGED" "$C_PACKAGED"
+            printf 'step=smoke outcome=%s conclusion=%s\n' "$O_SMOKE" "$C_SMOKE"
+            printf 'step=f0 outcome=%s conclusion=%s\n' "$O_F0" "$C_F0"
+            printf 'step=cost outcome=%s conclusion=%s\n' "$O_COST" "$C_COST"
+            printf 'step=checks outcome=%s conclusion=%s\n' "$O_CHECKS" "$C_CHECKS"
+          } > "$RUNNER_TEMP/g3r2h-summary/rehearsal-summary.txt"
+
+      - name: Leak check (no token or runner secret in the upload)
+        id: leak
+        if: always()
+        run: |
+          if grep -r -l -E '(ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}' "$RUNNER_TEMP/g3r2h-summary"; then echo "credential-like text found"; exit 1; fi
+
+      - name: Upload the outcomes (exit codes and check verdicts only)
+        if: always() && steps.leak.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: g3h-rehearsal-${{ matrix.os }}
+          path: ${{ runner.temp }}/g3r2h-summary
+          if-no-files-found: warn
+          retention-days: 7
