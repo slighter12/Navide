@@ -56,6 +56,15 @@ export async function closePaneHidden(
   }
 }
 
+/**
+ * What every surface lists while a close is settling: the same items without the closing panes.
+ * The pane record stays in `panes` for the unsettled-pane checks; only what is drawn or listed
+ * (stage, sidebar cards, tab strip, spotlight and float lists) goes through this.
+ */
+export function withoutClosing<L extends readonly { id: string }[]>(items: L, closing: ReadonlySet<string>): L {
+  return (closing.size === 0 ? items : items.filter((item) => !closing.has(item.id))) as L
+}
+
 export async function settlePaneTerminals(steps: PaneRetirementSteps): Promise<boolean> {
   if (steps.killOwn) {
     try {

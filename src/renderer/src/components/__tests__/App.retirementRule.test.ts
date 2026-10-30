@@ -103,6 +103,32 @@ describe('callers that start a replacement (or retire more) only after a proven 
   })
 })
 
+describe('a closing pane is listed on no surface until its close is refused', () => {
+  const computedBody = (name: string): string => {
+    const start = appSource.indexOf(`const ${name} = computed`)
+    expect(start, name).toBeGreaterThan(-1)
+    return appSource.slice(start, appSource.indexOf('\n\n', start))
+  }
+
+  it('derives the listed panes and views through withoutClosing', () => {
+    expect(computedBody('listedPanes')).toContain('withoutClosing(panes.value, closingPaneIds.value)')
+    expect(computedBody('listedPaneViews')).toContain('withoutClosing(paneViews.value, closingPaneIds.value)')
+  })
+  it.each(['paneLineage', 'paneListLineage'])('%s is built from the listed panes', (name) => {
+    expect(computedBody(name)).toContain('listedPanes.value')
+    expect(computedBody(name)).not.toContain('panes.value,')
+  })
+  it('the stage tabs and the pane list read the listed panes', () => {
+    expect(computedBody('panesOnStage')).toContain('closingPaneIds.value')
+    expect(computedBody('auxiliaryListPanes')).toContain('listedPaneViews.value')
+    expect(computedBody('auxiliaryListPanes')).not.toContain('paneViews.value')
+  })
+  it('the workspace groups and the sidebar cards read the listed panes and views', () => {
+    expect(computedBody('workspaceGroups')).toContain('panes: listedPanes.value')
+    expect(appSource).toMatch(/<ControlPane[\s\S]*?:panes="listedPaneViews"/)
+  })
+})
+
 describe('ui.pane.close (MCP) reports a refused close', () => {
   it('fails the command when onKill did not retire the pane', () => {
     const start = appSource.indexOf("registerCommand('ui.pane.close'")
