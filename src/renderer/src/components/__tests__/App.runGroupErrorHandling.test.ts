@@ -27,7 +27,7 @@ describe('run-group menu failure paths', () => {
     expect(ask).toBeGreaterThan(0)
     expect(fn).toContain("i18n.global.t('stageTab.close-running-confirm-body', { count: runningCount })")
     expect(fn).toMatch(/if \(!ok\) return/)
-    expect(ask).toBeLessThan(fn.indexOf('await onKill(p.id)'))
+    expect(ask).toBeLessThan(fn.indexOf('await onUserClosePane(p.id)'))
     expect(ask).toBeLessThan(fn.indexOf('onPipelineAbort()'))
   })
 

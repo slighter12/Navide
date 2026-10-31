@@ -36,7 +36,7 @@ describe('several workspaces in one window', () => {
     for (const input of [
       'here: currentWorkspace.value',
       'order: workspaceOrder.value',
-      'panes: panes.value',
+      'panes: listedPanes.value',
       'lineage: paneLineage.value',
       'collapsed: collapsedWorkspaces.value',
       'homeDir: homeDir.value',
@@ -168,7 +168,7 @@ describe('several workspaces in one window', () => {
     const kStart = appSource.indexOf('async function onKillAll')
     expect(kStart).toBeGreaterThan(-1)
     const kill = appSource.slice(kStart, appSource.indexOf('\n}', kStart))
-    expect(kill).toContain('panesInView.value')
+    expect(kill).toContain('listedPanesInView.value')
     expect(kill).not.toContain('panes.value')
     // Rebuild is the one action that may name a workspace: every heading
     // carries its own ↻, and rebuild reads each pane's own workspacePath, so
@@ -177,12 +177,12 @@ describe('several workspaces in one window', () => {
     const start = appSource.indexOf('async function rebuildPanesViaResume')
     const body = appSource.slice(start, appSource.indexOf('\n}', start))
     expect(body).toContain('normWs(p.workspacePath) === normWs(workspacePath)')
-    expect(body).toContain(': panesInView.value')
+    expect(body).toContain(': listedPanesInView.value')
     expect(body).toContain('const ids = pool')
     // The count behind the toolbar's copy of the button stays on screen too.
     const cStart = appSource.indexOf('const rebuildableAllPaneCount')
     const count = appSource.slice(cStart, appSource.indexOf('\n)', cStart))
-    expect(count).toContain('panesInView.value')
+    expect(count).toContain('listedPanesInView.value')
     expect(count).not.toContain('panes.value')
   })
 

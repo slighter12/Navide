@@ -30,30 +30,36 @@ export interface PaneRetirementSteps {
  * replacement. A proven answer drops the pane as before; a refusal, a timeout, a transport failure
  * or a throw shows the same pane again (the caller reports the error).
  */
-const inFlight = new WeakMap<object, Map<string, number>>()
+const inFlight = new WeakMap<object, Map<string, Promise<boolean>>>()
 
-export async function closePaneHidden(
+export function closePaneHidden(
   closing: Set<string>,
   paneId: string,
   retire: () => Promise<boolean>,
+  isOpen: () => boolean = () => true,
 ): Promise<boolean> {
-  // A count per pane keeps the hide until the LAST overlapping close settles (an earlier refusal
-  // must not reveal it). The caller passes the same set every time.
-  let counts = inFlight.get(closing)
-  if (!counts) inFlight.set(closing, counts = new Map())
-  counts.set(paneId, (counts.get(paneId) ?? 0) + 1)
+  // A pane whose record is already gone (an earlier close settled) has nothing left to close.
+  if (!isOpen()) return Promise.resolve(false)
+  // One close per pane: a pane that is already closing joins the pending close instead of starting
+  // a second `retire`. The check runs when the close is requested, so a batch that snapshotted its
+  // ids earlier still closes each pane once. The caller passes the same set every time.
+  let pending = inFlight.get(closing)
+  if (!pending) inFlight.set(closing, pending = new Map())
+  const running = pending.get(paneId)
+  if (running) return running
   closing.add(paneId)
-  try {
-    return await retire()
-  } finally {
-    const left = (counts.get(paneId) ?? 1) - 1
-    if (left > 0) {
-      counts.set(paneId, left)
-    } else {
-      counts.delete(paneId)
-      closing.delete(paneId)
-    }
-  }
+  // `.then` defers `retire` one microtask, so a synchronous throw still reaches `.finally` after the map entry exists.
+  const close = Promise.resolve().then(retire).finally(() => {
+    pending.delete(paneId)
+    closing.delete(paneId)
+  })
+  pending.set(paneId, close)
+  return close
+}
+
+/** Observe a close already in flight without making the pane a target of another user action. */
+export function pendingPaneClose(closing: ReadonlySet<string>, paneId: string): Promise<boolean> | undefined {
+  return inFlight.get(closing)?.get(paneId)
 }
 
 /**

@@ -289,7 +289,7 @@ import {
   type WorkspaceRestoreSession,
 } from './lib/resumeBehavior'
 import { shouldQueuePtyLostResume } from './lib/ptyLostRecovery'
-import { closePaneHidden, idsWithoutClosing, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
+import { closePaneHidden, idsWithoutClosing, pendingPaneClose, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
 import { WakeClaims, joinedRealizeOutcome, paneOpenAnswer, sessionHeldElsewhere, type SessionHolder } from './lib/paneOpenAnswer'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
 import { cliPermissionKey, parseCliPermissionMode, skipPermissionFlagFor } from '@navide/plugin-shell'
@@ -4855,7 +4855,7 @@ function mentionCandidatesFor(paneId: string): MentionCandidate[] {
   const localGroup = i18n.global.t('mention.group-local')
   const ownPath = panes.value.find((x) => x.id === paneId)?.workspacePath
   const ownGroup = groupKeyOf(ownPath) ?? localGroup
-  const others: MentionCandidate[] = panes.value
+  const others: MentionCandidate[] = listedPanes.value
     .filter((x) => x.id !== paneId && x.messagingName)
     .map((x) => {
       // Only a realized pane in THIS window can report a status; a cold-restore
@@ -7730,7 +7730,7 @@ async function dispatchPlanToPane(relPath: string, agentKey: string): Promise<Pl
   const prompt = planExecutionPrompt(relPath)
 
   const reusable = pickReusablePane(
-    panes.value.map((p) => ({
+    listedPanes.value.map((p) => ({
       id: p.id,
       agentKey: p.agentKey,
       workspacePath: p.workspacePath,
@@ -8079,7 +8079,12 @@ const listedPanes = computed(() => withoutClosing(panes.value, closingPaneIds.va
 const listedPaneViews = computed(() => withoutClosing(paneViews.value, closingPaneIds.value))
 
 function onUserClosePane(paneId: string, opts: Parameters<typeof onKill>[1] = {}): Promise<boolean> {
-  return closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId, opts))
+  return closePaneHidden(
+    closingPaneIds.value,
+    paneId,
+    async () => await onKill(paneId, opts),
+    () => panes.value.some((p) => p.id === paneId),
+  )
 }
 
 // The backend may wait for an in-flight create's own disposition (60 s) before answering.
@@ -8258,7 +8263,7 @@ const rebuildablePaneCount = computed(
 // be a surprise — those panes are not even visible. Identical to the old
 // behaviour whenever this window holds a single workspace.
 const rebuildableAllPaneCount = computed(
-  () => panesInView.value.filter((p) => p.realized && paneCanRebuild(p)).length
+  () => listedPanesInView.value.filter((p) => p.realized && paneCanRebuild(p)).length
 )
 
 /** The same answer, per workspace, for the ↻ on every sidebar heading.
@@ -8268,7 +8273,7 @@ const rebuildableAllPaneCount = computed(
  *  offering the button, and one with panes to rebuild refusing it. */
 const rebuildableByWorkspace = computed<Record<string, number>>(() => {
   const out: Record<string, number> = {}
-  for (const p of panes.value) {
+  for (const p of listedPanes.value) {
     if (!p.realized || !paneCanRebuild(p)) continue
     const key = normWs(p.workspacePath)
     out[key] = (out[key] ?? 0) + 1
@@ -8759,7 +8764,7 @@ provide(
  *  one summary toast. */
 async function restartAgentPanes(agentKey: string): Promise<void> {
   // Rebuild replaces pane ids — capture the batch up front.
-  const batch = panes.value.filter((p) => {
+  const batch = listedPanes.value.filter((p) => {
     const paneRef = paneRefs[p.id]
     const status = (paneRef?.displayStatus ?? paneRef?.status) as string | undefined
     return paneNeedsAccountRestart(p, agentKey, status)
@@ -8928,7 +8933,7 @@ async function moveFollowPanes(
 /** After a successful claude switch: list the pinned panes it did not reach
  *  and move the ones the user ticks. Nothing to list, nothing shown. */
 async function offerFollowSwitch(outgoingId: string | null, targetId: string | null): Promise<void> {
-  const rows = followSwitchRows(panes.value.map(followPaneInput), {
+  const rows = followSwitchRows(listedPanes.value.map(followPaneInput), {
     targetId,
     outgoingId,
     dirSignedIn: followDirSignedIn,
@@ -8945,7 +8950,7 @@ async function offerFollowSwitch(outgoingId: string | null, targetId: string | n
  *  on, optionally taking the other panes that ran out on the same account. */
 async function onQuotaSwitchAccount(paneId: string): Promise<void> {
   if (!followSwitchFlag.value) return
-  const inputs = panes.value.map(followPaneInput)
+  const inputs = listedPanes.value.map(followPaneInput)
   const self = inputs.find((p) => p.id === paneId)
   if (!self) return
   const liveId = cliProfilesApi.defaultProfileId(FOLLOW_SWITCH_AGENT)
@@ -8998,7 +9003,7 @@ function paneAccountFollow(p: ActivePane): 'follow' | 'fixed' | undefined {
  *  about once — moved when they finish (the batch waits) or left out; null
  *  when the user cancels the whole choice. */
 async function planAccountFollow(target: string): Promise<string[] | null> {
-  const rows = followingPaneRows(panes.value.map(followPaneInput), {
+  const rows = followingPaneRows(listedPanes.value.map(followPaneInput), {
     target,
     liveId: cliProfilesApi.defaultProfileId(FOLLOW_SWITCH_AGENT),
     dirSignedIn: followDirSignedIn,
@@ -9014,7 +9019,7 @@ async function planAccountFollow(target: string): Promise<string[] | null> {
 
 provide(accountFollowKey, {
   followingCount: () =>
-    panes.value.filter((p) => p.agentKey === FOLLOW_SWITCH_AGENT && accountFollow.has(p.id)).length,
+    listedPanes.value.filter((p) => p.agentKey === FOLLOW_SWITCH_AGENT && accountFollow.has(p.id)).length,
   plan: planAccountFollow,
   move: moveFollowPanes,
 })
@@ -9071,7 +9076,7 @@ async function toggleAccountPin(paneId: string): Promise<void> {
  *  finish (the follow batch waits, never interrupts) or skipped. Runs only
  *  when the user clicks it. */
 async function unpinAllAccountPanes(): Promise<void> {
-  const fixed = panes.value.filter((p) => p.realized && paneAccountFixed(p) && paneCanRebuild(p))
+  const fixed = listedPanes.value.filter((p) => p.realized && paneAccountFixed(p) && paneCanRebuild(p))
   if (fixed.length === 0) return
   const idle = fixed.filter((p) => !followPaneBusy(p.id)).map((p) => p.id)
   const running = fixed.filter((p) => followPaneBusy(p.id))
@@ -9100,7 +9105,7 @@ async function unpinAllAccountPanes(): Promise<void> {
 }
 
 provide(accountPinKey, {
-  fixedCount: () => panes.value.filter((p) => paneAccountFixed(p)).length,
+  fixedCount: () => listedPanes.value.filter((p) => paneAccountFixed(p)).length,
   unpinAll: unpinAllAccountPanes,
 })
 
@@ -9119,8 +9124,8 @@ async function rebuildPanesViaResume(
   // pane's own workspacePath, so another project's panes rebuild in place —
   // no switch, and nothing on screen changes under the user.
   const pool = workspacePath
-    ? panes.value.filter((p) => normWs(p.workspacePath) === normWs(workspacePath))
-    : panesInView.value
+    ? listedPanes.value.filter((p) => normWs(p.workspacePath) === normWs(workspacePath))
+    : listedPanesInView.value
   // Rebuild replaces pane ids, so capture the batch up front.
   const ids = pool
     .filter((p) => p.realized && (scope === 'all' || tabFilteredPaneIds.value.has(p.id)) && paneCanRebuild(p))
@@ -9323,8 +9328,11 @@ async function onKillAll(paneIds?: readonly string[]): Promise<void> {
   // currentWorkspace is blank every workspace counts as extra, the view empties
   // and this kills nothing at all. Such a caller captures the list first and
   // passes it in. See doCloseWorkspace.
-  const ids = paneIds ?? panesInView.value.map((p) => p.id)
-  for (const id of [...ids]) await onKill(id, { markRemoved: false })
+  const ids = paneIds ?? listedPanesInView.value.map((p) => p.id)
+  for (const id of [...ids]) {
+    if (paneIds) await onKill(id, { markRemoved: false })
+    else await onUserClosePane(id, { markRemoved: false })
+  }
 }
 
 // ── Batch actions on the multi-select set (right-click a selected pane) ───────
@@ -9348,7 +9356,7 @@ async function batchKill(ids: string[]): Promise<void> {
 
 /** Every pane this one spawned, transitively — never the pane itself. */
 function descendantPaneIds(paneId: string): string[] {
-  return withDescendants([paneId], panes.value).filter((id) => id !== paneId)
+  return withDescendants([paneId], listedPanes.value).filter((id) => id !== paneId)
 }
 
 // "Remove sub-panes": closes only what the right-clicked pane spawned. The
@@ -10688,7 +10696,7 @@ registerCommand('ui.groupPeers', (args) => {
   // owns the sender. Unassigned panes share the synthetic 'manual' group, so
   // they broadcast to each other rather than to nobody.
   // Never a terminal: a broadcast is prose for agents, and a shell would run it.
-  const peers = (groupPeers(panes.value, paneId) ?? []).filter((p) => p.agentKey !== TERMINAL_AGENT_KEY)
+  const peers = (groupPeers(listedPanes.value, paneId) ?? []).filter((p) => p.agentKey !== TERMINAL_AGENT_KEY)
   return {
     group_id: sender.runGroupId ?? '',
     peers: peers.map((p) => ({ pane_id: p.id, name: p.messagingName as string })),
@@ -13739,7 +13747,7 @@ const reconnectLoading = ref(false)
 const activeHistoryPaneKey = computed(() => {
   const disconnected = new Set(disconnectedPaneIds.value)
   const ids: string[] = []
-  for (const view of paneViews.value) {
+  for (const view of listedPaneViews.value) {
     if (disconnected.has(view.id)) continue
     if (view.status === 'running' || view.status === 'starting' || view.status === 'awaiting') {
       ids.push(view.id)
@@ -13845,7 +13853,7 @@ async function onConfirmReconnect(sessionId: string): Promise<void> {
  *  (onKill only stamps removedAt); groups handed off to detached windows are
  *  left untouched. Always confirms before acting. */
 async function closeAllSessions(): Promise<void> {
-  const count = panes.value.length
+  const count = listedPanes.value.length
   if (count === 0) return
   const ok = await notifyRestore.confirm(
     i18n.global.t('closeAll.confirm', { count }),
@@ -13857,7 +13865,7 @@ async function closeAllSessions(): Promise<void> {
   )
   if (!ok) return
   if (pipeline.state === 'running') await onPipelineAbort()
-  for (const p of [...panes.value]) await onUserClosePane(p.id)
+  for (const p of [...listedPanes.value]) await onUserClosePane(p.id)
   runGroups.value = runGroups.value.filter((g) => detachedGroupIds.value.has(g.id))
   if (!runGroups.value.some((g) => g.id === currentRunGroupId.value)) currentRunGroupId.value = ''
   activeTab.value = ''
@@ -19289,8 +19297,11 @@ async function movePaneToGroup(paneId: string, targetKey: string): Promise<void>
  */
 async function closeRunGroup(id: string, keepGroup = false): Promise<void> {
   const affected = id === 'manual'
-    ? panesInView.value.filter((p) => !p.runGroupId)
-    : panesInView.value.filter((p) => p.runGroupId === id)
+    ? listedPanesInView.value.filter((p) => !p.runGroupId)
+    : listedPanesInView.value.filter((p) => p.runGroupId === id)
+  const pendingCloses = panesInView.value
+    .filter((p) => (id === 'manual' ? !p.runGroupId : p.runGroupId === id) && closingPaneIds.value.has(p.id))
+    .map((p) => pendingPaneClose(closingPaneIds.value, p.id))
   // Same rule as a batch rebuild: stopping CLIs mid-turn is asked first.
   const runningCount = countPanesBusyForRebuild(affected.map((p) => p.id))
   if (runningCount > 0) {
@@ -19314,8 +19325,10 @@ async function closeRunGroup(id: string, keepGroup = false): Promise<void> {
     await onPipelineAbort()
   }
   for (const p of [...affected]) await onUserClosePane(p.id)
+  await Promise.all(pendingCloses)
   noteOtherWorkspacesUntouched((p) => (id === 'manual' ? !p.runGroupId : p.runGroupId === id))
   if (id !== 'manual' && !keepGroup) {
+    if (panesInView.value.some((p) => p.runGroupId === id)) return
     runGroups.value = runGroups.value.filter((g) => g.id !== id)
     if (currentRunGroupId.value === id) currentRunGroupId.value = ''
     if (activeTab.value === id) activeTab.value = runGroups.value[0]?.id ?? 'manual'
@@ -19395,6 +19408,8 @@ type StageTabShape = Omit<TabItem, 'status' | 'live'> & { paneIds: string[] }
 const panesInView = computed<readonly ActivePane[]>(() =>
   panesOfViewedWorkspace(panes.value, extraWorkspaces.value)
 )
+// The user-facing view of panesInView: counts, menus and batch targets never include a closing pane.
+const listedPanesInView = computed<readonly ActivePane[]>(() => withoutClosing(panesInView.value, closingPaneIds.value))
 
 /* ── Sidebar mode ─────────────────────────────────────────────────────────
  *
@@ -19513,8 +19528,8 @@ const runGroupCtxMenu = ref<{
  *  another workspace reads its own panes. */
 function runGroupPanes(workspacePath: string, key: string): ActivePane[] {
   const pool = normWs(workspacePath) === normWs(currentWorkspace.value)
-    ? panesInView.value
-    : panes.value.filter((p) => normWs(p.workspacePath) === normWs(workspacePath))
+    ? listedPanesInView.value
+    : listedPanes.value.filter((p) => normWs(p.workspacePath) === normWs(workspacePath))
   return pool.filter((p) => inRunGroup(p, key))
 }
 
@@ -19666,7 +19681,7 @@ watch(activeTab, (v) => {
 function minimizePane(id: string): void {
   minimizedPanes.value = new Set([...minimizedPanes.value, id])
   if (focusPaneId.value === id) {
-    const fallback = panes.value.find((p) => p.id !== id && !minimizedPanes.value.has(p.id))?.id ?? null
+    const fallback = listedPanes.value.find((p) => p.id !== id && !minimizedPanes.value.has(p.id))?.id ?? null
     selectPane(fallback, { userInitiated: false })
   }
   persistPaneMinimized(id, true)
@@ -19688,7 +19703,7 @@ function restorePane(id: string): void {
  *  single pane otherwise. Ordered by `panes.value` so a batch keeps its relative
  *  arrangement wherever it lands. */
 function paneDragBatch(paneId: string): string[] {
-  return resolveDragBatch(paneId, selectedPaneIds.value, panes.value.map((p) => p.id))
+  return resolveDragBatch(paneId, selectedPaneIds.value, listedPanes.value.map((p) => p.id))
 }
 
 /** The batch for a drag started in one of the auxiliary lists (Auto, Spotlight,
@@ -19705,7 +19720,7 @@ function paneDragBatch(paneId: string): string[] {
 function auxiliaryDragBatch(paneId: string, folded: boolean): string[] {
   const batch = paneDragBatch(paneId)
   if (!folded) return batch
-  const full = withFoldedSubtree(paneId, batch, panes.value)
+  const full = withFoldedSubtree(paneId, batch, listedPanes.value)
   if (full !== batch) selectedPaneIds.value = new Set(full)
   return full
 }
@@ -20214,7 +20229,7 @@ async function closeWorkspace(path: string, opts: { confirmed?: boolean } = {}):
   // the menu row alone does not say so. `confirmed`: the caller already asked
   // (ui.workspace.close asks every time, naming the agent that wants it).
   if (confirmBeforeCloseWorkspace.value && !opts.confirmed) {
-    const inWorkspace = panes.value.filter((p) => normWs(p.workspacePath) === normWs(path))
+    const inWorkspace = listedPanes.value.filter((p) => normWs(p.workspacePath) === normWs(path))
     const count = inWorkspace.length
     // Pipeline panes are unspawned below, so the plain wording — which now
     // promises every pane comes back — would be a false promise for them.
@@ -20837,7 +20852,7 @@ const resourcePanelOpen = computed(
 
 /** Panes with a live CLI. The pill counts these, not placeholders: a
  *  placeholder holds no process, so no CPU and no memory. */
-const realizedPaneCount = computed(() => panes.value.filter((p) => p.realized).length)
+const realizedPaneCount = computed(() => listedPanes.value.filter((p) => p.realized).length)
 
 const resourceUsage = useResourceUsage({
   request: () => sendQuiet<ResourceUsageWire>('terminal.resource_usage', {}),
@@ -20857,7 +20872,7 @@ const resourceRows = computed<ResourceSummaryRow[]>(() => {
   const bytesByPane = resourceUsage.bytesByPaneId.value
   const cpuByPane = resourceUsage.cpuPercentByPaneId.value
   const paneIdByKey = resourceUsage.paneIdByKey.value
-  return panes.value.map((p) => {
+  return listedPanes.value.map((p) => {
     const name = p.customName || p.autoName || p.agentLabel
     const vendor = agentSpecs.find((s) => s.agentKey === p.agentKey)?.label ?? p.agentKey
     // Keyed by terminal session first: that id is the one this window holds for
@@ -20892,6 +20907,20 @@ const resourceRows = computed<ResourceSummaryRow[]>(() => {
       reclaimable: reclaimable.has(p.id),
     }
   })
+})
+
+// A closing pane stays in the backend roster and the sweep until it settles: the Resource Manager
+// hides it by pane id and by the id its PTY was measured under.
+const closingResourceKeys = computed<ReadonlySet<string>>(() => {
+  const keys = new Set<string>()
+  const paneIdByKey = resourceUsage.paneIdByKey.value
+  for (const id of closingPaneIds.value) {
+    keys.add(id)
+    const sessionKey = (paneRefs[id]?.sessionId as unknown as string) ?? ''
+    const measured = sessionKey ? paneIdByKey.get(sessionKey) : undefined
+    if (measured) keys.add(measured)
+  }
+  return keys
 })
 
 // The backend measures every PTY it owns, which is every window's — the right
@@ -20947,7 +20976,7 @@ const resourcePillTitle = computed(() => {
 // this it would stay mounted with a full-viewport backdrop swallowing every
 // click on a status bar that no longer offers a way to dismiss it.
 watch(
-  () => panes.value.length,
+  () => listedPanes.value.length,
   (count) => {
     if (count === 0 && openPopover.value === 'resource') closePopover()
   },
@@ -22757,6 +22786,7 @@ function paneIsCommander(p: ActivePane): boolean {
       :backend="backend"
       :usage="resourceUsage"
       :local-rows="resourceRows"
+      :hidden-keys="closingResourceKeys"
       :auto-reclaim-on="idleReclaimEnabled"
       :auto-reclaim-minutes="idleReclaimMinutes"
       :workspace-paths="knownWorkspacePaths"
@@ -22788,7 +22818,7 @@ function paneIsCommander(p: ActivePane): boolean {
       :show="showHistory"
       :session-history="historyEntries"
       :viewing-workspace="historyWorkspaceLabel"
-      :pane-count="panes.length"
+      :pane-count="listedPanesInView.length"
       :reviving-pane-id="revivingHistoryPaneId"
       :unavailable-pane-ids="unavailableHistoryPaneIds"
       :active-pane-ids="activeHistoryPaneIds"
@@ -22886,7 +22916,7 @@ function paneIsCommander(p: ActivePane): boolean {
           <ViewPanel :model-value="layoutMode" @update:model-value="onUserChangeLayoutMode" />
         </template>
       </StageTabBar>
-      <div v-if="panes.length === 0" class="empty">
+      <div v-if="listedPanes.length === 0" class="empty">
         <!-- Pipeline is starting but the first pane hasn't appeared yet.
              The orchestrator typically takes 10-30s for the first stage:
              Context7 doc fetch → CLI spawn → settle → role + kickoff inject. -->
@@ -23706,7 +23736,7 @@ function paneIsCommander(p: ActivePane): boolean {
           <span v-if="backendUrl" class="sb-url">· {{ backendUrl }}</span>
         </span>
         <span
-          v-if="panes.length > 0"
+          v-if="listedPanes.length > 0"
           class="sb-item sb-resource sb-clickable"
           role="button"
           tabindex="0"
@@ -23829,7 +23859,7 @@ function paneIsCommander(p: ActivePane): boolean {
           @keydown.enter="togglePopover('clock')"
         >{{ clockLabel }}</span>
         <span
-          v-if="!isDetachedWindow && panes.length > 0"
+          v-if="!isDetachedWindow && listedPanes.length > 0"
           class="sb-item sb-clickable sb-close-all"
           :title="$t('closeAll.title')"
           @click="closeAllSessions"

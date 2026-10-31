@@ -22,7 +22,7 @@ const zhLocale = readFileSync(
 describe('App pane context menu — Remove sub-panes', () => {
   it('closes only the spawned descendants, keeping the pane itself', () => {
     expect(appSource).toContain(
-      'return withDescendants([paneId], panes.value).filter((id) => id !== paneId)'
+      'return withDescendants([paneId], listedPanes.value).filter((id) => id !== paneId)'
     )
     expect(appSource).toContain('for (const id of descendantPaneIds(paneId)) await onUserClosePane(id)')
   })

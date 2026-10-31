@@ -136,6 +136,7 @@ async function mountModal(
     localRows?: ReturnType<typeof localRow>[]
     autoReclaimMinutes?: string
     workspacePaths?: string[]
+    hiddenKeys?: Set<string>
     /** Mount the real Teleport into document.body instead of stubbing it. */
     realTeleport?: boolean
   } = {}
@@ -150,6 +151,7 @@ async function mountModal(
       autoReclaimOn: true,
       autoReclaimMinutes: opts.autoReclaimMinutes ?? '45',
       workspacePaths: opts.workspacePaths,
+      hiddenKeys: opts.hiddenKeys,
     },
     // The modal teleports to <body>; stubbing that keeps the tree inside the
     // wrapper, which is what every query here reads from.
@@ -199,6 +201,15 @@ describe('ResourceManagerModal', () => {
     expect(names).toContain('Scan the code')
     expect(names).toContain('Deploy notes')
     expect(w.text()).toContain('care-platform')
+    w.unmount()
+  })
+
+  // review-5 B1: a pane the user is closing is still in the roster and the sweep until it settles.
+  it('does not bring a closing pane back from the roster or the measurement fallback', async () => {
+    const { w } = await mountModal({ bytes: { ...DEFAULT_BYTES, ghost: 50 * MB }, hiddenKeys: new Set(['p1', 'ghost']) })
+    expect(w.find('[data-pane="p1"]').exists()).toBe(false)
+    expect(w.find('[data-pane="ghost"]').exists()).toBe(false)
+    expect(w.find('[data-pane="p2"]').exists()).toBe(true)
     w.unmount()
   })
 

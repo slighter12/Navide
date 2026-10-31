@@ -22,7 +22,7 @@ describe('the subtree chip on parent cards', () => {
     // so no two surfaces can disagree about which family is busy.
     // Split the source assertion so the staged-import guard does not parse it as this test's own import.
     expect(appSource).toContain(["import { subtreeSignals } from ", "'./lib/paneSubtreeStatus'"].join(''))
-    expect(appSource).toContain('const paneListSubtree = computed(() => subtreeSignals(paneViews.value))')
+    expect(appSource).toContain('const paneListSubtree = computed(() => subtreeSignals(listedPaneViews.value))')
   })
 
   it('renders on both card lists under the status badge', () => {

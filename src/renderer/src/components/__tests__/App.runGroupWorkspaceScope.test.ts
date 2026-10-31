@@ -32,6 +32,6 @@ describe('run-group tab edits stay inside the viewed workspace', () => {
 
   it('closeRunGroup kills panes of the viewed workspace only', () => {
     expect(close).not.toMatch(/panes\.value\.filter/)
-    expect(close.match(/panesInView\.value\.filter/g)?.length).toBe(2)
+    expect(close.match(/listedPanesInView\.value\.filter/g)?.length).toBe(2)
   })
 })
