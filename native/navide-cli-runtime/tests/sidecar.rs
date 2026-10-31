@@ -1317,12 +1317,14 @@ int main(int argc, char **argv) {
             .unwrap()
     }
 
-    /// The sidecar's `rchar` over ten idle seconds with four sessions and `noise` unrelated processes.
-    fn idle_rchar(name: &str, noise: usize, envs: &[(&str, &str)]) -> (u64, Stats) {
+    /// The sidecar's `rchar` over ten idle seconds with four sessions and `noise` unrelated processes, and the
+    /// pids of those processes.
+    fn idle_rchar(name: &str, noise: usize, envs: &[(&str, &str)]) -> (u64, Stats, Vec<i64>) {
         let (mut sidecar, stats) = start_scoped(name, envs);
         let mut sleepers: Vec<_> = (0..noise)
             .map(|_| Command::new("/bin/sleep").arg("600").spawn().unwrap())
             .collect();
+        let noise_pids: Vec<i64> = sleepers.iter().map(|sleeper| i64::from(sleeper.id())).collect();
         let masters: Vec<_> = (0..4)
             .map(|index| create_in(&mut sidecar, &["/bin/cat"], &format!("{name}-{index}"), "pane-1").1)
             .collect();
@@ -1339,15 +1341,15 @@ int main(int argc, char **argv) {
         for master in masters {
             unsafe { libc::close(master) };
         }
-        (used, stats)
+        (used, stats, noise_pids)
     }
 
     #[cfg(feature = "fault-hooks")]
     #[test]
     fn idle_scan_reads_only_owned_pids() {
-        let (head, _) = idle_rchar("r5-head", 165, &[("NAVIDE_FAULT_FORCE_FULL", "1")]);
-        let (used_165, stats) = idle_rchar("r5-165", 165, &[]);
-        let (used_495, _) = idle_rchar("r5-495", 495, &[]);
+        let (head, _, _) = idle_rchar("r5-head", 165, &[("NAVIDE_FAULT_FORCE_FULL", "1")]);
+        let (used_165, stats, noise) = idle_rchar("r5-165", 165, &[]);
+        let (used_495, _, _) = idle_rchar("r5-495", 495, &[]);
         assert!(
             used_165 * 4 < head,
             "rchar over 10 s: scoped {used_165} is not below a quarter of the full-scan {head}"
@@ -1358,14 +1360,18 @@ int main(int argc, char **argv) {
         assert_eq!(read["scans_full"], 0, "{read}");
         assert!(read["scans_scoped"].as_u64().unwrap_or(0) > 0, "{read}");
         assert_eq!(read["due_scans_skipped"], 0, "{read}");
-        // No noise pid was ever stat-read: every inspected pid is the sidecar, a session root, or a descendant.
-        let inspected: Vec<i64> = read["inspected_pid_set"]
+        assert_eq!(read["reaper_running"], true, "{read}");
+        // No walk ever stat-read a noise pid: the stat-read set holds the sidecar, the session roots and their
+        // descendants only. The set is checked non-empty so the intersection cannot pass on a missing counter.
+        let stat_read: Vec<i64> = read["stat_read_pid_set"]
             .as_array()
-            .expect("no inspected pid set")
+            .expect("no stat-read pid set")
             .iter()
             .filter_map(Value::as_i64)
             .collect();
-        assert!(!inspected.is_empty(), "{read}");
+        assert!(!stat_read.is_empty(), "{read}");
+        let touched: Vec<i64> = stat_read.iter().copied().filter(|pid| noise.contains(pid)).collect();
+        assert!(touched.is_empty(), "a walk stat-read noise pids {touched:?}: {read}");
         let walked_max = read["walks"]
             .as_array()
             .unwrap()
@@ -1414,6 +1420,12 @@ int main(int argc, char **argv) {
         unsafe { libc::close(master) };
     }
 
+    /// Workers whose leaders `pthread_exit` at random moments over eight seconds (row R-6). A walk is dirty only
+    /// when a leader dies while it runs, so the row needs enough deaths per second, and a long enough walk, that
+    /// some walk meets one. With 300 workers a release build missed every walk in about 5 runs of 12.
+    #[cfg(feature = "fault-hooks")]
+    const WORKERS: usize = 900;
+
     #[cfg(feature = "fault-hooks")]
     #[test]
     fn thread_exit_reparent_probe_shape() {
@@ -1424,10 +1436,10 @@ int main(int argc, char **argv) {
         let script = write_script(
             &dir,
             "root.sh",
-            &format!("{helper} workers 300 {} & exec sleep 600\n", out.display()),
+            &format!("{helper} workers {WORKERS} {} & exec sleep 600\n", out.display()),
         );
         let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], "r6", "pane-1");
-        wait_for("the workers", Duration::from_secs(30), || read_pids(&out).len() == 300);
+        wait_for("the workers", Duration::from_secs(60), || read_pids(&out).len() == WORKERS);
         let kids = read_pids(&out);
         let all = ownership_until(&sidecar, |pids| kids.iter().all(|kid| pids.contains(kid)));
         assert!(kids.iter().all(|kid| all.contains(kid)), "an event lost a live child");
@@ -1445,11 +1457,22 @@ int main(int argc, char **argv) {
             stats.num("scans_scoped") >= scoped_before + 2
         });
         assert_eq!(stats.num("scans_full"), settled, "{}", stats.read());
+        let read = stats.read();
+        // Every full scan must be a dirty fallback; name any other reason that caused one.
+        let other: Vec<String> = read["fallbacks"]
+            .as_object()
+            .map(|reasons| {
+                reasons
+                    .iter()
+                    .filter(|(reason, count)| reason.as_str() != "dirty" && count.as_u64().unwrap_or(0) > 0)
+                    .map(|(reason, count)| format!("{reason}={count}"))
+                    .collect()
+            })
+            .unwrap_or_default();
         assert_eq!(
             stats.num("scans_full"),
             stats.nested("fallbacks", "dirty"),
-            "a full scan without a dirty fallback: {}",
-            stats.read()
+            "full scans exceed the dirty fallbacks; other fallback reasons: {other:?}; {read}"
         );
         kill_all(&kids);
         kill_and_clean(&mut sidecar, "r6");
