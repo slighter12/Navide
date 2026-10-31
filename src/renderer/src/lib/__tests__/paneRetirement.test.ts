@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { closePaneHidden, settlePaneTerminals, withoutClosing } from '../paneRetirement'
+import { closePaneHidden, idsWithoutClosing, settlePaneTerminals, withoutClosing } from '../paneRetirement'
 
 describe('settlePaneTerminals — the settlement answer is the only proof', () => {
   it('a proven settlement after a successful own kill retires', async () => {
@@ -112,5 +112,27 @@ describe('withoutClosing — a closing pane is not listed on any surface', () =>
     refuse(false)
     await pending
     expect(withoutClosing(items, closing).map((p) => p.id)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('idsWithoutClosing — a hidden closing pane is not part of a batch action', () => {
+  it('drops the closing ids and keeps the order of the rest', () => {
+    expect(idsWithoutClosing(['a', 'b', 'c'], new Set(['b']))).toEqual(['a', 'c'])
+  })
+  it('returns the input unchanged when nothing is closing', () => {
+    const ids = ['a', 'b']
+    expect(idsWithoutClosing(ids, new Set())).toBe(ids)
+  })
+  it('a batch close during settlement does not close the closing pane a second time', async () => {
+    const closing = new Set<string>()
+    const closed: string[] = []
+    const settle = new Promise<boolean>(() => {})
+    void closePaneHidden(closing, 'a', async () => { closed.push('a'); return await settle })
+    await Promise.resolve()
+    // The user selected a and b, closed a, then picks "Remove selected".
+    for (const id of idsWithoutClosing(['a', 'b'], closing)) {
+      await closePaneHidden(closing, id, async () => { closed.push(id); return true })
+    }
+    expect(closed).toEqual(['a', 'b'])
   })
 })
