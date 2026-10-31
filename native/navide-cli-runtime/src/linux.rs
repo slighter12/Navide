@@ -1284,6 +1284,10 @@ pub(super) struct Reaper {
     /// Test seam: what the loop does on its next pass instead of calling `waitid` (0 = nothing).
     #[cfg(test)]
     inject: std::sync::atomic::AtomicU8,
+    /// Test seam: set by `StopGuard::drop` once it found the gate taken, i.e. the reaper is at publication and
+    /// waiting for a create to release the gate.
+    #[cfg(test)]
+    stop_blocked_on_gate: std::sync::atomic::AtomicBool,
 }
 
 /// Test seam values for `Reaper::inject`.
@@ -1315,6 +1319,16 @@ impl Drop for StopGuard<'_> {
         // and, on a panic, during unwinding, before the unwind reaches `run`'s `guard` local (declared before the
         // `run_loop` call, so it drops after everything `run_loop` owns). Nothing else is held either, and the
         // lock order stays `FD_FORK_LOCK` -> `gate` -> `reserved`: this takes `gate` alone, never `reserved`.
+        #[cfg(test)]
+        if matches!(
+            self.reaper.gate.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        ) {
+            // Handshake for the interleaving test: the reaper is at publication and the gate is taken.
+            self.reaper
+                .stop_blocked_on_gate
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let gate = self.reaper.hold_gate();
         // The counter first: whoever sees the stop also sees the liveness counter already cleared.
         counters::reaper_stopped();
@@ -1338,6 +1352,8 @@ impl Reaper {
             stopped: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             inject: std::sync::atomic::AtomicU8::new(0),
+            #[cfg(test)]
+            stop_blocked_on_gate: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -1355,6 +1371,22 @@ impl Reaper {
     #[cfg(test)]
     pub(super) fn inject(&self, what: u8) {
         self.inject.store(what, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Wait (bounded, a failure guard only) until the stopping reaper reports it is blocked on the gate.
+    #[cfg(test)]
+    pub(super) fn wait_stop_blocked_on_gate(&self, within: Duration) -> bool {
+        let end = Instant::now() + within;
+        while Instant::now() < end {
+            if self
+                .stop_blocked_on_gate
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        false
     }
 
     /// Wait (bounded) until the reaper thread has ended; true if it did.
