@@ -193,6 +193,9 @@ enum Msg {
 struct ExitInfo {
     code: Option<i32>,
     signal: Option<i32>,
+    /// The root's status was not read by its own waiter (Linux scoped mode only): `ECHILD` there means a
+    /// third party reaped it, so the exit is not verified and cleanup cannot be called complete.
+    unverified: bool,
 }
 struct ExitCell {
     state: Mutex<Option<ExitInfo>>,
@@ -596,6 +599,18 @@ struct GateContext<'a> {
     /// Harness build only: a release file the owner waits for before the journal append.
     #[cfg(feature = "fault-hooks")]
     hold: Option<&'a str>,
+    /// Harness build only: a release file the owner waits for before it reads the child's report, so the root
+    /// exists as a sidecar child with no reservation yet.
+    #[cfg(feature = "fault-hooks")]
+    before_read: Option<&'a str>,
+    /// The Linux reaper (scoped mode) and the slot, owned by `spawn_gated`, that holds this root's reservation.
+    #[cfg(target_os = "linux")]
+    reaper: Option<&'a Arc<linux::Reaper>>,
+    #[cfg(target_os = "linux")]
+    slot: &'a Mutex<Option<linux::RootReservation>>,
+    /// Test only: the owner panics right after it released the gate, so the spawn succeeded and the owner failed.
+    #[cfg(all(test, target_os = "linux"))]
+    panic_after_release: bool,
 }
 fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Table, Value, Births)> {
     let GateContext {
@@ -608,7 +623,19 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         request,
         #[cfg(feature = "fault-hooks")]
         hold,
+        #[cfg(feature = "fault-hooks")]
+        before_read,
+        #[cfg(target_os = "linux")]
+        reaper,
+        #[cfg(target_os = "linux")]
+        slot,
+        #[cfg(all(test, target_os = "linux"))]
+        panic_after_release,
     } = *ctx;
+    #[cfg(feature = "fault-hooks")]
+    if let Some(path) = before_read {
+        fault::wait_for_file_bounded(path)?;
+    }
     let mut buffer = [0u8; 4];
     let mut got = 0;
     while got < 4 {
@@ -625,6 +652,13 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         got += n as usize;
     }
     let pid = i32::from_ne_bytes(buffer);
+    // From here until its own waiter has taken its status, only that waiter may reap this root. The key is
+    // written before the identity snapshot and the journal append; `spawn_gated` has held the reaper's gate
+    // since before the fork, so the interval [fork, here] is closed too.
+    #[cfg(target_os = "linux")]
+    if let Some(reaper) = reaper {
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reaper.reserve(pid));
+    }
     let mut births = Births::default();
     let table = snapshot(Some(pid), &Table::new(), &mut births)
         .map_err(|_| io::Error::other("OWNERSHIP_JOURNAL_FAILED: identity unavailable"))?;
@@ -656,6 +690,10 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         return Err(io::Error::other("OWNERSHIP_JOURNAL_FAILED: gate release"));
     }
     drop(registry);
+    #[cfg(all(test, target_os = "linux"))]
+    if panic_after_release {
+        panic!("test: the gate owner failed after it released the gate");
+    }
     Ok((table, root, births))
 }
 
@@ -784,7 +822,25 @@ struct Spawned {
     owned: Owned,
 }
 
-fn watch_exit(pid: i32, cell: Arc<ExitCell>, tx: mpsc::Sender<Msg>) -> io::Result<()> {
+/// A root's reservation against the Linux reaper, shared so that a failed watcher start still holds it while the
+/// sidecar kills and waits for the root itself. Empty when the reaper is off.
+#[cfg(target_os = "linux")]
+type RootSlot = Arc<Mutex<Option<linux::RootReservation>>>;
+#[cfg(not(target_os = "linux"))]
+type RootSlot = ();
+
+fn watch_exit(
+    pid: i32,
+    cell: Arc<ExitCell>,
+    tx: mpsc::Sender<Msg>,
+    slot: RootSlot,
+) -> io::Result<()> {
+    // Scoped mode is read here, on the creating thread: in scoped mode the reservation makes this the only
+    // waiter allowed to take the root's status, so `ECHILD` means a third party took it.
+    #[cfg(target_os = "linux")]
+    let scoped = linux::scoped();
+    #[cfg(not(target_os = "linux"))]
+    let scoped = false;
     thread::Builder::new()
         .name("exit-watch".into())
         .spawn(move || {
@@ -797,26 +853,47 @@ fn watch_exit(pid: i32, cell: Arc<ExitCell>, tx: mpsc::Sender<Msg>) -> io::Resul
                         ExitInfo {
                             code: Some(libc::WEXITSTATUS(status)),
                             signal: None,
+                            unverified: false,
                         }
                     } else {
                         ExitInfo {
                             code: None,
                             signal: Some(libc::WTERMSIG(status)),
+                            unverified: false,
                         }
                     };
                 }
                 if reaped < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
                     continue;
                 }
+                let echild =
+                    reaped < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD);
                 break ExitInfo {
                     code: None,
                     signal: None,
+                    unverified: scoped && echild,
                 }; // not our child any more: status unknown
             };
+            // The exact wait has returned: the reaper may take a pid this root held.
+            #[cfg(target_os = "linux")]
+            drop(slot.lock().unwrap_or_else(|e| e.into_inner()).take());
+            #[cfg(not(target_os = "linux"))]
+            let _ = slot;
             cell.set(info);
             let _ = tx.send(Msg::Exited);
         })?;
     Ok(())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+thread_local! {
+    /// Test seam: the next `kill_and_reap_released` wait on this thread answers `ECHILD`.
+    static FORCE_ECHILD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Test seam: runs on the creating thread right before the failed-create branch waits for its child.
+    static BEFORE_CHILD_WAIT: std::cell::RefCell<Option<Box<dyn FnOnce(i32)>>> =
+        const { std::cell::RefCell::new(None) };
+    /// Test seam: the next create's gate owner panics right after it released the gate.
+    static PANIC_AFTER_RELEASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// A released root whose session could not be set up: signal its group by the identity just recorded and
@@ -825,6 +902,12 @@ fn watch_exit(pid: i32, cell: Arc<ExitCell>, tx: mpsc::Sender<Msg>) -> io::Resul
 /// the root (the one process that ran) is gone; no descendant had time to be recorded (no snapshot ran yet), and
 /// anything that escaped the group is what the generation's journal-based cleanup is for.
 fn kill_and_reap_released(pid: i32) -> bool {
+    // In Linux scoped mode the root is reserved, so only this wait may take its status: `ECHILD` is then a
+    // third party having taken it, which is not a verified reap.
+    #[cfg(target_os = "linux")]
+    let echild_is_reaped = !linux::scoped();
+    #[cfg(not(target_os = "linux"))]
+    let echild_is_reaped = true;
     // SAFETY: the root is our own child, a session/group leader we just created (pgid == pid); a
     // negative pid addresses exactly that group.
     unsafe {
@@ -839,14 +922,24 @@ fn kill_and_reap_released(pid: i32) -> bool {
         #[cfg(not(target_os = "macos"))]
         let flags = 0; // a SIGKILLed child exits promptly; E5 replaces this with pidfd
                        // SAFETY: waitpid on our own child with a valid status pointer.
+        #[cfg(not(all(test, target_os = "linux")))]
         let reaped = unsafe { libc::waitpid(pid, &mut status, flags) };
+        #[cfg(all(test, target_os = "linux"))]
+        let reaped = if FORCE_ECHILD.with(|forced| forced.get()) {
+            // SAFETY: errno is thread-local; this stands in for a third party having reaped the root.
+            unsafe { *libc::__errno_location() = libc::ECHILD };
+            -1
+        } else {
+            // SAFETY: as above.
+            unsafe { libc::waitpid(pid, &mut status, flags) }
+        };
         if reaped == pid {
             return true;
         }
         if reaped < 0 {
             match io::Error::last_os_error().raw_os_error() {
                 Some(libc::EINTR) => continue,
-                Some(libc::ECHILD) => return true, // already reaped elsewhere
+                Some(libc::ECHILD) => return echild_is_reaped, // already reaped elsewhere
                 _ => return false,
             }
         }
@@ -925,6 +1018,16 @@ fn spawn_gated(
     // no concurrent fork can inherit the gate's write end (which would keep the gate open after
     // the owner's death).
     let _spawn_lock = FD_FORK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Linux scoped mode: the reaper may not wait for any pid from before the fork until this root's
+    // reservation is in place and it is out of reach of the failure paths below. Lock order is
+    // `FD_FORK_LOCK` -> the reaper's gate -> its reservation set.
+    #[cfg(target_os = "linux")]
+    let reaper = linux::reaper();
+    #[cfg(target_os = "linux")]
+    let reaper_gate = reaper.as_ref().map(|reaper| reaper.hold_gate());
+    // The reservation lives here, not in the gate-owner thread, so a panic of that thread cannot drop it.
+    #[cfg(target_os = "linux")]
+    let slot: Mutex<Option<linux::RootReservation>> = Mutex::new(None);
     let (report_r, report_w) = cloexec_pipe()?;
     let (gate_r, gate_w) = match cloexec_pipe() {
         Ok(pair) => pair,
@@ -971,6 +1074,12 @@ fn spawn_gated(
         let (id_ref, generation_ref, argv0) = (&parsed.id, &parsed.generation, &argv[0]);
         #[cfg(feature = "fault-hooks")]
         let hold = fault::journal_hold(&parsed.pane);
+        #[cfg(feature = "fault-hooks")]
+        let before_read = fault::before_report_read(&parsed.pane);
+        #[cfg(target_os = "linux")]
+        let (reaper_ref, slot_ref) = (reaper.as_ref(), &slot);
+        #[cfg(all(test, target_os = "linux"))]
+        let panic_after_release = PANIC_AFTER_RELEASE.with(|flag| flag.get());
         let (spawned, verdict) = thread::scope(|scope| {
             let watcher = scope.spawn(move || {
                 // Owner side of the gate: every path below ends by closing the gate's write end
@@ -988,6 +1097,14 @@ fn spawn_gated(
                         request,
                         #[cfg(feature = "fault-hooks")]
                         hold: hold.as_deref(),
+                        #[cfg(feature = "fault-hooks")]
+                        before_read: before_read.as_deref(),
+                        #[cfg(target_os = "linux")]
+                        reaper: reaper_ref,
+                        #[cfg(target_os = "linux")]
+                        slot: slot_ref,
+                        #[cfg(all(test, target_os = "linux"))]
+                        panic_after_release,
                     },
                 );
                 close_fds(&[report_r, gate_w]);
@@ -1010,6 +1127,19 @@ fn spawn_gated(
             (Ok(mut child), Err(error)) => {
                 // Cannot happen (the gate is released only after success); stay safe regardless.
                 let _ = child.kill();
+                // This wait is a third waiter for the root's pid: the reservation must be in place, and stay
+                // until `wait` has returned.
+                #[cfg(target_os = "linux")]
+                if let Some(reaper) = &reaper {
+                    let mut held = slot.lock().unwrap_or_else(|e| e.into_inner());
+                    if held.is_none() {
+                        *held = Some(reaper.reserve(child.id() as i32));
+                    }
+                }
+                #[cfg(all(test, target_os = "linux"))]
+                if let Some(hook) = BEFORE_CHILD_WAIT.with(|cell| cell.borrow_mut().take()) {
+                    hook(child.id() as i32);
+                }
                 let _ = child.wait();
                 return Err(error);
             }
@@ -1017,6 +1147,14 @@ fn spawn_gated(
             (Err(error), Ok(_)) => return Err(error), // exec failed after a durable record: stale row only
         }
     };
+    // The root exists and is reserved: the reaper may run again, and has a new child to wait on.
+    #[cfg(target_os = "linux")]
+    {
+        drop(reaper_gate);
+        if let Some(reaper) = &reaper {
+            reaper.note_spawned();
+        }
+    }
     // Every sidecar copy of the slave closes now, so the CLI tree closing its own is observable
     // as EOF on the master.
     drop(command);
@@ -1025,14 +1163,19 @@ fn spawn_gated(
     let pty = Arc::new(pty);
     let (tx, mailbox) = mpsc::channel();
     let exit = Arc::new(ExitCell::new());
+    // Shared with the watcher: if it cannot start, the reservation is still held while the root is waited for.
+    #[cfg(target_os = "linux")]
+    let root_slot: RootSlot = Arc::new(slot);
+    #[cfg(not(target_os = "linux"))]
+    let root_slot: RootSlot = ();
     #[cfg(feature = "fault-hooks")]
     let watched = if fault::watch_exit_fails(&parsed.pane) {
         Err(io::Error::other("fault: exit watcher could not start"))
     } else {
-        watch_exit(pid, exit.clone(), tx.clone())
+        watch_exit(pid, exit.clone(), tx.clone(), root_slot.clone())
     };
     #[cfg(not(feature = "fault-hooks"))]
-    let watched = watch_exit(pid, exit.clone(), tx.clone());
+    let watched = watch_exit(pid, exit.clone(), tx.clone(), root_slot.clone());
     if let Err(error) = watched {
         // The gate was released: the root has run. `effect:none` is only true if it is dead and reaped.
         #[cfg(feature = "fault-hooks")]
@@ -1352,7 +1495,10 @@ fn finish(
     sessions: &Sessions,
     survivors: io::Result<Vec<Value>>,
 ) {
-    let root_reaped = handle.exit.get().is_some();
+    // An exit whose status the root's own waiter did not read is not a reap (Linux scoped mode only).
+    let root_reaped = handle.exit.get().is_some_and(|info| !info.unverified);
+    #[cfg(target_os = "linux")]
+    linux::note_unattributed();
     let complete = survivors.as_ref().is_ok_and(Vec::is_empty) && root_reaped;
     let mut meta = handle.meta();
     meta["cleanup_complete"] = json!(complete);
@@ -1549,6 +1695,13 @@ mod fault {
     /// append on macOS.
     pub fn journal_hold(pane: &str) -> Option<String> {
         kind(pane)?.strip_prefix("journal-hold:").map(str::to_owned)
+    }
+    /// `fault:before-report-read:<path>`: the owner waits, before it reads the root's pid report, until
+    /// `<path>` exists (the fork-to-reservation window of the Linux reaper).
+    pub fn before_report_read(pane: &str) -> Option<String> {
+        kind(pane)?
+            .strip_prefix("before-report-read:")
+            .map(str::to_owned)
     }
     /// The hold is bounded: a release that never comes fails the create loudly instead of blocking.
     pub fn wait_for_file_bounded(path: &str) -> io::Result<()> {
@@ -2379,6 +2532,10 @@ pub fn run() -> io::Result<()> {
         }
     }
     let tag = frame::runtime_tag(&config.generation).expect("validated while parsing");
+    // Linux: choose scoped ownership scans (subreaper + reaper) or the full-scan fallback before any
+    // session can exist, so the choice is fixed for the process lifetime.
+    #[cfg(target_os = "linux")]
+    linux::enable_scoped_mode();
     stdout_line(&ready_line(&config))?;
     let wire = Arc::new(Wire {
         generation: config.generation.clone(),
@@ -2537,6 +2694,14 @@ pub fn run() -> io::Result<()> {
         let left = deadline.saturating_duration_since(Instant::now());
         clean &= handle.wait_finished(left) == Some(true);
     }
+    // Linux scoped mode: let the reaper take what it has been holding off, and publish the diagnostics.
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(reaper) = linux::reaper() {
+            reaper.drain(deadline);
+        }
+        linux::note_unattributed();
+    }
     if let Ended::Shutdown(id) = &ended {
         let survivors: Vec<Value> = handles
             .iter()
@@ -2651,7 +2816,7 @@ mod root_exit_tests {
     use super::*;
     use std::os::unix::process::CommandExt;
 
-    fn session(root: i32) -> (Arc<SessionHandle>, Wire, State) {
+    pub(super) fn session(root: i32) -> (Arc<SessionHandle>, Wire, State) {
         let mut births = Births::default();
         let table = snapshot(Some(root), &Table::new(), &mut births).unwrap();
         let start = table[&root].2.clone();
@@ -2722,6 +2887,7 @@ mod root_exit_tests {
         handle.exit.set(ExitInfo {
             code: status.code(),
             signal: std::os::unix::process::ExitStatusExt::signal(&status),
+            unverified: false,
         });
     }
 
@@ -3090,6 +3256,7 @@ mod lifecycle_tests {
         cell.set(ExitInfo {
             code: Some(3),
             signal: None,
+            unverified: false,
         });
         assert_eq!(waiter.join().unwrap().and_then(|info| info.code), Some(3));
         assert!(
@@ -3162,5 +3329,141 @@ mod lifecycle_tests {
                 .map(|e| e.0),
             Some("STARTUP_FAILED")
         );
+    }
+}
+
+/// Linux scoped mode: `ECHILD` on a root fails closed, no lock is held across a wait, and a failed create
+/// keeps its reservation until its own wait has returned (design section 3, rows U-16, U-18, U-19).
+#[cfg(all(test, target_os = "linux"))]
+mod scoped_tests {
+    use super::*;
+    use std::process::Command;
+
+    fn scoped(on: bool) {
+        linux::SCOPED_FORCE.with(|forced| forced.set(Some(on)));
+    }
+
+    fn test_wire(journal: std::path::PathBuf) -> Wire {
+        Wire {
+            generation: "g".into(),
+            journal,
+            owner_pid: 0,
+            out: Outbound::new(1),
+            observe_tx: Mutex::new(None),
+            inbound: InboundBudget::new(1024),
+        }
+    }
+
+    #[test]
+    fn echild_on_root_is_unverified() {
+        // A pid that cannot name a group: the group kill finds nothing.
+        let nowhere = i32::MAX - 1;
+        FORCE_ECHILD.with(|forced| forced.set(true));
+        scoped(true);
+        assert!(
+            !kill_and_reap_released(nowhere),
+            "ECHILD on a root was reported as reaped"
+        );
+        scoped(false);
+        assert!(
+            kill_and_reap_released(nowhere),
+            "with scoped mode off, ECHILD keeps its HEAD meaning"
+        );
+        FORCE_ECHILD.with(|forced| forced.set(false));
+        // watch_exit: waiting for a pid that is not our child answers ECHILD.
+        // SAFETY: getppid takes no arguments.
+        let stranger = unsafe { libc::getppid() };
+        for on in [true, false] {
+            scoped(on);
+            let cell = Arc::new(ExitCell::new());
+            let (tx, _rx) = mpsc::channel();
+            watch_exit(stranger, cell.clone(), tx, Arc::new(Mutex::new(None))).unwrap();
+            let info = cell
+                .wait(Duration::from_secs(2))
+                .expect("the exit watcher never answered");
+            assert_eq!(info.unverified, on, "scoped mode {on}");
+        }
+        // finish: an unverified root is not reaped, so the cleanup is not complete.
+        for unverified in [true, false] {
+            let mut root = Command::new("/bin/sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let (handle, wire, _state) = super::root_exit_tests::session(root.id() as i32);
+            handle.exit.set(ExitInfo {
+                code: None,
+                signal: None,
+                unverified,
+            });
+            finish(
+                &handle,
+                &wire,
+                &Arc::new(Mutex::new(Registry::default())),
+                Ok(Vec::new()),
+            );
+            let complete = handle.wait_finished(Duration::from_secs(1));
+            root.kill().unwrap();
+            root.wait().unwrap();
+            assert_eq!(complete, Some(!unverified), "unverified = {unverified}");
+        }
+        scoped(false);
+    }
+
+    #[test]
+    fn no_lock_is_held_across_a_blocking_wait() {
+        // A child that is not a group leader: the group kill misses it, so the wait blocks.
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = child.id() as i32;
+        let reaper = linux::Reaper::new();
+        let _reservation = reaper.reserve_key(pid, 1);
+        let waiter = thread::spawn(move || kill_and_reap_released(pid));
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            reaper.is_free(),
+            "a lock was held while a root's wait was blocked"
+        );
+        child.kill().unwrap();
+        assert!(waiter.join().unwrap());
+    }
+
+    #[test]
+    fn failed_create_keeps_reservation_until_child_wait() {
+        let reaper = linux::Reaper::new();
+        linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = Some(reaper.clone()));
+        scoped(true);
+        PANIC_AFTER_RELEASE.with(|flag| flag.set(true));
+        let seen = Arc::new(AtomicBool::new(false));
+        {
+            let (reaper, seen) = (reaper.clone(), seen.clone());
+            BEFORE_CHILD_WAIT.with(|cell| {
+                *cell.borrow_mut() = Some(Box::new(move |pid| {
+                    assert!(
+                        reaper.holds(pid),
+                        "the reservation was gone before child.wait() started"
+                    );
+                    seen.store(true, Ordering::SeqCst);
+                }));
+            });
+        }
+        let dir = std::env::temp_dir().join(format!("navide-u19-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let args = json!({"session_id":"u19","session_generation":"ffeeddccbbaa99887766554433221100",
+            "pane_id":"pane-1","workspace_path":dir,"cwd":dir,
+            "launch":{"shape":"direct","form":"list","elements":["/bin/sleep","30"],"words":[]},
+            "env":{"PATH":"/usr/bin:/bin"},"rows":24,"cols":80,"agent_key":""});
+        let wire = test_wire(dir.join("journal.jsonl"));
+        let sessions: Sessions = Arc::new(Mutex::new(Registry::default()));
+        let result = spawn(&args, &wire, 1, &sessions);
+        PANIC_AFTER_RELEASE.with(|flag| flag.set(false));
+        scoped(false);
+        linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = None);
+        assert!(result.is_err(), "the owner failed after the release");
+        assert!(seen.load(Ordering::SeqCst), "the failed-create branch never ran");
+        assert!(
+            !reaper.holds_any(),
+            "the reservation outlived the failed create's wait"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

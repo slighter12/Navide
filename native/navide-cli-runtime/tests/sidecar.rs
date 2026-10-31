@@ -55,9 +55,20 @@ fn start_with(name: &str, args: &[&str], journal: Option<PathBuf>) -> Sidecar {
     start_bounded(name, args, journal, WATCHDOG, true)
 }
 
-/// `arm_now: false` leaves the watchdog idle until `Sidecar::arm`, so a test can count the bound from
-/// the moment it deliberately stalls rather than from process start.
 fn start_bounded(name: &str, args: &[&str], journal: Option<PathBuf>, bound: Duration, arm_now: bool) -> Sidecar {
+    start_env(name, args, journal, bound, arm_now, &[])
+}
+
+/// `arm_now: false` leaves the watchdog idle until `Sidecar::arm`, so a test can count the bound from
+/// the moment it deliberately stalls rather than from process start. `envs` is added to the sidecar's environment.
+fn start_env(
+    name: &str,
+    args: &[&str],
+    journal: Option<PathBuf>,
+    bound: Duration,
+    arm_now: bool,
+    envs: &[(&str, &str)],
+) -> Sidecar {
     let dir = temp_dir(name);
     let mut pair = [0i32; 2];
     assert_eq!(
@@ -82,6 +93,7 @@ fn start_bounded(name: &str, args: &[&str], journal: Option<PathBuf>, bound: Dur
         .arg("--control-fd")
         .arg(pair[1].to_string())
         .args(args)
+        .envs(envs.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -792,7 +804,15 @@ fn idle_cost_probe() {
             .unwrap_or(default)
     };
     let (shells, window) = (env("NAVIDE_PROBE_SHELLS", 4), env("NAVIDE_PROBE_SECONDS", 10));
-    let mut sidecar = start("idle-cost");
+    // Counters exist only in a `fault-hooks` build, which is never the scored one.
+    let stats_path = std::env::temp_dir().join(format!("navide-probe-stats-{}.json", std::process::id()));
+    let stats_arg = stats_path.to_string_lossy().into_owned();
+    let envs: Vec<(&str, &str)> = if cfg!(feature = "fault-hooks") {
+        vec![("NAVIDE_SCAN_STATS_FILE", stats_arg.as_str())]
+    } else {
+        Vec::new()
+    };
+    let mut sidecar = start_env("idle-cost", &[], None, WATCHDOG, true, &envs);
     sidecar.line();
     let pid = sidecar.child.lock().unwrap().id();
     let ticks = || {
@@ -823,15 +843,762 @@ fn idle_cost_probe() {
         creates.push(started.elapsed().as_micros());
         masters.push(fd.unwrap());
     }
+    // The decider divides CPU seconds by the sampled phase duration, so the tick rate is read at run time and the
+    // window is measured on the monotonic clock around the sleep, never assumed to be `window`.
+    // SAFETY: sysconf only reads an immutable system constant.
+    let clk_tck = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as u64;
     let before = ticks();
+    let started = Instant::now();
     std::thread::sleep(Duration::from_secs(window));
     let used = ticks() - before;
-    println!("probe shells={shells} window_s={window} sidecar_ticks={used} (1 tick = 10 ms) create_us={creates:?}");
+    let elapsed = started.elapsed();
+    let cpu_pct = used as f64 / clk_tck as f64 / elapsed.as_secs_f64() * 100.0;
+    println!(
+        "probe shells={shells} noise={} window_s={window} elapsed_ns={} clk_tck={clk_tck} sidecar_ticks={used} cpu_pct={cpu_pct:.4} exceed={} create_us={creates:?}",
+        noise.len(),
+        elapsed.as_nanos(),
+        cpu_pct > 0.10
+    );
+    #[cfg(feature = "fault-hooks")]
+    if let Ok(text) = std::fs::read_to_string(&stats_path) {
+        let stats: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        println!(
+            "counters scans_scoped={} scans_full={} fallbacks={} inspected_pids={} due_scans_skipped={}",
+            stats["scans_scoped"], stats["scans_full"], stats["fallbacks"], stats["inspected_pids"], stats["due_scans_skipped"]
+        );
+    }
     for child in &mut noise {
         let _ = child.kill();
         let _ = child.wait();
     }
     for master in masters {
+        unsafe { libc::close(master) };
+    }
+}
+
+// ---------------------------------------------------------------------------- Linux scoped enumeration
+//
+// Rows R-1 to R-11 of the design (`linux-scoped-enum/design.md` section 8). The counters file exists only in a
+// `fault-hooks` build (`NAVIDE_SCAN_STATS_FILE`); a row that needs it is compiled only there.
+
+#[cfg(target_os = "linux")]
+#[cfg_attr(not(feature = "fault-hooks"), allow(dead_code))]
+mod scoped {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// Process shapes a shell cannot make: a leader that `pthread_exit`s over live children, a non-leader thread
+    /// that `exec`s over and over (`de_thread`), and workers whose leaders exit at random moments.
+    const HELPER_C: &str = r#"
+#define _GNU_SOURCE
+#include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+static void record(const char *path, int pid) {
+  FILE *f = fopen(path, "a");
+  if (f) { fprintf(f, "%d\n", pid); fclose(f); }
+}
+static pid_t sleeper(void) {
+  pid_t p = fork();
+  if (p == 0) { for (;;) pause(); }
+  return p;
+}
+static void *idle(void *arg) { (void)arg; for (;;) pause(); return 0; }
+static void *exec_thread(void *arg) { char **argv = arg; execv(argv[0], argv); _exit(127); return 0; }
+int main(int argc, char **argv) {
+  const char *mode = argc > 1 ? argv[1] : "";
+  int n = argc > 2 ? atoi(argv[2]) : 0;
+  const char *out = argc > 3 ? argv[3] : "/dev/null";
+  pthread_t t;
+  if (!strcmp(mode, "leader-exit")) {
+    for (int i = 0; i < n; i++) record(out, sleeper());
+    pthread_create(&t, 0, idle, 0);
+    pthread_exit(0);
+  }
+  if (!strcmp(mode, "exec-loop")) {
+    if (argc <= 4) { for (int i = 0; i < n; i++) record(out, sleeper()); }
+    static char *next[6];
+    next[0] = argv[0]; next[1] = "exec-loop"; next[2] = argv[2]; next[3] = argv[3]; next[4] = "again"; next[5] = 0;
+    pthread_create(&t, 0, exec_thread, next);
+    for (;;) pause();
+  }
+  if (!strcmp(mode, "rounds")) {
+    for (int i = 0; i < n; i++) {
+      if (fork() == 0) {
+        record(out, sleeper());
+        pthread_create(&t, 0, idle, 0);
+        pthread_exit(0);
+      }
+      usleep(3000);
+    }
+    for (;;) pause();
+  }
+  if (!strcmp(mode, "workers")) {
+    for (int i = 0; i < n; i++) {
+      if (fork() == 0) {
+        srand(getpid());
+        record(out, sleeper());
+        pthread_create(&t, 0, idle, 0);
+        usleep((rand() % 8000) * 1000);
+        pthread_exit(0);
+      }
+    }
+    for (;;) pause();
+  }
+  return 2;
+}
+"#;
+
+    const SESSION_GENERATION: &str = "ffeeddccbbaa99887766554433221100";
+    const LONG: Duration = Duration::from_secs(240);
+
+    struct Stats(PathBuf);
+
+    impl Stats {
+        fn read(&self) -> Value {
+            std::fs::read_to_string(&self.0)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or(Value::Null)
+        }
+        fn num(&self, key: &str) -> u64 {
+            self.read()[key].as_u64().unwrap_or(0)
+        }
+        fn nested(&self, key: &str, field: &str) -> u64 {
+            self.read()[key][field].as_u64().unwrap_or(0)
+        }
+    }
+
+    fn start_scoped(name: &str, envs: &[(&str, &str)]) -> (Sidecar, Stats) {
+        let path = std::env::temp_dir().join(format!("navide-stats-{name}-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let text = path.to_string_lossy().into_owned();
+        let mut all = vec![("NAVIDE_SCAN_STATS_FILE", text.as_str())];
+        all.extend_from_slice(envs);
+        let mut sidecar = start_env(name, &[], None, LONG, true, &all);
+        sidecar.line();
+        (sidecar, Stats(path))
+    }
+
+    fn pid_of(sidecar: &Sidecar) -> i32 {
+        sidecar.child.lock().unwrap().id() as i32
+    }
+
+    fn stat_tail(pid: i32) -> Option<Vec<String>> {
+        let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let at = text.rfind(") ")?;
+        Some(text[at + 2..].split(' ').map(str::to_owned).collect())
+    }
+
+    fn ppid_of(pid: i32) -> Option<i32> {
+        stat_tail(pid)?.get(1)?.parse().ok()
+    }
+
+    fn state_of(pid: i32) -> Option<String> {
+        stat_tail(pid)?.first().cloned()
+    }
+
+    fn children_of(pid: i32) -> Vec<i32> {
+        let mut found = Vec::new();
+        if let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) {
+            for task in tasks.flatten() {
+                if let Ok(text) = std::fs::read_to_string(task.path().join("children")) {
+                    found.extend(text.split_whitespace().filter_map(|word| word.parse::<i32>().ok()));
+                }
+            }
+        }
+        found
+    }
+
+    fn wait_for(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + timeout;
+        while !done() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn read_pids(path: &std::path::Path) -> Vec<i32> {
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .split_whitespace()
+            .filter_map(|word| word.parse().ok())
+            .collect()
+    }
+
+    fn write_script(dir: &std::path::Path, name: &str, body: &str) -> String {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    fn build_helper(dir: &std::path::Path) -> String {
+        let source = dir.join("helper.c");
+        let binary = dir.join("helper");
+        std::fs::write(&source, HELPER_C).unwrap();
+        let status = Command::new("cc")
+            .args(["-O1", "-pthread", "-o"])
+            .arg(&binary)
+            .arg(&source)
+            .status()
+            .expect("a C compiler is needed for the process-shape helper");
+        assert!(status.success(), "the helper did not compile");
+        binary.to_string_lossy().into_owned()
+    }
+
+    fn create_in(
+        sidecar: &mut Sidecar,
+        argv: &[&str],
+        session: &str,
+        pane: &str,
+    ) -> (libc::pid_t, RawFd) {
+        let dir = sidecar.dir.clone();
+        let mut meta = create_meta(&dir, argv, session);
+        meta["session_generation"] = json!(SESSION_GENERATION);
+        meta["pane_id"] = json!(pane);
+        sidecar.send(code::CREATE, meta);
+        let (owned, fd) = sidecar.recv_until(|f| f.code == code::SESSION_OWNED);
+        sidecar.recv_until(|f| f.frame_type == FrameType::Response && f.code == code::CREATE);
+        let pid = owned.meta["root"]["pid"].as_i64().unwrap() as libc::pid_t;
+        (pid, fd.expect("SESSION_OWNED carries the master"))
+    }
+
+    fn kill_and_clean(sidecar: &mut Sidecar, session: &str) -> Value {
+        sidecar.send(
+            code::KILL,
+            json!({"session_id":session,"session_generation":SESSION_GENERATION,"force":true}),
+        );
+        sidecar.recv_until(|f| f.code == code::SESSION_CLEANED).0.meta
+    }
+
+    /// Read ownership events until one whole snapshot satisfies `want`; returns that snapshot's pids.
+    fn ownership_until(sidecar: &Sidecar, mut want: impl FnMut(&HashSet<i32>) -> bool) -> HashSet<i32> {
+        let mut seen = HashSet::new();
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            assert!(Instant::now() < deadline, "no ownership snapshot satisfied the test: {} pids", seen.len());
+            let (frame, _) = sidecar.recv().expect("the sidecar closed the channel");
+            if frame.code != code::SESSION_OWNERSHIP {
+                continue;
+            }
+            if frame.meta["part"] == 0 {
+                seen.clear();
+            }
+            for entry in frame.meta["descendants"].as_array().unwrap() {
+                seen.insert(entry["pid"].as_i64().unwrap() as i32);
+            }
+            if frame.meta["final"] == true && want(&seen) {
+                return seen;
+            }
+        }
+    }
+
+    fn kill_all(pids: &[i32]) {
+        for &pid in pids {
+            // SAFETY: test-owned helper processes.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+
+    #[test]
+    fn adopted_orphan_is_a_sidecar_child() {
+        let (mut sidecar, _stats) = start_scoped("r1", &[]);
+        let dir = sidecar.dir.clone();
+        let pidfile = dir.join("orphan.pid");
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!("(sleep 600 & echo $! > {}) ; exec sleep 600\n", pidfile.display()),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], "r1", "pane-1");
+        wait_for("the orphan's pid", Duration::from_secs(10), || !read_pids(&pidfile).is_empty());
+        let orphan = read_pids(&pidfile)[0];
+        let sidecar_pid = pid_of(&sidecar);
+        let reparented = Instant::now() + Duration::from_secs(2);
+        while ppid_of(orphan) != Some(sidecar_pid) && Instant::now() < reparented {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(ppid_of(orphan), Some(sidecar_pid), "the orphan's parent is not the sidecar");
+        // Guard: the same-PGID edge already attributes it at HEAD.
+        ownership_until(&sidecar, |pids| pids.contains(&orphan));
+        let cleaned = kill_and_clean(&mut sidecar, "r1");
+        assert_eq!(cleaned["cleanup_complete"], true, "{cleaned}");
+        unsafe { libc::close(master) };
+    }
+
+    #[test]
+    fn unattributable_orphan_changes_no_receipt() {
+        let (mut sidecar, stats) = start_scoped("r2", &[]);
+        let dir = sidecar.dir.clone();
+        let (marker, pidfile) = (dir.join("signalled"), dir.join("orphan.pid"));
+        let handler = write_script(
+            &dir,
+            "handler.sh",
+            &format!(
+                "trap 'touch {}' HUP TERM INT QUIT USR1\necho $$ > {}\nwhile :; do sleep 1; done\n",
+                marker.display(),
+                pidfile.display()
+            ),
+        );
+        let root_script = write_script(
+            &dir,
+            "root.sh",
+            &format!("( setsid /bin/sh {handler} & ) ; exec sleep 600\n"),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &root_script], "r2", "pane-1");
+        wait_for("the orphan's pid", Duration::from_secs(10), || !read_pids(&pidfile).is_empty());
+        let orphan = read_pids(&pidfile)[0];
+        // Two 5 s grid points pass before the cleanup, so the orphan is looked at and still not attributed. No
+        // ownership event is emitted while the session owns no descendant, so this waits on the clock.
+        std::thread::sleep(Duration::from_secs(11));
+        let alive_before_cleanup = process_exists(orphan);
+        sidecar.send(
+            code::KILL,
+            json!({"session_id":"r2","session_generation":SESSION_GENERATION,"force":true}),
+        );
+        let named = std::cell::Cell::new(false);
+        let cleaned = sidecar
+            .recv_until(|f| {
+                if f.code == code::SESSION_OWNERSHIP
+                    && f.meta["descendants"]
+                        .as_array()
+                        .is_some_and(|d| d.iter().any(|e| e["pid"].as_i64() == Some(orphan as i64)))
+                {
+                    named.set(true);
+                }
+                f.code == code::SESSION_CLEANED
+            })
+            .0
+            .meta;
+        let named_by_events = named.get();
+        assert_eq!(cleaned["cleanup_complete"], true, "{cleaned}");
+        assert_eq!(cleaned["root_reaped"], true);
+        assert_eq!(cleaned["survivors"], json!([]));
+        assert_eq!(cleaned["unverifiable"], json!([]));
+        std::thread::sleep(Duration::from_millis(500));
+        #[cfg(feature = "fault-hooks")]
+        let seen_by_scans = stats.read()["inspected_pid_set"]
+            .as_array()
+            .is_some_and(|set| set.iter().any(|pid| pid.as_i64() == Some(orphan as i64)));
+        #[cfg(not(feature = "fault-hooks"))]
+        let seen_by_scans = false;
+        assert!(
+            process_exists(orphan),
+            "the unattributable orphan was killed (alive before cleanup: {alive_before_cleanup}, named by an ownership event: {named_by_events}, scans inspected it: {seen_by_scans}): {cleaned}"
+        );
+        assert!(!marker.exists(), "the unattributable orphan was signalled");
+        #[cfg(feature = "fault-hooks")]
+        assert_eq!(stats.num("unattributed_orphans"), 1, "{}", stats.read());
+        let _ = &stats;
+        // SAFETY: the orphan is this test's own process.
+        unsafe { libc::kill(orphan, libc::SIGKILL) };
+        wait_for("the sidecar to reap the orphan", Duration::from_secs(2), || {
+            !std::path::Path::new(&format!("/proc/{orphan}")).exists()
+        });
+        unsafe { libc::close(master) };
+    }
+
+    /// No child of the sidecar is a zombie.
+    fn no_zombie_children(sidecar_pid: i32) -> bool {
+        children_of(sidecar_pid)
+            .into_iter()
+            .all(|child| state_of(child).is_none_or(|state| state != "Z"))
+    }
+
+    #[test]
+    fn root_status_survives_orphan_reap() {
+        let (mut sidecar, _stats) = start_scoped("r3", &[]);
+        let dir = sidecar.dir.clone();
+        let (pidfile, go) = (dir.join("orphan.pid"), dir.join("go"));
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!(
+                "(sleep 600 & echo $! > {}) ; while [ ! -e {} ]; do sleep 0.05; done ; exit 7\n",
+                pidfile.display(),
+                go.display()
+            ),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], "r3", "pane-1");
+        wait_for("the orphan's pid", Duration::from_secs(10), || !read_pids(&pidfile).is_empty());
+        let orphan = read_pids(&pidfile)[0];
+        let sidecar_pid = pid_of(&sidecar);
+        let reparented = Instant::now() + Duration::from_secs(2);
+        while ppid_of(orphan) != Some(sidecar_pid) && Instant::now() < reparented {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(ppid_of(orphan), Some(sidecar_pid), "the orphan was not a sidecar child");
+        kill_all(&[orphan]);
+        std::fs::write(&go, b"").unwrap();
+        let (exited, _) = sidecar.recv_until(|f| f.code == code::SESSION_EXITED);
+        assert_eq!(exited.meta["exit_code"], 7, "{}", exited.meta);
+        assert_eq!(exited.meta["signal"], Value::Null);
+        wait_for("no zombie sidecar child", Duration::from_secs(2), || no_zombie_children(sidecar_pid));
+        unsafe { libc::close(master) };
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn root_status_survives_orphan_reap_on_the_released_root_failure_path() {
+        let (mut sidecar, _stats) = start_scoped("r3b", &[]);
+        let sidecar_pid = pid_of(&sidecar);
+        let dir = sidecar.dir.clone();
+        let mut meta = create_meta(&dir, &["/bin/sleep", "600"], "r3b");
+        meta["pane_id"] = json!("fault:watch-exit-fail");
+        sidecar.send(code::CREATE, meta);
+        let (error, _) = sidecar.recv_until(|f| f.frame_type == FrameType::Error);
+        assert_eq!(error.meta["effect"], "none", "{}", error.meta);
+        wait_for("no zombie sidecar child", Duration::from_secs(2), || no_zombie_children(sidecar_pid));
+        assert!(children_of(sidecar_pid).is_empty(), "the released root is still a child");
+    }
+
+    /// The only child of the sidecar, once the gated root exists.
+    #[cfg(feature = "fault-hooks")]
+    fn only_child(sidecar_pid: i32) -> i32 {
+        let mut found = None;
+        wait_for("the gated root", Duration::from_secs(10), || {
+            found = children_of(sidecar_pid).first().copied();
+            found.is_some()
+        });
+        found.unwrap()
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    fn killed_root_keeps_its_status(hook: &str, name: &str) {
+        let (mut sidecar, _stats) = start_scoped(name, &[]);
+        let sidecar_pid = pid_of(&sidecar);
+        let release = sidecar.dir.join("release");
+        let dir = sidecar.dir.clone();
+        let mut meta = create_meta(&dir, &["/bin/sleep", "600"], name);
+        meta["session_generation"] = json!(SESSION_GENERATION);
+        meta["pane_id"] = json!(format!("fault:{hook}:{}", release.display()));
+        sidecar.send(code::CREATE, meta);
+        let root = only_child(sidecar_pid);
+        // SAFETY: the sidecar's only child, a gated root of this test's session.
+        unsafe { libc::kill(root, libc::SIGKILL) };
+        std::thread::sleep(Duration::from_millis(200));
+        std::fs::write(&release, b"").unwrap();
+        loop {
+            let (frame, _) = sidecar.recv().expect("the sidecar closed the channel");
+            if frame.frame_type == FrameType::Error {
+                return; // a refusal before publication is allowed
+            }
+            if frame.code == code::SESSION_EXITED {
+                assert_eq!(frame.meta["exit_code"], -9, "{}", frame.meta);
+                assert_eq!(frame.meta["signal"], "SIGKILL", "{}", frame.meta);
+                return;
+            }
+        }
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn root_killed_after_reservation_keeps_its_status() {
+        killed_root_keeps_its_status("journal-hold", "r4");
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn root_killed_in_fork_to_reservation_window_keeps_its_status() {
+        killed_root_keeps_its_status("before-report-read", "r4b");
+    }
+
+    fn rchar_of(pid: i32) -> u64 {
+        std::fs::read_to_string(format!("/proc/{pid}/io"))
+            .expect("task I/O accounting is required")
+            .lines()
+            .find_map(|line| line.strip_prefix("rchar: "))
+            .expect("no rchar field")
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
+    /// The sidecar's `rchar` over ten idle seconds with four sessions and `noise` unrelated processes.
+    fn idle_rchar(name: &str, noise: usize, envs: &[(&str, &str)]) -> (u64, Stats) {
+        let (mut sidecar, stats) = start_scoped(name, envs);
+        let mut sleepers: Vec<_> = (0..noise)
+            .map(|_| Command::new("/bin/sleep").arg("600").spawn().unwrap())
+            .collect();
+        let masters: Vec<_> = (0..4)
+            .map(|index| create_in(&mut sidecar, &["/bin/cat"], &format!("{name}-{index}"), "pane-1").1)
+            .collect();
+        // Past the first snapshot window, so every session is on its grid.
+        std::thread::sleep(Duration::from_secs(6));
+        let sidecar_pid = pid_of(&sidecar);
+        let before = rchar_of(sidecar_pid);
+        std::thread::sleep(Duration::from_secs(10));
+        let used = rchar_of(sidecar_pid) - before;
+        for sleeper in &mut sleepers {
+            let _ = sleeper.kill();
+            let _ = sleeper.wait();
+        }
+        for master in masters {
+            unsafe { libc::close(master) };
+        }
+        (used, stats)
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn idle_scan_reads_only_owned_pids() {
+        let (head, _) = idle_rchar("r5-head", 165, &[("NAVIDE_FAULT_FORCE_FULL", "1")]);
+        let (used_165, stats) = idle_rchar("r5-165", 165, &[]);
+        let (used_495, _) = idle_rchar("r5-495", 495, &[]);
+        assert!(
+            used_165 * 4 < head,
+            "rchar over 10 s: scoped {used_165} is not below a quarter of the full-scan {head}"
+        );
+        let spread = (used_495 as f64 - used_165 as f64).abs() / used_165 as f64;
+        assert!(spread <= 0.10, "rchar depends on the noise: {used_165} vs {used_495}");
+        let read = stats.read();
+        assert_eq!(read["scans_full"], 0, "{read}");
+        assert!(read["scans_scoped"].as_u64().unwrap_or(0) > 0, "{read}");
+        assert_eq!(read["due_scans_skipped"], 0, "{read}");
+        // No noise pid was ever stat-read: every inspected pid is the sidecar, a session root, or a descendant.
+        let inspected: Vec<i64> = read["inspected_pid_set"]
+            .as_array()
+            .expect("no inspected pid set")
+            .iter()
+            .filter_map(Value::as_i64)
+            .collect();
+        assert!(!inspected.is_empty(), "{read}");
+        let walked_max = read["walks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|walk| walk["stat_reads"].as_u64().unwrap())
+            .max()
+            .unwrap();
+        assert!(walked_max < 120, "a walk read {walked_max} stats: it depends on the noise");
+    }
+
+    /// 250 children over a leader that `pthread_exit`s: a stable already-zombie leader (rows R-6, R-7).
+    #[cfg(feature = "fault-hooks")]
+    fn leader_exit_world(name: &str) -> (Sidecar, Stats, RawFd, Vec<i32>) {
+        let (mut sidecar, stats) = start_scoped(name, &[]);
+        let dir = sidecar.dir.clone();
+        let helper = build_helper(&dir);
+        let out = dir.join("children.pids");
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!("{helper} leader-exit 250 {} & exec sleep 600\n", out.display()),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], name, "pane-1");
+        wait_for("the children", Duration::from_secs(20), || read_pids(&out).len() == 250);
+        let kids = read_pids(&out);
+        (sidecar, stats, master, kids)
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn zombie_stable_probe_shape() {
+        let (mut sidecar, stats, master, kids) = leader_exit_world("r7");
+        let all = ownership_until(&sidecar, |pids| kids.iter().all(|kid| pids.contains(kid)));
+        assert!(kids.iter().all(|kid| all.contains(kid)));
+        assert_eq!(stats.nested("dirty_walks", "r2b"), 1, "{}", stats.read());
+        // Two more due scans add none: the baseline is held.
+        let mut snapshots = 0;
+        ownership_until(&sidecar, |_| {
+            snapshots += 1;
+            snapshots >= 2
+        });
+        assert_eq!(stats.nested("dirty_walks", "r2b"), 1, "{}", stats.read());
+        assert_eq!(stats.num("scans_full"), 0, "{}", stats.read());
+        kill_all(&kids);
+        kill_and_clean(&mut sidecar, "r7");
+        unsafe { libc::close(master) };
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn thread_exit_reparent_probe_shape() {
+        let (mut sidecar, stats) = start_scoped("r6", &[]);
+        let dir = sidecar.dir.clone();
+        let helper = build_helper(&dir);
+        let out = dir.join("children.pids");
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!("{helper} workers 300 {} & exec sleep 600\n", out.display()),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], "r6", "pane-1");
+        wait_for("the workers", Duration::from_secs(30), || read_pids(&out).len() == 300);
+        let kids = read_pids(&out);
+        let all = ownership_until(&sidecar, |pids| kids.iter().all(|kid| pids.contains(kid)));
+        assert!(kids.iter().all(|kid| all.contains(kid)), "an event lost a live child");
+        // The exits are spread over eight seconds, so some walk meets a leader that dies while it is read.
+        wait_for("a walk that met a dying leader", Duration::from_secs(30), || {
+            stats.nested("dirty_walks", "r2") + stats.nested("dirty_walks", "r1") >= 1
+        });
+        // While leaders keep dying a walk can be dirty three times in a row, and the full scan then takes over
+        // (every one of those is a dirty fallback). Once the exits are over the baseline holds every zombie, the
+        // retry succeeds and the scoped scan is back: no further full scan.
+        std::thread::sleep(Duration::from_secs(9));
+        let settled = stats.num("scans_full");
+        let scoped_before = stats.num("scans_scoped");
+        wait_for("two scoped scans after the exits", Duration::from_secs(30), || {
+            stats.num("scans_scoped") >= scoped_before + 2
+        });
+        assert_eq!(stats.num("scans_full"), settled, "{}", stats.read());
+        assert_eq!(
+            stats.num("scans_full"),
+            stats.nested("fallbacks", "dirty"),
+            "a full scan without a dirty fallback: {}",
+            stats.read()
+        );
+        kill_all(&kids);
+        kill_and_clean(&mut sidecar, "r6");
+        unsafe { libc::close(master) };
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn de_thread_probe_shape() {
+        let (mut sidecar, stats) = start_scoped("r8", &[]);
+        let dir = sidecar.dir.clone();
+        let helper = build_helper(&dir);
+        let out = dir.join("children.pids");
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!("{helper} exec-loop 100 {} & exec sleep 600\n", out.display()),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], "r8", "pane-1");
+        wait_for("the children", Duration::from_secs(20), || read_pids(&out).len() == 100);
+        let kids = read_pids(&out);
+        for _ in 0..2 {
+            let all = ownership_until(&sidecar, |pids| kids.iter().all(|kid| pids.contains(kid)));
+            assert!(kids.iter().all(|kid| all.contains(kid)), "an event lost a live child");
+        }
+        // The tid set changes under a walk at a random moment, and the walk's end re-read (R2) catches the same
+        // exec more often than the second listing (R1) does: scans keep coming until one lands in the R1 window.
+        // Every event on the way must still hold all the live children.
+        let mut r1_seen = stats.nested("dirty_walks", "r1") >= 1;
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while !r1_seen {
+            assert!(Instant::now() < deadline, "no walk met the tid set changing: {}", stats.read());
+            let all = ownership_until(&sidecar, |pids| kids.iter().all(|kid| pids.contains(kid)));
+            assert!(kids.iter().all(|kid| all.contains(kid)), "an event lost a live child");
+            r1_seen = stats.nested("dirty_walks", "r1") >= 1;
+        }
+        kill_all(&kids);
+        kill_and_clean(&mut sidecar, "r8");
+        unsafe { libc::close(master) };
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    #[ignore]
+    fn zombie_first_seen_probe_shape() {
+        let (mut sidecar, stats) = start_scoped("r9", &[]);
+        let dir = sidecar.dir.clone();
+        let helper = build_helper(&dir);
+        let out = dir.join("children.pids");
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!("{helper} rounds 500 {} & exec sleep 600\n", out.display()),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], "r9", "pane-1");
+        wait_for("the first-seen zombie shape", Duration::from_secs(120), || {
+            stats.nested("dirty_walks", "r2b") >= 1
+        });
+        wait_for("all rounds", Duration::from_secs(30), || read_pids(&out).len() == 500);
+        let kids = read_pids(&out);
+        let all = ownership_until(&sidecar, |pids| kids.iter().all(|kid| pids.contains(kid)));
+        assert!(kids.iter().all(|kid| all.contains(kid)), "Y is missing from a published event");
+        kill_all(&kids);
+        kill_and_clean(&mut sidecar, "r9");
+        unsafe { libc::close(master) };
+    }
+
+    /// The roles the persisted table names in one mode: a double-fork orphan and a same-group member.
+    #[cfg(feature = "fault-hooks")]
+    fn fixture_roles(name: &str, envs: &[(&str, &str)]) -> (Vec<&'static str>, Stats) {
+        let (mut sidecar, stats) = start_scoped(name, envs);
+        let dir = sidecar.dir.clone();
+        let (orphan_file, member_file, setsid_file) =
+            (dir.join("orphan.pid"), dir.join("member.pid"), dir.join("setsid.pid"));
+        let handler = write_script(
+            &dir,
+            "setsid.sh",
+            &format!("echo $$ > {}\nexec sleep 600\n", setsid_file.display()),
+        );
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!(
+                "(sleep 600 & echo $! > {}) ; ( setsid /bin/sh {handler} & ) ; sleep 600 & echo $! > {} ; wait\n",
+                orphan_file.display(),
+                member_file.display()
+            ),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], name, "pane-1");
+        wait_for("the fixture", Duration::from_secs(10), || {
+            [&orphan_file, &member_file, &setsid_file].iter().all(|file| !read_pids(file).is_empty())
+        });
+        let (orphan, member, setsid) =
+            (read_pids(&orphan_file)[0], read_pids(&member_file)[0], read_pids(&setsid_file)[0]);
+        let table = ownership_until(&sidecar, |pids| pids.contains(&orphan) && pids.contains(&member));
+        let mut roles = Vec::new();
+        if table.contains(&orphan) {
+            roles.push("orphan");
+        }
+        if table.contains(&member) {
+            roles.push("member");
+        }
+        if table.contains(&setsid) {
+            roles.push("setsid");
+        }
+        kill_and_clean(&mut sidecar, name);
+        kill_all(&[setsid]);
+        unsafe { libc::close(master) };
+        (roles, stats)
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn scoped_table_equals_full_scan() {
+        let (full, _) = fixture_roles("r10-full", &[("NAVIDE_FAULT_FORCE_FULL", "1")]);
+        let (scoped_roles, stats) = fixture_roles("r10-scoped", &[]);
+        assert_eq!(full, scoped_roles, "the persisted tables differ");
+        assert_eq!(full, ["orphan", "member"], "the setsid orphan must not be attributed");
+        assert!(stats.num("scans_scoped") > 0, "the scoped run never walked: {}", stats.read());
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn missing_children_falls_back_to_full_scan() {
+        let (mut sidecar, stats) = start_scoped("r11", &[("NAVIDE_FAULT_NO_CHILDREN", "1")]);
+        let sidecar_pid = pid_of(&sidecar);
+        let dir = sidecar.dir.clone();
+        let pidfile = dir.join("orphan.pid");
+        let script = write_script(
+            &dir,
+            "root.sh",
+            &format!("(sleep 600 & echo $! > {}) ; exec sleep 600\n", pidfile.display()),
+        );
+        let (_root, master) = create_in(&mut sidecar, &["/bin/sh", &script], "r11", "pane-1");
+        wait_for("the helper", Duration::from_secs(10), || !read_pids(&pidfile).is_empty());
+        let orphan = read_pids(&pidfile)[0];
+        ownership_until(&sidecar, |pids| pids.contains(&orphan));
+        let read = stats.read();
+        assert_eq!(read["scans_scoped"], 0, "{read}");
+        assert!(read["scans_full"].as_u64().unwrap_or(0) >= 1, "{read}");
+        assert_eq!(read["fallbacks"]["no_children"], 1, "{read}");
+        assert_eq!(read["subreaper_enabled"], false, "{read}");
+        assert_eq!(read["reaper_running"], false, "{read}");
+        assert_ne!(ppid_of(orphan), Some(sidecar_pid), "the orphan was adopted without a subreaper");
+        kill_all(&[orphan]);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(stats.num("unreaped_children"), 0, "{}", stats.read());
+        assert!(no_zombie_children(sidecar_pid));
+        kill_and_clean(&mut sidecar, "r11");
         unsafe { libc::close(master) };
     }
 }
