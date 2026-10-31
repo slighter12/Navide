@@ -703,6 +703,19 @@ mod counters {
         with(|c| c.reaper_running = true);
     }
 
+    /// Called when the reaper thread ends for any reason (its stop guard).
+    pub(super) fn reaper_stopped() {
+        with(|c| c.reaper_running = false);
+        flush();
+    }
+
+    #[cfg(test)]
+    pub(super) fn reaper_is_running() -> bool {
+        let mut running = false;
+        with(|c| running = c.reaper_running);
+        running
+    }
+
     pub(super) fn reaped() {
         with(|c| c.reaped += 1);
     }
@@ -788,6 +801,7 @@ mod counters {
     pub(super) fn skipped() {}
     pub(super) fn subreaper(_: bool) {}
     pub(super) fn reaper_running() {}
+    pub(super) fn reaper_stopped() {}
     pub(super) fn reaped() {}
     pub(super) fn unattributed() {}
     pub(super) fn flush() {}
@@ -1263,6 +1277,40 @@ pub(super) struct Reaper {
     reserved: Mutex<HashSet<(i32, u64)>>,
     /// Spawns that succeeded, so the reaper sleeps in the kernel (or on this condvar) when there is no child.
     spawns: (Mutex<u64>, std::sync::Condvar),
+    /// Set, for good, when the reaper thread ends for any reason (an unexpected `waitid` error or a panic).
+    /// From then on nobody consumes adopted orphans, so the subreaper's contract is broken and every new
+    /// create is refused (`stopped`). Live sessions and cleanup are untouched.
+    stopped: std::sync::atomic::AtomicBool,
+    /// Test seam: what the loop does on its next pass instead of calling `waitid` (0 = nothing).
+    #[cfg(test)]
+    inject: std::sync::atomic::AtomicU8,
+}
+
+/// Test seam values for `Reaper::inject`.
+#[cfg(test)]
+pub(super) const INJECT_WAITID_ERROR: u8 = 1;
+#[cfg(test)]
+pub(super) const INJECT_PANIC: u8 = 2;
+
+/// Ends the reaper thread's life on every path out of `run`, including a panic: it records the stop (so creates
+/// are refused), clears the liveness counter, and says so once on stderr.
+struct StopGuard<'a> {
+    reaper: &'a Reaper,
+    cause: String,
+}
+
+impl Drop for StopGuard<'_> {
+    fn drop(&mut self) {
+        // The counter first: whoever sees the stop also sees the liveness counter already cleared.
+        counters::reaper_stopped();
+        self.reaper
+            .stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        eprintln!(
+            "cli runtime: the reaper stopped ({}); new sessions are refused, running sessions are unaffected",
+            self.cause
+        );
+    }
 }
 
 impl Reaper {
@@ -1271,7 +1319,39 @@ impl Reaper {
             gate: Mutex::new(()),
             reserved: Mutex::new(HashSet::new()),
             spawns: (Mutex::new(0), std::sync::Condvar::new()),
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            inject: std::sync::atomic::AtomicU8::new(0),
         })
+    }
+
+    /// Whether the reaper thread has ended. Checked by a create while it holds `gate`, before the fork.
+    pub(super) fn stopped(&self) -> bool {
+        self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The `reaper_running` counter, which exists only with `fault-hooks`.
+    #[cfg(all(test, feature = "fault-hooks"))]
+    pub(super) fn counter_running() -> bool {
+        counters::reaper_is_running()
+    }
+
+    #[cfg(test)]
+    pub(super) fn inject(&self, what: u8) {
+        self.inject.store(what, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Wait (bounded) until the reaper thread has ended; true if it did.
+    #[cfg(test)]
+    pub(super) fn wait_stopped(&self, within: Duration) -> bool {
+        let end = Instant::now() + within;
+        while Instant::now() < end {
+            if self.stopped() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.stopped()
     }
 
     pub(super) fn hold_gate(&self) -> std::sync::MutexGuard<'_, ()> {
@@ -1392,11 +1472,33 @@ impl Reaper {
 
     /// The event-driven loop: it blocks in the kernel until some child is waitable, without consuming it, and
     /// consumes only a pid that is not reserved. With no child at all it blocks on a condvar until a spawn.
+    ///
+    /// The loop never returns normally. If it ends, by an unexpected `waitid` error or by a panic, the guard
+    /// marks the reaper stopped and creates are refused from then on (design: subreaper enabled <=> reaper
+    /// running <=> reservation enforced). No restart: the error is not transient (`waitid(P_ALL, ...)` fails only
+    /// for bad arguments or a kernel without it, and the same call would fail again), and a panic comes from this
+    /// loop's own state, so a restarted thread would most likely hit it again. Refusing creates is the one
+    /// response that cannot steal a root's status, and it keeps every live session's reservation rules.
     fn run(&self) {
         counters::reaper_running();
+        let mut guard = StopGuard {
+            reaper: self,
+            cause: "panicked".into(),
+        };
+        let error = self.run_loop();
+        guard.cause = format!("waitid failed: {error}");
+    }
+
+    fn run_loop(&self) -> io::Error {
         let mut seen = 0;
         let mut complained = HashSet::new();
         loop {
+            #[cfg(test)]
+            match self.inject.load(std::sync::atomic::Ordering::SeqCst) {
+                INJECT_WAITID_ERROR => return io::Error::from_raw_os_error(libc::EIO),
+                INJECT_PANIC => panic!("injected reaper panic"),
+                _ => {}
+            }
             // SAFETY: an all-zero siginfo is a valid out buffer for waitid.
             let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             // SAFETY: valid out pointer; blocks until a child is waitable, and leaves its status in place.
@@ -1423,10 +1525,7 @@ impl Reaper {
                     }
                     seen = *spawns;
                 }
-                _ => {
-                    eprintln!("cli runtime: the reaper stopped: {}", io::Error::last_os_error());
-                    return;
-                }
+                _ => return io::Error::last_os_error(),
             }
         }
     }

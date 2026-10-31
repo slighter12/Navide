@@ -1025,6 +1025,14 @@ fn spawn_gated(
     let reaper = linux::reaper();
     #[cfg(target_os = "linux")]
     let reaper_gate = reaper.as_ref().map(|reaper| reaper.hold_gate());
+    // The reaper thread ended: adopted orphans would never be consumed again. Refuse before any pipe or fork, so
+    // the answer is `SPAWN_FAILED` with `effect:none`; sessions already running are not touched.
+    #[cfg(target_os = "linux")]
+    if reaper.as_ref().is_some_and(|reaper| reaper.stopped()) {
+        return Err(io::Error::other(
+            "the Linux child reaper has stopped; no new session can be started safely",
+        ));
+    }
     // The reservation lives here, not in the gate-owner thread, so a panic of that thread cannot drop it.
     #[cfg(target_os = "linux")]
     let slot: Mutex<Option<linux::RootReservation>> = Mutex::new(None);
@@ -3465,5 +3473,56 @@ mod scoped_tests {
             "the reservation outlived the failed create's wait"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// B1: a reaper thread that ended (`what` selects how) leaves the runtime refusing the next create, with the
+    /// `SPAWN_FAILED` / `spawn` answer of any pre-fork refusal, and the liveness counter cleared.
+    fn create_is_refused_once_the_reaper_has_stopped(what: u8, name: &str) {
+        let reaper = linux::Reaper::new();
+        reaper.inject(what);
+        reaper.start().unwrap();
+        assert!(
+            reaper.wait_stopped(Duration::from_secs(5)),
+            "the reaper thread never ended"
+        );
+        #[cfg(feature = "fault-hooks")]
+        assert!(
+            !linux::Reaper::counter_running(),
+            "reaper_running still reports true"
+        );
+        linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = Some(reaper.clone()));
+        scoped(true);
+        let dir = std::env::temp_dir().join(format!("navide-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let args = json!({"session_id":name,"session_generation":"ffeeddccbbaa99887766554433221100",
+            "pane_id":"pane-1","workspace_path":dir,"cwd":dir,
+            "launch":{"shape":"direct","form":"list","elements":["/bin/sleep","30"],"words":[]},
+            "env":{"PATH":"/usr/bin:/bin"},"rows":24,"cols":80,"agent_key":""});
+        let journal = dir.join("journal.jsonl");
+        let wire = test_wire(journal.clone());
+        let sessions: Sessions = Arc::new(Mutex::new(Registry::default()));
+        let result = spawn(&args, &wire, 1, &sessions);
+        scoped(false);
+        linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = None);
+        let message = result.err().expect("a create was accepted after the reaper stopped").to_string();
+        assert_eq!(classify(code::CREATE, &message), ("SPAWN_FAILED", "spawn"), "{message}");
+        assert!(message.contains("reaper has stopped"), "{message}");
+        assert!(
+            std::fs::metadata(&journal).map_or(true, |meta| meta.len() == 0),
+            "a root was journalled although the create was refused"
+        );
+        assert!(sessions.lock().unwrap().ttys.is_empty(), "the refused create kept its tty");
+        assert!(reaper.is_free(), "the refused create left a reaper lock held");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_is_refused_after_the_reaper_hits_a_waitid_error() {
+        create_is_refused_once_the_reaper_has_stopped(linux::INJECT_WAITID_ERROR, "b1-error");
+    }
+
+    #[test]
+    fn create_is_refused_after_the_reaper_panics() {
+        create_is_refused_once_the_reaper_has_stopped(linux::INJECT_PANIC, "b1-panic");
     }
 }
