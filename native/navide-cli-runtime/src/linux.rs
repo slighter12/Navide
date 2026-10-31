@@ -125,7 +125,7 @@ impl Births {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 struct Process {
     parent: i32,
     group: i32,
@@ -182,18 +182,107 @@ thread_local! {
     pub(super) static DENIED_STAT: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
 }
 
+/// A file that is gone: the task exited between being named and being read. ENOENT, or ESRCH when it
+/// exits while the read is in progress.
+fn gone(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
+/// Every procfs read the scanners make. One seam: the production reader below and a scripted reader in the
+/// tests, so the walk rules can be driven through exact interleavings that a live kernel cannot repeat.
+/// `Ok(None)` is "gone"; any other failure is an `Err` and makes the scan fail closed.
+trait ProcFs {
+    /// The numeric entries of `/proc`.
+    fn list(&self) -> io::Result<Vec<i32>>;
+    /// `/proc/<pid>/stat`, or `/proc/<pid>/task/<tid>/stat` when `tid` is given.
+    fn stat(&self, pid: i32, tid: Option<i32>) -> io::Result<Option<Process>>;
+    /// The tids in `/proc/<pid>/task`.
+    fn tasks(&self, pid: i32) -> io::Result<Option<Vec<i32>>>;
+    /// The pids in `/proc/<pid>/task/<tid>/children`.
+    fn children(&self, pid: i32, tid: i32) -> io::Result<Option<Vec<i32>>>;
+}
+
+struct RealProc;
+
+fn pid_list(text: &str) -> io::Result<Vec<i32>> {
+    text.split_ascii_whitespace()
+        .map(|word| {
+            word.parse::<i32>()
+                .ok()
+                .filter(|pid| *pid > 0)
+                .ok_or_else(|| io::Error::other("invalid proc pid list"))
+        })
+        .collect()
+}
+
+impl ProcFs for RealProc {
+    fn list(&self) -> io::Result<Vec<i32>> {
+        let mut pids = Vec::new();
+        for entry in std::fs::read_dir("/proc")? {
+            let entry = entry?;
+            if let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+                .filter(|pid| *pid > 0)
+            {
+                pids.push(pid);
+            }
+        }
+        Ok(pids)
+    }
+
+    fn stat(&self, pid: i32, tid: Option<i32>) -> io::Result<Option<Process>> {
+        #[cfg(test)]
+        if tid.is_none() && DENIED_STAT.with(|denied| denied.get()) == Some(pid) {
+            return Err(io::Error::from_raw_os_error(libc::EACCES));
+        }
+        let (path, id) = match tid {
+            Some(tid) => (format!("/proc/{pid}/task/{tid}/stat"), tid),
+            None => (format!("/proc/{pid}/stat"), pid),
+        };
+        match std::fs::read(path) {
+            Ok(bytes) => parse_stat(id, &bytes).map(Some),
+            Err(error) if gone(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn tasks(&self, pid: i32) -> io::Result<Option<Vec<i32>>> {
+        let entries = match std::fs::read_dir(format!("/proc/{pid}/task")) {
+            Ok(entries) => entries,
+            Err(error) if gone(&error) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut tids = Vec::new();
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if gone(&error) => return Ok(None),
+                Err(error) => return Err(error),
+            };
+            if let Some(tid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+            {
+                tids.push(tid);
+            }
+        }
+        Ok(Some(tids))
+    }
+
+    fn children(&self, pid: i32, tid: i32) -> io::Result<Option<Vec<i32>>> {
+        match std::fs::read_to_string(format!("/proc/{pid}/task/{tid}/children")) {
+            Ok(text) => pid_list(&text).map(Some),
+            Err(error) if gone(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
 fn process(pid: i32) -> io::Result<Option<Process>> {
-    #[cfg(test)]
-    if DENIED_STAT.with(|denied| denied.get()) == Some(pid) {
-        return Err(io::Error::from_raw_os_error(libc::EACCES));
-    }
-    match std::fs::read(format!("/proc/{pid}/stat")) {
-        Ok(bytes) => parse_stat(pid, &bytes).map(Some),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        // A task that exits while its stat is being read answers ESRCH, not ENOENT: it is just as gone.
-        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(None),
-        Err(error) => Err(error),
-    }
+    RealProc.stat(pid, None)
 }
 
 fn boot_seconds() -> io::Result<u64> {
@@ -264,29 +353,25 @@ fn scan(deadline: Instant) -> io::Result<HashMap<i32, Process>> {
 
 /// Every readable process, plus the pids whose stat could not be read for a reason other than "gone".
 fn scan_all(deadline: Instant) -> io::Result<(HashMap<i32, Process>, Vec<i32>)> {
+    scan_all_with(&RealProc, deadline)
+}
+
+fn scan_all_with(
+    fs: &dyn ProcFs,
+    deadline: Instant,
+) -> io::Result<(HashMap<i32, Process>, Vec<i32>)> {
     let mut all = HashMap::new();
     let mut unreadable = Vec::new();
-    for entry in std::fs::read_dir("/proc")? {
+    for pid in fs.list()? {
         if Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "owned snapshot bound",
             ));
         }
-        let entry = entry?;
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        if pid <= 0 {
-            continue;
-        }
         // An unrelated process may vanish or deny inspection. Retained owned
         // processes are read separately and their errors remain fatal.
-        match process(pid) {
+        match fs.stat(pid, None) {
             Ok(Some(value)) => {
                 if all.insert(pid, value).is_none() && all.len() > MAX_PIDS {
                     return Err(io::Error::other("owned node bound"));
@@ -301,6 +386,7 @@ fn scan_all(deadline: Instant) -> io::Result<(HashMap<i32, Process>, Vec<i32>)> 
 
 /// One session's owned set, derived from the full `all` read of /proc (its own or a shared one).
 fn owned_scan(
+    fs: &dyn ProcFs,
     seeds: &HashMap<i32, Process>,
     all: &HashMap<i32, Process>,
     deadline: Instant,
@@ -322,7 +408,9 @@ fn owned_scan(
         if !seen.insert(pid) {
             continue;
         }
-        let Some(value) = process(pid)? else { continue };
+        let Some(value) = fs.stat(pid, None)? else {
+            continue;
+        };
         if expected.birth_ticks != value.birth_ticks {
             continue; // A replacement never authorizes traversal or signals.
         }
@@ -347,7 +435,7 @@ fn owned_scan(
                 }
             }
         }
-        if process(pid)?.as_ref() != Some(&value) {
+        if fs.stat(pid, None)?.as_ref() != Some(&value) {
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "owned discovery raced identity",
@@ -440,6 +528,7 @@ pub(super) fn snapshot_with(
     births: &mut Births,
     reads: Reads,
 ) -> io::Result<Table> {
+    let _flush = counters::Flush;
     let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
     let boot = boot_seconds()?;
     let ticks = clock_ticks()?;
@@ -471,20 +560,28 @@ pub(super) fn snapshot_with(
     let mut used = 0;
     loop {
         if Instant::now() >= deadline {
+            counters::skipped();
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "unstable owned snapshot",
             ));
         }
         let all = match reads {
-            Reads::Own => Arc::new(scan(deadline)?),
+            Reads::Own => Arc::new(read_all(&known, deadline)?),
             Reads::Shared { due } => {
-                let shared = BOARD.scan_after(used, due, || scan(deadline))?;
+                let shared = BOARD.scan_after(used, due, || read_all(&known, deadline))?;
                 used = shared.seq;
-                shared.all
+                // Another session's walk may have been shared with this one: a live process this session
+                // already knows must be in it, or the full scan is read instead.
+                if scoped() && omitted_known(&RealProc, &known, &shared.all)? {
+                    counters::fallback("omitted");
+                    Arc::new(scan(deadline)?)
+                } else {
+                    shared.all
+                }
             }
         };
-        let current = match owned_scan(&known, &all, deadline) {
+        let current = match owned_scan(&RealProc, &known, &all, deadline) {
             Ok(current) => current,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
             Err(error) => return Err(error),
@@ -496,6 +593,9 @@ pub(super) fn snapshot_with(
                 // A same-second replacement of a pid this session already recorded is not owned.
                 if births.admit(pid, &start, value.birth_ticks) {
                     table.insert(pid, (value.parent, value.group, start));
+                    if scoped() {
+                        note_admitted(pid, value.birth_ticks);
+                    }
                 }
             }
             return Ok(table);
@@ -503,6 +603,905 @@ pub(super) fn snapshot_with(
         known.extend(current.clone());
         previous = Some(current);
     }
+}
+
+// ---- scoped ownership enumeration (design v6) -------------------------------------------------
+
+/// Scan counters for the isolated harness build. They exist only under `fault-hooks`: the scored product binary
+/// carries none of this, and writes none of it. `NAVIDE_SCAN_STATS_FILE` names the JSON file rewritten after
+/// each snapshot.
+#[cfg(feature = "fault-hooks")]
+mod counters {
+    use super::*;
+    use serde_json::json;
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+    #[derive(Default)]
+    struct Inner {
+        scans_scoped: u64,
+        scans_full: u64,
+        fallbacks: BTreeMap<&'static str, u64>,
+        inspected_pids: u64,
+        walk_reads: u64,
+        pid_set: BTreeSet<i32>,
+        walks: VecDeque<(usize, Vec<i32>, usize)>,
+        dirty: [u64; 5],
+        skipped: u64,
+        subreaper: bool,
+        reaped: u64,
+        unattributed: u64,
+    }
+
+    fn inner() -> &'static Mutex<Inner> {
+        static INNER: OnceLock<Mutex<Inner>> = OnceLock::new();
+        INNER.get_or_init(|| Mutex::new(Inner::default()))
+    }
+
+    fn with(act: impl FnOnce(&mut Inner)) {
+        act(&mut inner().lock().unwrap_or_else(|e| e.into_inner()));
+    }
+
+    pub(super) fn scan_full_only() {
+        with(|c| c.scans_full += 1);
+    }
+
+    pub(super) fn source(source: &Source) {
+        with(|c| match source {
+            Source::Scoped => c.scans_scoped += 1,
+            Source::Full(why) => {
+                c.scans_full += 1;
+                let reason = match why {
+                    Fallback::Dirty(_) => "dirty",
+                    Fallback::Omitted => "omitted",
+                    Fallback::Failed => "io",
+                };
+                *c.fallbacks.entry(reason).or_default() += 1;
+            }
+        });
+    }
+
+    pub(super) fn fallback(reason: &'static str) {
+        with(|c| *c.fallbacks.entry(reason).or_default() += 1);
+    }
+
+    pub(super) fn walk(info: &WalkInfo, dirty: &Dirty) {
+        with(|c| {
+            c.walk_reads += 1;
+            c.inspected_pids += info.stat_reads as u64;
+            c.pid_set.extend(info.walked.iter().copied());
+            c.walks.push_back((info.stat_reads, info.walked.clone(), info.sidecar_tids));
+            if c.walks.len() > 32 {
+                c.walks.pop_front();
+            }
+            for (slot, hit) in [dirty.r1, dirty.r2, dirty.r2b, dirty.r3, dirty.io].into_iter().enumerate() {
+                c.dirty[slot] += hit as u64;
+            }
+        });
+    }
+
+    pub(super) fn skipped() {
+        with(|c| c.skipped += 1);
+    }
+
+    pub(super) fn subreaper(on: bool) {
+        with(|c| c.subreaper = on);
+    }
+
+    pub(super) fn reaped() {
+        with(|c| c.reaped += 1);
+    }
+
+    pub(super) fn unattributed() {
+        with(|c| c.unattributed += 1);
+    }
+
+    /// Adopted children of the sidecar that exited and were not reaped.
+    fn unreaped() -> u64 {
+        let me = std::process::id();
+        let mut count = 0;
+        if let Ok(tasks) = std::fs::read_dir(format!("/proc/{me}/task")) {
+            for task in tasks.flatten() {
+                let Ok(text) = std::fs::read_to_string(task.path().join("children")) else {
+                    continue;
+                };
+                for child in text.split_whitespace() {
+                    let stat = std::fs::read_to_string(format!("/proc/{child}/stat")).unwrap_or_default();
+                    if stat.rfind(") ").is_some_and(|at| stat[at + 2..].starts_with('Z')) {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    pub(super) fn flush() {
+        static PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+        let Some(path) = PATH.get_or_init(|| std::env::var_os("NAVIDE_SCAN_STATS_FILE").map(Into::into)) else {
+            return;
+        };
+        let unreaped = unreaped();
+        let c = inner().lock().unwrap_or_else(|e| e.into_inner());
+        let walks: Vec<_> = c
+            .walks
+            .iter()
+            .map(|(reads, walked, tids)| json!({"stat_reads":reads,"walk_pid_set":walked,"sidecar_tids":tids}))
+            .collect();
+        let report = json!({
+            "scans_scoped": c.scans_scoped,
+            "scans_full": c.scans_full,
+            "fallbacks": c.fallbacks,
+            "inspected_pids": c.inspected_pids,
+            "inspected_pid_set": c.pid_set,
+            "walks": walks,
+            "subreaper_enabled": c.subreaper,
+            "reaper_running": c.subreaper,
+            "unreaped_children": unreaped,
+            "walk_reads": c.walk_reads,
+            "dirty_walks": {"r1":c.dirty[0],"r2":c.dirty[1],"r2b":c.dirty[2],"r3":c.dirty[3],"io":c.dirty[4]},
+            "due_scans_skipped": c.skipped,
+            "orphans_reaped": c.reaped,
+            "unattributed_orphans": c.unattributed,
+        });
+        drop(c);
+        let temporary = path.with_extension("tmp");
+        if std::fs::write(&temporary, report.to_string()).is_ok() {
+            let _ = std::fs::rename(&temporary, path);
+        }
+    }
+
+    /// Rewrites the file when a snapshot ends, by whatever path.
+    pub(super) struct Flush;
+
+    impl Drop for Flush {
+        fn drop(&mut self) {
+            flush();
+        }
+    }
+}
+
+#[cfg(not(feature = "fault-hooks"))]
+mod counters {
+    use super::*;
+
+    pub(super) fn scan_full_only() {}
+    pub(super) fn source(_: &Source) {}
+    pub(super) fn fallback(_: &'static str) {}
+    pub(super) fn walk(_: &WalkInfo, _: &Dirty) {}
+    pub(super) fn skipped() {}
+    pub(super) fn subreaper(_: bool) {}
+    pub(super) fn reaped() {}
+    pub(super) fn unattributed() {}
+    pub(super) fn flush() {}
+    pub(super) struct Flush;
+}
+
+/// Which walk rule found a walk unusable.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+struct Dirty {
+    r1: bool,
+    r2: bool,
+    r2b: bool,
+    r3: bool,
+    io: bool,
+}
+
+#[derive(Debug)]
+enum Incomplete {
+    /// A walk rule fired: the walk is retried, then the full scan supplies the table.
+    Dirty(Dirty),
+    /// A read failed for a reason other than "gone".
+    Failed,
+}
+
+/// What one walk read, for the counters and the cost assertions.
+#[derive(Default, Debug)]
+struct WalkInfo {
+    stat_reads: usize,
+    walked: Vec<i32>,
+    sidecar_tids: usize,
+}
+
+/// A complete candidate table, or an explicit refusal: never a silently partial table. The walk's reads are
+/// published through the counters; the unit tests read them back from here.
+#[cfg_attr(not(test), allow(dead_code))]
+enum Walk {
+    Complete(HashMap<i32, Process>, WalkInfo),
+    Incomplete(Incomplete),
+}
+
+#[derive(Debug, PartialEq)]
+enum Fallback {
+    Dirty(Dirty),
+    /// A live process the session already knows is missing from the clean walk.
+    Omitted,
+    Failed,
+}
+
+#[derive(Debug, PartialEq)]
+enum Source {
+    Scoped,
+    Full(Fallback),
+}
+
+/// The scoped scanner: the zombie baseline lives here, so a new instance (a restarted sidecar) starts empty.
+struct Scanner {
+    baseline: Mutex<HashSet<(i32, i32, u64)>>,
+}
+
+impl Scanner {
+    fn new() -> Self {
+        Self {
+            baseline: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// One walk of `root`'s tree through every `/proc/<pid>/task/<tid>/children` file. The walk rules are the
+    /// design's (section 1.1) and each one closes a proven hole; do not reorder the reads:
+    /// - W2: a process's tasks are listed before any of its tid reads, and again after its last children read;
+    /// - W1: every tid's stat is read before that tid's children file;
+    /// - R1 (the tid set changed), R2 (a live tid died or changed), R2b (a tid is a zombie at first sight and no
+    ///   earlier walk saw it as one), R3 (a printed process is gone or replaced) make the walk dirty;
+    /// - W3: the zombie baseline is replaced at the end of every walk that ran to its end, clean or dirty.
+    fn walk(&self, fs: &dyn ProcFs, root: i32, deadline: Instant) -> Walk {
+        let mut info = WalkInfo::default();
+        let mut dirty = Dirty::default();
+        match self.read_tree(fs, root, deadline, &mut info, &mut dirty) {
+            Ok(table) => {
+                counters::walk(&info, &dirty);
+                if dirty == Dirty::default() {
+                    Walk::Complete(table, info)
+                } else {
+                    Walk::Incomplete(Incomplete::Dirty(dirty))
+                }
+            }
+            Err(_) => {
+                dirty.io = true;
+                counters::walk(&info, &dirty);
+                Walk::Incomplete(Incomplete::Failed)
+            }
+        }
+    }
+
+    fn read_tree(
+        &self,
+        fs: &dyn ProcFs,
+        root: i32,
+        deadline: Instant,
+        info: &mut WalkInfo,
+        dirty: &mut Dirty,
+    ) -> io::Result<HashMap<i32, Process>> {
+        // Zombies recorded by walks that ended before this one began.
+        let before = self.baseline.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut zombies = HashSet::new();
+        let mut table = HashMap::new();
+        // (pid, tid, starttime, live at first read) of every tid read.
+        let mut tids: Vec<(i32, i32, u64, bool)> = Vec::new();
+        let mut printed: Vec<(i32, u64)> = Vec::new();
+        let mut queue = vec![root];
+        let mut queued: HashSet<i32> = HashSet::from([root]);
+        let dead = |state: u8| matches!(state, b'Z' | b'X');
+        while let Some(pid) = queue.pop() {
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "owned snapshot bound"));
+            }
+            let Some(first) = fs.tasks(pid)? else {
+                dirty.r3 = true; // the process left between being printed and being walked
+                continue;
+            };
+            info.stat_reads += 1;
+            let Some(process) = fs.stat(pid, None)? else {
+                dirty.r3 = true;
+                continue;
+            };
+            printed.push((pid, process.birth_ticks));
+            table.insert(pid, process);
+            info.walked.push(pid);
+            if pid == root {
+                info.sidecar_tids = first.len();
+            }
+            let mut found = Vec::new();
+            for &tid in &first {
+                info.stat_reads += 1;
+                let Some(task) = fs.stat(pid, Some(tid))? else {
+                    continue; // gone: the second listing shows it
+                };
+                let live = !dead(task.state);
+                if !live {
+                    let key = (pid, tid, task.birth_ticks);
+                    if !before.contains(&key) {
+                        dirty.r2b = true;
+                    }
+                    zombies.insert(key);
+                }
+                tids.push((pid, tid, task.birth_ticks, live));
+                match fs.children(pid, tid)? {
+                    Some(list) => found.extend(list),
+                    None => {
+                        // Either the tid exited (the second listing shows it) or the file does not exist.
+                        info.stat_reads += 1;
+                        if fs.stat(pid, Some(tid))?.is_some() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Unsupported,
+                                "the children file is gone from a live task",
+                            ));
+                        }
+                    }
+                }
+            }
+            let Some(second) = fs.tasks(pid)? else {
+                dirty.r1 = true;
+                continue;
+            };
+            let (mut a, mut b) = (first, second);
+            a.sort_unstable();
+            b.sort_unstable();
+            if a != b {
+                dirty.r1 = true;
+            }
+            for child in found {
+                if queued.insert(child) {
+                    queue.push(child);
+                }
+            }
+        }
+        // End of walk: the same tids and processes, read again.
+        for &(pid, tid, start, live) in &tids {
+            info.stat_reads += 1;
+            match fs.stat(pid, Some(tid))? {
+                Some(now) => {
+                    let now_live = !dead(now.state);
+                    if live && (!now_live || now.birth_ticks != start) {
+                        dirty.r2 = true;
+                    }
+                    if !now_live && now.birth_ticks == start {
+                        zombies.insert((pid, tid, start));
+                    }
+                }
+                None => {
+                    if live {
+                        dirty.r2 = true;
+                    }
+                }
+            }
+        }
+        for &(pid, birth) in &printed {
+            info.stat_reads += 1;
+            if fs.stat(pid, None)?.is_none_or(|now| now.birth_ticks != birth) {
+                dirty.r3 = true;
+            }
+        }
+        *self.baseline.lock().unwrap_or_else(|e| e.into_inner()) = zombies;
+        Ok(table)
+    }
+
+    /// The candidate table for `root`'s tree: a clean walk that lists every live process in `known`, else the
+    /// full scan. A dirty walk is retried; whatever the walk could not vouch for, `scan_all` supplies.
+    fn table(
+        &self,
+        fs: &dyn ProcFs,
+        root: i32,
+        known: &HashMap<i32, Process>,
+        deadline: Instant,
+    ) -> io::Result<(HashMap<i32, Process>, Source)> {
+        let mut why = Fallback::Failed;
+        for _ in 0..WALK_ATTEMPTS {
+            match self.walk(fs, root, deadline) {
+                Walk::Complete(table, _) => {
+                    if omitted_known(fs, known, &table)? {
+                        why = Fallback::Omitted;
+                        break;
+                    }
+                    return Ok((table, Source::Scoped));
+                }
+                Walk::Incomplete(Incomplete::Dirty(dirty)) => why = Fallback::Dirty(dirty),
+                Walk::Incomplete(Incomplete::Failed) => {
+                    why = Fallback::Failed;
+                    break;
+                }
+            }
+        }
+        let (all, _) = scan_all_with(fs, deadline)?;
+        Ok((all, Source::Full(why)))
+    }
+}
+
+/// How many times a dirty walk is repeated before the full scan takes over.
+const WALK_ATTEMPTS: usize = 3;
+
+/// Whether a live process the caller already knows is missing from `table`. The walk rules cannot see a plain
+/// omission, so a known process is the witness.
+fn omitted_known(
+    fs: &dyn ProcFs,
+    known: &HashMap<i32, Process>,
+    table: &HashMap<i32, Process>,
+) -> io::Result<bool> {
+    for (&pid, expected) in known {
+        if table.contains_key(&pid) {
+            continue;
+        }
+        if fs.stat(pid, None)?.is_some_and(|now| {
+            now.birth_ticks == expected.birth_ticks && !matches!(now.state, b'Z' | b'X')
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+static SCANNER: OnceLock<Scanner> = OnceLock::new();
+/// Set when a visited children file vanished from a live task: later scans use the full scan, the subreaper and
+/// the reaper stay on.
+static CHILDREN_LOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// One read of the processes a snapshot works from: the sidecar's tree in scoped mode, else all of `/proc`.
+fn read_all(known: &HashMap<i32, Process>, deadline: Instant) -> io::Result<HashMap<i32, Process>> {
+    if !scoped() || CHILDREN_LOST.load(std::sync::atomic::Ordering::SeqCst) {
+        counters::scan_full_only();
+        return scan(deadline);
+    }
+    let me = std::process::id() as i32;
+    let scanner = SCANNER.get_or_init(Scanner::new);
+    let (table, source) = scanner.table(&RealProc, me, known, deadline)?;
+    if let Source::Full(Fallback::Failed) = source {
+        // A read failed. If the sidecar's own children file is gone, the capability was lost: the full scan is
+        // used from now on, for the scan only (the subreaper and the reaper stay on).
+        if matches!(RealProc.children(me, me), Ok(None) | Err(_)) {
+            CHILDREN_LOST.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    counters::source(&source);
+    Ok(table)
+}
+
+/// Scoped mode is decided once at startup and never changes (design section 4).
+static SCOPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static REAPER: OnceLock<Arc<Reaper>> = OnceLock::new();
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: this thread sees scoped mode on or off regardless of the process-wide decision.
+    pub(super) static SCOPED_FORCE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    /// Test seam: this thread sees this reaper as the process-wide one.
+    pub(super) static REAPER_FORCE: std::cell::RefCell<Option<Arc<Reaper>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn scoped() -> bool {
+    #[cfg(test)]
+    if let Some(forced) = SCOPED_FORCE.with(|forced| forced.get()) {
+        return forced;
+    }
+    SCOPED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The reaper, only in scoped mode.
+pub(super) fn reaper() -> Option<Arc<Reaper>> {
+    #[cfg(test)]
+    if let Some(forced) = REAPER_FORCE.with(|forced| forced.borrow().clone()) {
+        return Some(forced);
+    }
+    REAPER.get().cloned()
+}
+
+/// The startup facts the mode decision needs, behind one seam so the order of the checks can be asserted.
+trait Startup {
+    fn children_readable(&self) -> io::Result<()>;
+    fn sigchld_ignored(&self) -> bool;
+    fn set_subreaper(&self) -> io::Result<()>;
+}
+
+#[derive(Debug, PartialEq)]
+enum Mode {
+    Scoped,
+    Full(&'static str),
+}
+
+/// The ordered startup checks (design section 4); the first failure selects the full scan and nothing after it
+/// runs, so the subreaper is never enabled on a host where the scoped walk cannot be used.
+fn choose_mode(sys: &dyn Startup) -> Mode {
+    if sys.children_readable().is_err() {
+        return Mode::Full("no_children");
+    }
+    if sys.sigchld_ignored() {
+        return Mode::Full("sigchld_ignored");
+    }
+    if sys.set_subreaper().is_err() {
+        return Mode::Full("prctl");
+    }
+    Mode::Scoped
+}
+
+struct RealStartup;
+
+impl Startup for RealStartup {
+    fn children_readable(&self) -> io::Result<()> {
+        #[cfg(feature = "fault-hooks")]
+        if std::env::var_os("NAVIDE_FAULT_NO_CHILDREN").is_some() {
+            return Err(io::Error::from_raw_os_error(libc::ENOENT));
+        }
+        let me = std::process::id();
+        let text = std::fs::read_to_string(format!("/proc/{me}/task/{me}/children"))?;
+        pid_list(&text).map(|_| ())
+    }
+
+    fn sigchld_ignored(&self) -> bool {
+        // SAFETY: reads the current disposition of SIGCHLD into a zeroed out-parameter.
+        let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+        // SAFETY: a null new action only queries.
+        if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut old) } != 0 {
+            return true; // unknown: fail closed to the full scan
+        }
+        old.sa_sigaction == libc::SIG_IGN || old.sa_flags & libc::SA_NOCLDWAIT != 0
+    }
+
+    fn set_subreaper(&self) -> io::Result<()> {
+        // SAFETY: prctl with an integer option and value.
+        if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
+/// Decide the scan mode once, before the first create is accepted. Subreaper on, reaper running, reservation
+/// enforced, `ECHILD` on a root fail-closed and the scoped walk are one decision: all on or all off.
+pub(super) fn enable_scoped_mode() {
+    // The snapshot grid starts now. Started by the first session instead, its first point would fall at or before
+    // that session's creation and make the first snapshot due at once, while the session's target is still
+    // starting up.
+    EPOCH.get_or_init(Instant::now);
+    #[cfg(feature = "fault-hooks")]
+    if std::env::var_os("NAVIDE_FAULT_FORCE_FULL").is_some() {
+        counters::fallback("forced");
+        counters::flush();
+        return;
+    }
+    match choose_mode(&RealStartup) {
+        Mode::Full(reason) => {
+            eprintln!("cli runtime: scoped ownership scan is off ({reason}); using the full /proc scan");
+            counters::fallback(reason);
+        }
+        Mode::Scoped => {
+            let reaper = Reaper::new();
+            if let Err(error) = reaper.start() {
+                // SAFETY: undo the subreaper so the three stay in step.
+                unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0) };
+                eprintln!("cli runtime: the reaper did not start ({error}); using the full /proc scan");
+                counters::fallback("reaper");
+            } else {
+                let _ = REAPER.set(reaper);
+                SCOPED.store(true, std::sync::atomic::Ordering::SeqCst);
+                counters::subreaper(true);
+            }
+        }
+    }
+    counters::flush();
+}
+
+/// How many 10 ms retries the reaper gives a reserved root's own waiter before it stops waiting for it.
+const MAX_DEFERRALS: usize = 100;
+
+/// What the reaper decided about one waitable child.
+#[derive(Debug, PartialEq)]
+enum Served {
+    /// Not reserved: its status was consumed (or it was already gone).
+    Reaped,
+    /// Reserved and still a waitable child: its own waiter reaps it within microseconds.
+    Deferred,
+    /// Reserved, but not our child any more: the stale key was removed.
+    Stale,
+}
+
+#[derive(Debug, PartialEq)]
+enum Settled {
+    Done,
+    GaveUp,
+}
+
+/// A root's claim that only its own waiter may consume its exit status. Removes only its own key.
+pub(super) struct RootReservation {
+    reaper: Arc<Reaper>,
+    key: (i32, u64),
+}
+
+impl Drop for RootReservation {
+    fn drop(&mut self) {
+        self.reaper
+            .reserved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.key);
+    }
+}
+
+/// Orphans the sidecar adopted as a subreaper, and the roots it must never reap out from under their waiters.
+///
+/// Lock order is `FD_FORK_LOCK` -> `gate` -> `reserved`; the reverse is forbidden. `reserved` is locked only for
+/// a membership insert, remove or lookup, never across a wait, an `fsync` or any read (rule L1): `gate` is the
+/// only lock a create may hold across another thread's work.
+pub(super) struct Reaper {
+    /// Held by a create from before `fork` until its reservation exists (design section 3).
+    gate: Mutex<()>,
+    /// `(pid, start ticks)` of every root that is alive and not yet waited for by its own waiter.
+    reserved: Mutex<HashSet<(i32, u64)>>,
+    /// Spawns that succeeded, so the reaper sleeps in the kernel (or on this condvar) when there is no child.
+    spawns: (Mutex<u64>, std::sync::Condvar),
+}
+
+impl Reaper {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            gate: Mutex::new(()),
+            reserved: Mutex::new(HashSet::new()),
+            spawns: (Mutex::new(0), std::sync::Condvar::new()),
+        })
+    }
+
+    pub(super) fn hold_gate(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.gate.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Reserve the root `pid`: only its own waiter may consume its status from now until the guard drops.
+    pub(super) fn reserve(self: &Arc<Self>, pid: i32) -> RootReservation {
+        // A root that is already gone keys on 0; the key only has to differ between two holders of one pid.
+        let birth = process(pid).ok().flatten().map_or(0, |seen| seen.birth_ticks);
+        self.reserve_key(pid, birth)
+    }
+
+    /// A create has a new child: wake the reaper if it is idle.
+    pub(super) fn note_spawned(&self) {
+        *self.spawns.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        self.spawns.1.notify_all();
+    }
+
+    pub(super) fn reserve_key(self: &Arc<Self>, pid: i32, birth: u64) -> RootReservation {
+        self.reserved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((pid, birth));
+        RootReservation {
+            reaper: self.clone(),
+            key: (pid, birth),
+        }
+    }
+
+    /// No lock of the reaper is held by anyone.
+    #[cfg(test)]
+    pub(super) fn is_free(&self) -> bool {
+        self.gate.try_lock().is_ok() && self.reserved.try_lock().is_ok()
+    }
+
+    /// Whether any root is reserved under `pid`.
+    pub(super) fn holds(&self, pid: i32) -> bool {
+        self.reserved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|(held, _)| *held == pid)
+    }
+
+    #[cfg(test)]
+    pub(super) fn holds_any(&self) -> bool {
+        !self.reserved.lock().unwrap().is_empty()
+    }
+
+    /// Decide what to do with the waitable child `pid` that `waitid(WNOWAIT)` named. The check and the exact
+    /// wait are one critical section under `gate`, so a root forked after the check cannot be waited for: its
+    /// create needs `gate` first.
+    fn serve(&self, pid: i32) -> Served {
+        let gate = self.hold_gate();
+        let reserved = self
+            .reserved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|(held, _)| *held == pid);
+        if !reserved {
+            let mut status: libc::c_int = 0;
+            // SAFETY: the exact pid of a child that is not reserved, so no root's waiter can want it. `0` (not
+            // exited any more, or a reused pid of a live child) and `ECHILD` (already reaped, or reused by a
+            // non-child) are both fine to ignore.
+            if unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) } == pid {
+                orphan_reaped(pid);
+            }
+            drop(gate);
+            return Served::Reaped;
+        }
+        drop(gate);
+        // Reserved: its own waiter reaps it within microseconds, unless the key is stale.
+        // SAFETY: an all-zero siginfo is a valid out buffer for waitid.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: valid out pointer; WNOWAIT leaves the status for the root's waiter.
+        let rc = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT | libc::WNOHANG,
+            )
+        };
+        if rc != 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD) {
+            // Not our child any more: drop the keys whose start time no longer matches the live process.
+            let live = process(pid).ok().flatten().map(|seen| seen.birth_ticks);
+            self.reserved
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|(held, birth)| *held != pid || Some(*birth) == live);
+            return Served::Stale;
+        }
+        Served::Deferred
+    }
+
+    /// `serve` with the bounded retries a deferred root gets. A leaked reservation therefore cannot become a
+    /// permanent 100 Hz wake-up.
+    fn settle(&self, pid: i32, sleep: &dyn Fn(Duration)) -> Settled {
+        for attempt in 0..=MAX_DEFERRALS {
+            match self.serve(pid) {
+                Served::Reaped | Served::Stale => return Settled::Done,
+                Served::Deferred if attempt == MAX_DEFERRALS => break,
+                Served::Deferred => sleep(Duration::from_millis(10)),
+            }
+        }
+        Settled::GaveUp
+    }
+
+    pub(super) fn start(self: &Arc<Self>) -> io::Result<()> {
+        let reaper = self.clone();
+        std::thread::Builder::new()
+            .name("reaper".into())
+            .spawn(move || reaper.run())
+            .map(|_| ())
+    }
+
+    /// The event-driven loop: it blocks in the kernel until some child is waitable, without consuming it, and
+    /// consumes only a pid that is not reserved. With no child at all it blocks on a condvar until a spawn.
+    fn run(&self) {
+        let mut seen = 0;
+        let mut complained = HashSet::new();
+        loop {
+            // SAFETY: an all-zero siginfo is a valid out buffer for waitid.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            // SAFETY: valid out pointer; blocks until a child is waitable, and leaves its status in place.
+            let rc = unsafe { libc::waitid(libc::P_ALL, 0, &mut info, libc::WEXITED | libc::WNOWAIT) };
+            if rc == 0 {
+                // SAFETY: waitid returned 0, so si_pid is set.
+                let pid = unsafe { info.si_pid() };
+                if pid > 0 && self.settle(pid, &|pause| std::thread::sleep(pause)) == Settled::GaveUp {
+                    if complained.insert(pid) {
+                        eprintln!("cli runtime: root {pid} was not reaped by its own waiter; waiting for it");
+                    }
+                    // The same zombie would be named again at once: look again slowly instead of spinning.
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                continue;
+            }
+            match io::Error::last_os_error().raw_os_error() {
+                Some(libc::EINTR) => continue,
+                Some(libc::ECHILD) => {
+                    // No child: sleep until a spawn newer than the last one this loop saw.
+                    let mut spawns = self.spawns.0.lock().unwrap_or_else(|e| e.into_inner());
+                    while *spawns == seen {
+                        spawns = self.spawns.1.wait(spawns).unwrap_or_else(|e| e.into_inner());
+                    }
+                    seen = *spawns;
+                }
+                _ => {
+                    eprintln!("cli runtime: the reaper stopped: {}", io::Error::last_os_error());
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Shutdown: wait, bounded, until no non-reserved child is waitable. The reaper keeps consuming; this only
+    /// observes. A reserved zombie ends the wait (its own waiter is the only one allowed to take it).
+    pub(super) fn drain(&self, deadline: Instant) {
+        while Instant::now() < deadline {
+            // SAFETY: an all-zero siginfo is a valid out buffer for waitid.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            // SAFETY: valid out pointer; WNOHANG and WNOWAIT make this a pure observation.
+            let rc = unsafe {
+                libc::waitid(
+                    libc::P_ALL,
+                    0,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            // SAFETY: si_pid is read only after a successful call.
+            let pid = if rc == 0 { unsafe { info.si_pid() } } else { 0 };
+            let reserved = self
+                .reserved
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .any(|(held, _)| *held == pid);
+            if pid == 0 || reserved {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+/// Every orphan the reaper consumed, and the pids already named as unattributable.
+fn orphan_reaped(pid: i32) {
+    counters::reaped();
+    orphans()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .named
+        .retain(|(named, _)| *named != pid);
+}
+
+#[derive(Default)]
+struct Orphans {
+    /// `(pid, start ticks)` of every process some session admitted.
+    admitted: HashSet<(i32, u64)>,
+    /// Orphans already logged as unattributable, oldest first.
+    named: std::collections::VecDeque<(i32, u64)>,
+}
+
+fn orphans() -> &'static Mutex<Orphans> {
+    static ORPHANS: OnceLock<Mutex<Orphans>> = OnceLock::new();
+    ORPHANS.get_or_init(|| Mutex::new(Orphans::default()))
+}
+
+/// The entries kept in the named set before the oldest is dropped.
+const NAMED_CAP: usize = 512;
+
+/// A session admitted this exact process.
+fn note_admitted(pid: i32, birth: u64) {
+    orphans()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .admitted
+        .insert((pid, birth));
+}
+
+/// Name, once each, the adopted direct children of the sidecar that no session admitted: counted and logged,
+/// never signalled, never added to a receipt (design section 2). Called when a session finishes and at shutdown.
+pub(super) fn note_unattributed() {
+    let Some(reaper) = reaper() else { return };
+    let me = std::process::id() as i32;
+    let Ok(Some(tids)) = RealProc.tasks(me) else {
+        return;
+    };
+    let mut children = Vec::new();
+    for tid in tids {
+        if let Ok(Some(list)) = RealProc.children(me, tid) {
+            children.extend(list);
+        }
+    }
+    let mut orphans = orphans().lock().unwrap_or_else(|e| e.into_inner());
+    orphans
+        .admitted
+        .retain(|(pid, birth)| matches!(process(*pid), Ok(Some(seen)) if seen.birth_ticks == *birth));
+    for child in children {
+        let Ok(Some(seen)) = process(child) else {
+            continue;
+        };
+        let key = (child, seen.birth_ticks);
+        if matches!(seen.state, b'Z' | b'X')
+            || orphans.admitted.contains(&key)
+            || orphans.named.contains(&key)
+            || reaper.holds(child)
+        {
+            continue;
+        }
+        orphans.named.push_back(key);
+        if orphans.named.len() > NAMED_CAP {
+            orphans.named.pop_front();
+        }
+        eprintln!(
+            "cli runtime: process {child} was adopted by the sidecar and belongs to no session; it is left running"
+        );
+        counters::unattributed();
+    }
+    drop(orphans);
+    counters::flush();
 }
 
 struct Pidfd(i32);
@@ -1160,5 +2159,704 @@ mod tests {
         // One cadence step after a snapshot is still strictly in the future.
         let now = ms(12_040);
         assert!(grid_due_from(epoch, now + Duration::from_millis(5000)) > now);
+    }
+}
+
+/// The scoped walk, the startup order and the reaper, driven through exact interleavings (design section 8,
+/// rows U-1 to U-15 and U-17).
+#[cfg(test)]
+mod scoped_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Call {
+        List,
+        Stat(i32, Option<i32>),
+        Tasks(i32),
+        Children(i32, i32),
+    }
+
+    #[derive(Clone)]
+    struct FTask {
+        state: u8,
+        start: u64,
+        kids: Vec<i32>,
+    }
+
+    #[derive(Clone)]
+    struct FProc {
+        parent: i32,
+        group: i32,
+        session: i32,
+        order: Vec<i32>,
+        tasks: HashMap<i32, FTask>,
+    }
+
+    impl FProc {
+        fn new(parent: i32, group: i32, session: i32, tids: &[i32]) -> Self {
+            FProc {
+                parent,
+                group,
+                session,
+                order: tids.to_vec(),
+                tasks: tids
+                    .iter()
+                    .map(|&tid| {
+                        let task = FTask {
+                            state: b'S',
+                            start: 1000 + tid as u64,
+                            kids: Vec::new(),
+                        };
+                        (tid, task)
+                    })
+                    .collect(),
+            }
+        }
+
+        fn kids(mut self, tid: i32, kids: &[i32]) -> Self {
+            self.tasks.get_mut(&tid).unwrap().kids = kids.to_vec();
+            self
+        }
+    }
+
+    type Procs = BTreeMap<i32, FProc>;
+    type Hook = Box<dyn FnMut(&Call, &mut Procs)>;
+
+    /// A scripted procfs. A hook sees every read before it is answered and may change the world first.
+    struct Fake {
+        procs: RefCell<Procs>,
+        log: RefCell<Vec<Call>>,
+        hooks: RefCell<Vec<Hook>>,
+    }
+
+    impl Fake {
+        fn new(procs: Vec<(i32, FProc)>) -> Self {
+            Fake {
+                procs: RefCell::new(procs.into_iter().collect()),
+                log: RefCell::new(Vec::new()),
+                hooks: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn hook(&self, hook: impl FnMut(&Call, &mut Procs) + 'static) {
+            self.hooks.borrow_mut().push(Box::new(hook));
+        }
+
+        /// A hook that runs `act` on the `nth` (1-based) occurrence of `call`.
+        fn on_nth(&self, call: Call, nth: usize, mut act: impl FnMut(&mut Procs) + 'static) {
+            let mut seen = 0;
+            self.hook(move |current, procs| {
+                if *current == call {
+                    seen += 1;
+                    if seen == nth {
+                        act(procs);
+                    }
+                }
+            });
+        }
+
+        fn serve(&self, call: Call) {
+            self.log.borrow_mut().push(call.clone());
+            let mut procs = self.procs.borrow_mut();
+            for hook in self.hooks.borrow_mut().iter_mut() {
+                hook(&call, &mut procs);
+            }
+        }
+
+        fn calls(&self) -> Vec<Call> {
+            self.log.borrow().clone()
+        }
+
+        fn stats(&self) -> usize {
+            self.calls()
+                .iter()
+                .filter(|call| matches!(call, Call::Stat(..)))
+                .count()
+        }
+    }
+
+    impl ProcFs for Fake {
+        fn list(&self) -> io::Result<Vec<i32>> {
+            self.serve(Call::List);
+            Ok(self.procs.borrow().keys().copied().collect())
+        }
+
+        fn stat(&self, pid: i32, tid: Option<i32>) -> io::Result<Option<Process>> {
+            self.serve(Call::Stat(pid, tid));
+            let procs = self.procs.borrow();
+            let Some(process) = procs.get(&pid) else {
+                return Ok(None);
+            };
+            let Some(task) = process.tasks.get(&tid.unwrap_or(pid)) else {
+                return Ok(None);
+            };
+            Ok(Some(Process {
+                parent: process.parent,
+                group: process.group,
+                session: process.session,
+                birth_ticks: task.start,
+                state: task.state,
+            }))
+        }
+
+        fn tasks(&self, pid: i32) -> io::Result<Option<Vec<i32>>> {
+            self.serve(Call::Tasks(pid));
+            Ok(self.procs.borrow().get(&pid).map(|process| process.order.clone()))
+        }
+
+        fn children(&self, pid: i32, tid: i32) -> io::Result<Option<Vec<i32>>> {
+            self.serve(Call::Children(pid, tid));
+            Ok(self
+                .procs
+                .borrow()
+                .get(&pid)
+                .and_then(|process| process.tasks.get(&tid))
+                .map(|task| task.kids.clone()))
+        }
+    }
+
+    fn soon() -> Instant {
+        Instant::now() + Duration::from_secs(5)
+    }
+
+    fn dirty_of(walk: Walk) -> Dirty {
+        match walk {
+            Walk::Incomplete(Incomplete::Dirty(dirty)) => dirty,
+            Walk::Incomplete(other) => panic!("expected a dirty walk, got {other:?}"),
+            Walk::Complete(table, _) => panic!("expected a dirty walk, got a table of {}", table.len()),
+        }
+    }
+
+    fn table_of(walk: Walk) -> (HashMap<i32, Process>, WalkInfo) {
+        match walk {
+            Walk::Complete(table, info) => (table, info),
+            Walk::Incomplete(why) => panic!("expected a clean walk, got {why:?}"),
+        }
+    }
+
+    /// root 100 -> 101, 102.
+    fn small_tree() -> Vec<(i32, FProc)> {
+        vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (100, FProc::new(1, 100, 100, &[100]).kids(100, &[101, 102])),
+            (101, FProc::new(100, 100, 100, &[101])),
+            (102, FProc::new(100, 100, 100, &[102])),
+        ]
+    }
+
+    #[test]
+    fn omitted_known_child_forces_full_rescan() {
+        // 102 is alive and its stat is readable, but root's children read does not list it.
+        let mut tree = small_tree();
+        tree[1].1 = FProc::new(1, 100, 100, &[100]).kids(100, &[101]);
+        let fake = Fake::new(tree);
+        let known: HashMap<_, _> = [(102, fake.stat(102, None).unwrap().unwrap())].into();
+        let (table, source) = Scanner::new().table(&fake, 100, &HashMap::new(), soon()).unwrap();
+        assert_eq!(source, Source::Scoped, "no witness: the walk alone cannot see the omission");
+        assert!(!table.contains_key(&102));
+        let (table, source) = Scanner::new().table(&fake, 100, &known, soon()).unwrap();
+        assert_eq!(source, Source::Full(Fallback::Omitted));
+        assert!(table.contains_key(&102), "the full scan did not supply the omitted child");
+    }
+
+    #[test]
+    fn postwalk_vanished_printed_child_forces_full_rescan() {
+        // Walk 1 prints A (101) and A is reaped; live B (102) is omitted. Walk 2 prints C (103) and C is
+        // reaped; B is omitted again. Both walks are dirty by R3, so neither table is published.
+        for (printed, reaped) in [(101, 101), (103, 103)] {
+            let mut tree = small_tree();
+            tree[1].1 = FProc::new(1, 100, 100, &[100]).kids(100, &[printed]);
+            tree.push((103, FProc::new(100, 100, 100, &[103])));
+            let fake = Fake::new(tree);
+            fake.on_nth(Call::Stat(reaped, None), 2, move |procs| {
+                procs.remove(&reaped);
+            });
+            let dirty = dirty_of(Scanner::new().walk(&fake, 100, soon()));
+            assert!(dirty.r3, "{dirty:?}");
+        }
+        let mut tree = small_tree();
+        tree[1].1 = FProc::new(1, 100, 100, &[100]).kids(100, &[101]);
+        let fake = Fake::new(tree);
+        fake.hook(|call, procs| {
+            if *call == Call::Tasks(100) {
+                procs.remove(&101);
+            }
+        });
+        let known: HashMap<_, _> = [(102, fake.stat(102, None).unwrap().unwrap())].into();
+        let (table, source) = Scanner::new().table(&fake, 100, &known, soon()).unwrap();
+        assert!(matches!(source, Source::Full(_)));
+        assert!(table.contains_key(&102), "scan_all did not supply B");
+    }
+
+    /// Process 200 under root 100: tids [201, 200] (leader second), live child 210 on the leader's list.
+    fn thread_exit_world() -> Fake {
+        let fake = Fake::new(vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (100, FProc::new(1, 100, 100, &[100]).kids(100, &[200])),
+            (
+                200,
+                FProc::new(100, 100, 100, &[201, 200]).kids(200, &[210]),
+            ),
+            (210, FProc::new(200, 100, 100, &[210])),
+        ]);
+        // The leader exits between its stat read and its children read: its list moves to the other tid,
+        // whose list was already read, and the read ends with nothing.
+        fake.on_nth(Call::Children(200, 200), 1, |procs| {
+            let process = procs.get_mut(&200).unwrap();
+            let moved = std::mem::take(&mut process.tasks.get_mut(&200).unwrap().kids);
+            process.tasks.get_mut(&200).unwrap().state = b'Z';
+            process.tasks.get_mut(&201).unwrap().kids = moved;
+        });
+        fake
+    }
+
+    #[test]
+    fn thread_exit_reparent_forces_full_rescan() {
+        let fake = thread_exit_world();
+        let dirty = dirty_of(Scanner::new().walk(&fake, 100, soon()));
+        assert_eq!(
+            dirty,
+            Dirty { r2: true, ..Dirty::default() },
+            "R2 must be the only rule that fires; the v2 identity-only predicate (R3) would have passed it"
+        );
+    }
+
+    #[test]
+    fn leader_exit_between_walks_is_dirty_then_clean() {
+        let fake = thread_exit_world();
+        let scanner = Scanner::new();
+        assert!(dirty_of(scanner.walk(&fake, 100, soon())).r2);
+        // The same scanner: the zombie leader is a baseline now, so walk 2 accepts it and prints 210.
+        let (table, _) = table_of(scanner.walk(&fake, 100, soon()));
+        assert!(table.contains_key(&210));
+        // A fresh scanner has no baseline: dirty once by R2b, then clean.
+        let fresh = Scanner::new();
+        assert!(dirty_of(fresh.walk(&fake, 100, soon())).r2b);
+        assert!(table_of(fresh.walk(&fake, 100, soon())).0.contains_key(&210));
+    }
+
+    /// Process 301 under root 300: tids [302, 301]; live child 303 on the leader's list.
+    fn first_seen_zombie_world() -> Fake {
+        let fake = Fake::new(vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (300, FProc::new(1, 300, 300, &[300]).kids(300, &[301])),
+            (
+                301,
+                FProc::new(300, 300, 300, &[302, 301]).kids(301, &[303]),
+            ),
+            (303, FProc::new(301, 300, 300, &[303])),
+        ]);
+        // The leader is already a zombie at its first stat read, and its list went to the tid read before.
+        fake.on_nth(Call::Stat(301, Some(301)), 1, |procs| {
+            let process = procs.get_mut(&301).unwrap();
+            let moved = std::mem::take(&mut process.tasks.get_mut(&301).unwrap().kids);
+            process.tasks.get_mut(&301).unwrap().state = b'Z';
+            process.tasks.get_mut(&302).unwrap().kids = moved;
+        });
+        fake
+    }
+
+    #[test]
+    fn first_seen_zombie_intermediate_forces_retry() {
+        let fake = first_seen_zombie_world();
+        let scanner = Scanner::new();
+        let dirty = dirty_of(scanner.walk(&fake, 300, soon()));
+        assert_eq!(
+            dirty,
+            Dirty { r2b: true, ..Dirty::default() },
+            "the v3 predicate (R1, R2, R3 only) would have called this walk clean"
+        );
+        let (table, _) = table_of(scanner.walk(&fake, 300, soon()));
+        assert!(table.contains_key(&303), "the retry must print the live child");
+    }
+
+    #[test]
+    fn zombie_baseline_is_keyed_and_not_shared() {
+        let fake = first_seen_zombie_world();
+        let scanner = Scanner::new();
+        assert!(dirty_of(scanner.walk(&fake, 300, soon())).r2b);
+        assert!(scanner.baseline.lock().unwrap().contains(&(301, 301, 1301)));
+        table_of(scanner.walk(&fake, 300, soon()));
+        // Same pid and tid, other starttime: a different instance, dirty again.
+        {
+            let mut procs = fake.procs.borrow_mut();
+            procs.get_mut(&301).unwrap().tasks.get_mut(&301).unwrap().start = 9999;
+        }
+        assert!(dirty_of(scanner.walk(&fake, 300, soon())).r2b);
+        // A new scanner has no baseline at all.
+        assert!(Scanner::new().baseline.lock().unwrap().is_empty());
+        assert!(dirty_of(Scanner::new().walk(&fake, 300, soon())).r2b);
+    }
+
+    #[test]
+    fn de_thread_tid_set_change_is_dirty() {
+        let fake = Fake::new(vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (100, FProc::new(1, 100, 100, &[100, 110, 111])),
+        ]);
+        // A thread exec swaps the tid set between the two listings; the leader keeps its tid.
+        fake.on_nth(Call::Tasks(100), 2, |procs| {
+            *procs.get_mut(&100).unwrap() = FProc::new(1, 100, 100, &[100, 112]);
+        });
+        assert!(dirty_of(Scanner::new().walk(&fake, 100, soon())).r1);
+    }
+
+    #[test]
+    fn walk_reads_stat_before_children() {
+        let fake = Fake::new(vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (100, FProc::new(1, 100, 100, &[100, 101]).kids(100, &[102])),
+            (102, FProc::new(100, 100, 100, &[102])),
+        ]);
+        table_of(Scanner::new().walk(&fake, 100, soon()));
+        let calls = fake.calls();
+        assert!(!calls.is_empty(), "the walk read nothing");
+        for pid in [100, 102] {
+            let first = |wanted: &dyn Fn(&Call) -> bool| calls.iter().position(|call| wanted(call));
+            let last = |wanted: &dyn Fn(&Call) -> bool| calls.iter().rposition(|call| wanted(call));
+            let listing = first(&|call| *call == Call::Tasks(pid)).expect("no listing");
+            let tid_stat = first(&|call| matches!(call, Call::Stat(p, Some(_)) if *p == pid)).unwrap();
+            let last_children =
+                last(&|call| matches!(call, Call::Children(p, _) if *p == pid)).unwrap();
+            let last_listing = last(&|call| *call == Call::Tasks(pid)).unwrap();
+            assert!(listing < tid_stat, "W2: listing before the first stat of {pid}");
+            assert!(last_listing > last_children, "W2: listing repeated after the last children read of {pid}");
+            for &tid in &fake.procs.borrow()[&pid].order {
+                let stat = first(&|call| *call == Call::Stat(pid, Some(tid))).unwrap();
+                let kids = first(&|call| *call == Call::Children(pid, tid)).unwrap();
+                assert!(stat < kids, "W1: stat of tid {tid} before its children read");
+            }
+        }
+    }
+
+    #[test]
+    fn transient_tid_between_listings_is_clean_and_complete() {
+        let fake = Fake::new(small_tree());
+        fake.on_nth(Call::Children(100, 100), 1, |procs| {
+            let process = procs.get_mut(&100).unwrap();
+            process.order.push(150);
+            process.tasks.insert(150, FTask { state: b'S', start: 1150, kids: Vec::new() });
+        });
+        fake.on_nth(Call::Tasks(100), 2, |procs| {
+            let process = procs.get_mut(&100).unwrap();
+            process.order.retain(|tid| *tid != 150);
+            process.tasks.remove(&150);
+        });
+        let (table, _) = table_of(Scanner::new().walk(&fake, 100, soon()));
+        assert!(table.contains_key(&101) && table.contains_key(&102));
+    }
+
+    #[test]
+    fn already_zombie_leader_clean_from_walk_2() {
+        let kids: Vec<i32> = (1000..1250).collect();
+        let mut tree = vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (100, FProc::new(1, 100, 100, &[100]).kids(100, &[200])),
+            (200, FProc::new(100, 100, 100, &[200, 201]).kids(201, &kids)),
+        ];
+        for &kid in &kids {
+            tree.push((kid, FProc::new(200, 100, 100, &[kid])));
+        }
+        let fake = Fake::new(tree);
+        fake.procs.borrow_mut().get_mut(&200).unwrap().tasks.get_mut(&200).unwrap().state = b'Z';
+        let scanner = Scanner::new();
+        assert!(dirty_of(scanner.walk(&fake, 100, soon())).r2b);
+        let (table, _) = table_of(scanner.walk(&fake, 100, soon()));
+        assert!(kids.iter().all(|kid| table.contains_key(kid)));
+    }
+
+    struct Sys {
+        calls: RefCell<Vec<&'static str>>,
+        readable: bool,
+        ignored: bool,
+        subreaper: bool,
+    }
+
+    impl Startup for Sys {
+        fn children_readable(&self) -> io::Result<()> {
+            self.calls.borrow_mut().push("children");
+            if self.readable {
+                Ok(())
+            } else {
+                Err(io::Error::from_raw_os_error(libc::ENOENT))
+            }
+        }
+        fn sigchld_ignored(&self) -> bool {
+            self.calls.borrow_mut().push("sigchld");
+            self.ignored
+        }
+        fn set_subreaper(&self) -> io::Result<()> {
+            self.calls.borrow_mut().push("prctl");
+            if self.subreaper {
+                Ok(())
+            } else {
+                Err(io::Error::from_raw_os_error(libc::EPERM))
+            }
+        }
+    }
+
+    #[test]
+    fn children_read_enoent_selects_full_scan() {
+        let sys = |readable, ignored, subreaper| Sys {
+            calls: RefCell::new(Vec::new()),
+            readable,
+            ignored,
+            subreaper,
+        };
+        let missing = sys(false, false, true);
+        assert_eq!(choose_mode(&missing), Mode::Full("no_children"));
+        assert_eq!(*missing.calls.borrow(), ["children"], "nothing may run after the first failure");
+        let ignoring = sys(true, true, true);
+        assert_eq!(choose_mode(&ignoring), Mode::Full("sigchld_ignored"));
+        assert_eq!(*ignoring.calls.borrow(), ["children", "sigchld"]);
+        let denied = sys(true, false, false);
+        assert_eq!(choose_mode(&denied), Mode::Full("prctl"));
+        assert_eq!(*denied.calls.borrow(), ["children", "sigchld", "prctl"]);
+        let good = sys(true, false, true);
+        assert_eq!(choose_mode(&good), Mode::Scoped);
+        assert_eq!(*good.calls.borrow(), ["children", "sigchld", "prctl"]);
+    }
+
+    /// Sidecar 1000 with root 1001, a descendant chain, a double-fork orphan adopted by the sidecar, a
+    /// setsid orphan, and processes outside its tree.
+    fn orphan_world() -> Fake {
+        let mut tree = vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (
+                1000,
+                FProc::new(1, 1000, 1000, &[1000]).kids(1000, &[1001, 1005, 1006]),
+            ),
+            (1001, FProc::new(1000, 1001, 1001, &[1001]).kids(1001, &[1002])),
+            (1002, FProc::new(1001, 1001, 1001, &[1002]).kids(1002, &[1003, 1004])),
+            (1003, FProc::new(1002, 1001, 1001, &[1003])),
+            (1004, FProc::new(1002, 1001, 1001, &[1004])),
+            (1005, FProc::new(1000, 1001, 1001, &[1005])),
+            (1006, FProc::new(1000, 1006, 1006, &[1006])),
+        ];
+        for noise in 1100..1130 {
+            tree.push((noise, FProc::new(1, noise, noise, &[noise])));
+        }
+        Fake::new(tree)
+    }
+
+    #[test]
+    fn scoped_equals_full_scan_on_fixture() {
+        let fake = orphan_world();
+        let root = fake.stat(1001, None).unwrap().unwrap();
+        let seeds: HashMap<_, _> = [(1001, root)].into();
+        let (full, _) = scan_all_with(&fake, soon()).unwrap();
+        let (scoped, source) = Scanner::new().table(&fake, 1000, &HashMap::new(), soon()).unwrap();
+        assert_eq!(source, Source::Scoped);
+        let from_full = owned_scan(&fake, &seeds, &full, soon()).unwrap();
+        let from_scoped = owned_scan(&fake, &seeds, &scoped, soon()).unwrap();
+        assert_eq!(from_full, from_scoped);
+        let mut pids: Vec<_> = from_scoped.keys().copied().collect();
+        pids.sort();
+        assert_eq!(pids, [1001, 1002, 1003, 1004, 1005], "1006 is a setsid orphan: not owned");
+    }
+
+    #[test]
+    fn scoped_scan_inspects_only_the_sidecar_tree() {
+        let measure = |noise: i32| {
+            let mut tree = vec![
+                (1, FProc::new(0, 1, 1, &[1])),
+                (
+                    100,
+                    FProc::new(1, 100, 100, &[100, 101, 102, 103, 104, 105, 106, 107, 108])
+                        .kids(100, &[200, 201, 202, 203, 204]),
+                ),
+            ];
+            for owned in 200..205 {
+                tree.push((owned, FProc::new(100, owned, owned, &[owned])));
+            }
+            for index in 0..noise {
+                tree.push((5000 + index, FProc::new(1, 5000 + index, 5000 + index, &[5000 + index])));
+            }
+            let fake = Fake::new(tree);
+            let (_, info) = table_of(Scanner::new().walk(&fake, 100, soon()));
+            let stats: Vec<i32> = fake
+                .calls()
+                .iter()
+                .filter_map(|call| match call {
+                    Call::Stat(pid, _) => Some(*pid),
+                    _ => None,
+                })
+                .collect();
+            (fake.stats(), info, stats)
+        };
+        let (few, info_few, _) = measure(5);
+        let (many, info_many, stats_many) = measure(500);
+        assert!(few > 0 && many > 0, "the walk read nothing");
+        assert!(
+            (many as f64 - few as f64).abs() <= few as f64 * 0.10,
+            "stat reads depend on the noise: {few} vs {many}"
+        );
+        assert!(stats_many.iter().all(|pid| *pid < 5000), "a noise pid was inspected");
+        let tree: HashSet<i32> = [100, 200, 201, 202, 203, 204].into();
+        assert!(info_many.walked.iter().all(|pid| tree.contains(pid)));
+        assert_eq!(info_few.stat_reads, few);
+        assert!(many <= 3 * (info_many.walked.len() + info_many.sidecar_tids));
+    }
+
+    fn zombie_pid(pid: i32) -> bool {
+        // SAFETY: an all-zero siginfo is a valid out buffer for waitid.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: valid out pointer; WNOWAIT leaves the status in place.
+        let rc = unsafe {
+            libc::waitid(libc::P_PID, pid as u32, &mut info, libc::WEXITED | libc::WNOWAIT | libc::WNOHANG)
+        };
+        // SAFETY: the union field is only read after waitid returned 0.
+        rc == 0 && unsafe { info.si_pid() } == pid
+    }
+
+    fn exited_child() -> (std::process::Child, i32) {
+        let child = Command::new("/bin/true").spawn().unwrap();
+        let pid = child.id() as i32;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !zombie_pid(pid) {
+            assert!(Instant::now() < deadline, "the child never exited");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        (child, pid)
+    }
+
+    #[test]
+    fn reaper_defers_to_held_gate_and_reserved_roots() {
+        let reaper = Reaper::new();
+        let (_orphan, orphan) = exited_child();
+        let guard = reaper.hold_gate();
+        let done = Arc::new(AtomicBool::new(false));
+        let served = {
+            let (reaper, done) = (reaper.clone(), done.clone());
+            std::thread::spawn(move || {
+                let served = reaper.serve(orphan);
+                done.store(true, Ordering::SeqCst);
+                served
+            })
+        };
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!done.load(Ordering::SeqCst), "served an exited child while a create held the gate");
+        assert!(zombie_pid(orphan), "the status was consumed while the gate was held");
+        drop(guard);
+        assert_eq!(served.join().unwrap(), Served::Reaped);
+        assert!(!zombie_pid(orphan), "the orphan was not reaped after the gate opened");
+        let (mut root, root_pid) = exited_child();
+        let _reservation = reaper.reserve_key(root_pid, 7);
+        assert_eq!(reaper.serve(root_pid), Served::Deferred);
+        assert!(zombie_pid(root_pid), "a reserved root was waited for");
+        root.wait().unwrap();
+    }
+
+    /// The churn-probe shape on the real kernel (850 children, constant replacement): a regression guard for
+    /// R1-R3, not evidence for the omission argument. It would pass vacuously if the first three asserts
+    /// were dropped.
+    #[test]
+    #[ignore]
+    fn strong_check_regression_guard() {
+        fn sleeper() -> i32 {
+            // SAFETY: the child only calls async-signal-safe functions before it exits.
+            match unsafe { libc::fork() } {
+                0 => loop {
+                    // SAFETY: pause and _exit take no pointers.
+                    unsafe { libc::pause() };
+                },
+                pid => pid,
+            }
+        }
+        let pool = Arc::new(Mutex::new((0..850).map(|_| sleeper()).collect::<Vec<_>>()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let churn = {
+            let (pool, stop) = (pool.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut index = 0;
+                while !stop.load(Ordering::SeqCst) {
+                    let mut slots = pool.lock().unwrap();
+                    let old = slots[index];
+                    // SAFETY: `old` is this process's own unreaped child.
+                    unsafe {
+                        libc::kill(old, libc::SIGKILL);
+                        libc::waitpid(old, std::ptr::null_mut(), 0);
+                    }
+                    slots[index] = sleeper();
+                    index = (index + 1) % slots.len();
+                }
+            })
+        };
+        let me = std::process::id() as i32;
+        let scanner = Scanner::new();
+        let (mut reads, mut omissions, mut dirty, mut unflagged) = (0, 0, 0, 0);
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while reads < 500 && Instant::now() < deadline {
+            let before: HashSet<i32> = pool.lock().unwrap().iter().copied().collect();
+            let walk = scanner.walk(&RealProc, me, Instant::now() + Duration::from_secs(30));
+            let raw: HashSet<i32> = RealProc
+                .tasks(me)
+                .unwrap()
+                .unwrap_or_default()
+                .into_iter()
+                .flat_map(|tid| RealProc.children(me, tid).unwrap().unwrap_or_default())
+                .collect();
+            let after: HashSet<i32> = pool.lock().unwrap().iter().copied().collect();
+            let stable: Vec<i32> = before.intersection(&after).copied().collect();
+            reads += 1;
+            if stable.iter().any(|pid| !raw.contains(pid)) {
+                omissions += 1;
+            }
+            match walk {
+                Walk::Complete(table, _) => {
+                    if stable.iter().any(|pid| !table.contains_key(pid)) {
+                        unflagged += 1;
+                    }
+                }
+                Walk::Incomplete(Incomplete::Dirty(_)) => dirty += 1,
+                Walk::Incomplete(_) => {}
+            }
+        }
+        stop.store(true, Ordering::SeqCst);
+        churn.join().unwrap();
+        for pid in pool.lock().unwrap().iter() {
+            // SAFETY: the pool holds this process's own children.
+            unsafe {
+                libc::kill(*pid, libc::SIGKILL);
+                libc::waitpid(*pid, std::ptr::null_mut(), 0);
+            }
+        }
+        assert!(omissions > 0, "the churn never omitted a child: {reads} reads");
+        assert!(dirty > 0, "no read was flagged: {reads} reads, {omissions} omissions");
+        assert!(reads >= 500, "only {reads} reads");
+        assert_eq!(unflagged, 0, "{unflagged} unflagged omissions in {reads} reads");
+    }
+
+    #[test]
+    fn stale_reservation_does_not_spin_the_reaper() {
+        let reaper = Reaper::new();
+        let (mut gone, pid) = exited_child();
+        gone.wait().unwrap();
+        let stale = reaper.reserve_key(pid, 42);
+        let sleeps = AtomicUsize::new(0);
+        let count = |_: Duration| {
+            sleeps.fetch_add(1, Ordering::SeqCst);
+        };
+        assert_eq!(reaper.settle(pid, &count), Settled::Done);
+        assert!(sleeps.load(Ordering::SeqCst) <= 2, "a stale key made the reaper sleep and retry");
+        assert!(reaper.reserved.lock().unwrap().is_empty(), "the stale key was kept");
+        drop(stale);
+        // A reserved root whose waiter never comes: bounded retries, then it gives up.
+        let (mut stuck, stuck_pid) = exited_child();
+        let _key = reaper.reserve_key(stuck_pid, 1);
+        sleeps.store(0, Ordering::SeqCst);
+        assert_eq!(reaper.settle(stuck_pid, &count), Settled::GaveUp);
+        assert_eq!(sleeps.load(Ordering::SeqCst), MAX_DEFERRALS);
+        stuck.wait().unwrap();
+        // Two roots that held the same pid in turn keep distinct keys.
+        let first = reaper.reserve_key(77, 1);
+        let _second = reaper.reserve_key(77, 2);
+        drop(first);
+        let held = reaper.reserved.lock().unwrap();
+        assert!(held.contains(&(77, 2)) && !held.contains(&(77, 1)));
     }
 }
