@@ -3557,7 +3557,12 @@ mod scoped_tests {
                 *cell.borrow_mut() = Some(Box::new(move || {
                     // The create holds the gate and has read `stopped == false`. End the reaper now.
                     reaper.inject(linux::INJECT_WAITID_ERROR);
-                    thread::sleep(Duration::from_millis(500));
+                    // Wait until the reaper is *at* publication, blocked on the gate this create holds. The
+                    // timeout only guards a failure; the verdict never depends on elapsed time.
+                    assert!(
+                        reaper.wait_stop_blocked_on_gate(Duration::from_secs(10)),
+                        "the reaper never reached the stop publication while the create held the gate"
+                    );
                     assert!(
                         !reaper.stopped(),
                         "stopped became true while the create held the gate"
