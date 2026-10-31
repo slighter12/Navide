@@ -528,6 +528,13 @@ pub(super) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
     remaining
 }
 
+/// The gated root's own row, read once: `None` unless `setsid` made it its own group leader. At the gate it has
+/// not executed yet, so it has no child and its group holds only itself; `snapshot(Some(pid), ..)` then returns
+/// exactly this row, after two scans. `None` sends the caller to that snapshot.
+pub(super) fn gated_root(pid: i32) -> io::Result<Option<(i32, i32, String)>> {
+    Ok(row(pid)?.filter(|entry| entry.1 == pid))
+}
+
 pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<Table> {
     let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
     let mut known = seeds.clone();

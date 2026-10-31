@@ -1382,6 +1382,44 @@ int main(int argc, char **argv) {
         assert!(walked_max < 120, "a walk read {walked_max} stats: it depends on the noise");
     }
 
+    /// The create path takes no ownership scan of its own: the gate reads the gated root's identity once. The
+    /// first scan is the session's first background snapshot, due on the 5 s grid.
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn a_create_takes_no_ownership_scan_of_its_own() {
+        let (mut sidecar, stats) = start_scoped("gate-scan", &[]);
+        wait_for("the startup counters", Duration::from_secs(10), || stats.read() != Value::Null);
+        let dir = sidecar.dir.clone();
+        let script = write_script(&dir, "root.sh", "exec sleep 600\n");
+        // The gate holds before the journal append, after it took the root's identity. No session exists while it
+        // holds, so no background snapshot can run: any scan counted now is the create's own.
+        let release = dir.join("release-journal");
+        let mut meta = create_meta(&dir, &["/bin/sh", &script], "gate-scan");
+        meta["session_generation"] = json!(SESSION_GENERATION);
+        meta["pane_id"] = json!(format!("fault:journal-hold:{}", release.display()));
+        sidecar.send(code::CREATE, meta);
+        // The hold publishes this marker after the identity step, before it waits: every scan the create would
+        // take has been counted once it exists.
+        let entered = dir.join("release-journal.entered");
+        wait_for("the gate to hold", Duration::from_secs(10), || entered.exists());
+        let read = stats.read();
+        assert_eq!(read["scans_scoped"], 0, "{read}");
+        assert_eq!(read["scans_full"], 0, "{read}");
+        std::fs::write(&release, b"").unwrap();
+        let (_, master) = sidecar.recv_until(|f| f.code == code::SESSION_OWNED);
+        let master = master.expect("SESSION_OWNED carries the master");
+        sidecar.recv_until(|f| f.frame_type == FrameType::Response && f.code == code::CREATE);
+        // Guard: the counters move once the session's own snapshot runs, so the zeros above are not a dead file.
+        wait_for("the first background snapshot", Duration::from_secs(30), || stats.num("scans_scoped") > 0);
+        let read = stats.read();
+        assert_eq!(read["scans_full"], 0, "{read}");
+        assert_eq!(read["reaper_running"], true, "{read}");
+        let cleaned = kill_and_clean(&mut sidecar, "gate-scan");
+        assert_eq!(cleaned["cleanup_complete"], true, "{cleaned}");
+        // SAFETY: the master this test received.
+        unsafe { libc::close(master) };
+    }
+
     /// 250 children over a leader that `pthread_exit`s: a stable already-zombie leader (rows R-6, R-7).
     #[cfg(feature = "fault-hooks")]
     fn leader_exit_world(name: &str) -> (Sidecar, Stats, RawFd, Vec<i32>) {

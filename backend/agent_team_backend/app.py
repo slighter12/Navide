@@ -627,6 +627,10 @@ class Session:
         # connection); output routes back through _active_emit → the attached
         # Session's send_json. See get_terminals().
         self.terminals = get_terminals()
+        # The app-level service starts its background work (the Rust runtime) at the first connection. Startup reap
+        # has finished before any connection, so that start sees what a create would. Only a TerminalService has it.
+        if isinstance(self.terminals, TerminalService):
+            self.terminals.prewarm()
         # Track background tasks so they can be cancelled on disconnect.
         self._review_tasks: set[asyncio.Task] = set()
         # In-flight handle_message tasks; cancelled in ws() finally so handlers

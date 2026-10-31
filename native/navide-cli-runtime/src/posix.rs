@@ -502,6 +502,19 @@ fn snapshot(initial_child: Option<i32>, known: &Table, _births: &mut Births) -> 
 fn snapshot(initial_child: Option<i32>, known: &Table, births: &mut Births) -> io::Result<Table> {
     linux::snapshot(initial_child, known, births)
 }
+
+/// What the gate admits for a root blocked before its `exec`: its own identity, read once, which is what a
+/// snapshot of it would return; any other shape falls back to that snapshot.
+fn gated_root_table(pid: i32, births: &mut Births) -> io::Result<Table> {
+    #[cfg(target_os = "linux")]
+    let row = linux::gated_root(pid, births)?;
+    #[cfg(target_os = "macos")]
+    let row = darwin::gated_root(pid)?;
+    match row {
+        Some(entry) => Ok(Table::from([(pid, entry)])),
+        None => snapshot(Some(pid), &Table::new(), births),
+    }
+}
 #[cfg(all(test, target_os = "macos"))]
 fn descendants(table: &Table, pid: i32) -> Table {
     let mut result = Table::new();
@@ -530,8 +543,13 @@ const SNAPSHOT_MS: u64 = 5000;
 /// crash could leave an executed, unnamed process. It runs under `FD_FORK_LOCK`, which exists for a different reason
 /// (no concurrent fork may inherit the gate's write end), so the sync cost is a correctness price, not a latency
 /// target; the measured cost is in `evidence/e3/e3-handoff.md`.
+///
+/// The sync is one plain `fsync(2)` on every platform, the call `File::sync_all` makes on Linux. On Apple platforms
+/// `sync_all` issues `F_FULLFSYNC` instead (~4 ms per create there): its drive-cache flush guards only against
+/// power loss, after which no process the journal names can be alive.
 fn journal_append(path: &std::path::Path, record: &Value) -> io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
     let mut line = serde_json::to_vec(record).map_err(io::Error::other)?;
     line.push(b'\n');
     let mut file = std::fs::OpenOptions::new()
@@ -540,7 +558,16 @@ fn journal_append(path: &std::path::Path, record: &Value) -> io::Result<()> {
         .mode(0o600)
         .open(path)?;
     file.write_all(&line)?;
-    file.sync_all()
+    loop {
+        // SAFETY: a valid descriptor owned by `file` for the duration of the call.
+        if unsafe { libc::fsync(file.as_raw_fd()) } == 0 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::EINTR) {
+            return Err(error);
+        }
+    }
 }
 
 fn identity(pid: i32, entry: &(i32, i32, String)) -> Value {
@@ -653,14 +680,14 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
     }
     let pid = i32::from_ne_bytes(buffer);
     // From here until its own waiter has taken its status, only that waiter may reap this root. The key is
-    // written before the identity snapshot and the journal append; `spawn_gated` has held the reaper's gate
+    // written before the identity read and the journal append; `spawn_gated` has held the reaper's gate
     // since before the fork, so the interval [fork, here] is closed too.
     #[cfg(target_os = "linux")]
     if let Some(reaper) = reaper {
         *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reaper.reserve(pid));
     }
     let mut births = Births::default();
-    let table = snapshot(Some(pid), &Table::new(), &mut births)
+    let table = gated_root_table(pid, &mut births)
         .map_err(|_| io::Error::other("OWNERSHIP_JOURNAL_FAILED: identity unavailable"))?;
     let root = table
         .get(&pid)
@@ -672,6 +699,7 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         "runtime_generation":wire.generation,"owner_pid":wire.owner_pid});
     #[cfg(feature = "fault-hooks")]
     if let Some(path) = hold {
+        fault::mark_hold_entered(path);
         fault::wait_for_file_bounded(path)?;
     }
     journal_append(journal, &record).map_err(|error| {
@@ -1711,6 +1739,11 @@ mod fault {
     /// append on macOS.
     pub fn journal_hold(pane: &str) -> Option<String> {
         kind(pane)?.strip_prefix("journal-hold:").map(str::to_owned)
+    }
+    /// The journal hold creates `<path>.entered` once the owner has taken the root's identity and is about
+    /// to wait, so a test can tell "the gate is holding" from "the gate has not got there yet".
+    pub fn mark_hold_entered(path: &str) {
+        let _ = std::fs::write(format!("{path}.entered"), b"");
     }
     /// `fault:before-report-read:<path>`: the owner waits, before it reads the root's pid report, until
     /// `<path>` exists (the fork-to-reservation window of the Linux reaper).
@@ -3610,5 +3643,59 @@ mod scoped_tests {
         assert_eq!(classify(code::CREATE, &message), ("SPAWN_FAILED", "spawn"), "{message}");
         assert!(message.contains("reaper has stopped"), "{message}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// g2-t11 F1: the gate's one identity read returns what a snapshot of a root held at the gate returns.
+#[cfg(test)]
+mod gated_root_tests {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    /// Shaped like a root held at the gate: a `setsid` leader with no child, blocked on its stdin.
+    fn held_root(leader: bool) -> std::process::Child {
+        let mut command = Command::new("/bin/cat");
+        command.stdin(Stdio::piped()).stdout(Stdio::null());
+        if leader {
+            // SAFETY: setsid is async-signal-safe and runs in the forked child before exec.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        command.spawn().unwrap()
+    }
+
+    #[test]
+    fn the_gate_identity_read_equals_the_snapshot_of_a_held_root() {
+        let mut root = held_root(true);
+        let pid = root.id() as i32;
+        let from_read = gated_root_table(pid, &mut Births::default());
+        let from_snapshot = snapshot(Some(pid), &Table::new(), &mut Births::default());
+        root.kill().unwrap();
+        root.wait().unwrap();
+        let from_read = from_read.unwrap();
+        assert_eq!(from_read, from_snapshot.unwrap());
+        assert_eq!(from_read.len(), 1, "{from_read:?}");
+        assert_eq!(from_read[&pid].1, pid, "the root leads its own group");
+    }
+
+    /// A root that is not its own group leader is not the gate's shape: no identity read, the snapshot decides.
+    #[test]
+    fn a_root_outside_the_gate_shape_gets_no_identity_read() {
+        let mut root = held_root(false);
+        let pid = root.id() as i32;
+        #[cfg(target_os = "linux")]
+        let row = linux::gated_root(pid, &mut Births::default());
+        #[cfg(target_os = "macos")]
+        let row = darwin::gated_root(pid);
+        root.kill().unwrap();
+        root.wait().unwrap();
+        assert_eq!(row.unwrap(), None);
     }
 }

@@ -210,6 +210,7 @@ class RustTerminalService(TerminalService):
     """Reuse presentation, not Python native handles or process lifecycle."""
 
     _sending: asyncio.Future | None = None  # the frame write in progress, finished even if its caller left
+    _prewarming: asyncio.Task | None = None  # the background start of `prewarm`
 
     def __init__(self, emit):
         super().__init__(emit)
@@ -305,6 +306,19 @@ class RustTerminalService(TerminalService):
                 self._lose(f"RUNTIME_EVENT_FAILED: {error}")
         task.add_done_callback(done)
         return task
+
+    def prewarm(self) -> None:
+        """Start the runtime in the background, once, at the first client connection, so the first request
+        usually finds it ready. A request that arrives earlier waits on the same `_start_lock` and gets the same
+        outcome. The task drops its exception only because `_ensure_started` has already settled it: a failure
+        after the spawn set the permanent `_lost` and reaped the child, a refusal before the spawn left no process
+        and the next request retries it. Not `_task`: a refused start is not a runtime loss."""
+        if self._prewarming is None:
+            self._prewarming = asyncio.create_task(self._prewarm())
+
+    async def _prewarm(self) -> None:
+        with suppress(Exception):
+            await self._ensure_started()
 
     def _lose(self, message: str) -> None:
         """Record a runtime failure, fail every wait on it and, for a runtime
@@ -674,17 +688,24 @@ class RustTerminalService(TerminalService):
             # Python must hold only its own end, or it could never observe the sidecar's death.
             if child is not None:
                 child.close()
+            # What is known without a read, so a failure below still settles (and receipts) this process.
+            self._runtime_identity = {"pid": self._runtime.pid, "created": None, "executable": str(path),
+                                      "executableSha256": None}
             try:
-                process = psutil.Process(self._runtime.pid)
-                self._runtime_identity = {"pid": process.pid, "created": process.create_time(),
-                                          "executable": process.exe(), "executableSha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-            except psutil.NoSuchProcess:
-                # Reaped before its identity could be read: the handshake below still reads its fatal line
-                # (START_FAILED), and a ready line from an identity-less process is refused.
-                self._runtime_identity = {"pid": self._runtime.pid, "created": None, "executable": str(path),
-                                          "executableSha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-            self._stderr_task = self._task(self._read_stderr())
-            try:
+                try:
+                    try:
+                        process = psutil.Process(self._runtime.pid)
+                        created, executable = process.create_time(), process.exe()
+                    except psutil.NoSuchProcess:
+                        # Reaped before its identity could be read: the handshake below still reads its fatal line
+                        # (START_FAILED), and a ready line from an identity-less process is refused.
+                        created, executable = None, str(path)
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                except (OSError, psutil.Error) as error:
+                    raise RuntimeError(f"START_FAILED at identity: {error}") from error
+                self._runtime_identity = {"pid": self._runtime.pid, "created": created, "executable": executable,
+                                          "executableSha256": digest}
+                self._stderr_task = self._task(self._read_stderr())
                 ready = await self._read_ready()
                 if self._runtime_identity["created"] is None:
                     raise RuntimeError("START_FAILED: the sidecar exited before its identity was read")
@@ -2024,6 +2045,8 @@ class RustTerminalService(TerminalService):
                 if s.pane_id == pane_id and not s.cleanup.is_set() and not s.hidden]
 
     async def kill_all(self, grace: float = 1.0) -> None:
+        if self._prewarming is not None:
+            await asyncio.wait({self._prewarming})  # never decide on a half-started runtime
         if self._invalidation is not None and not self._invalidation.done():
             await asyncio.wait({self._invalidation})
         if self._runtime is None:

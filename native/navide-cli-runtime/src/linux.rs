@@ -514,6 +514,25 @@ pub(super) enum Reads {
     Shared { due: Instant },
 }
 
+/// The gated root's own row, read once: `None` unless it is alive and alone in the group and session `setsid`
+/// gave it. At the gate it has not executed yet, so it has no child and nothing else is in its group or session;
+/// `snapshot(Some(pid), ..)` then admits exactly this row into `births`, after two scans. `None` sends the caller
+/// to that snapshot. The orphan ledger is not touched: it is only read for non-reserved children, and a gated
+/// root is reserved until its own waiter has reaped it.
+pub(super) fn gated_root(pid: i32, births: &mut Births) -> io::Result<Option<(i32, i32, String)>> {
+    let Some(seen) = process(pid)? else {
+        return Ok(None);
+    };
+    if matches!(seen.state, b'Z' | b'X') || seen.group != pid || seen.session != pid {
+        return Ok(None);
+    }
+    let start = legacy_start(seen.birth_ticks, boot_seconds()?, clock_ticks()?)?;
+    if !births.admit(pid, &start, seen.birth_ticks) {
+        return Ok(None);
+    }
+    Ok(Some((seen.parent, seen.group, start)))
+}
+
 pub(super) fn snapshot(
     initial_child: Option<i32>,
     seeds: &Table,
@@ -1974,6 +1993,42 @@ mod tests {
         let value = parse_stat(123, input).unwrap();
         assert_eq!((value.parent, value.group, value.birth_ticks), (1, 23, 456));
         assert!(parse_stat(124, input).is_err());
+    }
+
+    /// g2-t11 F1: the gate's identity read admits a held root into the session's births exactly as a snapshot of
+    /// it does, and never writes the orphan ledger; the snapshot, the control, does write it in scoped mode.
+    #[test]
+    fn the_gate_identity_read_admits_the_root_without_touching_the_orphan_ledger() {
+        let mut command = Command::new("/bin/cat");
+        command.stdin(std::process::Stdio::piped());
+        // SAFETY: setsid is async-signal-safe and runs in the forked child before exec.
+        unsafe {
+            command.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let mut root = command.spawn().unwrap();
+        let pid = root.id() as i32;
+        SCOPED_FORCE.with(|forced| forced.set(Some(true)));
+        let mut read = Births::default();
+        let row = gated_root(pid, &mut read).unwrap();
+        let ticks = read.0.get(&pid).map(|(_, ticks)| *ticks);
+        let in_ledger = || {
+            ticks.is_some_and(|ticks| orphans().lock().unwrap().admitted.contains_key(&(pid, ticks)))
+        };
+        let ledger_after_read = in_ledger();
+        let mut snapped = Births::default();
+        let table = snapshot(Some(pid), &Table::new(), &mut snapped);
+        let ledger_after_snapshot = in_ledger();
+        SCOPED_FORCE.with(|forced| forced.set(None));
+        root.kill().unwrap();
+        root.wait().unwrap();
+        let row = row.expect("a held root has its own row");
+        assert_eq!(table.unwrap(), Table::from([(pid, row)]));
+        assert_eq!(read.0, snapped.0, "the same births admission");
+        assert!(!ledger_after_read, "the identity read wrote the orphan ledger");
+        assert!(ledger_after_snapshot, "control: a scoped snapshot records the root in the ledger");
     }
 
     #[test]
