@@ -579,6 +579,9 @@ class TerminalService:
         self._exit_settles: set[asyncio.Task[None]] = set()
         self._last_persisted: dict[int, dict[int, str]] = {}
 
+    def prewarm(self) -> None:
+        """Called at each client connection. This service has nothing to start ahead of a create."""
+
     def create(
         self,
         *,
