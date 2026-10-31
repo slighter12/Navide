@@ -1291,6 +1291,9 @@ pub(super) struct Reaper {
 pub(super) const INJECT_WAITID_ERROR: u8 = 1;
 #[cfg(test)]
 pub(super) const INJECT_PANIC: u8 = 2;
+/// The loop idles (never calls `waitid`) until the value changes, so a test can pick the moment it ends.
+#[cfg(test)]
+pub(super) const INJECT_PARK: u8 = 3;
 
 /// Ends the reaper thread's life on every path out of `run`, including a panic: it records the stop (so creates
 /// are refused), clears the liveness counter, and says so once on stderr.
@@ -1301,11 +1304,24 @@ struct StopGuard<'a> {
 
 impl Drop for StopGuard<'_> {
     fn drop(&mut self) {
+        // The stop is published under the create gate. A create holds the gate from its `stopped` check until its
+        // root is reserved, so a create that already read `false` finishes (and reserves its root) before this
+        // store, and every create that takes the gate afterwards reads `true` and is refused before any fork.
+        // Without the gate the store could land between a create's check and its fork, leaving a new root
+        // with no reaper.
+        //
+        // Self-deadlock: the reaper thread never holds `gate` when this runs. The only place the loop takes it is
+        // `serve` (through `settle`), and that guard is a local of `serve`: it is released before `serve` returns
+        // and, on a panic, during unwinding, before the unwind reaches `run`'s `guard` local (declared before the
+        // `run_loop` call, so it drops after everything `run_loop` owns). Nothing else is held either, and the
+        // lock order stays `FD_FORK_LOCK` -> `gate` -> `reserved`: this takes `gate` alone, never `reserved`.
+        let gate = self.reaper.hold_gate();
         // The counter first: whoever sees the stop also sees the liveness counter already cleared.
         counters::reaper_stopped();
         self.reaper
             .stopped
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        drop(gate);
         eprintln!(
             "cli runtime: the reaper stopped ({}); new sessions are refused, running sessions are unaffected",
             self.cause
@@ -1497,6 +1513,10 @@ impl Reaper {
             match self.inject.load(std::sync::atomic::Ordering::SeqCst) {
                 INJECT_WAITID_ERROR => return io::Error::from_raw_os_error(libc::EIO),
                 INJECT_PANIC => panic!("injected reaper panic"),
+                INJECT_PARK => {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
                 _ => {}
             }
             // SAFETY: an all-zero siginfo is a valid out buffer for waitid.

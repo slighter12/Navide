@@ -894,6 +894,10 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
     /// Test seam: the next create's gate owner panics right after it released the gate.
     static PANIC_AFTER_RELEASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Test seam: runs on the creating thread while it holds the reaper gate, right after the `stopped` check
+    /// passed and before any pipe or fork.
+    static AFTER_STOPPED_CHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// A released root whose session could not be set up: signal its group by the identity just recorded and
@@ -1032,6 +1036,10 @@ fn spawn_gated(
         return Err(io::Error::other(
             "the Linux child reaper has stopped; no new session can be started safely",
         ));
+    }
+    #[cfg(all(test, target_os = "linux"))]
+    if let Some(hook) = AFTER_STOPPED_CHECK.with(|cell| cell.borrow_mut().take()) {
+        hook();
     }
     // The reservation lives here, not in the gate-owner thread, so a panic of that thread cannot drop it.
     #[cfg(target_os = "linux")]
@@ -3347,6 +3355,10 @@ mod scoped_tests {
     use super::*;
     use std::process::Command;
 
+    /// The tests that start a real reaper thread share the process-wide `reaper_running` counter, so they run
+    /// one at a time.
+    static REAPER_THREAD_TESTS: Mutex<()> = Mutex::new(());
+
     fn scoped(on: bool) {
         linux::SCOPED_FORCE.with(|forced| forced.set(Some(on)));
     }
@@ -3478,6 +3490,7 @@ mod scoped_tests {
     /// B1: a reaper thread that ended (`what` selects how) leaves the runtime refusing the next create, with the
     /// `SPAWN_FAILED` / `spawn` answer of any pre-fork refusal, and the liveness counter cleared.
     fn create_is_refused_once_the_reaper_has_stopped(what: u8, name: &str) {
+        let _serial = REAPER_THREAD_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let reaper = linux::Reaper::new();
         reaper.inject(what);
         reaper.start().unwrap();
@@ -3524,5 +3537,70 @@ mod scoped_tests {
     #[test]
     fn create_is_refused_after_the_reaper_panics() {
         create_is_refused_once_the_reaper_has_stopped(linux::INJECT_PANIC, "b1-panic");
+    }
+
+    /// B1 (review): the stop is published under the create gate. A create that already passed the `stopped` check
+    /// finishes and reserves its root first; the stop lands only after it released the gate; a create that starts
+    /// after that is refused before any fork.
+    #[test]
+    fn the_reaper_stop_waits_for_a_create_that_holds_the_gate() {
+        let _serial = REAPER_THREAD_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let reaper = linux::Reaper::new();
+        reaper.inject(linux::INJECT_PARK);
+        reaper.start().unwrap();
+        linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = Some(reaper.clone()));
+        scoped(true);
+        let held = Arc::new(AtomicBool::new(false));
+        {
+            let (reaper, held) = (reaper.clone(), held.clone());
+            AFTER_STOPPED_CHECK.with(|cell| {
+                *cell.borrow_mut() = Some(Box::new(move || {
+                    // The create holds the gate and has read `stopped == false`. End the reaper now.
+                    reaper.inject(linux::INJECT_WAITID_ERROR);
+                    thread::sleep(Duration::from_millis(500));
+                    assert!(
+                        !reaper.stopped(),
+                        "stopped became true while the create held the gate"
+                    );
+                    held.store(true, Ordering::SeqCst);
+                }));
+            });
+        }
+        let dir = std::env::temp_dir().join(format!("navide-b1-gate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let args = |name: &str| {
+            json!({"session_id":name,"session_generation":"ffeeddccbbaa99887766554433221100",
+                "pane_id":"pane-1","workspace_path":dir,"cwd":dir,
+                "launch":{"shape":"direct","form":"list","elements":["/bin/sleep","30"],"words":[]},
+                "env":{"PATH":"/usr/bin:/bin"},"rows":24,"cols":80,"agent_key":""})
+        };
+        let wire = test_wire(dir.join("journal.jsonl"));
+        let sessions: Sessions = Arc::new(Mutex::new(Registry::default()));
+        // The held create's own outcome: it succeeds and its root is reserved by the time it returns.
+        let first = spawn(&args("b1-held"), &wire, 1, &sessions);
+        assert!(held.load(Ordering::SeqCst), "the hook never ran");
+        let spawned = first.ok().expect("the create that held the gate was refused");
+        let pid = spawned.owned.pid;
+        assert!(reaper.holds(pid), "the held create's root was not reserved");
+        // The stop is published once the create released the gate, and then every create is refused.
+        assert!(
+            reaper.wait_stopped(Duration::from_secs(5)),
+            "the stop was never published after the gate was released"
+        );
+        let second = spawn(&args("b1-later"), &wire, 2, &sessions);
+        scoped(false);
+        linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = None);
+        // Clean up the held create's child before judging the later one.
+        // SAFETY: the root is a session leader of its own group; this signals only that group.
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+        let end = Instant::now() + Duration::from_secs(10);
+        while reaper.holds_any() && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!reaper.holds_any(), "the held create's root was never reaped by its own waiter");
+        let message = second.err().expect("a create was accepted after the stop").to_string();
+        assert_eq!(classify(code::CREATE, &message), ("SPAWN_FAILED", "spawn"), "{message}");
+        assert!(message.contains("reaper has stopped"), "{message}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
