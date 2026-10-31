@@ -289,7 +289,7 @@ import {
   type WorkspaceRestoreSession,
 } from './lib/resumeBehavior'
 import { shouldQueuePtyLostResume } from './lib/ptyLostRecovery'
-import { closePaneHidden, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
+import { closePaneHidden, idsWithoutClosing, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
 import { WakeClaims, joinedRealizeOutcome, paneOpenAnswer, sessionHeldElsewhere, type SessionHolder } from './lib/paneOpenAnswer'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
 import { cliPermissionKey, parseCliPermissionMode, skipPermissionFlagFor } from '@navide/plugin-shell'
@@ -9341,7 +9341,8 @@ function batchRestore(ids: string[]): void {
 }
 
 async function batchKill(ids: string[]): Promise<void> {
-  for (const id of [...ids]) await onUserClosePane(id)
+  // A pane the user already closed is hidden and settling; closing it again would race that close.
+  for (const id of [...idsWithoutClosing(ids, closingPaneIds.value)]) await onUserClosePane(id)
   selectedPaneIds.value = new Set()
 }
 
@@ -18551,10 +18552,12 @@ async function sweepIdlePanes(): Promise<void> {
 
 /** Panes the user could reclaim right now, ignoring how long they have been
  *  idle. Drives the count on every "reclaim now" control, so the button can
- *  say what it is about to do before it is pressed. */
+ *  say what it is about to do before it is pressed. It also names the default
+ *  targets of reclaimPanesNow, so a pane the user is closing is left out: it is
+ *  hidden, and a reclaim would kill it a second time. */
 const reclaimableNowIds = computed<string[]>(() => {
   const now = Date.now()
-  return panes.value
+  return listedPanes.value
     .filter((p) => reclaimBlockedBy(reclaimCandidate(p), RECLAIM_NOW_THRESHOLD_MS, now) === null)
     .map((p) => p.id)
 })
@@ -18669,7 +18672,7 @@ const selectedPaneIds = ref(new Set<string>())
 const selectionBatchIds = computed<string[]>(() =>
   selectedPaneIds.value.size < 2
     ? []
-    : panes.value.map((p) => p.id).filter((id) => selectedPaneIds.value.has(id))
+    : idsWithoutClosing(panes.value.map((p) => p.id).filter((id) => selectedPaneIds.value.has(id)), closingPaneIds.value)
 )
 // Anchor for Shift-click range selection (same semantics as GitPane's
 // lastClickKey): set by plain and Cmd/Ctrl clicks, left untouched by Shift
@@ -20921,7 +20924,7 @@ const resourcePillText = computed(() => {
   // Live over total: idle reclaim downgrades panes to placeholders rather than
   // closing them, so "▤ 10 / 100" reads as ten panes holding a process out of a
   // hundred listed. The resource figures below come only from the live ones.
-  const parts = [`▤ ${realizedPaneCount.value} / ${panes.value.length}`]
+  const parts = [`▤ ${realizedPaneCount.value} / ${listedPanes.value.length}`]
   const share = resourceCpuShare.value
   if (share !== null && resourceUsage.cpuAvailable.value) parts.push(formatCpuPercent(share))
   if (resourceUsage.measured.value && resourceUsage.available.value && resourceTotals.value.bytes > 0) {
@@ -21005,7 +21008,7 @@ const ctxTargetIds = computed<string[]>(() => {
   const m = paneCtxMenu.value
   if (!m) return []
   if (selectedPaneIds.value.has(m.paneId) && selectedPaneIds.value.size > 1) {
-    return panes.value.map((p) => p.id).filter((id) => selectedPaneIds.value.has(id))
+    return idsWithoutClosing(panes.value.map((p) => p.id).filter((id) => selectedPaneIds.value.has(id)), closingPaneIds.value)
   }
   return [m.paneId]
 })
@@ -21929,7 +21932,7 @@ function paneListTrail(ancestors: readonly string[]): string {
  *  panes it spawned and how many are in it. Read from paneViews, not the
  *  lineage tree, because it is live status; see subtreeSignals for why it is
  *  walked over all panes and kept out of the pane's own status. */
-const paneListSubtree = computed(() => subtreeSignals(paneViews.value))
+const paneListSubtree = computed(() => subtreeSignals(listedPaneViews.value))
 
 /** The subtree chip's state, colour and legend in one binding: a coloured
  *  "↳ 2" with no tooltip is a number nobody can read. */
@@ -22721,7 +22724,7 @@ function paneIsCommander(p: ActivePane): boolean {
       v-if="turnStatsEverOpened"
       :open="showTurnStats"
       :backend="backend"
-      :panes="paneViews"
+      :panes="listedPaneViews"
       :cli-profiles="cliProfilesApi"
       :active-pane-id="effectiveFocusPaneId"
       @close="showTurnStats = false"
@@ -23281,7 +23284,7 @@ function paneIsCommander(p: ActivePane): boolean {
             </button>
           </div>
         </div>
-        <div v-if="paneViews.filter(v => !v.isMinimized && tabFilteredPaneIds.has(v.id)).length === 0" class="spotlight-strip-empty">
+        <div v-if="auxiliaryListPanes.length === 0" class="spotlight-strip-empty">
           {{ $t('label.no-agents-yet') }}
         </div>
       </div>
@@ -23445,7 +23448,7 @@ function paneIsCommander(p: ActivePane): boolean {
       :workspace-path="pipeline.workspacePath"
       :stages="stagesApi.stages.value"
       :run-groups="runGroups"
-      :panes="paneViews"
+      :panes="listedPaneViews"
       :active-pane-id="effectiveFocusPaneId"
       :pipeline="pipelineView"
       :expanded="tokenPanelExpanded"

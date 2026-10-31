@@ -104,10 +104,26 @@ describe('callers that start a replacement (or retire more) only after a proven 
 })
 
 describe('a closing pane is listed on no surface until its close is refused', () => {
+  // The body of `const <name> = computed...(...)`, cut at the paren that closes the computed call:
+  // no dependence on blank lines or on how the text is wrapped.
   const computedBody = (name: string): string => {
     const start = appSource.indexOf(`const ${name} = computed`)
     expect(start, name).toBeGreaterThan(-1)
-    return appSource.slice(start, appSource.indexOf('\n\n', start))
+    const open = appSource.indexOf('(', start)
+    let depth = 0
+    for (let i = open; i < appSource.length; i++) {
+      if (appSource[i] === '(') depth++
+      else if (appSource[i] === ')' && --depth === 0) return appSource.slice(start, i + 1)
+    }
+    throw new Error(`unterminated computed: ${name}`)
+  }
+  // `paneViews.value` / `panes.value` as a whole identifier: `listedPaneViews.value` and
+  // `listedPanes.value` do not match, so a raw read cannot hide behind a similar name.
+  const raw = (id: string): RegExp => new RegExp(`(?<![\\w$.])${id}\\.value\\b`)
+  const tag = (name: string): string => {
+    const start = appSource.indexOf(`<${name}\n`)
+    expect(start, name).toBeGreaterThan(-1)
+    return appSource.slice(start, appSource.indexOf('/>', start))
   }
 
   it('derives the listed panes and views through withoutClosing', () => {
@@ -116,16 +132,38 @@ describe('a closing pane is listed on no surface until its close is refused', ()
   })
   it.each(['paneLineage', 'paneListLineage'])('%s is built from the listed panes', (name) => {
     expect(computedBody(name)).toContain('listedPanes.value')
-    expect(computedBody(name)).not.toContain('panes.value,')
+    expect(computedBody(name)).not.toMatch(raw('panes'))
   })
   it('the stage tabs and the pane list read the listed panes', () => {
     expect(computedBody('panesOnStage')).toContain('closingPaneIds.value')
     expect(computedBody('auxiliaryListPanes')).toContain('listedPaneViews.value')
-    expect(computedBody('auxiliaryListPanes')).not.toContain('paneViews.value')
+    expect(computedBody('auxiliaryListPanes')).not.toMatch(raw('paneViews'))
   })
   it('the workspace groups and the sidebar cards read the listed panes and views', () => {
     expect(computedBody('workspaceGroups')).toContain('panes: listedPanes.value')
-    expect(appSource).toMatch(/<ControlPane[\s\S]*?:panes="listedPaneViews"/)
+    expect(tag('ControlPane')).toContain(':panes="listedPaneViews"')
+  })
+  it('the token panel, the turn-stats modal and the auxiliary subtree chips read the listed views', () => {
+    expect(tag('TokenStatsPanel')).toContain(':panes="listedPaneViews"')
+    expect(tag('TurnStatsModal')).toContain(':panes="listedPaneViews"')
+    expect(computedBody('paneListSubtree')).toContain('subtreeSignals(listedPaneViews.value)')
+    expect(computedBody('paneListSubtree')).not.toMatch(raw('paneViews'))
+  })
+  it('the spotlight empty state reads the same list as the cards beside it', () => {
+    expect(appSource).toMatch(/v-if="auxiliaryListPanes\.length === 0"\s+class="spotlight-strip-empty"/)
+  })
+  it('the status-bar pill total and "reclaim now" leave out a closing pane', () => {
+    // reclaimableNowIds drives the "reclaim now" counts AND the default targets of reclaimPanesNow,
+    // so a closing pane must not be offered (a second onKill would race the close in flight).
+    expect(computedBody('reclaimableNowIds')).toContain('listedPanes.value')
+    expect(computedBody('reclaimableNowIds')).not.toMatch(raw('panes'))
+    expect(computedBody('resourcePillText')).toContain('listedPanes.value.length')
+    expect(computedBody('resourcePillText')).not.toMatch(raw('panes'))
+  })
+  it('a hidden closing pane is no part of a batch (selection, context menu, remove selected)', () => {
+    expect(computedBody('selectionBatchIds')).toContain('idsWithoutClosing(')
+    expect(computedBody('ctxTargetIds')).toContain('idsWithoutClosing(')
+    expect(fn('batchKill')).toContain('idsWithoutClosing(ids, closingPaneIds.value)')
   })
 })
 

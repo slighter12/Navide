@@ -65,6 +65,11 @@ export function withoutClosing<L extends readonly { id: string }[]>(items: L, cl
   return (closing.size === 0 ? items : items.filter((item) => !closing.has(item.id))) as L
 }
 
+/** The same rule for a batch of ids: a pane the user already closed is not closed (or counted) again. */
+export function idsWithoutClosing(ids: string[], closing: ReadonlySet<string>): string[] {
+  return closing.size === 0 ? ids : ids.filter((id) => !closing.has(id))
+}
+
 export async function settlePaneTerminals(steps: PaneRetirementSteps): Promise<boolean> {
   if (steps.killOwn) {
     try {
