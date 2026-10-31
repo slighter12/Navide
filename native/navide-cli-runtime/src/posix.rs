@@ -1166,10 +1166,6 @@ fn spawn_gated(
     // The root exists and is reserved: the reaper may run again, and has a new child to wait on.
     #[cfg(target_os = "linux")]
     {
-        #[cfg(test)]
-        if let Some(reaper) = &reaper {
-            reaper.mark_create_released();
-        }
         drop(reaper_gate);
         if let Some(reaper) = &reaper {
             reaper.note_spawned();
@@ -3561,10 +3557,10 @@ mod scoped_tests {
                 *cell.borrow_mut() = Some(Box::new(move || {
                     // The create holds the gate and has read `stopped == false`. End the reaper now.
                     reaper.inject(linux::INJECT_WAITID_ERROR);
-                    // Wait until the reaper is *at* publication, blocked on the gate this create holds, so a
-                    // regressed store happens while the create still holds the gate. The timeout only guards a
-                    // failure. The verdict is not read here: it is what the publication site recorded
-                    // (`stop_store_seen`, asserted below), so it does not depend on when this hook runs.
+                    // Wait until the reaper is *at* publication, blocked on the gate this create holds, so the
+                    // stop is really waiting for this create. The timeout only guards a failure. The verdict is
+                    // not read here: it is what the publication site recorded (`stop_store_seen`, asserted
+                    // below), so it does not depend on when this hook runs.
                     assert!(
                         reaper.wait_stop_blocked_on_gate(Duration::from_secs(10)),
                         "the reaper never reached the stop publication while the create held the gate"
@@ -3596,8 +3592,8 @@ mod scoped_tests {
         );
         assert_eq!(
             reaper.stop_store_seen(),
-            linux::STOP_AFTER_RELEASE,
-            "the stopped flag was published while the create still held the gate"
+            linux::STOP_UNDER_GATE,
+            "the stopped flag was published before the stopper owned the gate"
         );
         let second = spawn(&args("b1-later"), &wire, 2, &sessions);
         scoped(false);
