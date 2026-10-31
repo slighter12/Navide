@@ -51,7 +51,7 @@ describe('the tree these lists read', () => {
     // borrowing that copy would let folding a family in the sidebar erase its
     // panes from a surface with no way to bring them back.
     expect(appSource).toContain('const paneListLineage = computed<PaneLineageRow[]>(() =>')
-    expect(appSource).toContain('buildPaneLineage(panes.value, NOTHING_FOLDED)')
+    expect(appSource).toContain('buildPaneLineage(listedPanes.value, NOTHING_FOLDED)')
     expect(bodyOf('const paneListLineage = computed<PaneLineageRow[]>(() =>')).not.toContain('collapsedPanes')
   })
 

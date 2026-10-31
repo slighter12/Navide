@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import ts from 'typescript'
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
+import { idsWithoutClosing } from '../../lib/paneRetirement'
 import { reclaimBlockedBy, namedReclaimBlockedBy, RECLAIM_NOW_THRESHOLD_MS, type ReclaimCandidate } from '../../lib/idleReclaim'
 
 const source = readFileSync(resolve(process.cwd(), 'src/renderer/src/App.vue'), 'utf8')
@@ -50,6 +51,7 @@ function harness(initial: TestPane[], selected: string[], muted: string[] = []) 
   })
   const deps = {
     computed, panes, selectedPaneIds, paneCtxMenu, reclaimIdlePane,
+    listedPanes: computed(() => panes.value), closingPaneIds: ref(new Set<string>()), idsWithoutClosing,
     reclaimBlockedBy, namedReclaimBlockedBy, RECLAIM_NOW_THRESHOLD_MS,
     reclaimCandidate: (p: TestPane) => p,
     closePaneCtxMenu: () => { paneCtxMenu.value = null },

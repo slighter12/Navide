@@ -128,7 +128,7 @@ describe('follow the default account (plan_8debb8, scheme B) wiring', () => {
     expect(block).toContain('plan: planAccountFollow,')
     expect(block).toContain('move: moveFollowPanes,')
     const plan = functionBody('planAccountFollow')
-    expect(plan).toContain('followingPaneRows(panes.value.map(followPaneInput), {')
+    expect(plan).toContain('followingPaneRows(listedPanes.value.map(followPaneInput), {')
     expect(plan).toContain('isFollowing: accountFollow.has,')
     // The menu path never swaps the live credential.
     expect(plan).not.toContain('cliAccountSwitch')

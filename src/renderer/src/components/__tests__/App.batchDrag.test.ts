@@ -28,7 +28,7 @@ describe('App batch drag wiring', () => {
 
   it('derives the batch from the same multi-selection the context menu uses', () => {
     expect(appSource).toContain(
-      'resolveDragBatch(paneId, selectedPaneIds.value, panes.value.map((p) => p.id))'
+      'resolveDragBatch(paneId, selectedPaneIds.value, listedPanes.value.map((p) => p.id))'
     )
   })
 

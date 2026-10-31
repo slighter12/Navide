@@ -39,9 +39,9 @@ describe('a workspace heading acts on its own workspace', () => {
   it('rebuild picks that workspace\'s panes, and panesInView only without one', () => {
     const fn = body('rebuildPanesViaResume')
     expect(fn).toContain('const pool = workspacePath')
-    expect(fn).toContain('panes.value.filter((p) => normWs(p.workspacePath) === normWs(workspacePath))')
+    expect(fn).toContain('listedPanes.value.filter((p) => normWs(p.workspacePath) === normWs(workspacePath))')
     // The toolbar and the tab strip still mean the workspace on screen.
-    expect(fn).toContain(': panesInView.value')
+    expect(fn).toContain(': listedPanesInView.value')
     expect(fn).toContain('const ids = pool')
   })
 

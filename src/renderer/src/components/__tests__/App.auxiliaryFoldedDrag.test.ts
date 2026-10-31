@@ -33,7 +33,7 @@ describe('auxiliary list folded drag wiring', () => {
     const fn = appSource.slice(start, end)
     expect(fn).toContain('if (!folded) return batch')
     // The real helper — the same one this file's behaviour tests exercise.
-    expect(fn).toContain('withFoldedSubtree(paneId, batch, panes.value)')
+    expect(fn).toContain('withFoldedSubtree(paneId, batch, listedPanes.value)')
     // The drop consumers re-derive the batch from the selection, so the
     // descendants only travel if the selection carries them.
     expect(fn).toContain('if (full !== batch) selectedPaneIds.value = new Set(full)')

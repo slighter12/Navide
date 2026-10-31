@@ -56,12 +56,13 @@ function harness(initial = familyPanes(), closed: string[] = [], actions = true)
   ))
   const paneListLineage = computed(() => buildPaneLineage(panes.value, new Set()))
   const paneViews = computed(() => panes.value.map(p => ({ ...p, isMinimized: minimizedPanes.value.has(p.id) })))
+  const listedPaneViews = paneViews
   const backend = { send: vi.fn() }
   const selectPane = vi.fn()
   const realizeRestoredPane = vi.fn()
   const syncViews = vi.fn()
   const deps = {
-    computed, panes, paneViews, paneListLineage, paneListCollapsed, minimizedPanes,
+    computed, panes, paneViews, listedPaneViews, paneListLineage, paneListCollapsed, minimizedPanes,
     activeTab, currentWorkspace, focusPaneId, effectiveLayoutMode, tabFilteredPaneIds,
     backend, selectPane, realizeRestoredPane, syncViews,
   }

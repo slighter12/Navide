@@ -124,7 +124,7 @@ describe('workspace switch — how the parts fit together', () => {
     // The owning actions never widen: they act on one project in every mode.
     for (const name of ['onKillAll', 'persistPaneOrder'] as const) {
       const b = body(name)
-      expect(b, name).toContain('panesInView.value')
+      expect(b, name).toContain(name === 'onKillAll' ? 'listedPanesInView.value' : 'panesInView.value')
       expect(b, name).not.toContain('panes.value')
     }
 

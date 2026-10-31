@@ -34,6 +34,9 @@ const props = defineProps<{
    *  host knows each pane's terminal session id, so its figures survive a
    *  rebuild that moves the pane id. The roster below only has pane ids. */
   localRows: ResourceSummaryRow[]
+  /** Pane ids and measurement keys of panes the user is closing: the roster and the sweep still
+   *  know them until settlement, but this table must not list them again. */
+  hiddenKeys?: ReadonlySet<string>
   /** Read-only mirror of the Settings › General rows. */
   autoReclaimOn: boolean
   autoReclaimMinutes: string
@@ -216,7 +219,7 @@ const rows = computed<ResourceRow[]>(() => {
 
   for (const pane of roster.value) {
     const paneId = pane.pane_id as string
-    if (seenPanes.has(paneId)) continue
+    if (seenPanes.has(paneId) || props.hiddenKeys?.has(paneId)) continue
     seenPanes.add(paneId)
     claimedMeasurements.add(paneId)
     out.push({
@@ -232,7 +235,7 @@ const rows = computed<ResourceRow[]>(() => {
   }
 
   for (const paneId of bytes.keys()) {
-    if (claimedMeasurements.has(paneId) || seenPanes.has(paneId)) continue
+    if (claimedMeasurements.has(paneId) || seenPanes.has(paneId) || props.hiddenKeys?.has(paneId)) continue
     out.push({
       paneId,
       name: t('resource.unnamed-pane'),

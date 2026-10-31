@@ -39,9 +39,9 @@ describe('closing a workspace actually tears its panes down', () => {
 
   it('still defaults to the on-screen workspace for every other caller', () => {
     // The ＋ menu's "kill all" must keep meaning "this workspace only" — passing
-    // no list has to behave exactly as before.
+    // no list must still stay in the viewed workspace while skipping closing panes.
     const killAll = body('onKillAll')
-    expect(killAll).toContain('paneIds ?? panesInView.value.map((p) => p.id)')
+    expect(killAll).toContain('paneIds ?? listedPanesInView.value.map((p) => p.id)')
   })
 
   it('keeps the derivation this depends on intact', () => {

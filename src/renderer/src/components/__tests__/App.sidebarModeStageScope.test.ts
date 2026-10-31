@@ -64,7 +64,7 @@ describe('free mode widens the stage, not the owning actions', () => {
       'deleteRunGroup'
     ]) {
       const text = body(appSource, fn)
-      expect(text, fn).toContain('panesInView')
+      expect(text, fn).toContain(fn === 'onKillAll' || fn === 'closeRunGroup' ? 'listedPanesInView' : 'panesInView')
       expect(text, fn).not.toContain('panesOnStage')
     }
   })

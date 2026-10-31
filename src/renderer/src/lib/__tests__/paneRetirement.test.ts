@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { closePaneHidden, idsWithoutClosing, settlePaneTerminals, withoutClosing } from '../paneRetirement'
+import { closePaneHidden, idsWithoutClosing, pendingPaneClose, settlePaneTerminals, withoutClosing } from '../paneRetirement'
 
 describe('settlePaneTerminals — the settlement answer is the only proof', () => {
   it('a proven settlement after a successful own kill retires', async () => {
@@ -66,19 +66,63 @@ describe('closePaneHidden — the pane is hidden while settlement is pending', (
     await expect(closePaneHidden(closing, 'p1', async () => { throw new Error('boom') })).rejects.toThrow('boom')
     expect(closing.has('p1')).toBe(false)
   })
-  it('stays hidden while a second close of the same pane is pending, even after the first one is refused', async () => {
+  it('a second close of a closing pane joins the pending close: one retire, one answer, hidden until it settles', async () => {
     const closing = new Set<string>()
     const first = deferred<object | null>()
-    const second = deferred<object | null>()
-    const firstClose = close(closing, first.promise)
-    const secondClose = close(closing, second.promise)
+    const retire = vi.fn(() => settlePaneTerminals({ settle: () => first.promise }))
+    const firstClose = closePaneHidden(closing, 'p1', retire)
+    const secondClose = closePaneHidden(closing, 'p1', retire)
     await Promise.resolve()
+    expect(closing.has('p1')).toBe(true)
     first.resolve(null)
     expect(await firstClose).toBe(false)
-    expect(closing.has('p1')).toBe(true)
-    second.resolve({ ok: true })
-    expect(await secondClose).toBe(true)
+    expect(await secondClose).toBe(false)
+    expect(retire).toHaveBeenCalledOnce()
     expect(closing.has('p1')).toBe(false)
+  })
+  it('a group with only a closing pane can await its refusal without starting another close', async () => {
+    const closing = new Set<string>()
+    const late = deferred<boolean>()
+    const retire = vi.fn(() => late.promise)
+    const firstClose = closePaneHidden(closing, 'p1', retire)
+    const observed = pendingPaneClose(closing, 'p1')
+    expect(observed).toBe(firstClose)
+    late.resolve(false)
+    expect(await observed).toBe(false)
+    expect(retire).toHaveBeenCalledOnce()
+  })
+  it('a group with visible and closing panes can await both without closing the hidden member twice', async () => {
+    const closing = new Set<string>()
+    const late = deferred<boolean>()
+    const retired: string[] = []
+    const hiddenClose = closePaneHidden(closing, 'hidden', async () => {
+      retired.push('hidden')
+      return late.promise
+    })
+    const observed = pendingPaneClose(closing, 'hidden')
+    const visibleClose = closePaneHidden(closing, 'visible', async () => {
+      retired.push('visible')
+      return true
+    })
+    await visibleClose
+    expect(retired).toEqual(['hidden', 'visible'])
+    late.resolve(true)
+    expect(await observed).toBe(true)
+    expect(await hiddenClose).toBe(true)
+    expect(retired).toEqual(['hidden', 'visible'])
+  })
+  it('a pane closed again after its close finished is retired again (refusal reveals it, a retry is a new close)', async () => {
+    const closing = new Set<string>()
+    const retire = vi.fn(async () => false)
+    await closePaneHidden(closing, 'p1', retire)
+    await closePaneHidden(closing, 'p1', retire)
+    expect(retire).toHaveBeenCalledTimes(2)
+  })
+  it('a synchronous throw from retire still reveals the pane and leaves no stale pending close', async () => {
+    const closing = new Set<string>()
+    await expect(closePaneHidden(closing, 'p1', () => { throw new Error('sync') })).rejects.toThrow('sync')
+    expect(closing.has('p1')).toBe(false)
+    expect(await closePaneHidden(closing, 'p1', async () => true)).toBe(true)
   })
   it('a caller that starts a replacement only after a proven answer starts none while pending or refused', async () => {
     const closing = new Set<string>()
@@ -133,6 +177,48 @@ describe('idsWithoutClosing — a hidden closing pane is not part of a batch act
     for (const id of idsWithoutClosing(['a', 'b'], closing)) {
       await closePaneHidden(closing, id, async () => { closed.push(id); return true })
     }
+    expect(closed).toEqual(['a', 'b'])
+  })
+  it('review-5 B4: a batch [a, b] whose ids were snapshotted earlier closes b once when b is closed separately meanwhile', async () => {
+    const closing = new Set<string>()
+    const closed: string[] = []
+    let settleA!: (retired: boolean) => void
+    const slowA = new Promise<boolean>((resolve) => { settleA = resolve })
+    let settleB!: (retired: boolean) => void
+    const slowB = new Promise<boolean>((resolve) => { settleB = resolve })
+    const retireOf = (id: string) => async () => { closed.push(id); return await (id === 'a' ? slowA : slowB) }
+    // The batch snapshot is taken before anything is closing, exactly like batchKill's ids argument.
+    const snapshot = ['a', 'b']
+    const batch = (async () => { for (const id of snapshot) await closePaneHidden(closing, id, retireOf(id)) })()
+    await Promise.resolve()
+    // b is closed separately (card or keyboard) while a is still settling.
+    const separate = closePaneHidden(closing, 'b', retireOf('b'))
+    settleA(true)
+    // The batch now reaches b while b's separate close is still settling.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    settleB(true)
+    await batch
+    await separate
+    expect(closed.filter((id) => id === 'b')).toHaveLength(1)
+    expect(closed.filter((id) => id === 'a')).toHaveLength(1)
+  })
+  it('review-5 B4: a batch id whose pane already settled and left the record is not closed again', async () => {
+    const closing = new Set<string>()
+    const open = new Set(['a', 'b'])
+    const closed: string[] = []
+    let settleA!: (retired: boolean) => void
+    const slowA = new Promise<boolean>((resolve) => { settleA = resolve })
+    const close = (id: string, wait?: Promise<boolean>) => closePaneHidden(closing, id, async () => {
+      closed.push(id)
+      const ok = wait ? await wait : true
+      if (ok) open.delete(id)
+      return ok
+    }, () => open.has(id))
+    const batch = (async () => { for (const id of ['a', 'b']) await close(id, id === 'a' ? slowA : undefined) })()
+    await Promise.resolve()
+    await close('b')
+    settleA(true)
+    await batch
     expect(closed).toEqual(['a', 'b'])
   })
 })

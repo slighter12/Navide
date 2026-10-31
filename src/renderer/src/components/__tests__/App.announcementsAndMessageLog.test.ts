@@ -82,9 +82,9 @@ describe('resource summary rows and popover lifetime', () => {
   })
 
   it('closes the overview when the last pane leaves', () => {
-    // The trigger is v-if="panes.length > 0"; without this the popover and its
+    // The trigger is v-if="listedPanes.length > 0"; without this the popover and its
     // full-viewport backdrop outlive it and swallow every status-bar click.
-    const start = appSource.indexOf('watch(\n  () => panes.value.length,')
+    const start = appSource.indexOf('watch(\n  () => listedPanes.value.length,')
     expect(start).toBeGreaterThan(-1)
     const block = appSource.slice(start, appSource.indexOf('\n)', start))
     expect(block).toContain("openPopover.value === 'resource'")

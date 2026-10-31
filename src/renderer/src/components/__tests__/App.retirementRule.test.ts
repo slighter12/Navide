@@ -45,7 +45,7 @@ describe('onKill: settlement first, retirement only on proof', () => {
 
 describe('the user\'s own close hides the pane while settling', () => {
   it('goes through onUserClosePane from the confirm dialog and the list button', () => {
-    expect(fn('onUserClosePane')).toContain('closePaneHidden(closingPaneIds.value, paneId, async () => await onKill(paneId, opts))')
+    expect(fn('onUserClosePane')).toMatch(/return closePaneHidden\([\s\S]*async \(\) => await onKill\(paneId, opts\),[\s\S]*\(\) => panes\.value\.some\(\(p\) => p\.id === paneId\)/)
     expect(fn('closeFocusedPane')).toContain('await onUserClosePane(paneId)')
     expect(appSource).toContain('@kill="onUserClosePane"')
   })
@@ -111,9 +111,18 @@ describe('a closing pane is listed on no surface until its close is refused', ()
     expect(start, name).toBeGreaterThan(-1)
     const open = appSource.indexOf('(', start)
     let depth = 0
+    // Brackets inside comments and string/template literals do not count (review-5 NB1).
     for (let i = open; i < appSource.length; i++) {
-      if (appSource[i] === '(') depth++
-      else if (appSource[i] === ')' && --depth === 0) return appSource.slice(start, i + 1)
+      const c = appSource[i]
+      const pair = appSource.slice(i, i + 2)
+      if (pair === '//') { i = appSource.indexOf('\n', i); if (i < 0) break; continue }
+      if (pair === '/*') { i = appSource.indexOf('*/', i + 2) + 1; if (i < 1) break; continue }
+      if (c === "'" || c === '"' || c === '`') {
+        for (i++; i < appSource.length && appSource[i] !== c; i++) if (appSource[i] === '\\') i++
+        continue
+      }
+      if (c === '(') depth++
+      else if (c === ')' && --depth === 0) return appSource.slice(start, i + 1)
     }
     throw new Error(`unterminated computed: ${name}`)
   }
@@ -164,6 +173,65 @@ describe('a closing pane is listed on no surface until its close is refused', ()
     expect(computedBody('selectionBatchIds')).toContain('idsWithoutClosing(')
     expect(computedBody('ctxTargetIds')).toContain('idsWithoutClosing(')
     expect(fn('batchKill')).toContain('idsWithoutClosing(ids, closingPaneIds.value)')
+  })
+  it('review-5 B4: every user close goes through the one-close-per-pane guard and checks the record at action time', () => {
+    const body = fn('onUserClosePane')
+    expect(body).toContain('closePaneHidden(')
+    expect(body).toContain('panes.value.some((p) => p.id === paneId)')
+  })
+  it('review-5 B1: resource count, rows and the Resource Manager leave out a closing pane', () => {
+    expect(computedBody('realizedPaneCount')).toContain('listedPanes.value')
+    expect(computedBody('realizedPaneCount')).not.toMatch(raw('panes'))
+    expect(computedBody('resourceRows')).toContain('listedPanes.value.map')
+    expect(computedBody('resourceRows')).not.toMatch(raw('panes'))
+    expect(tag('ResourceManagerModal')).toContain(':hidden-keys="closingResourceKeys"')
+  })
+  it('review-5 B2: the empty state, status bar controls, close-all and history leave out a closing pane', () => {
+    expect(appSource).toContain('<div v-if="listedPanes.length === 0" class="empty">')
+    expect(appSource).toContain('v-if="!isDetachedWindow && listedPanes.length > 0"')
+    expect(appSource).toContain(':pane-count="listedPanesInView.length"')
+    expect(fn('closeAllSessions')).toContain('listedPanes.value')
+    expect(fn('closeAllSessions')).not.toMatch(raw('panes'))
+    expect(computedBody('activeHistoryPaneKey')).toContain('listedPaneViews.value')
+    expect(computedBody('activeHistoryPaneKey')).not.toMatch(raw('paneViews'))
+  })
+  it('round 9 B1: kill-all agrees with the visible count and joins the guarded user close', () => {
+    const body = fn('onKillAll')
+    expect(body).toContain('paneIds ?? listedPanesInView.value.map((p) => p.id)')
+    expect(body).toContain('await onUserClosePane(id, { markRemoved: false })')
+    expect(body).toContain('await onKill(id, { markRemoved: false })')
+    expect(appSource).toContain(':pane-count="listedPanesInView.length"')
+  })
+  it('round 9 B2: closing the last visible pane dismisses the resource popover', () => {
+    expect(appSource).toMatch(/watch\(\s*\(\) => listedPanes\.value\.length,\s*\(count\) => \{\s*if \(count === 0 && openPopover\.value === 'resource'\) closePopover\(\)/)
+  })
+  it('round 9 B3: a group with only a closing pane waits for settlement before deletion', () => {
+    const body = fn('closeRunGroup')
+    expect(body).toContain('pendingPaneClose(closingPaneIds.value, p.id)')
+    expect(body).toContain('await Promise.all(pendingCloses)')
+    expect(body).toContain('if (panesInView.value.some((p) => p.runGroupId === id)) return')
+  })
+  it('round 9 B3: mixed visible and closing members share the deletion gate', () => {
+    const body = fn('closeRunGroup')
+    expect(body).toContain('for (const p of [...affected]) await onUserClosePane(p.id)')
+    expect(body).toContain('await Promise.all(pendingCloses)')
+    expect(body.indexOf('await Promise.all(pendingCloses)')).toBeLessThan(body.indexOf('runGroups.value = runGroups.value.filter((g) => g.id !== id)'))
+  })
+  it('review-5 B3: rebuild availability and the run-group menu counts and targets leave out a closing pane', () => {
+    expect(computedBody('listedPanesInView')).toContain('withoutClosing(panesInView.value, closingPaneIds.value)')
+    expect(computedBody('rebuildableAllPaneCount')).toContain('listedPanesInView.value')
+    expect(computedBody('rebuildableByWorkspace')).toContain('listedPanes.value')
+    expect(computedBody('rebuildableByWorkspace')).not.toMatch(raw('panes'))
+    expect(fn('runGroupPanes')).toContain('listedPanesInView.value')
+    expect(fn('runGroupPanes')).not.toMatch(raw('panes'))
+    expect(fn('closeRunGroup')).toContain('listedPanesInView.value.filter((p) => p.runGroupId === id)')
+  })
+  it('round 8 inventory: user-facing batches, dialogs and counts read the listed panes', () => {
+    expect(fn('restartAgentPanes')).toContain('listedPanes.value.filter')
+    expect(fn('restartAgentPanes')).not.toMatch(raw('panes'))
+    expect(fn('descendantPaneIds')).toContain('listedPanes.value')
+    expect(fn('dispatchPlanToPane')).toContain('pickReusablePane(\n    listedPanes.value.map')
+    expect(fn('closeWorkspace')).toContain('const inWorkspace = listedPanes.value.filter')
   })
 })
 
