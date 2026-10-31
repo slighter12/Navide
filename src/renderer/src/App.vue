@@ -9330,8 +9330,12 @@ async function onKillAll(paneIds?: readonly string[]): Promise<void> {
   // passes it in. See doCloseWorkspace.
   const ids = paneIds ?? listedPanesInView.value.map((p) => p.id)
   for (const id of [...ids]) {
-    if (paneIds) await onKill(id, { markRemoved: false })
-    else await onUserClosePane(id, { markRemoved: false })
+    if (paneIds) {
+      // A teardown joins an existing user close before retrying a refusal.
+      // Do not send two settlements for the same pane at once.
+      if (await pendingPaneClose(closingPaneIds.value, id)) continue
+      await onKill(id, { markRemoved: false })
+    } else await onUserClosePane(id, { markRemoved: false })
   }
 }
 
@@ -14886,7 +14890,7 @@ async function onPipelineReset(paneIds?: readonly string[]): Promise<void> {
   // Reset is the destructive action: tear down ALL panes (pipeline + manual) so
   // the workspace returns to a clean slate. onKill handles each pane's
   // watcher/timer/session teardown and removes it from the view.
-  await onKillAll(paneIds)
+  await onKillAll(paneIds ?? panesInView.value.map((p) => p.id))
   pipeline.task = ''
   pipeline.stageIndex = -1
   pipeline.state = 'idle'

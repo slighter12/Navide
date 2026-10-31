@@ -34,7 +34,7 @@ describe('closing a workspace actually tears its panes down', () => {
   it('passes that captured list through to the teardown', () => {
     const close = body('doCloseWorkspace')
     expect(close).toContain('onPipelineReset(paneIdsToKill)')
-    expect(body('onPipelineReset')).toContain('onKillAll(paneIds)')
+    expect(body('onPipelineReset')).toContain('onKillAll(paneIds ?? panesInView.value.map((p) => p.id))')
   })
 
   it('still defaults to the on-screen workspace for every other caller', () => {
