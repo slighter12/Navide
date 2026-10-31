@@ -566,8 +566,12 @@ pub(super) fn snapshot_with(
                 "unstable owned snapshot",
             ));
         }
-        let all = match reads {
-            Reads::Own => Arc::new(read_all(&known, deadline)?),
+        // `scanned_at` is when the read behind `all` began: nothing admitted after it can be judged by it.
+        let (all, scanned_at) = match reads {
+            Reads::Own => {
+                let at = Instant::now();
+                (Arc::new(read_all(&known, deadline)?), at)
+            }
             Reads::Shared { due } => {
                 let shared = BOARD.scan_after(used, due, || read_all(&known, deadline))?;
                 used = shared.seq;
@@ -575,9 +579,10 @@ pub(super) fn snapshot_with(
                 // already knows must be in it, or the full scan is read instead.
                 if scoped() && omitted_known(&RealProc, &known, &shared.all)? {
                     counters::fallback("omitted");
-                    Arc::new(scan(deadline)?)
+                    let at = Instant::now();
+                    (Arc::new(scan(deadline)?), at)
                 } else {
-                    shared.all
+                    (shared.all, shared.started)
                 }
             }
         };
@@ -588,15 +593,17 @@ pub(super) fn snapshot_with(
         };
         if previous.as_ref() == Some(&current) {
             let mut table = Table::new();
+            let mut admitted = Vec::new();
             for (pid, value) in current {
                 let start = legacy_start(value.birth_ticks, boot, ticks)?;
                 // A same-second replacement of a pid this session already recorded is not owned.
                 if births.admit(pid, &start, value.birth_ticks) {
                     table.insert(pid, (value.parent, value.group, start));
-                    if scoped() {
-                        note_admitted(pid, value.birth_ticks);
-                    }
+                    admitted.push((pid, value.birth_ticks));
                 }
+            }
+            if scoped() {
+                note_admitted(&admitted, &all, scanned_at);
             }
             return Ok(table);
         }
@@ -624,10 +631,13 @@ mod counters {
         inspected_pids: u64,
         walk_reads: u64,
         pid_set: BTreeSet<i32>,
+        /// Every pid any walk read a stat of (a superset of `pid_set`, which holds the walked pids only).
+        stat_pid_set: BTreeSet<i32>,
         walks: VecDeque<(usize, Vec<i32>, usize)>,
         dirty: [u64; 5],
         skipped: u64,
         subreaper: bool,
+        reaper_running: bool,
         reaped: u64,
         unattributed: u64,
     }
@@ -669,6 +679,7 @@ mod counters {
             c.walk_reads += 1;
             c.inspected_pids += info.stat_reads as u64;
             c.pid_set.extend(info.walked.iter().copied());
+            c.stat_pid_set.extend(info.stat_pids.iter().copied());
             c.walks.push_back((info.stat_reads, info.walked.clone(), info.sidecar_tids));
             if c.walks.len() > 32 {
                 c.walks.pop_front();
@@ -685,6 +696,11 @@ mod counters {
 
     pub(super) fn subreaper(on: bool) {
         with(|c| c.subreaper = on);
+    }
+
+    /// Called by the reaper thread itself when it starts its loop.
+    pub(super) fn reaper_running() {
+        with(|c| c.reaper_running = true);
     }
 
     pub(super) fn reaped() {
@@ -733,9 +749,10 @@ mod counters {
             "fallbacks": c.fallbacks,
             "inspected_pids": c.inspected_pids,
             "inspected_pid_set": c.pid_set,
+            "stat_read_pid_set": c.stat_pid_set,
             "walks": walks,
             "subreaper_enabled": c.subreaper,
-            "reaper_running": c.subreaper,
+            "reaper_running": c.reaper_running,
             "unreaped_children": unreaped,
             "walk_reads": c.walk_reads,
             "dirty_walks": {"r1":c.dirty[0],"r2":c.dirty[1],"r2b":c.dirty[2],"r3":c.dirty[3],"io":c.dirty[4]},
@@ -770,6 +787,7 @@ mod counters {
     pub(super) fn walk(_: &WalkInfo, _: &Dirty) {}
     pub(super) fn skipped() {}
     pub(super) fn subreaper(_: bool) {}
+    pub(super) fn reaper_running() {}
     pub(super) fn reaped() {}
     pub(super) fn unattributed() {}
     pub(super) fn flush() {}
@@ -798,8 +816,22 @@ enum Incomplete {
 #[derive(Default, Debug)]
 struct WalkInfo {
     stat_reads: usize,
+    /// Every pid whose stat (or one of its tids' stat) this walk read; kept only where something reads it back.
+    #[cfg(any(test, feature = "fault-hooks"))]
+    stat_pids: std::collections::BTreeSet<i32>,
     walked: Vec<i32>,
     sidecar_tids: usize,
+}
+
+impl WalkInfo {
+    /// Count one stat read of `pid` (or of one of its tids).
+    fn stat_read(&mut self, pid: i32) {
+        self.stat_reads += 1;
+        #[cfg(any(test, feature = "fault-hooks"))]
+        self.stat_pids.insert(pid);
+        #[cfg(not(any(test, feature = "fault-hooks")))]
+        let _ = pid;
+    }
 }
 
 /// A complete candidate table, or an explicit refusal: never a silently partial table. The walk's reads are
@@ -889,7 +921,7 @@ impl Scanner {
                 dirty.r3 = true; // the process left between being printed and being walked
                 continue;
             };
-            info.stat_reads += 1;
+            info.stat_read(pid);
             let Some(process) = fs.stat(pid, None)? else {
                 dirty.r3 = true;
                 continue;
@@ -902,7 +934,7 @@ impl Scanner {
             }
             let mut found = Vec::new();
             for &tid in &first {
-                info.stat_reads += 1;
+                info.stat_read(pid);
                 let Some(task) = fs.stat(pid, Some(tid))? else {
                     continue; // gone: the second listing shows it
                 };
@@ -919,7 +951,7 @@ impl Scanner {
                     Some(list) => found.extend(list),
                     None => {
                         // Either the tid exited (the second listing shows it) or the file does not exist.
-                        info.stat_reads += 1;
+                        info.stat_read(pid);
                         if fs.stat(pid, Some(tid))?.is_some() {
                             return Err(io::Error::new(
                                 io::ErrorKind::Unsupported,
@@ -947,7 +979,7 @@ impl Scanner {
         }
         // End of walk: the same tids and processes, read again.
         for &(pid, tid, start, live) in &tids {
-            info.stat_reads += 1;
+            info.stat_read(pid);
             match fs.stat(pid, Some(tid))? {
                 Some(now) => {
                     let now_live = !dead(now.state);
@@ -966,7 +998,7 @@ impl Scanner {
             }
         }
         for &(pid, birth) in &printed {
-            info.stat_reads += 1;
+            info.stat_read(pid);
             if fs.stat(pid, None)?.is_none_or(|now| now.birth_ticks != birth) {
                 dirty.r3 = true;
             }
@@ -1148,10 +1180,6 @@ impl Startup for RealStartup {
 /// Decide the scan mode once, before the first create is accepted. Subreaper on, reaper running, reservation
 /// enforced, `ECHILD` on a root fail-closed and the scoped walk are one decision: all on or all off.
 pub(super) fn enable_scoped_mode() {
-    // The snapshot grid starts now. Started by the first session instead, its first point would fall at or before
-    // that session's creation and make the first snapshot due at once, while the session's target is still
-    // starting up.
-    EPOCH.get_or_init(Instant::now);
     #[cfg(feature = "fault-hooks")]
     if std::env::var_os("NAVIDE_FAULT_FORCE_FULL").is_some() {
         counters::fallback("forced");
@@ -1174,6 +1202,13 @@ pub(super) fn enable_scoped_mode() {
                 let _ = REAPER.set(reaper);
                 SCOPED.store(true, std::sync::atomic::Ordering::SeqCst);
                 counters::subreaper(true);
+                // Scoped mode only: the snapshot grid starts now. `grid_due` would otherwise start it inside the
+                // first session's own first call, after that call computed `own_due = now + 5 s`; the grid's
+                // epoch is then a few microseconds later than `now`, `own_due - epoch` truncates to 4999 ms, and
+                // the first grid point at or before it is the epoch itself, so that session's first snapshot is
+                // due at once, while its target is still starting. With the epoch fixed here the first point
+                // falls on the 5 s grid. With scoped mode off nothing is set and the grid is HEAD's.
+                EPOCH.get_or_init(Instant::now);
             }
         }
     }
@@ -1358,6 +1393,7 @@ impl Reaper {
     /// The event-driven loop: it blocks in the kernel until some child is waitable, without consuming it, and
     /// consumes only a pid that is not reserved. With no child at all it blocks on a condvar until a spawn.
     fn run(&self) {
+        counters::reaper_running();
         let mut seen = 0;
         let mut complained = HashSet::new();
         loop {
@@ -1429,19 +1465,38 @@ impl Reaper {
 /// Every orphan the reaper consumed, and the pids already named as unattributable.
 fn orphan_reaped(pid: i32) {
     counters::reaped();
-    orphans()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .named
-        .retain(|(named, _)| *named != pid);
+    let mut orphans = orphans().lock().unwrap_or_else(|e| e.into_inner());
+    orphans.named.retain(|(named, _)| *named != pid);
+    orphans.admitted.retain(|(admitted, _), _| *admitted != pid);
 }
 
 #[derive(Default)]
 struct Orphans {
-    /// `(pid, start ticks)` of every process some session admitted.
-    admitted: HashSet<(i32, u64)>,
+    /// `(pid, start ticks)` of every process some session admitted, and when it was admitted.
+    admitted: HashMap<(i32, u64), Instant>,
     /// Orphans already logged as unattributable, oldest first.
     named: std::collections::VecDeque<(i32, u64)>,
+}
+
+impl Orphans {
+    /// Record what one published snapshot admitted, and drop every entry that the read behind that snapshot
+    /// (`all`, begun at `scanned_at`) shows is gone or replaced, so the set follows the live processes of all
+    /// sessions instead of growing for as long as no session finishes. An entry admitted at or after
+    /// `scanned_at` is kept whatever `all` says: the read could not have seen it. No `/proc` read happens here.
+    fn admit_batch(
+        &mut self,
+        batch: &[(i32, u64)],
+        all: &HashMap<i32, Process>,
+        scanned_at: Instant,
+        admitted_at: Instant,
+    ) {
+        self.admitted.retain(|(pid, birth), since| {
+            *since >= scanned_at || all.get(pid).is_some_and(|seen| seen.birth_ticks == *birth)
+        });
+        for &key in batch {
+            self.admitted.insert(key, admitted_at);
+        }
+    }
 }
 
 fn orphans() -> &'static Mutex<Orphans> {
@@ -1452,17 +1507,18 @@ fn orphans() -> &'static Mutex<Orphans> {
 /// The entries kept in the named set before the oldest is dropped.
 const NAMED_CAP: usize = 512;
 
-/// A session admitted this exact process.
-fn note_admitted(pid: i32, birth: u64) {
+/// A session's published snapshot admitted these exact processes.
+fn note_admitted(batch: &[(i32, u64)], all: &HashMap<i32, Process>, scanned_at: Instant) {
     orphans()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .admitted
-        .insert((pid, birth));
+        .admit_batch(batch, all, scanned_at, Instant::now());
 }
 
 /// Name, once each, the adopted direct children of the sidecar that no session admitted: counted and logged,
 /// never signalled, never added to a receipt (design section 2). Called when a session finishes and at shutdown.
+/// A session root is the sidecar's usual child and is reserved, so roots are dropped before any stat read: with
+/// no other child the call costs the task listing and the `children` reads, nothing per process.
 pub(super) fn note_unattributed() {
     let Some(reaper) = reaper() else { return };
     let me = std::process::id() as i32;
@@ -1472,22 +1528,22 @@ pub(super) fn note_unattributed() {
     let mut children = Vec::new();
     for tid in tids {
         if let Ok(Some(list)) = RealProc.children(me, tid) {
-            children.extend(list);
+            children.extend(list.into_iter().filter(|child| !reaper.holds(*child)));
         }
     }
+    if children.is_empty() {
+        counters::flush();
+        return;
+    }
     let mut orphans = orphans().lock().unwrap_or_else(|e| e.into_inner());
-    orphans
-        .admitted
-        .retain(|(pid, birth)| matches!(process(*pid), Ok(Some(seen)) if seen.birth_ticks == *birth));
     for child in children {
         let Ok(Some(seen)) = process(child) else {
             continue;
         };
         let key = (child, seen.birth_ticks);
         if matches!(seen.state, b'Z' | b'X')
-            || orphans.admitted.contains(&key)
+            || orphans.admitted.contains_key(&key)
             || orphans.named.contains(&key)
-            || reaper.holds(child)
         {
             continue;
         }
@@ -2696,10 +2752,68 @@ mod scoped_tests {
             "stat reads depend on the noise: {few} vs {many}"
         );
         assert!(stats_many.iter().all(|pid| *pid < 5000), "a noise pid was inspected");
+        // The walk's own record of the pids it read (what the harness counters report) matches the seam's log.
+        let logged: std::collections::BTreeSet<i32> = stats_many.iter().copied().collect();
+        assert_eq!(info_many.stat_pids, logged);
         let tree: HashSet<i32> = [100, 200, 201, 202, 203, 204].into();
         assert!(info_many.walked.iter().all(|pid| tree.contains(pid)));
         assert_eq!(info_few.stat_reads, few);
         assert!(many <= 3 * (info_many.walked.len() + info_many.sidecar_tids));
+    }
+
+    fn live(birth: u64) -> Process {
+        Process {
+            parent: 1,
+            group: 1,
+            session: 1,
+            birth_ticks: birth,
+            state: b'S',
+        }
+    }
+
+    /// F7: with no session finishing, the admitted set follows the live processes instead of growing.
+    #[test]
+    fn admitted_set_stays_bounded_while_children_exit() {
+        let base = Instant::now();
+        let mut orphans = Orphans::default();
+        let mut largest = 0;
+        for round in 0..500u64 {
+            // Each round's snapshot admits four new processes; every earlier round's processes have exited, so
+            // the read behind this snapshot lists only these four.
+            let batch: Vec<(i32, u64)> = (0..4)
+                .map(|slot| (10_000 + (round as i32) * 4 + slot, 100 + round))
+                .collect();
+            let all: HashMap<i32, Process> = batch.iter().map(|&(pid, birth)| (pid, live(birth))).collect();
+            let scanned_at = base + Duration::from_millis(round * 10);
+            let admitted_at = scanned_at + Duration::from_millis(5);
+            orphans.admit_batch(&batch, &all, scanned_at, admitted_at);
+            largest = largest.max(orphans.admitted.len());
+        }
+        // Every earlier round's processes were judged gone by the next read: the set never holds more than the
+        // live four, where unpruned it would hold 2000.
+        assert_eq!(largest, 4, "the admitted set reached {largest}");
+        assert_eq!(orphans.admitted.len(), 4, "only the live processes remain");
+    }
+
+    /// F7: a replaced pid is not kept alive by the old entry, and an entry admitted after a read began is kept
+    /// when that read is judged.
+    #[test]
+    fn admitted_set_prunes_replaced_pids_but_keeps_entries_newer_than_the_read() {
+        let base = Instant::now();
+        let at = |millis: u64| base + Duration::from_millis(millis);
+        let mut orphans = Orphans::default();
+        orphans.admit_batch(&[(500, 1), (501, 2), (502, 3)], &HashMap::new(), at(0), at(0));
+        // Another session admits 503 at 20 ms, while a read that began at 10 ms is still being used.
+        orphans.admit_batch(&[(503, 4)], &HashMap::new(), at(0), at(20));
+        // That older read: 500 live with the same birth, 501 replaced (new birth), 502 absent, 503 unseen.
+        let all = HashMap::from([(500, live(1)), (501, live(99))]);
+        orphans.admit_batch(&[], &all, at(10), at(25));
+        let mut kept: Vec<_> = orphans.admitted.keys().copied().collect();
+        kept.sort();
+        assert_eq!(kept, [(500, 1), (503, 4)]);
+        // A read that began after 503 was admitted and does not list it drops it.
+        orphans.admit_batch(&[], &all, at(30), at(40));
+        assert!(!orphans.admitted.contains_key(&(503, 4)));
     }
 
     fn zombie_pid(pid: i32) -> bool {
