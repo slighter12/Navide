@@ -1288,7 +1288,23 @@ pub(super) struct Reaper {
     /// waiting for a create to release the gate.
     #[cfg(test)]
     stop_blocked_on_gate: std::sync::atomic::AtomicBool,
+    /// Test seam: set by the create right before it drops the gate guard it took for the `stopped` check.
+    #[cfg(test)]
+    create_released: std::sync::atomic::AtomicBool,
+    /// Test seam: what `StopGuard::drop` saw at the `stopped` store (`STOP_UNRECORDED` until it ran).
+    #[cfg(test)]
+    stop_store_seen: std::sync::atomic::AtomicU8,
 }
+
+/// `Reaper::stop_store_seen` values.
+#[cfg(test)]
+pub(super) const STOP_UNRECORDED: u8 = 0;
+/// The `stopped` store happened after the create released the gate (correct).
+#[cfg(test)]
+pub(super) const STOP_AFTER_RELEASE: u8 = 1;
+/// The `stopped` store happened while the create still held the gate (the regression).
+#[cfg(test)]
+pub(super) const STOP_BEFORE_RELEASE: u8 = 2;
 
 /// Test seam values for `Reaper::inject`.
 #[cfg(test)]
@@ -1332,6 +1348,26 @@ impl Drop for StopGuard<'_> {
         let gate = self.reaper.hold_gate();
         // The counter first: whoever sees the stop also sees the liveness counter already cleared.
         counters::reaper_stopped();
+        // Record, at the publication itself, whether the create had already released the gate. The create sets
+        // `create_released` immediately before dropping its gate guard, and the gate is a mutex, so this thread
+        // can be here (owning the gate, as the correct code does) only after that drop: the load reads `true`
+        // every time. A `stopped` store placed anywhere before this thread owns the gate runs while the create
+        // still holds it, hence before the create's `create_released` store, and records `false` wherever it is
+        // placed relative to the handshake flag above. The verdict is this recorded fact, not the moment the
+        // create happens to read the flag.
+        #[cfg(test)]
+        self.reaper.stop_store_seen.store(
+            if self
+                .reaper
+                .create_released
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                STOP_AFTER_RELEASE
+            } else {
+                STOP_BEFORE_RELEASE
+            },
+            std::sync::atomic::Ordering::SeqCst,
+        );
         self.reaper
             .stopped
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1354,6 +1390,10 @@ impl Reaper {
             inject: std::sync::atomic::AtomicU8::new(0),
             #[cfg(test)]
             stop_blocked_on_gate: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            create_released: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            stop_store_seen: std::sync::atomic::AtomicU8::new(STOP_UNRECORDED),
         })
     }
 
@@ -1387,6 +1427,19 @@ impl Reaper {
             std::thread::sleep(Duration::from_millis(1));
         }
         false
+    }
+
+    /// Called by a create immediately before it drops the gate guard it took for the `stopped` check.
+    #[cfg(test)]
+    pub(super) fn mark_create_released(&self) {
+        self.create_released
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// What `StopGuard::drop` saw at the `stopped` store: one of the `STOP_*` values.
+    #[cfg(test)]
+    pub(super) fn stop_store_seen(&self) -> u8 {
+        self.stop_store_seen.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Wait (bounded) until the reaper thread has ended; true if it did.
