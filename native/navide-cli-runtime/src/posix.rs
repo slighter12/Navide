@@ -3383,7 +3383,8 @@ mod lifecycle_tests {
 
 /// Linux scoped mode: `ECHILD` on a root fails closed, no lock is held across a wait, and a failed create
 /// keeps its reservation until its own wait has returned (design section 3, rows U-16, U-18, U-19).
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
+#[cfg(test)]
 mod scoped_tests {
     use super::*;
     use std::process::Command;
