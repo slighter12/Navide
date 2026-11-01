@@ -1248,8 +1248,14 @@ pub(super) fn enable_scoped_mode() {
     counters::flush();
 }
 
-/// How many 10 ms retries the reaper gives a reserved root's own waiter before it stops waiting for it.
+/// How many retries the reaper gives a reserved root's own waiter before it stops waiting for it.
 const MAX_DEFERRALS: usize = 100;
+/// The longest one retry waits for reaper progress (a reservation released, a child consumed) before it looks
+/// again: 100 retries bound the whole deferral near 1 s, as before.
+const DEFERRAL_WAIT: Duration = Duration::from_millis(10);
+/// After giving up on a reserved zombie, the longest the reaper waits for progress before `waitid` names that
+/// zombie again (instead of spinning on it).
+const GAVE_UP_WAIT: Duration = Duration::from_secs(1);
 
 /// What the reaper decided about one waitable child.
 #[derive(Debug, PartialEq)]
@@ -1265,7 +1271,10 @@ enum Served {
 #[derive(Debug, PartialEq)]
 enum Settled {
     Done,
-    GaveUp,
+    /// `seen` is the progress count read before the last `serve`: a release after that `serve` already moved it.
+    GaveUp {
+        seen: u64,
+    },
 }
 
 /// A root's claim that only its own waiter may consume its exit status. Removes only its own key.
@@ -1281,6 +1290,7 @@ impl Drop for RootReservation {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&self.key);
+        self.reaper.note_progress();
     }
 }
 
@@ -1296,6 +1306,10 @@ pub(super) struct Reaper {
     reserved: Mutex<HashSet<(i32, u64)>>,
     /// Spawns that succeeded, so the reaper sleeps in the kernel (or on this condvar) when there is no child.
     spawns: (Mutex<u64>, std::sync::Condvar),
+    /// Counts reaper progress: a reservation released, a child consumed, a stale key removed. A deferred root,
+    /// a given-up zombie and the shutdown drain wait on this condvar (bounded) instead of sleeping. A leaf lock:
+    /// no other lock is taken while it is held.
+    progress: (Mutex<u64>, std::sync::Condvar),
     /// Set, for good, when the reaper thread ends for any reason (an unexpected `waitid` error or a panic).
     /// From then on nobody consumes adopted orphans, so the subreaper's contract is broken and every new
     /// create is refused (`stopped`). Live sessions and cleanup are untouched.
@@ -1314,6 +1328,9 @@ pub(super) struct Reaper {
     /// Test seam: what `StopGuard::drop` saw at the `stopped` store (`STOP_UNRECORDED` until it ran).
     #[cfg(test)]
     stop_store_seen: std::sync::atomic::AtomicU8,
+    /// Test seam: run once by `serve` when it has decided `Deferred`, before it returns (no lock held).
+    #[cfg(test)]
+    on_deferred: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 /// `Reaper::stop_store_seen` values.
@@ -1408,6 +1425,7 @@ impl Reaper {
             gate: Mutex::new(()),
             reserved: Mutex::new(HashSet::new()),
             spawns: (Mutex::new(0), std::sync::Condvar::new()),
+            progress: (Mutex::new(0), std::sync::Condvar::new()),
             stopped: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             inject: std::sync::atomic::AtomicU8::new(0),
@@ -1417,6 +1435,8 @@ impl Reaper {
             stop_owns_gate: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             stop_store_seen: std::sync::atomic::AtomicU8::new(STOP_UNRECORDED),
+            #[cfg(test)]
+            on_deferred: Mutex::new(None),
         })
     }
 
@@ -1436,39 +1456,31 @@ impl Reaper {
         self.inject.store(what, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Wait (bounded, a failure guard only) until the stopping reaper reports it is blocked on the gate.
-    #[cfg(test)]
-    pub(super) fn wait_stop_blocked_on_gate(&self, within: Duration) -> bool {
-        let end = Instant::now() + within;
-        while Instant::now() < end {
-            if self
-                .stop_blocked_on_gate
-                .load(std::sync::atomic::Ordering::SeqCst)
-            {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        false
-    }
-
     /// What `StopGuard::drop` saw at the `stopped` store: one of the `STOP_*` values.
     #[cfg(test)]
     pub(super) fn stop_store_seen(&self) -> u8 {
         self.stop_store_seen.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Wait (bounded) until the reaper thread has ended; true if it did.
-    #[cfg(test)]
-    pub(super) fn wait_stopped(&self, within: Duration) -> bool {
-        let end = Instant::now() + within;
-        while Instant::now() < end {
-            if self.stopped() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        self.stopped()
+    /// The progress count now; read before a check so a later `await_progress` cannot miss what follows it.
+    fn progress(&self) -> u64 {
+        *self.progress.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn note_progress(&self) {
+        *self.progress.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        self.progress.1.notify_all();
+    }
+
+    /// Block until the progress count moves past `seen`, or `within` has passed.
+    fn await_progress(&self, seen: u64, within: Duration) {
+        let count = self.progress.0.lock().unwrap_or_else(|e| e.into_inner());
+        drop(
+            self.progress
+                .1
+                .wait_timeout_while(count, within, |now| *now == seen)
+                .unwrap_or_else(|e| e.into_inner()),
+        );
     }
 
     pub(super) fn hold_gate(&self) -> std::sync::MutexGuard<'_, ()> {
@@ -1539,6 +1551,7 @@ impl Reaper {
                 orphan_reaped(pid);
             }
             drop(gate);
+            self.note_progress();
             return Served::Reaped;
         }
         drop(gate);
@@ -1561,22 +1574,36 @@ impl Reaper {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .retain(|(held, birth)| *held != pid || Some(*birth) == live);
+            self.note_progress();
             return Served::Stale;
+        }
+        #[cfg(test)]
+        if let Some(hook) = self
+            .on_deferred
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            hook();
         }
         Served::Deferred
     }
 
-    /// `serve` with the bounded retries a deferred root gets. A leaked reservation therefore cannot become a
-    /// permanent 100 Hz wake-up.
-    fn settle(&self, pid: i32, sleep: &dyn Fn(Duration)) -> Settled {
-        for attempt in 0..=MAX_DEFERRALS {
+    /// `serve` with the bounded retries a deferred root gets. Between retries `pause` is handed the progress count
+    /// read before that `serve`; the reaper waits on it for at most `DEFERRAL_WAIT`, so the release of the root's
+    /// reservation wakes it at once. Giving up returns the count read before the last `serve`, for the same
+    /// reason. A leaked reservation therefore cannot become a permanent wake-up.
+    fn settle(&self, pid: i32, pause: &dyn Fn(u64)) -> Settled {
+        let mut attempt = 0;
+        loop {
+            let seen = self.progress();
             match self.serve(pid) {
                 Served::Reaped | Served::Stale => return Settled::Done,
-                Served::Deferred if attempt == MAX_DEFERRALS => break,
-                Served::Deferred => sleep(Duration::from_millis(10)),
+                Served::Deferred if attempt == MAX_DEFERRALS => return Settled::GaveUp { seen },
+                Served::Deferred => pause(seen),
             }
+            attempt += 1;
         }
-        Settled::GaveUp
     }
 
     pub(super) fn start(self: &Arc<Self>) -> io::Result<()> {
@@ -1615,7 +1642,7 @@ impl Reaper {
                 INJECT_WAITID_ERROR => return io::Error::from_raw_os_error(libc::EIO),
                 INJECT_PANIC => panic!("injected reaper panic"),
                 INJECT_PARK => {
-                    std::thread::sleep(Duration::from_millis(5));
+                    reaper_test_seams::park();
                     continue;
                 }
                 _ => {}
@@ -1627,12 +1654,18 @@ impl Reaper {
             if rc == 0 {
                 // SAFETY: waitid returned 0, so si_pid is set.
                 let pid = unsafe { info.si_pid() };
-                if pid > 0 && self.settle(pid, &|pause| std::thread::sleep(pause)) == Settled::GaveUp {
+                if pid <= 0 {
+                    continue;
+                }
+                let pause = |seen| self.await_progress(seen, DEFERRAL_WAIT);
+                if let Settled::GaveUp { seen } = self.settle(pid, &pause) {
                     if complained.insert(pid) {
                         eprintln!("cli runtime: root {pid} was not reaped by its own waiter; waiting for it");
                     }
-                    // The same zombie would be named again at once: look again slowly instead of spinning.
-                    std::thread::sleep(Duration::from_secs(1));
+                    // The same zombie would be named again at once: look again on progress (counted from before
+                    // the last `serve`, so a release since then ends the wait at once), or slowly, instead of
+                    // spinning.
+                    self.await_progress(seen, GAVE_UP_WAIT);
                 }
                 continue;
             }
@@ -1652,9 +1685,11 @@ impl Reaper {
     }
 
     /// Shutdown: wait, bounded, until no non-reserved child is waitable. The reaper keeps consuming; this only
-    /// observes. A reserved zombie ends the wait (its own waiter is the only one allowed to take it).
+    /// observes. A reserved zombie ends the wait (its own waiter is the only one allowed to take it). Between
+    /// looks it waits for reaper progress, not for a fixed interval.
     pub(super) fn drain(&self, deadline: Instant) {
         while Instant::now() < deadline {
+            let seen = self.progress();
             // SAFETY: an all-zero siginfo is a valid out buffer for waitid.
             let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             // SAFETY: valid out pointer; WNOHANG and WNOWAIT make this a pure observation.
@@ -1677,7 +1712,51 @@ impl Reaper {
             if pid == 0 || reserved {
                 return;
             }
-            std::thread::sleep(Duration::from_millis(5));
+            self.await_progress(seen, deadline.saturating_duration_since(Instant::now()));
+        }
+    }
+}
+
+/// Test-only waits on the reaper's flags. A test polls a flag the code under test sets once; this module is
+/// outside the product build.
+#[cfg(test)]
+mod reaper_test_seams {
+    use super::*;
+
+    /// How often a test-side wait looks at a flag again.
+    const LOOK_AGAIN: Duration = Duration::from_millis(1);
+
+    /// One idle pass of a parked reaper loop (`INJECT_PARK`).
+    pub(super) fn park() {
+        std::thread::sleep(LOOK_AGAIN);
+    }
+
+    impl Reaper {
+        /// Wait (bounded, a failure guard only) until the stopping reaper reports it is blocked on the gate.
+        pub(crate) fn wait_stop_blocked_on_gate(&self, within: Duration) -> bool {
+            let end = Instant::now() + within;
+            while Instant::now() < end {
+                if self
+                    .stop_blocked_on_gate
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    return true;
+                }
+                std::thread::sleep(LOOK_AGAIN);
+            }
+            false
+        }
+
+        /// Wait (bounded) until the reaper thread has ended; true if it did.
+        pub(crate) fn wait_stopped(&self, within: Duration) -> bool {
+            let end = Instant::now() + within;
+            while Instant::now() < end {
+                if self.stopped() {
+                    return true;
+                }
+                std::thread::sleep(LOOK_AGAIN);
+            }
+            self.stopped()
         }
     }
 }
@@ -3208,7 +3287,7 @@ mod scoped_tests {
         gone.wait().unwrap();
         let stale = reaper.reserve_key(pid, 42);
         let sleeps = AtomicUsize::new(0);
-        let count = |_: Duration| {
+        let count = |_: u64| {
             sleeps.fetch_add(1, Ordering::SeqCst);
         };
         assert_eq!(reaper.settle(pid, &count), Settled::Done);
@@ -3219,7 +3298,7 @@ mod scoped_tests {
         let (mut stuck, stuck_pid) = exited_child();
         let _key = reaper.reserve_key(stuck_pid, 1);
         sleeps.store(0, Ordering::SeqCst);
-        assert_eq!(reaper.settle(stuck_pid, &count), Settled::GaveUp);
+        assert!(matches!(reaper.settle(stuck_pid, &count), Settled::GaveUp { .. }));
         assert_eq!(sleeps.load(Ordering::SeqCst), MAX_DEFERRALS);
         stuck.wait().unwrap();
         // Two roots that held the same pid in turn keep distinct keys.
@@ -3228,5 +3307,51 @@ mod scoped_tests {
         drop(first);
         let held = reaper.reserved.lock().unwrap();
         assert!(held.contains(&(77, 2)) && !held.contains(&(77, 1)));
+    }
+
+    /// A deferred root's retry waits on reaper progress, not on a clock: the release of its reservation wakes the
+    /// wait at once, even when the release lands after `serve` saw the root reserved and before the retry's wait
+    /// (the count was read before that `serve`). A count read after `serve`, or a fixed sleep, runs to the bound.
+    #[test]
+    fn a_released_reservation_wakes_the_deferred_reaper_at_once() {
+        let reaper = Reaper::new();
+        let (_child, pid) = exited_child();
+        let key = reaper.reserve_key(pid, 1);
+        *reaper.on_deferred.lock().unwrap() = Some(Box::new(move || drop(key)));
+        let pauses = AtomicUsize::new(0);
+        let started = Instant::now();
+        let pause = |seen: u64| {
+            pauses.fetch_add(1, Ordering::SeqCst);
+            reaper.await_progress(seen, Duration::from_secs(30));
+        };
+        assert_eq!(reaper.settle(pid, &pause), Settled::Done);
+        assert_eq!(pauses.load(Ordering::SeqCst), 1);
+        assert!(started.elapsed() < Duration::from_secs(10), "the wait ran to its bound");
+    }
+
+    /// Giving up hands back the count read before the last `serve`: a release after that `serve` saw the root
+    /// reserved (here, inside it, after its decision) ends the give-up wait at once instead of after
+    /// `GAVE_UP_WAIT`. A count read after the last `serve`, or after `settle` returned, runs to the bound.
+    #[test]
+    fn a_release_after_giving_up_wakes_the_reaper_at_once() {
+        let reaper = Reaper::new();
+        let (mut stuck, pid) = exited_child();
+        let key = Mutex::new(Some(reaper.reserve_key(pid, 1)));
+        let pauses = AtomicUsize::new(0);
+        // The last pause arms the hook, so the release lands in the final `serve`, after it decided `Deferred`.
+        let pause = |_: u64| {
+            if pauses.fetch_add(1, Ordering::SeqCst) + 1 == MAX_DEFERRALS {
+                let held = key.lock().unwrap().take();
+                *reaper.on_deferred.lock().unwrap() = Some(Box::new(move || drop(held)));
+            }
+        };
+        let Settled::GaveUp { seen } = reaper.settle(pid, &pause) else {
+            panic!("a reserved root with no waiter was settled");
+        };
+        assert!(key.lock().unwrap().is_none() && reaper.on_deferred.lock().unwrap().is_none());
+        let started = Instant::now();
+        reaper.await_progress(seen, Duration::from_secs(30));
+        assert!(started.elapsed() < Duration::from_secs(10), "the give-up wait missed the release");
+        stuck.wait().unwrap();
     }
 }
