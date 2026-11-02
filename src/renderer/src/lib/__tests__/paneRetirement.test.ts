@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { closePaneHidden, idsWithoutClosing, pendingPaneClose, settlePaneTerminals, withoutClosing } from '../paneRetirement'
+import { closePaneHidden, idsWithoutClosing, pendingPaneClose, retirePaneInPlace, settlePaneTerminals, withoutClosing } from '../paneRetirement'
 
 describe('settlePaneTerminals — the settlement answer is the only proof', () => {
   it('a proven settlement after a successful own kill retires', async () => {
@@ -135,6 +135,35 @@ describe('closePaneHidden — the pane is hidden while settlement is pending', (
     late.resolve(null)
     await pending
     expect(replacements).toEqual([])
+  })
+})
+
+describe('retirePaneInPlace — one retirement per pane without hiding the pane', () => {
+  it('never hides the pane, yet a close or another teardown requested meanwhile joins it', async () => {
+    const closing = new Set<string>()
+    let answer!: (settled: boolean) => void
+    const retire = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve }))
+    const teardown = retirePaneInPlace(closing, 'p1', retire)
+    const other = retirePaneInPlace(closing, 'p1', retire)
+    const userClose = closePaneHidden(closing, 'p1', retire)
+    await Promise.resolve()
+    expect(closing.size).toBe(0)
+    expect(pendingPaneClose(closing, 'p1')).toBeDefined()
+    answer(true)
+    expect(await Promise.all([teardown, other, userClose])).toEqual([true, true, true])
+    expect(retire).toHaveBeenCalledOnce()
+    expect(pendingPaneClose(closing, 'p1')).toBeUndefined()
+  })
+  it('forgets a rejected retirement, so the next one is a new retirement', async () => {
+    const closing = new Set<string>()
+    await expect(retirePaneInPlace(closing, 'p1', async () => { throw new Error('boom') })).rejects.toThrow('boom')
+    expect(pendingPaneClose(closing, 'p1')).toBeUndefined()
+    expect(await retirePaneInPlace(closing, 'p1', async () => true)).toBe(true)
+  })
+  it('does nothing for a pane whose record is already gone', async () => {
+    const retire = vi.fn(async () => true)
+    expect(await retirePaneInPlace(new Set(), 'p1', retire, () => false)).toBe(false)
+    expect(retire).not.toHaveBeenCalled()
   })
 })
 

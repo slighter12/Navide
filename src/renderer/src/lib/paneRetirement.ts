@@ -38,6 +38,30 @@ export function closePaneHidden(
   retire: () => Promise<boolean>,
   isOpen: () => boolean = () => true,
 ): Promise<boolean> {
+  return retireOnce(closing, paneId, retire, isOpen, true)
+}
+
+/**
+ * The same one-close-per-pane rule for a teardown that must not hide its targets (pipeline reset): it
+ * joins a close already in flight, and a close or teardown that comes later joins it, so two
+ * teardowns never settle one pane twice. The pane stays listed while it settles.
+ */
+export function retirePaneInPlace(
+  closing: Set<string>,
+  paneId: string,
+  retire: () => Promise<boolean>,
+  isOpen: () => boolean = () => true,
+): Promise<boolean> {
+  return retireOnce(closing, paneId, retire, isOpen, false)
+}
+
+function retireOnce(
+  closing: Set<string>,
+  paneId: string,
+  retire: () => Promise<boolean>,
+  isOpen: () => boolean,
+  hide: boolean,
+): Promise<boolean> {
   // A pane whose record is already gone (an earlier close settled) has nothing left to close.
   if (!isOpen()) return Promise.resolve(false)
   // One close per pane: a pane that is already closing joins the pending close instead of starting
@@ -47,11 +71,11 @@ export function closePaneHidden(
   if (!pending) inFlight.set(closing, pending = new Map())
   const running = pending.get(paneId)
   if (running) return running
-  closing.add(paneId)
+  if (hide) closing.add(paneId)
   // `.then` defers `retire` one microtask, so a synchronous throw still reaches `.finally` after the map entry exists.
   const close = Promise.resolve().then(retire).finally(() => {
     pending.delete(paneId)
-    closing.delete(paneId)
+    if (hide) closing.delete(paneId)
   })
   pending.set(paneId, close)
   return close
