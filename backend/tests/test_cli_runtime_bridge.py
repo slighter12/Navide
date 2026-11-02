@@ -213,7 +213,7 @@ async def test_actual_rust_launch_boundary_refuses_unowned_provider_before_nativ
     from websockets.asyncio.client import connect
     from tests.cli_regression.support.backend_process import BackendProcess
 
-    binary = Path(__file__).resolve().parents[2] / "native/navide-cli-runtime/target/release/navide-cli-runtime"
+    from tests.cli_regression.support.frame_peer import PRODUCT as binary  # the build the run names, else the in-repo one
     if not hasattr(os, "tcgetpgrp") or not binary.is_file():
         pytest.skip("requires an explicitly built native POSIX runtime")
     # A controlled provider-named executable outside this backend's allowed root.
@@ -223,6 +223,7 @@ async def test_actual_rust_launch_boundary_refuses_unowned_provider_before_nativ
     external.chmod(0o700)
     backend = BackendProcess(tmp_path)
     backend.env["NAVIDE_ACR_EVAL_RUNTIME"] = "rust-shell"
+    backend.env["NAVIDE_CLI_RUNTIME_BIN"] = str(binary)  # the backend launches the build the gate above checked
     # Preserve the harness refusal verdict; expected refusal is the test's target.
     with pytest.raises(AssertionError, match="external boundary reached"):
         async with backend:

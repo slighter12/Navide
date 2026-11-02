@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -28,8 +29,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 RUST_SRC = ROOT / "native/navide-cli-runtime/src"
 PY_SRC = ROOT / "backend/agent_team_backend"
-PRODUCT = ROOT / "native/navide-cli-runtime/target/release/navide-cli-runtime"
-HARNESS = ROOT / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime"
+# The builds the run names (same variables as cli_regression/support/frame_peer.py), else the in-repo ones.
+PRODUCT = Path(os.environ.get("NAVIDE_CLI_RUNTIME_BIN") or ROOT / "native/navide-cli-runtime/target/release/navide-cli-runtime")
+HARNESS = Path(os.environ.get("NAVIDE_CLI_RUNTIME_HARNESS_BIN") or ROOT / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime")
 
 VENDOR_MODULES = {"claude.rs", "vendor_facts.rs", "codex.rs", "opencode.rs", "adapters.rs"}
 PY_RUNTIME = ["cli_runtime.py", "cli_runtime_frames.py", "cli_runtime_handoff.py", "cli_runtime_observation.py"]
