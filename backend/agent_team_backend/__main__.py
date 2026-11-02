@@ -267,6 +267,16 @@ def main() -> int:
     # The CLI risk observer must not flag a CLI's calls back to this backend.
     cli_risk_service.bound_port = resolved_port
 
+    # The credential for the port below. Separate file, 0600, minted fresh each
+    # run: the port file is written world-readable on purpose (a shell hook
+    # resolves it with `cat`), and a secret must not inherit that. Unlike the
+    # port this is not best-effort — a backend that cannot write it would accept
+    # nobody, and failing here says so instead of leaving that to every client.
+    # It goes first: the held socket already accepts, so a client that reads the
+    # port file the moment it appears would otherwise read the previous run's
+    # token from the same data dir and be refused (4403).
+    ws_auth.issue_token()
+
     # Write the current port to a discovery file so Claude hooks (installed
     # globally in ~/.claude/settings.json) can find us. Best-effort.
     try:
@@ -276,13 +286,6 @@ def main() -> int:
         log.info("wrote backend port to %s", port_path)
     except OSError as err:
         log.warning("could not write port-file: %s", err)
-
-    # The credential for that port. Separate file, 0600, minted fresh each run:
-    # the port above is written world-readable on purpose (a shell hook resolves
-    # it with `cat`), and a secret must not inherit that. Unlike the port this
-    # is not best-effort — a backend that cannot write it would accept nobody,
-    # and failing here says so instead of leaving that to every client.
-    ws_auth.issue_token()
 
     # The other credential, and it travels the other way: the main process
     # generates it and hands it over on stdin, first line, before anything else
