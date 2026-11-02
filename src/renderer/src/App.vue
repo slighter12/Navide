@@ -297,7 +297,7 @@ import {
   type RestoreSessionTrigger,
   type WorkspaceRestoreSession,
 } from './lib/resumeBehavior'
-import { closePaneHidden, idsWithoutClosing, pendingPaneClose, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
+import { closePaneHidden, idsWithoutClosing, pendingPaneClose, retirePaneInPlace, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
 import { isRepeatCrash, planBackendRestartResume, type LostPane } from './lib/backendRestartResume'
 import { WakeClaims, joinedRealizeOutcome, paneOpenAnswer, sessionHeldElsewhere, type SessionHolder } from './lib/paneOpenAnswer'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
@@ -8295,6 +8295,10 @@ function onUserClosePane(paneId: string, opts: Parameters<typeof onKill>[1] = {}
   )
 }
 
+// Whether a pane's record is still in the list: once it is gone, a close settled it. A named reader,
+// because kill-all must not read the raw pane list itself (it sweeps the workspace on screen only).
+const paneRecordOpen = (paneId: string): boolean => panes.value.some((p) => p.id === paneId)
+
 // The backend may wait for an in-flight create's own disposition (60 s) before answering.
 const PANE_RELEASE_TIMEOUT_MS = 90_000
 
@@ -9763,10 +9767,15 @@ async function onKillAll(paneIds?: readonly string[]): Promise<void> {
   const ids = paneIds ?? listedPanesInView.value.map((p) => p.id)
   for (const id of [...ids]) {
     if (paneIds) {
-      // A teardown joins an existing user close before retrying a refusal.
-      // Do not send two settlements for the same pane at once.
-      if (await pendingPaneClose(closingPaneIds.value, id)) continue
-      await onKill(id, { markRemoved: false })
+      // A teardown joins an existing close before retrying a refusal, and its own retry registers as
+      // a close too (without hiding the pane), so two teardowns never settle one pane twice.
+      // A joined close that rejects ran its post-settlement code into a throw: it must not stop the
+      // other targets. The pane is proven gone when its record is, and is retried otherwise.
+      const joined = pendingPaneClose(closingPaneIds.value, id)
+      if (joined && await joined.catch(() => !paneRecordOpen(id))) continue
+      await retirePaneInPlace(
+        closingPaneIds.value, id, async () => await onKill(id, { markRemoved: false }), () => paneRecordOpen(id),
+      )
     } else await onUserClosePane(id, { markRemoved: false })
   }
 }
