@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
-import gc
 import hashlib
 import json
 import os
@@ -29,7 +28,7 @@ from agent_team_backend.cli_runtime_handoff import MasterHandle
 from tests.cli_regression.support.cli_shim import base_python_executable
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT  # NAVIDE_CLI_RUNTIME[_HARNESS]_BIN, else in-repo builds
 from tests.cli_regression.support.isolation import isolated_environment
-from tests.runtime_loss_teardown import settle_lost_runtime
+from tests.runtime_loss_teardown import LOSS_FINISH_S, settle_lost_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 PEER = Path(__file__).parent / "cli_regression/support/handoff_peer.py"
@@ -376,7 +375,6 @@ async def test_p4_descriptor_counts_return_to_baseline_after_create_kill_cycles(
     warm = await rig.shell(service, "pane-warm")  # steady state: lazily opened stores are open now
     await service.kill(warm.id, force=True)
     await rig.until(lambda: sidecar.num_fds() <= 4, "warm-up session released")
-    gc.collect()  # a transport an earlier test left unreferenced must not close under this baseline
     base_me, base_sidecar = me.num_fds(), sidecar.num_fds()
     for cycle in range(6):
         session = await rig.shell(service, f"pane-cycle-{cycle}")
@@ -479,6 +477,12 @@ async def test_p11_a_journal_that_cannot_be_appended_refuses_the_create_and_the_
     await asyncio.sleep(0.3)
     assert not ran.exists()
     assert not [r for r in rig.receipts() if r["event"] in ("owned", "handoff_received")] and not service._slots
+    # The flag above rests on this: the loss the sidecar's end causes finishes, and finishes unverified because of the journal.
+    service._runtime.kill()
+    await rig.until(lambda: service._invalidation is not None, "the sidecar's end started a loss", 15)
+    await asyncio.wait({service._invalidation}, timeout=LOSS_FINISH_S)
+    assert service._invalidation.done(), "the loss did not finish in bound"
+    assert service._lost and "CLEANUP_FAILED" in service._lost, f"the loss did not end CLEANUP_FAILED: {service._lost!r}"
 
 
 # ------------------------------------------------------------------- P9: binding checks

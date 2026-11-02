@@ -19,11 +19,10 @@ BUILD = REPO / "tests" / "cli" / "g2-linux-build.sh"
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
 
-def run(override: Path | None) -> subprocess.CompletedProcess:
-    env = {"PATH": "/usr/bin:/bin"}
-    if override is not None:
-        env["G2_PROC_CHILDREN_FILE_FOR_TEST"] = str(override)
-    return subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=30)
+def run(override: Path | None, *, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """`override` is the script's file argument (the stand-in for /proc/<pid>/task/<tid>/children); `environment` is extra inherited env."""
+    argv = ["bash", str(SCRIPT)] + ([str(override)] if override is not None else [])
+    return subprocess.run(argv, env={"PATH": "/usr/bin:/bin", **(environment or {})}, capture_output=True, text=True, timeout=30)
 
 
 def test_a_readable_children_file_is_named_in_the_log(tmp_path: Path) -> None:
@@ -46,6 +45,16 @@ def test_on_linux_the_real_children_file_passes() -> None:
     done = run(None)
     assert done.returncode == 0, done.stderr
     assert "proc children: present: /proc/" in done.stdout
+
+
+def test_an_inherited_environment_variable_cannot_replace_the_real_check(tmp_path: Path) -> None:
+    """The old override was the env var G2_PROC_CHILDREN_FILE_FOR_TEST; a runner that had it set made the check read that file instead."""
+    present = tmp_path / "children"
+    present.write_text("")
+    plain = run(None)
+    inherited = run(None, environment={"G2_PROC_CHILDREN_FILE_FOR_TEST": str(present)})
+    assert inherited.returncode == plain.returncode
+    assert str(present) not in inherited.stdout + inherited.stderr
 
 
 def test_the_build_step_runs_the_check_before_it_builds() -> None:
