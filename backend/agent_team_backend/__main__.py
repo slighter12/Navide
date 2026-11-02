@@ -115,15 +115,46 @@ def _register_shutdown_diag(environ=None) -> bool:
     return True
 
 
-def _hold_free_port(host: str) -> socket.socket:
-    """A socket bound to a free port, kept open for uvicorn to serve on.
+# uvicorn.Config's own default backlog; uvicorn re-listens with it on this socket.
+_HELD_PORT_BACKLOG = 2048
+
+
+def _hold_free_port(host: str, port: int = 0) -> socket.socket:
+    """A socket bound to `port` (0 = pick a free one) and already listening, kept open for uvicorn to serve on.
 
     Choosing a port and closing the socket leaves a gap until uvicorn binds it,
     long enough here for startup to run: another process can take the port, and
-    the backend then exits with the port file already naming that process.
+    the backend then exits with the port file already naming that process. The
+    same gap exists for a port the caller chose (the desktop app picks one and
+    passes it), so both launches hold the port here.
+
+    Bound alone is not enough: the port file is written right after this, but
+    uvicorn only calls `listen()` once its lifespan startup has run (after the
+    handover line is read), and a client that connects in between is refused or
+    times out. Listening from here queues those connections in the backlog and
+    uvicorn accepts them when it serves; its own `listen()` just re-applies the
+    backlog.
+
+    The socket is set up as asyncio's `create_server` would have set up its own
+    (the bind uvicorn no longer does once it is handed this socket): the first
+    address `host` resolves to, SO_REUSEADDR on POSIX only (on Windows it would
+    let another process take over a bound port), IPV6_V6ONLY for an IPv6 host.
+    Raises OSError when the port cannot be bound.
     """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind((host, 0))
+    family, kind, proto, _canonical, address = socket.getaddrinfo(
+        host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE
+    )[0]
+    sock = socket.socket(family, kind, proto)
+    try:
+        if os.name == "posix" and sys.platform != "cygwin":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+        if family == socket.AF_INET6 and hasattr(socket, "IPPROTO_IPV6"):
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, True)
+        sock.bind(address)
+        sock.listen(_HELD_PORT_BACKLOG)
+    except OSError:
+        sock.close()
+        raise
     return sock
 
 
@@ -219,14 +250,19 @@ def main() -> int:
     log.info("backend log file: %s", log_file)
     print(f"AGENT_TEAM_BACKEND_LOG path={log_file}", flush=True)
 
-    # When --port=0, resolve to an actual free port BEFORE handing to uvicorn so
-    # we can write the port file (Claude hooks rely on it being available
-    # before the server starts accepting).
-    resolved_port = args.port
-    held_socket: socket.socket | None = None
-    if resolved_port == 0:
-        held_socket = _hold_free_port(args.host)
-        resolved_port = held_socket.getsockname()[1]
+    # Bind and listen on the port BEFORE handing the socket to uvicorn, on both
+    # launches: --port=0 resolves to an actual free port, and an explicit --port
+    # (the desktop app always passes one) is bound as given. The port file below
+    # (Claude hooks rely on it being available before the server starts
+    # accepting) then never names a port that is still free or not yet listening.
+    # A port that cannot be bound ends the process here, before that file exists.
+    try:
+        held_socket = _hold_free_port(args.host, args.port)
+    except OSError as err:
+        log.error("cannot bind %s:%d: %s", args.host, args.port, err)
+        return uvicorn.server.STARTUP_FAILURE
+    resolved_port = held_socket.getsockname()[1]
+    if args.port == 0:
         log.info("resolved free port: %d", resolved_port)
     # The CLI risk observer must not flag a CLI's calls back to this backend.
     cli_risk_service.bound_port = resolved_port
@@ -331,7 +367,7 @@ def main() -> int:
     log.info("listening on http://%s:%s", args.host, resolved_port)
     print(f"AGENT_TEAM_BACKEND_LISTEN host={args.host} port={resolved_port}", flush=True)
 
-    server.run(sockets=[held_socket] if held_socket else None)
+    server.run(sockets=[held_socket])
     log.info("shutdown: server stopped")
     return 0
 
