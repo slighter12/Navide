@@ -77,6 +77,17 @@ PLAIN = {("claude", "wrapped"): "claude-plain", ("terminal", "wrapped"): "termin
          ("claude", "direct-string"): "claude-direct-plain", ("terminal", "direct-string"): "terminal-direct-plain"}
 
 
+def _leaks_in(snapshot: dict) -> list[str]:
+    """`_snapshot_leaks`, except that the one variable this harness injects is checked for what it is: it may hold the
+    raw path of the build the run names (`_backend` copies it from the test process), and nothing else. A different
+    value, or the variable in a run that named no build, stays in the snapshot and is reported like any other leak."""
+    env = dict(snapshot["child_env"])
+    named = os.environ.get("NAVIDE_CLI_RUNTIME_BIN")
+    if named and env.get("NAVIDE_CLI_RUNTIME_BIN") == named:
+        del env["NAVIDE_CLI_RUNTIME_BIN"]
+    return _snapshot_leaks({**snapshot, "child_env": env})
+
+
 def _receipts(root: Path) -> list[dict]:
     path = root / "runtime-receipts.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
@@ -174,7 +185,7 @@ async def test_row_child_observation_and_receipt(row, tmp_path):
             json.dumps({"row": name, "create_meta_bytes": sizes[0], "cap_bytes": MAX_META_P2R}) + "\n", encoding="utf-8")
     assert snapshot["child_cwd"] == "<ROOT>/pane-cwd"
     assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
-    assert not _snapshot_leaks(snapshot)
+    assert not _leaks_in(snapshot)
     target = os.environ.get("NAVIDE_G2_SNAPSHOT_DIR")
     if target:
         directory = Path(target) / sys.platform

@@ -35,9 +35,9 @@ from agent_team_backend.cli_vendors.registry import VENDORS
 from tests.cli_regression.support.backend_process import BackendProcess
 from tests.cli_regression.support.cli_shim import base_python_executable, install_cli_shim
 from tests.cli_regression.test_launch_snapshots import (
-    BOOT_DIR, PROBE, _SECRET_NAME, _binary_name, _normalise_argv, _normaliser, _snapshot_leaks,
+    BOOT_DIR, PROBE, _SECRET_NAME, _binary_name, _normalise_argv, _normaliser,
 )
-from tests.test_cli_runtime_composition import BASELINE_FORM, HARNESS_ENV, RESUME_ID, SESSION_ID, _owned
+from tests.test_cli_runtime_composition import BASELINE_FORM, HARNESS_ENV, RESUME_ID, SESSION_ID, _leaks_in, _owned
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.cli_regression,
               pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="POSIX composition only")]
@@ -175,7 +175,7 @@ async def test_row_child_observation_and_receipt(row, tmp_path):
     snapshot, owned, outer = await _observe(row, root)
     assert snapshot["child_cwd"] == "<ROOT>/pane-cwd"
     assert snapshot["child_env"]["REGRESSION_MARKER"] == "ordinary-setting"
-    assert not _snapshot_leaks(snapshot)
+    assert not _leaks_in(snapshot)
     if directory := os.environ.get("NAVIDE_G2_SNAPSHOT_DIR"):
         target = Path(directory) / sys.platform
         target.mkdir(parents=True, exist_ok=True)

@@ -412,6 +412,7 @@ async def test_t4_on_linux_a_descendant_holding_the_slave_survives_the_root_and_
     with it; one that ignores SIGHUP keeps the slave open (E1 R-d). The sidecar never signals it by a
     reusable id (ticket 03): the stream stays open, and a kill ends the session with an incomplete
     cleanup that names the descendant, which is still running."""
+    rig.cleanup_may_fail = True  # this test is the incomplete cleanup (asserted below); its fence stays closed at teardown
     service = rig.service()
     session = await rig.life(service, "pane-t4l")
     await rig.say(service, session, "child-nohup")

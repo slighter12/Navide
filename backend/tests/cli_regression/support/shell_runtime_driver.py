@@ -43,7 +43,8 @@ async def main(root: Path, mode: str, fault: str = ""):
         # Fault hooks exist only in the isolated harness build (cargo feature `fault-hooks`),
         # never in the product binary: this scenario runs the harness build explicitly.
         backend.env["NAVIDE_ACR_FAULT"] = fault
-        harness = Path(__file__).resolve().parents[4] / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime"
+        harness = Path(os.environ.get("NAVIDE_CLI_RUNTIME_HARNESS_BIN") or Path(__file__).resolve().parents[4]
+                       / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime")
         target = root / "harness-runtime"
         shutil.copyfile(harness, target)
         target.chmod(0o755)
@@ -51,7 +52,8 @@ async def main(root: Path, mode: str, fault: str = ""):
     elif fault == "missing":
         backend.env["NAVIDE_CLI_RUNTIME_BIN"] = str(root / "missing-runtime")
     elif fault == "exec":
-        source = Path(__file__).resolve().parents[4] / "native/navide-cli-runtime/target/release/navide-cli-runtime"
+        source = Path(os.environ.get("NAVIDE_CLI_RUNTIME_BIN") or Path(__file__).resolve().parents[4]
+                      / "native/navide-cli-runtime/target/release/navide-cli-runtime")
         target = root / "nonexecutable-runtime"
         shutil.copyfile(source, target)
         target.chmod(0o600)

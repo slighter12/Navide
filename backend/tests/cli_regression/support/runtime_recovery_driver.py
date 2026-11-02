@@ -26,9 +26,10 @@ from agent_team_backend.applog import in_data_dir
 from .backend_process import BackendProcess
 from .cli_shim import base_python_executable, install_cli_shim
 
-# NAVIDE_T05_SIDECAR lets a differential run name another explicitly built sidecar image.
+# NAVIDE_T05_SIDECAR lets a differential run name another explicitly built sidecar image; failing that, the build the
+# run names for the whole suite (NAVIDE_CLI_RUNTIME_BIN, as frame_peer.py reads it).
 WINDOWS = os.name == "nt"
-BINARY = Path(os.environ.get("NAVIDE_T05_SIDECAR") or
+BINARY = Path(os.environ.get("NAVIDE_T05_SIDECAR") or os.environ.get("NAVIDE_CLI_RUNTIME_BIN") or
               Path(__file__).resolve().parents[4] / "native/navide-cli-runtime/target/release"
               / ("navide-cli-runtime.exe" if WINDOWS else "navide-cli-runtime"))
 PEER = Path(__file__).with_name("native_shell_peer_win.py" if WINDOWS else "native_shell_peer.py")
@@ -183,7 +184,8 @@ def _install_common(root: Path, backend: BackendProcess) -> dict:
             target.chmod(0o600)
         elif kind == "protocol-mismatch":
             # The forced-wire hook exists only in the isolated harness build (cargo feature `fault-hooks`).
-            harness = BINARY.parents[2] / "target-harness/release/navide-cli-runtime"
+            harness = Path(os.environ.get("NAVIDE_CLI_RUNTIME_HARNESS_BIN") or
+                           BINARY.parents[2] / "target-harness/release/navide-cli-runtime")
             target.write_text(f'#!/bin/sh\nexec {harness} "$@" --ready-wire 999\n')
             target.chmod(0o755)
         elif kind == "exits-before-ready":
