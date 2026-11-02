@@ -32,10 +32,9 @@ pub fn integrated(key: &str) -> bool {
         )
 }
 
-/// Harness build only: a test declaration (not a vendor name) that declares a graceful shutdown
-/// with a deferred master close, so declaration-driven policy is proven without a vendor key (S3).
+/// Harness build only: the test declaration of a graceful shutdown (owned by `vendor_facts`).
 #[cfg(feature = "fault-hooks")]
-pub const FAULT_GRACEFUL: &str = "fault-graceful";
+pub const FAULT_GRACEFUL: &str = super::vendor_facts::FAULT_GRACEFUL;
 
 /// A vendor's declared shutdown behaviour (language-neutral declaration, ADR 0002). Shared
 /// lifecycle code reads this, never a vendor key (E1 13.1, 13.3 site 6).

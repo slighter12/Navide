@@ -282,3 +282,15 @@ pub fn find(key: &str) -> Option<&'static VendorFacts> {
 /// Non-vendor subjects (the ordinary shell): how their launch is composed.
 pub const SUBJECT_ALIASES: &[&str] = &["", "terminal"];
 pub const SUBJECT_COMPOSITION: Composition = Composition::Rust;
+
+/// Harness build only: a test declaration (not a vendor name) that declares a graceful shutdown
+/// with a deferred master close, so declaration-driven policy is proven without a vendor key (S3).
+/// `adapters::shutdown` gives it its shutdown; `compose::admit` asks `is_fault_declaration` so that
+/// shared code never spells the key.
+#[cfg(feature = "fault-hooks")]
+pub const FAULT_GRACEFUL: &str = "fault-graceful";
+
+#[cfg(feature = "fault-hooks")]
+pub fn is_fault_declaration(key: &str) -> bool {
+    key == FAULT_GRACEFUL
+}
