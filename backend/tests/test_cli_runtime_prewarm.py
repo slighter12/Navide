@@ -17,6 +17,7 @@ import pytest
 
 from agent_team_backend import cli_runtime
 from tests.cli_regression.support.frame_peer import PRODUCT
+from tests.test_cli_runtime_lifecycle import LifeRig
 from tests.test_cli_runtime_review1 import stop_stub, stub_service
 
 pytestmark = [
@@ -128,5 +129,88 @@ async def test_a_background_start_that_fails_after_the_spawn_refuses_the_first_c
         assert service._runtime.returncode is not None
         with pytest.raises(RuntimeError, match="START_FAILED at identity"):
             await service.create_async(pane_id="pane-second", **kwargs)
+    finally:
+        await stop_stub(service)
+
+
+@pytest.fixture
+async def rig(tmp_path, monkeypatch):
+    rig = LifeRig(tmp_path, monkeypatch)
+    try:
+        yield rig
+    finally:
+        await rig.close()
+
+
+class _HeldHandshake:
+    """Holds the start of a service at its handshake, which is after the spawn and inside `_start_lock`, until released.
+    This is the existing `_read_ready` seam: the start stays in flight for exactly as long as the test says."""
+
+    def __init__(self, service, outcome: Exception | None = None):
+        self.entered, self.release, self.calls = asyncio.Event(), asyncio.Event(), 0
+        self._outcome, self._real = outcome, service._read_ready
+        service._read_ready = self
+
+    async def __call__(self):
+        self.calls += 1
+        self.entered.set()
+        await self.release.wait()
+        if self._outcome is not None:
+            raise self._outcome
+        return await self._real()
+
+
+async def parked_on_start_lock(service, create: asyncio.Task) -> None:
+    """The create reaches `_ensure_started` as its first step and parks on the lock the held start owns."""
+    await until(lambda: len(service._start_lock._waiters or ()) == 1, "the create to wait on the start lock", 5)
+    assert not create.done()
+
+
+@pytest.mark.skipif(not PRODUCT.is_file(), reason="requires the explicitly built POSIX native runtime")
+async def test_a_create_that_arrives_during_the_background_start_waits_for_it_and_starts_nothing_more(rig):
+    service = rig.service()
+    held = _HeldHandshake(service)
+    try:
+        service.prewarm()
+        await asyncio.wait_for(held.entered.wait(), 15)
+        assert service._start_lock.locked() and service._runtime is not None and not service._ready_ok
+        create = asyncio.create_task(service.create_async(
+            pane_id="during-prewarm", agent_key="terminal", command=["/bin/cat"], cwd=str(rig.workspace),
+            cols=100, rows=30, env=rig.env))
+        await parked_on_start_lock(service, create)
+        assert not rig.receipts_of("ready"), "the create has not been answered by a start that is not finished"
+        held.release.set()
+        session = await asyncio.wait_for(create, 30)
+        rig.pids.add(session.proc.pid)
+        assert not session.closed and session.pane_id == "during-prewarm"
+        assert held.calls == 1, "one handshake: the create did not start a second sidecar"
+        assert len(rig.receipts_of("ready")) == 1
+        binary = str(rig.binary)
+        started = [child for child in psutil.Process().children() if child.exe() == binary]
+        assert len(started) == 1 and started[0].pid == service._runtime.pid
+        await service.kill_all()
+    finally:
+        await stop_stub(service)  # ends the sidecar and waits for the loss it causes, so no task outlives the test
+
+
+async def test_a_create_that_waits_on_a_background_start_that_fails_gets_the_same_failure_and_does_not_hang(
+        tmp_path, monkeypatch):
+    service = stub_service(tmp_path, monkeypatch, "plain")
+    held = _HeldHandshake(service, RuntimeError("START_FAILED: held handshake refused"))
+    kwargs = dict(agent_key="terminal", command=["/bin/cat"], cwd=str(tmp_path))
+    try:
+        service.prewarm()
+        await asyncio.wait_for(held.entered.wait(), 15)
+        create = asyncio.create_task(service.create_async(pane_id="pane-waiting", **kwargs))
+        await parked_on_start_lock(service, create)
+        held.release.set()
+        await asyncio.wait_for(service._prewarming, 20)  # the background start drops its failure
+        with pytest.raises(RuntimeError, match="START_FAILED: held handshake refused"):
+            await asyncio.wait_for(create, 20)
+        assert service._runtime.returncode is not None, "the failed start's sidecar was reaped"
+        assert held.calls == 1, "the waiting create did not start a second sidecar"
+        assert len(receipts(tmp_path, "startup_failed")) == 1
+        with pytest.raises(RuntimeError, match="START_FAILED: held handshake refused"):
+            await asyncio.wait_for(service.create_async(pane_id="pane-after", **kwargs), 20)
     finally:
         await stop_stub(service)

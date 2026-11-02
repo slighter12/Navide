@@ -335,6 +335,7 @@ async def test_l3_a_forged_identity_is_never_signalled_and_an_unreadable_process
     from agent_team_backend import pty_registry
     from agent_team_backend.applog import in_data_dir
     rig = LifeRig(tmp_path, monkeypatch, PRODUCT)
+    rig.cleanup_may_fail = True  # the second generation is fenced (CLEANUP_FAILED) on purpose
     bystander = psutil.Popen([base_python_executable(), "-c", "import time; time.sleep(120)"])
     rig.pids.add(bystander.pid)
     try:

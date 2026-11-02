@@ -29,6 +29,7 @@ from agent_team_backend.terminals import TerminalService, _clean_for_log
 from tests.cli_regression.support.cli_shim import base_python_executable
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT
 from tests.cli_regression.support.isolation import isolated_environment
+from tests.runtime_loss_teardown import settle_lost_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 PEER = Path(__file__).parent / "cli_regression/support/lifecycle_peer.py"
@@ -118,6 +119,8 @@ class Sink:
 
 
 class LifeRig:
+    cleanup_may_fail = False  # a test that provokes an incomplete cleanup says so; teardown then accepts CLEANUP_FAILED
+
     def __init__(self, root: Path, monkeypatch, binary: Path = PRODUCT):
         self.root, self.monkeypatch = root, monkeypatch
         self.sink = Sink()
@@ -216,6 +219,10 @@ class LifeRig:
                     pass
             for generation in {r["runtime_generation"] for r in self.receipts() if "runtime_generation" in r}:
                 pty_registry.reap_runtime(generation, grace=0.0, settle=1.0)
+            if runtime is not None:
+                # Killing the sidecar starts a loss: it must start, finish in bound and finish clean, or the teardown
+                # fails (also when the kill above did not take, instead of waiting for the sidecar without a bound).
+                await settle_lost_runtime(service, runtime, cleanup_may_fail=self.cleanup_may_fail)
         for pid in self.pids:
             try:
                 psutil.Process(pid).kill()
@@ -704,6 +711,7 @@ async def test_r6_a_partial_redraw_reports_the_first_step_and_is_never_retried(h
 # ---------------------------------------------------------------- L: loss (S6, L1, L2, L4, L7, L8)
 
 async def test_s6_kill_accepted_then_an_incomplete_cleanup_is_a_fence_and_loss(harness):
+    harness.cleanup_may_fail = True  # this test is the incomplete cleanup; its fence stays closed at teardown
     service = harness.service()
     session = await harness.life(service, "fault:survivor")
     with pytest.raises(RuntimeError, match="CLEANUP_FAILED"):

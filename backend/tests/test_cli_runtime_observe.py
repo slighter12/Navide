@@ -27,6 +27,7 @@ from agent_team_backend.cli_runtime_frames import FrameType
 from tests.cli_regression.support.cli_shim import base_python_executable
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT, FramePeer
 from tests.cli_regression.support.isolation import isolated_environment
+from tests.runtime_loss_teardown import settle_lost_runtime
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32" or not PRODUCT.is_file() or not HARNESS.is_file(),
@@ -218,6 +219,9 @@ async def service(tmp_path, monkeypatch):
                 pass
             if runtime.returncode is None:
                 runtime.kill()
+        if runtime is not None:
+            # Killing the sidecar starts a loss: it must start, finish in bound and finish clean, or the teardown fails.
+            await settle_lost_runtime(service, runtime)
 
 
 def historical(_sessions):
