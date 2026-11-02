@@ -558,11 +558,11 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
     let composition = match vendor_facts::find(agent_key) {
         Some(facts) => facts.composition,
         None if vendor_facts::SUBJECT_ALIASES.contains(&agent_key) => vendor_facts::SUBJECT_COMPOSITION,
-        // Harness build only: a subject the declarations do not know (the graceful-shutdown test
-        // declaration of adapters.rs) is composed in Rust, so fault tests can use test subjects.
+        // Harness build only: the one test declaration the declarations do not know (adapters.rs
+        // `FAULT_GRACEFUL`) is composed in Rust, so the graceful-shutdown fault test can launch it.
+        // Every other unknown subject stays refused in both builds.
         #[cfg(feature = "fault-hooks")]
-        None => vendor_facts::SUBJECT_COMPOSITION,
-        #[cfg(not(feature = "fault-hooks"))]
+        None if agent_key == "fault-graceful" => vendor_facts::SUBJECT_COMPOSITION,
         None => return Err(ComposeError::Composition(format!("unknown subject {agent_key:?}"))),
     };
     let allowed = match composition {
@@ -1074,6 +1074,26 @@ mod tests {
         // Ticket 05 composes every vendor in Rust: none takes the pre-composed shape on POSIX any more.
         assert!(matches!(admit("aider", "argv", false), Err(ComposeError::Composition(_))));
         assert_eq!(admit("aider", "wrapped", false), Ok(()));
+    }
+
+    #[test]
+    fn an_unknown_subject_is_refused_in_every_build() {
+        for shape in ["wrapped", "direct", "argv", "credential"] {
+            assert!(
+                matches!(admit("no-such-vendor", shape, false), Err(ComposeError::Composition(_))),
+                "{shape} on POSIX"
+            );
+            assert!(
+                matches!(admit("no-such-vendor", shape, true), Err(ComposeError::Composition(_))),
+                "{shape} on Windows"
+            );
+        }
+    }
+
+    #[cfg(feature = "fault-hooks")]
+    #[test]
+    fn the_harness_build_admits_only_the_graceful_test_declaration_as_an_unknown_subject() {
+        assert_eq!(admit("fault-graceful", "wrapped", false), Ok(()));
     }
 
     // ---- G2 ticket 05, delta addendum 10: every vendor composes in Rust; the credential outer form.
