@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import gc
 import hashlib
 import json
 import os
@@ -28,6 +29,7 @@ from agent_team_backend.cli_runtime_handoff import MasterHandle
 from tests.cli_regression.support.cli_shim import base_python_executable
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT  # NAVIDE_CLI_RUNTIME[_HARNESS]_BIN, else in-repo builds
 from tests.cli_regression.support.isolation import isolated_environment
+from tests.runtime_loss_teardown import settle_lost_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
 PEER = Path(__file__).parent / "cli_regression/support/handoff_peer.py"
@@ -40,6 +42,8 @@ pytestmark = [
 
 
 class Rig:
+    cleanup_may_fail = False  # a test that provokes an incomplete cleanup says so; teardown then accepts CLEANUP_FAILED
+
     def __init__(self, root: Path, monkeypatch, binary: Path = PRODUCT):
         self.root, self.monkeypatch = root, monkeypatch
         self.frames: list[dict] = []
@@ -108,6 +112,9 @@ class Rig:
                     pass
             if runtime is not None and runtime.returncode is None:
                 runtime.kill()
+            if runtime is not None:
+                # Killing the sidecar starts a loss: it must start, finish in bound and finish clean, or the teardown fails.
+                await settle_lost_runtime(service, runtime, cleanup_may_fail=self.cleanup_may_fail)
         for pid in self.pids:
             try:
                 psutil.Process(pid).kill()
@@ -369,6 +376,7 @@ async def test_p4_descriptor_counts_return_to_baseline_after_create_kill_cycles(
     warm = await rig.shell(service, "pane-warm")  # steady state: lazily opened stores are open now
     await service.kill(warm.id, force=True)
     await rig.until(lambda: sidecar.num_fds() <= 4, "warm-up session released")
+    gc.collect()  # a transport an earlier test left unreferenced must not close under this baseline
     base_me, base_sidecar = me.num_fds(), sidecar.num_fds()
     for cycle in range(6):
         session = await rig.shell(service, f"pane-cycle-{cycle}")
@@ -458,6 +466,7 @@ async def test_p7d_p10_cancel_before_the_gate_is_prevented_and_leaves_no_root_an
 
 
 async def test_p11_a_journal_that_cannot_be_appended_refuses_the_create_and_the_target_never_runs(rig):
+    rig.cleanup_may_fail = True  # the unreadable journal makes the loss at teardown end in CLEANUP_FAILED, by construction
     service = rig.service()
     await service._ensure_started()
     journal = Path(pty_journal(service))

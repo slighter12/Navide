@@ -331,6 +331,7 @@ class RustTerminalService(TerminalService):
             self._stop_dispatch()
         if self._ready and not self._ready.done():
             self._ready.set_exception(RuntimeError(message))
+            self._ready.exception()  # nothing awaits `_ready`: retrieve it, or every loss logs "never retrieved"
         for future in (*self._pending.values(), *self._owned.values()):
             if not future.done():
                 future.set_exception(RuntimeError(message))
