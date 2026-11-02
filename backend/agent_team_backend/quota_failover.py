@@ -301,35 +301,27 @@ def auth_scope_for_scope(agent_key: str, scope: str | None) -> str:
 
 def credential_env_vars(agent_key: str) -> tuple[str, ...]:
     """Environment variables through which this CLI takes a credential that
-    outranks the file / Keychain the vault swaps: the vendor's portable
-    credential variable and whatever it declares as ranking above it, plus
-    any ``account_switch.credential_env_vars`` the adapter names."""
+    outranks the file / Keychain the vault swaps: the
+    ``account_switch.credential_env_vars`` the adapter names."""
     from .cli_vendors import registry
 
     spec = registry.vendor(agent_key)
     if spec is None:
         return ()
-    names: list[str] = []
-    portable = getattr(spec, "portable_credential", None)
-    if portable is not None:
-        names.append(portable.env)
-        names.extend(portable.env_remove)
     switch = getattr(spec, "account_switch", None)
-    names.extend(getattr(switch, "credential_env_vars", ()) or ())
+    names = getattr(switch, "credential_env_vars", ()) or ()
     return tuple(dict.fromkeys(n for n in names if n))
 
 
 def pane_auth_scope(
     agent_key: str, profile: dict[str, Any] | None, *,
     env: dict[str, str] | None = None, env_remove: list[str] | tuple[str, ...] = (),
-    portable_slot_id: str | None = None,
     account_dir: bool = False,
 ) -> dict[str, Any]:
     """Launch provenance recorded on a pane's terminal metadata at spawn:
     which profile it started on, that profile's provider scope, the
     credential pool those resolve to, and where the CLI actually takes its
     credential from — ``vault`` (the file / Keychain a switch swaps),
-    ``portable`` (a pasted credential injected into the environment) or
     ``env-override`` (a credential variable the CLI ranks above the file
     reached the pane) or ``account-dir`` (a claude account's own config dir,
     whose login the CLI keeps itself). Only the variable's *name* is
@@ -344,9 +336,7 @@ def pane_auth_scope(
     removed = set(env_remove or ())
     env_names = [name for name in (env or {}) if name not in removed]
     preflight = switch_preflight(agent_key, env_names=env_names, scope=scope)
-    if portable_slot_id:
-        source = "portable"
-    elif account_dir:
+    if account_dir:
         source = "account-dir"
     else:
         for name in credential_env_vars(agent_key):
@@ -665,8 +655,12 @@ def _quota_verdict(snapshot: dict[str, Any] | None, now: float) -> tuple[bool, b
         spent = False
     remaining = [_window_remaining(w) for w in current]
     measured = [value for value in remaining if value is not None]
+    # A required window is present, or a successful read proved it does not
+    # exist for this account. Merely missing still says nothing about it.
+    absent = (snapshot or {}).get("absentWindows") if (snapshot or {}).get("status") == "ok" else None
+    accounted_for = {w.get("kind") for w in current} | set(absent or ())
     positive = bool(semantics is not None and current and not spent and None not in remaining
-                    and set(semantics["required"]) <= {w.get("kind") for w in current})
+                    and set(semantics["required"]) <= accounted_for)
     return spent, positive, min(measured) if measured else None
 
 
@@ -1651,7 +1645,12 @@ class QuotaFailoverService:
             self._stop_incident(incident, refused.code.lower())
             return
         eligible = [c for c in ranked if c["excluded"] is None and c["slotId"] not in incident.tried]
+        from . import api_key_accounts
+
+        eligible = api_key_accounts.logins_first(eligible)
         if not eligible:
+            if await api_key_accounts.take_over(self, incident):
+                return
             self._stop_incident(incident, "no-candidate")
             return
         target = eligible[0]
@@ -1764,8 +1763,11 @@ class QuotaFailoverService:
         the same judgement the manual switch makes (``_slot_login_reason``)
         plus the isolated login home check. Blocking — thread it."""
         from . import app
+        from .api_key_accounts import held_from_auto_switch
         from .ws_handlers import _running_login_terminals, _slot_login_reason
 
+        if held_from_auto_switch(slot_id):
+            return "api-key-auto-off"
         if slot_id != DEFAULT_SLOT_ID:
             try:
                 # A running sign-in pane for the slot means its credential is

@@ -30,7 +30,7 @@ from . import __version__
 from . import agent_messaging
 from . import hook_auth
 from . import hook_drain
-from . import guard_hooks
+from . import guard_fail_closed, guard_hooks
 from .guard import runtime as guard_runtime
 from . import ws_auth
 from . import error_ledger
@@ -38,7 +38,7 @@ from . import launch_id
 from . import loop_watchdog
 from . import mem_probe
 from . import osplat
-from . import portable_credentials
+from . import portable_credentials_cleanup
 from . import push_delivery
 from . import resource_limits
 from . import subagent_tracker
@@ -122,6 +122,7 @@ from .agent_message_log import AgentMessageLog
 from .preview_log import MAX_ROWS as PREVIEW_MAX_ROWS, PreviewLog
 from . import git_service
 from . import issue_service
+from . import file_query
 from . import fs_service
 from . import pty_registry
 from . import search_service
@@ -133,6 +134,7 @@ from . import plan_history
 from .plugins import wiring as plugin_wiring
 from .plugins.host import PluginHost
 from . import ws_handlers
+from . import acp_ws  # registers the acp.* requests; ACP on disconnect, janitor and shutdown
 from .git_watcher import GitWatcher
 
 log = logging.getLogger("agent_team_backend")
@@ -524,7 +526,7 @@ def host_supports_plans_backend() -> bool:
 
 
 #: The Navide plugins whose Disabled switch the Host reports.
-DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide"})
+DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide", "navide.browser"})
 #: Set by main on every backend start: the built-ins disabled at that moment,
 #: comma-separated. Absent when none is.
 DISABLED_BUILTIN_PLUGINS_ENV = "NAVIDE_DISABLED_BUILTIN_PLUGINS"
@@ -865,6 +867,7 @@ async def _broadcast_git_changed(
     `paths` is additive — `workspace_path` stays exactly as the existing
     `git.changed` consumers read it."""
     git_service.pane_git_snapshots.invalidate(ws_path)
+    file_query.invalidate(ws_path)
     entries = [
         {"rel_path": rel_path, "change": _GIT_EVENT_CHANGES[event_type]}
         for rel_path, event_type in (paths or [])
@@ -1040,6 +1043,14 @@ _TERMINALS: TerminalService | None = None
 # terminal_session_id → owning WS Session. Populated on terminal.create and
 # updated on terminal.reattach. Entries removed when the owning WS disconnects.
 _PTY_OWNERS: "dict[str, Session]" = {}
+# #448 diagnostics, counts only (ui_diagnostics → frame_drops): terminal frames
+# dropped because no window owns their PTY, and terminal requests that named a
+# terminal id this backend does not know. Since this backend started.
+_FRAME_DROPS: dict[str, int] = {"ownerless": 0, "unknown_terminal": 0}
+
+
+def frame_drop_counts() -> dict[str, int]:
+    return dict(_FRAME_DROPS)
 
 
 # An autonomous PTY death (exit/EOF) must release the attribution registration
@@ -1083,6 +1094,7 @@ async def _active_emit(event: dict[str, Any] | bytes) -> None:
         session_id = output_frame_session_id(frame)
         sess = _PTY_OWNERS.get(session_id) if session_id else None
         if sess is None:
+            _FRAME_DROPS["ownerless"] += 1
             return  # detached: drop output, PTY keeps running, TUI redraws on reattach
         try:
             await sess.send_bytes(frame)
@@ -1113,6 +1125,7 @@ async def _active_emit(event: dict[str, Any] | bytes) -> None:
     else:
         sess = _PTY_OWNERS.get(session_id) if session_id else None
     if sess is None:
+        _FRAME_DROPS["ownerless"] += 1
         return  # detached: drop output, PTY keeps running, TUI redraws on reattach
     try:
         await sess.send_json(event)
@@ -1197,6 +1210,7 @@ async def _ownerless_pty_janitor() -> None:
             await _sweep_ownerless_ptys_once()
         except Exception as err:  # noqa: BLE001 — the janitor must survive
             log.warning("ownerless-pty sweep failed: %s", err)
+        await acp_ws.sweep_ownerless()  # its own errors handled inside
 
 
 # SessionStart is run at the first turn in Codex 0.154, not at TUI startup.
@@ -1544,8 +1558,15 @@ def forget_pane_activity(pane_id: str) -> None:
         listener(pane_id, None)
     hook_drain.forget_pane(pane_id)
     push_delivery.forget_pane(pane_id)
-    portable_credentials.forget_launch(pane_id)
     forget_pane_live_sessions(pane_id)
+
+
+def _note_webhook_session(pane_id: str, vendor: str, session_id: str) -> None:
+    from . import webhook_service
+
+    webhooks = webhook_service.current()
+    if webhooks is not None:
+        webhooks.note_pane_session(pane_id, vendor, session_id)
 
 
 async def _on_log_activity(event: ActivityEvent) -> None:
@@ -1569,6 +1590,7 @@ async def _on_log_activity(event: ActivityEvent) -> None:
             # External session — skip; no pane to deliver to.
             return
         pane_id = attributed.pane_id or ""
+        _note_webhook_session(pane_id, event.vendor, event.session_id)
         if event.event_type == "subagent_turn_end":
             # A Codex sub-agent's turn end is not its parent pane's: the pane's
             # state, reply text and dev time ignore it. The per-account turn
@@ -2391,8 +2413,8 @@ def spawn_env_overridden_keys(
     """Requested keys that a later source in the spawn chain went on to win.
 
     Answerable only once the whole chain has run: vendor defaults, onboarding,
-    login profiles, CLI home management, MCP/plugin/push wiring and portable
-    credentials all write after the request, and ``env_remove`` — applied last
+    login profiles, CLI home management and MCP/plugin/push wiring all write
+    after the request, and ``env_remove`` — applied last
     of all, in ``terminals.spawn`` — can still delete a key that survived them.
     """
     removed = set(env_remove or ())
@@ -2489,6 +2511,11 @@ async def _start_log_watcher() -> None:
         credential_vault.promote_profile_home_secrets(cli_profiles_store)
     )
 
+    # One-time: erase what the removed portable-credential feature left on a
+    # machine that used it. No vault call where it was never used.
+    # Background task — credential I/O must never block startup.
+    asyncio.create_task(_remove_portable_credential_leftovers())
+
     # Sweep leftover isolated login homes into their slots, independently of
     # the usage poller (which only harvests while usage polling is enabled).
     # Background task — credential I/O must never block startup.
@@ -2535,6 +2562,15 @@ async def _start_log_watcher() -> None:
         await (await asyncio.to_thread(scheduler.get_service)).start()
     except Exception as err:  # noqa: BLE001
         log.warning("scheduler startup failed: %s", err)
+
+    # Webhook triggers: empty tables and no listener until the user turns them on.
+    from . import webhook_service, webhook_ws
+
+    try:
+        await webhook_ws.startup()
+    except Exception as err:  # noqa: BLE001
+        log.warning("webhook startup failed: %s", err)
+        webhook_service.mark_unavailable()
 
     # Each workspace's self-evolution: its watchdog notices runs that ran past
     # their time or budget, and runs a missed slot once its workspace opens.
@@ -2691,6 +2727,9 @@ async def _stop_log_watcher() -> None:
         from . import scheduler
 
         await scheduler.shutdown()
+        from . import webhook_ws
+
+        await webhook_ws.shutdown()
         from . import evolve_service
 
         await evolve_service.shutdown()
@@ -2706,6 +2745,7 @@ async def _stop_log_watcher() -> None:
                 await _TERMINALS.kill_all()
             except Exception as err:  # noqa: BLE001
                 log.warning("pty shutdown sweep failed: %s", err)
+        await acp_ws.shutdown()  # ACP agents: never raises (see acp_ws.shutdown)
         if _log_watcher is not None:
             # Settle what the drain has read but not yet counted, BEFORE stop()
             # cancels the flush task that would have done it. See
@@ -3061,11 +3101,14 @@ async def cli_pretooluse_guard_hook(vendor: str, request: Request) -> Response:
         return Response(status_code=404)
     if not hook_auth.presented(request.headers.get(hook_auth.HEADER)):
         return Response(status_code=403)
+    fail_closed = request.headers.get(guard_fail_closed.HEADER) == "1"
     try:
         payload = await request.json()
     except ValueError:
         payload = None
     if not isinstance(payload, dict):
+        if fail_closed:
+            return JSONResponse(guard_fail_closed.deny(vendor, "the call could not be read"))
         return Response(status_code=200)
     cwd = str(payload.get("cwd") or "")
     pane_id, ws_path = "", ""
@@ -3086,6 +3129,12 @@ async def cli_pretooluse_guard_hook(vendor: str, request: Request) -> Response:
         pane_id = _pane_for_guard_token(request.headers.get(guard_hooks.PANE_TOKEN_HEADER, ""))
         pane = agent_messaging.current(pane_id) if pane_id else None
         ws_path = pane.workspace_path if pane is not None else ws_path
+    # The token still names the pane after /clear, before the new session is attributed.
+    _note_webhook_session(pane_id, vendor, str(payload.get("session_id") or payload.get("sessionId") or ""))
+    if fail_closed:
+        return JSONResponse(await guard_fail_closed.respond(
+            vendor, payload, pane_id=pane_id or "", cwd=cwd, workspace=ws_path or cwd
+        ))
     answer = await guard_hooks.respond(
         vendor, payload, pane_id=pane_id or "", cwd=cwd, workspace=ws_path or cwd
     )
@@ -3478,6 +3527,7 @@ async def ws(websocket: WebSocket) -> None:
         orphaned = [tid for tid, owner in _PTY_OWNERS.items() if owner is session]
         for tid in orphaned:
             del _PTY_OWNERS[tid]
+        acp_ws.drop_owner(session)  # its ACP sessions: ownerless, as its PTYs
         # Flag the messaging handles this window mirrored as offline. They are
         # kept for a grace period rather than dropped: the window is usually
         # just reconnecting, and a deleted entry told callers the pane did not
@@ -3774,6 +3824,16 @@ def _login_spawn_command(agent_key: str, command: Any) -> Any:
     return replaced
 
 
+async def _remove_portable_credential_leftovers() -> None:
+    try:
+        await asyncio.to_thread(
+            lambda: portable_credentials_cleanup.run(
+                database, credential_vault, now=int(time.time()))
+        )
+    except Exception as err:  # noqa: BLE001 — retried on the next start
+        log.warning("portable-credential cleanup failed: %s", err)
+
+
 def _agent_signed_out(agent_key: str) -> bool:
     """True when this CLI is installed but its live credentials are absent.
 
@@ -3793,12 +3853,6 @@ def _agent_signed_out(agent_key: str) -> bool:
     if spec is None or spec.live_file is None:
         return False
     try:
-        # A selected portable credential that can be put in effect is what
-        # the pane will run on, whatever the live login says. One that is
-        # missing or shadowed does not count: the spawn refuses it with the
-        # reason, and the native answer below stays the honest one.
-        if portable_credentials.selection_usable(agent_key, home=Path.home()):
-            return False
         return not bool(credential_vault.identity(agent_key).get("signedIn"))
     except Exception:  # noqa: BLE001 — advisory only, never fails a spawn
         return False
@@ -4178,6 +4232,8 @@ async def handle_message(session: Session, msg: dict[str, Any]) -> None:
             make_error(msg_id, msg_type, "SETUP_ERROR", _redact_home(str(err)))
         )
     except KeyError as err:
+        if "unknown terminal session" in str(err):
+            _FRAME_DROPS["unknown_terminal"] += 1
         await session.send_json(
             make_error(msg_id, msg_type, "BAD_REQUEST", f"missing field: {err}")
         )

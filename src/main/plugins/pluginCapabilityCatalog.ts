@@ -1,5 +1,5 @@
 import type { JsonValue, StoragePartitionScope } from '../../../packages/plugin-contracts/src/index'
-import { validFilePickerRequest } from '../../../packages/plugin-contracts/src/filePicker'
+import { MAX_EXCLUDE_CHARS, MAX_EXCLUDES, validFilePickerRequest } from '../../../packages/plugin-contracts/src/filePicker'
 import { normalizeJsonValue, utf8ByteLength } from './pluginStorageJson'
 import { EDITOR_FILESYSTEM_METHODS, validateEditorFilesystemRequest } from './editorFilesystemCapability'
 import { EDITOR_AI_METHODS, EDITOR_AI_EVENTS, validateEditorAiRequest } from './editorAiCapability'
@@ -9,6 +9,7 @@ import { PUBLIC_ISSUE_METHODS, validateIssueRequest } from './issueCapability'
 import { EDITOR_PREFERENCE_METHODS, validateEditorPreferenceRequest } from './editorPreferenceCapability'
 import { GIT_ACCOUNT_PUBLIC_METHODS, validateGitAccountRequest } from './gitAccountCapability'
 import { WEB_EVENTS, WEB_GESTURE_METHODS, WEB_METHODS, validateWebRequest } from './webCapability'
+import { AGENTS_METHODS, validateAgentsRequest } from './agentsCapability'
 
 /** Public Manifest v2 capability catalog used by the Host broker.
  *
@@ -55,7 +56,7 @@ export interface PublicStorageCapabilityCatalogEntry extends PublicCapabilityCat
 }
 
 export interface PublicSystemCapabilityCatalogEntry extends PublicCapabilityCatalogBase {
-  namespace: 'fs' | 'ui' | 'aiCli' | 'web' | 'shell'
+  namespace: 'fs' | 'ui' | 'aiCli' | 'web' | 'agents' | 'agentMessages' | 'shell'
   /** Host-pinned scope for declared namespaces (`ui.openExternal` and every
    *  `web.*` address are `plugin`; storage has its own discriminated entry). */
   scope: PublicCapabilityScope
@@ -216,6 +217,27 @@ function validateListFilesRequest(value: unknown): value is Record<string, unkno
   )
 }
 
+/** Search work grows with query length and paths × patterns; the backend holds the same limits. */
+const MAX_QUERY_CHARS = 1024
+
+function validateQueryFilesRequest(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'query', 'matchOn', 'mode', 'exclude', 'respectGitignore', 'includeHidden', 'includeNoiseDirs', 'limit', 'cursor',
+  ])) return false
+  return (
+    typeof value.query === 'string' && value.query.length <= MAX_QUERY_CHARS &&
+    (value.matchOn === undefined || value.matchOn === 'name' || value.matchOn === 'path') &&
+    (value.mode === undefined || value.mode === 'substring' || value.mode === 'subsequence' || value.mode === 'glob') &&
+    (value.exclude === undefined || (
+      Array.isArray(value.exclude) && value.exclude.length <= MAX_EXCLUDES &&
+      value.exclude.every((item) => typeof item === 'string' && item.length <= MAX_EXCLUDE_CHARS)
+    )) &&
+    ['respectGitignore', 'includeHidden', 'includeNoiseDirs'].every((key) => value[key] === undefined || typeof value[key] === 'boolean') &&
+    (value.limit === undefined || (positiveInteger(value.limit) && (value.limit as number) <= 1000)) &&
+    (value.cursor === undefined || (typeof value.cursor === 'string' && /^\d*$/.test(value.cursor)))
+  )
+}
+
 function validateSessionRequest(value: unknown): value is Record<string, unknown> {
   return requestWithString('sessionId', value)
 }
@@ -348,6 +370,7 @@ export const PUBLIC_CAPABILITY_CATALOG: Readonly<Record<string, PublicCapability
     requestWithString('path', value, ['showHidden']) &&
     (value.showHidden === undefined || typeof value.showHidden === 'boolean')),
   'fs.listFilesFlat': systemMethod('fs.listFilesFlat', 'fs', validateListFilesRequest),
+  'fs.queryFiles': systemMethod('fs.queryFiles', 'fs', validateQueryFilesRequest),
   'fs.glob': systemMethod('fs.glob', 'fs', (value) => requestWithString('pattern', value)),
   'fs.stat': systemMethod('fs.stat', 'fs', validateSelectedPathRequest),
   'fs.statPath': systemMethod('fs.statPath', 'fs', validateSelectedPathRequest),
@@ -437,6 +460,14 @@ export const PUBLIC_CAPABILITY_CATALOG: Readonly<Record<string, PublicCapability
   } satisfies PublicSystemCapabilityCatalogEntry])),
   ...Object.fromEntries(WEB_EVENTS.map(address => [address, {
     address, kind: 'event', namespace: 'web', scope: 'plugin', eligibility: 'public',
+  } satisfies PublicSystemCapabilityCatalogEntry])),
+  // Read-only agent data of the bound workspace. The address prefix is the
+  // namespace the grant must hold: message text (`agentMessages.read`) is its
+  // own namespace so it is declared, disclosed and policed separately.
+  ...Object.fromEntries(AGENTS_METHODS.map(address => [address, {
+    address, kind: 'method', namespace: address.startsWith('agentMessages.') ? 'agentMessages' : 'agents',
+    scope: 'workspace', eligibility: 'public',
+    validateRequest: (value: unknown): value is Record<string, unknown> => validateAgentsRequest(address, value),
   } satisfies PublicSystemCapabilityCatalogEntry])),
 }
 

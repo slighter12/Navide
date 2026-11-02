@@ -3,7 +3,9 @@ import { OwnerOnlyJsonPersistence } from './ownerOnlyJsonPersistence'
 
 /**
  * Durable user decisions about third-party native backends:
- * - the global "allow third-party native backends" switch (off by default);
+ * - the global "allow third-party native backends" switch: on for a profile
+ *   that has no decision file yet; once the file exists, its `enabled` is the
+ *   answer, so an earlier version's "off" stays off;
  * - per plugin: the consented (binary digest, permission set) pair, a
  *   user "disabled" switch, and the workspaces where file changes are allowed.
  *
@@ -22,7 +24,24 @@ export interface NativeBackendConsent {
   permissionsKey: string
   packageVersion: string
   grantedAt: string
+  /** Set when the consent was not the user's own answer but the 0.2.32
+   * migration of a package installed before 0.2.31 (see
+   * migratePreInstallConsent). A later consent of the user drops it. */
+  grantedBy?: typeof PRE_INSTALL_CONSENT
 }
+
+/** 0.2.32: the user answered the first-start dialog with "not now" (or
+ * closed it) for this exact content and permission set: later starts of the
+ * same content are not asked again and stay off. New content asks again. */
+export interface NativeBackendDecline {
+  binarySha256: string
+  permissionsKey: string
+  packageVersion: string
+  declinedAt: string
+}
+
+/** How a consent given by the pre-0.2.31 install migration is marked. */
+export const PRE_INSTALL_CONSENT = 'pre-0.2.31-install'
 
 /** DB3: workspaces where the user allowed agent write-risk tools of one
  * package version under one consent. A new version or consent drops it. */
@@ -34,6 +53,17 @@ export interface AgentToolWriteGrant {
 
 export interface NativeBackendPluginRecord {
   consent?: NativeBackendConsent
+  /** A consent was taken away (revoked, or forgotten to fail closed): the
+   * next start asks again instead of counting the install as consent.
+   * Cleared by the next consent; uninstalling drops it with the record. */
+  consentRevoked?: true
+  /** 0.2.31: the user confirmed the install dialog of this version, which
+   * discloses its native backend, so its first start counts as consent. A
+   * package installed earlier, or of another version, is asked instead. */
+  installConsent?: { packageVersion: string; grantedBy?: typeof PRE_INSTALL_CONSENT }
+  /** 0.2.32: the user declined this content; cleared by the next consent or
+   * install dialog. */
+  consentDeclined?: NativeBackendDecline
   disabled?: boolean
   /** Canonical workspace paths where workspace writes are allowed. */
   workspaceWrite?: string[]
@@ -56,6 +86,9 @@ export interface AgentToolSwitches {
   enabled: boolean
   /** DB4: external MCP clients (and the Host credential) may call them too. */
   externalCallers: boolean
+  /** Agents may call the tools of Navide's own first-party plugins. On by
+   * default: absent or anything but false reads as on. */
+  firstParty?: boolean
 }
 
 export interface NativeBackendState {
@@ -63,13 +96,16 @@ export interface NativeBackendState {
   enabled: boolean
   plugins: Record<string, NativeBackendPluginRecord>
   agentTools?: AgentToolSwitches
+  /** 0.2.32: when migratePreInstallConsent ran (ISO 8601). Absent = it has
+   * not run on this profile yet. */
+  preInstallConsentMigratedAt?: string
 }
 
 const FILE_NAME = 'native-backends.json'
 const MAX_BYTES = 256 * 1024
 
-function emptyState(): NativeBackendState {
-  return { schemaVersion: 1, enabled: false, plugins: {} }
+function emptyState(enabled = false): NativeBackendState {
+  return { schemaVersion: 1, enabled, plugins: {} }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,7 +121,22 @@ function parseConsent(value: unknown): NativeBackendConsent | undefined {
     typeof packageVersion !== 'string' ||
     typeof grantedAt !== 'string'
   ) return undefined
-  return { binarySha256, permissionsKey, packageVersion, grantedAt }
+  return {
+    binarySha256, permissionsKey, packageVersion, grantedAt,
+    ...(value.grantedBy === PRE_INSTALL_CONSENT ? { grantedBy: PRE_INSTALL_CONSENT } : {}),
+  }
+}
+
+function parseDecline(value: unknown): NativeBackendDecline | undefined {
+  if (!isRecord(value)) return undefined
+  const { binarySha256, permissionsKey, packageVersion, declinedAt } = value
+  if (
+    typeof binarySha256 !== 'string' || !/^[0-9a-f]{64}$/.test(binarySha256) ||
+    typeof permissionsKey !== 'string' ||
+    typeof packageVersion !== 'string' ||
+    typeof declinedAt !== 'string'
+  ) return undefined
+  return { binarySha256, permissionsKey, packageVersion, declinedAt }
 }
 
 function parseAgentToolWrite(value: unknown): AgentToolWriteGrant | undefined {
@@ -104,6 +155,15 @@ function parseState(value: unknown): NativeBackendState {
     const record: NativeBackendPluginRecord = {}
     const consent = parseConsent(raw.consent)
     if (consent) record.consent = consent
+    if (raw.consentRevoked === true) record.consentRevoked = true
+    if (isRecord(raw.installConsent) && typeof raw.installConsent.packageVersion === 'string') {
+      record.installConsent = {
+        packageVersion: raw.installConsent.packageVersion,
+        ...(raw.installConsent.grantedBy === PRE_INSTALL_CONSENT ? { grantedBy: PRE_INSTALL_CONSENT } : {}),
+      }
+    }
+    const declined = parseDecline(raw.consentDeclined)
+    if (declined) record.consentDeclined = declined
     if (raw.disabled === true) record.disabled = true
     if (Array.isArray(raw.workspaceWrite)) {
       const paths = raw.workspaceWrite.filter((path): path is string => typeof path === 'string')
@@ -121,15 +181,30 @@ function parseState(value: unknown): NativeBackendState {
     plugins[pluginId] = record
   }
   const agentTools = isRecord(value.agentTools)
-    ? { enabled: value.agentTools.enabled === true, externalCallers: value.agentTools.externalCallers === true }
+    ? {
+        enabled: value.agentTools.enabled === true,
+        externalCallers: value.agentTools.externalCallers === true,
+        ...(value.agentTools.firstParty === false ? { firstParty: false } : {}),
+      }
     : undefined
-  return { schemaVersion: 1, enabled: value.enabled === true, plugins, ...(agentTools ? { agentTools } : {}) }
+  const migratedAt = typeof value.preInstallConsentMigratedAt === 'string' ? value.preInstallConsentMigratedAt : undefined
+  return {
+    schemaVersion: 1, enabled: value.enabled === true, plugins,
+    ...(agentTools ? { agentTools } : {}),
+    ...(migratedAt !== undefined ? { preInstallConsentMigratedAt: migratedAt } : {}),
+  }
 }
 
 export class NativeBackendStore {
   private readonly persistence: OwnerOnlyJsonPersistence
   private readonly file: string
   private state: NativeBackendState
+  /** False when the file exists but could not be read: nothing is migrated
+   * into it (a save would replace what could not be read). */
+  private readable = true
+  /** #642 review L2: "off" applies in memory but could not be saved, so the
+   * file still reads as on (or is missing) and the next start would be on. */
+  private unsavedOff = false
 
   constructor(directory: string) {
     this.persistence = new OwnerOnlyJsonPersistence(directory, MAX_BYTES, MAX_BYTES)
@@ -138,9 +213,20 @@ export class NativeBackendStore {
   }
 
   private load(): NativeBackendState {
-    if (this.persistence.ensureDirectory(false) !== 'ready') return emptyState()
+    // A fresh profile (no directory, or no file in it) has never decided:
+    // the switch is on. Anything unreadable still reads as nothing allowed.
+    const directory = this.persistence.ensureDirectory(false)
+    if (directory === 'missing') return emptyState(true)
+    this.readable = false
+    if (directory !== 'ready') return emptyState()
     const read = this.persistence.read(this.file, 'native backend decisions')
-    return read.kind === 'present' ? parseState(read.value) : emptyState()
+    if (read.kind === 'missing') {
+      this.readable = true
+      return emptyState(true)
+    }
+    if (read.kind !== 'present') return emptyState()
+    this.readable = isRecord(read.value) && read.value.schemaVersion === 1 && isRecord(read.value.plugins)
+    return parseState(read.value)
   }
 
   /**
@@ -180,11 +266,27 @@ export class NativeBackendStore {
   }
 
   setEnabled(enabled: boolean): void {
-    this.save({ ...this.state, enabled }, !enabled)
+    try {
+      this.save({ ...this.state, enabled }, !enabled)
+    } catch (error) {
+      if (!enabled) this.unsavedOff = true
+      throw error
+    }
+    this.unsavedOff = false
+  }
+
+  /** True while "off" holds only in memory: its save failed and none since
+   * succeeded. */
+  offUnsaved(): boolean {
+    return this.unsavedOff
   }
 
   agentToolSwitches(): AgentToolSwitches {
-    return { enabled: this.state.agentTools?.enabled === true, externalCallers: this.state.agentTools?.externalCallers === true }
+    return {
+      enabled: this.state.agentTools?.enabled === true,
+      externalCallers: this.state.agentTools?.externalCallers === true,
+      firstParty: this.state.agentTools?.firstParty !== false,
+    }
   }
 
   /** Turning a switch off takes effect in memory even when the save fails. */
@@ -194,7 +296,8 @@ export class NativeBackendStore {
     // DB4 never outlives DB8: turning agents off also turns external clients
     // off, so turning agents on again never silently re-enables them.
     if (change.enabled === false) next.externalCallers = false
-    const restricting = (current.enabled && !next.enabled) || (current.externalCallers && !next.externalCallers)
+    const restricting = (current.enabled && !next.enabled) || (current.externalCallers && !next.externalCallers) ||
+      (current.firstParty !== false && next.firstParty === false)
     this.save({ ...this.state, agentTools: next }, restricting)
   }
 
@@ -206,8 +309,61 @@ export class NativeBackendStore {
     this.update(pluginId, (record) => {
       // A new consent asks the agent write-tool questions again (DB3).
       delete record.agentToolWrite
+      delete record.consentRevoked
+      delete record.consentDeclined
       return { ...record, consent: { ...consent, grantedAt: now.toISOString() } }
     })
+  }
+
+  /** 0.2.32: the user declined this exact content at its first-start dialog.
+   * Restricting: it holds for this run even when the save fails. */
+  declineConsent(pluginId: string, decline: Omit<NativeBackendDecline, 'declinedAt'>, now = new Date()): void {
+    this.update(pluginId, (record) => ({ ...record, consentDeclined: { ...decline, declinedAt: now.toISOString() } }), true)
+  }
+
+  /** The user confirmed the install dialog of this version: a new disclosure,
+   * so an earlier revocation no longer applies. */
+  noteInstallConsent(pluginId: string, packageVersion: string): void {
+    this.update(pluginId, (record) => {
+      delete record.consentRevoked
+      delete record.consentDeclined
+      return { ...record, installConsent: { packageVersion } }
+    })
+  }
+
+  /**
+   * 0.2.32, once per profile: count the packages installed before 0.2.31 as
+   * consented, as 0.2.31 does for its own installs. Before 0.2.31 no install
+   * recorded `installConsent`, and nothing on disk tells such an install from
+   * a 0.2.31 one that recorded none; so a package counts when, the first time
+   * this runs, it is installed (`installed`: the caller leaves out Developer
+   * Mode folders) and has no consent, no install consent, no revocation and
+   * no saved decline.
+   * Its record gets an install consent marked PRE_INSTALL_CONSENT for that
+   * version; the first start then records the consent like any install
+   * consent (requestConsent). With the global switch off nothing is granted
+   * (the user turned every native backend off: each is asked once it is on).
+   * Never runs again once it ran; a file that could not be read is left
+   * alone and the migration waits for a readable one. Returns the ids it
+   * granted. A failed save throws and the next start tries again.
+   */
+  migratePreInstallConsent(
+    installed: ReadonlyArray<{ pluginId: string; packageVersion: string }>,
+    now = new Date(),
+  ): string[] {
+    if (!this.readable || this.state.preInstallConsentMigratedAt !== undefined) return []
+    const plugins = { ...this.state.plugins }
+    const granted: string[] = []
+    if (this.state.enabled) {
+      for (const { pluginId, packageVersion } of installed) {
+        const record = plugins[pluginId] ?? {}
+        if (record.consent || record.installConsent || record.consentRevoked || record.consentDeclined) continue
+        plugins[pluginId] = { ...record, installConsent: { packageVersion, grantedBy: PRE_INSTALL_CONSENT } }
+        granted.push(pluginId)
+      }
+    }
+    this.save({ ...this.state, plugins, preInstallConsentMigratedAt: now.toISOString() })
+    return granted
   }
 
   /** DB3: the user allowed agent write-risk tools of this exact package version,
@@ -245,7 +401,8 @@ export class NativeBackendStore {
   revokeConsent(pluginId: string): void {
     this.update(pluginId, (record) => {
       delete record.consent
-      return record
+      delete record.installConsent
+      return { ...record, consentRevoked: true }
     })
   }
 
@@ -317,13 +474,18 @@ export class NativeBackendStore {
    * (Marketplace ↔ local file). Forget every permission given to the replaced
    * one: its consent, every workspace it may change files in, its agent write
    * answers and its agent tool place. Only the user's own Disabled switch for
-   * the id stays. */
-  forgetGrants(pluginId: string): void {
+   * the id stays, and the install consent of `keepInstallConsentFor`: the
+   * replacing version's own install dialog, not the replaced one's consent.
+   * Without it (failing closed), the next start is asked. */
+  forgetGrants(pluginId: string, keepInstallConsentFor?: string): void {
     const current = this.state.plugins[pluginId]
-    if (!current) return
+    const kept = keepInstallConsentFor !== undefined && current?.installConsent?.packageVersion === keepInstallConsentFor
+      ? { installConsent: { packageVersion: keepInstallConsentFor } }
+      : { consentRevoked: true as const }
     // Restricting: even if the file cannot be written, nothing stays granted
-    // for the rest of this run.
-    this.update(pluginId, () => (current.disabled ? { disabled: true } : {}), true)
+    // for the rest of this run. The mark is written even with no record, so
+    // the next start asks instead of counting the install as consent.
+    this.update(pluginId, () => ({ ...(current?.disabled ? { disabled: true as const } : {}), ...kept }), true)
   }
 
   /** Uninstall: forget every decision about the plugin. */

@@ -31,6 +31,18 @@ function mockPlugins(overrides: Record<string, unknown> = {}) {
   return api
 }
 
+/** A row's declared file scope as shown: its label, then each access group and its patterns. */
+function scopeTable(row: Pick<VueWrapper, 'get'>) {
+  const scopes = row.get('.ext-manifest-scopes')
+  return {
+    label: scopes.get('.ext-perm-label').text(),
+    groups: scopes.findAll('.ext-scope-group').map((group) => [
+      group.get('.ext-scope-kind').text(),
+      group.findAll('.ext-glob').map((glob) => glob.text()),
+    ]),
+  }
+}
+
 describe('ExtensionsPane', () => {
   let wrapper: VueWrapper | undefined
 
@@ -522,9 +534,13 @@ describe('ExtensionsPane', () => {
     await flushPromises()
 
     const row = wrapper.get('[data-factory-id="navide.plans"]')
-    expect(row.get('.ext-manifest-scopes').text()).toBe(
-      'File scope (from the Git repository root): read and write **/docs/plans/*, .plans/*; read only **/docs/plans/.history/**'
-    )
+    expect(scopeTable(row)).toEqual({
+      label: 'File scope (from the Git repository root)',
+      groups: [
+        ['read and write', ['**/docs/plans/*', '.plans/*']],
+        ['read only', ['**/docs/plans/.history/**']],
+      ],
+    })
     const risk = row.get('.ext-risk-note').text()
     expect(risk).toContain('own backend')
     expect(risk).toContain('user permissions')
@@ -568,7 +584,10 @@ describe('ExtensionsPane', () => {
     wrapper = mountExtensions()
     await flushPromises()
 
-    expect(wrapper.get('[data-id="acme.notes"] .ext-manifest-scopes').text()).toBe('File scope: read only docs')
+    expect(scopeTable(wrapper.get('[data-id="acme.notes"]'))).toEqual({
+      label: 'File scope',
+      groups: [['read only', ['docs']]],
+    })
   })
 
   it('shows no matching Grant for a Bundled package version without a grant', async () => {
@@ -844,9 +863,13 @@ describe('ExtensionsPane', () => {
       await flushPromises()
 
       const row = wrapper.get('[data-factory-id="navide.plans"]')
-      expect(row.get('.ext-manifest-scopes').text()).toBe(
-        '檔案範圍（從 Git 儲存庫根目錄起）：讀寫 **/docs/plans/*, .plans/*; 只讀 **/docs/plans/.history/**'
-      )
+      expect(scopeTable(row)).toEqual({
+        label: '檔案範圍（從 Git 儲存庫根目錄起）',
+        groups: [
+          ['讀寫', ['**/docs/plans/*', '.plans/*']],
+          ['只讀', ['**/docs/plans/.history/**']],
+        ],
+      })
       expect(row.get('.ext-risk-note').text()).toContain('沒有沙盒')
       expect(row.get('.ext-risk-note').text()).toContain('使用者權限')
       expect(row.get('.ext-risk-note').text()).toContain('讀取與寫入計畫文件都由此 Navide 外掛的後端直接進行')
@@ -960,11 +983,33 @@ describe('ExtensionsPane', () => {
       wrapper = mountExtensions()
       await flushPromises()
       await new Promise((resolve) => setTimeout(resolve, 0))
-      expect(wrapper.get('.ext-error').text()).toBe('Could not reload the installed Navide plugins: backend gone')
+      // The first read failed: the list's place says why, with Retry.
+      expect(wrapper.get('.ext-inventory-state-text').text()).toBe('Could not reload the installed Navide plugins: backend gone')
+      expect(wrapper.find('.ext-inventory-retry').exists()).toBe(true)
       expect(unhandled).toEqual([])
     } finally {
       process.off('unhandledRejection', onUnhandled)
     }
+  })
+
+  it('says the list is loading, and offers Retry when the read gives no answer', async () => {
+    let answer: (value: unknown) => void = () => {}
+    const listInstalled = vi
+      .fn()
+      .mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+      .mockResolvedValue([])
+    mockPlugins({ listInstalled })
+    wrapper = mountExtensions()
+    await flushPromises()
+    expect(wrapper.find('.ext-inventory-state.nv-loading').exists()).toBe(true)
+
+    answer(undefined)
+    await flushPromises()
+    expect(wrapper.find('.ext-inventory-state.nv-loading').exists()).toBe(false)
+    await wrapper.get('.ext-inventory-retry').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.ext-inventory-state').exists()).toBe(false)
+    expect(wrapper.find('.ext-empty').exists()).toBe(true)
   })
 
   it('shows both the rollback failure and a failed redraw after it', async () => {

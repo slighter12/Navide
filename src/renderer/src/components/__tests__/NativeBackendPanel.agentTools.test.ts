@@ -4,7 +4,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { i18n } from '@navide/plugin-ui/foundation'
 import NativeBackendPanel from '../NativeBackendPanel.vue'
 
-function overview(agentTools?: { enabled: boolean; externalCallers: boolean }) {
+function overview(agentTools?: { enabled: boolean; externalCallers: boolean; firstParty?: boolean }) {
   return { enabled: true, plugins: [], ...(agentTools ? { agentTools } : {}) }
 }
 
@@ -33,18 +33,67 @@ describe('NativeBackendPanel agent-tool switches (plan B1-b)', () => {
     mockApi({ list: vi.fn().mockResolvedValue(overview({ enabled: false, externalCallers: false })), setAgentTools })
     wrapper = mount(NativeBackendPanel, { global: { plugins: [i18n] } })
     await flushPromises()
-    const enabled = wrapper.find<HTMLInputElement>('[data-agent-tools-switch="enabled"]')
-    const external = wrapper.find<HTMLInputElement>('[data-agent-tools-switch="externalCallers"]')
-    expect(enabled.element.checked).toBe(false)
-    expect(external.element.checked).toBe(false)
+    const enabled = wrapper.find<HTMLButtonElement>('[data-agent-tools-switch="enabled"]')
+    const external = wrapper.find<HTMLButtonElement>('[data-agent-tools-switch="externalCallers"]')
+    expect(enabled.attributes('role')).toBe('switch')
+    expect(enabled.attributes('aria-checked')).toBe('false')
+    expect(external.attributes('aria-checked')).toBe('false')
     expect(external.element.disabled).toBe(true)
     expect(wrapper.text()).toContain('Let agents call tools from third-party Navide plugins')
     expect(wrapper.text()).toContain('External programs share a single token')
 
-    enabled.element.checked = true
-    await enabled.trigger('change')
+    await enabled.trigger('click')
     await flushPromises()
     expect(setAgentTools).toHaveBeenCalledWith({ enabled: true })
-    expect(wrapper.find<HTMLInputElement>('[data-agent-tools-switch="externalCallers"]').element.disabled).toBe(false)
+    expect(wrapper.find<HTMLButtonElement>('[data-agent-tools-switch="externalCallers"]').element.disabled).toBe(false)
+  })
+
+  it('shows the first-party switch on by default and forwards turning it off', async () => {
+    const setAgentTools = vi.fn().mockResolvedValue(overview({ enabled: false, externalCallers: false, firstParty: false }))
+    mockApi({ list: vi.fn().mockResolvedValue(overview({ enabled: false, externalCallers: false, firstParty: true })), setAgentTools })
+    wrapper = mount(NativeBackendPanel, { global: { plugins: [i18n] } })
+    await flushPromises()
+    const firstParty = wrapper.find<HTMLButtonElement>('[data-agent-tools-switch="firstParty"]')
+    expect(firstParty.attributes('aria-checked')).toBe('true')
+    expect(firstParty.element.disabled).toBe(false)
+    expect(wrapper.text()).toContain("Let agents call tools from first-party Navide plugins")
+    await firstParty.trigger('click')
+    await flushPromises()
+    expect(setAgentTools).toHaveBeenCalledWith({ firstParty: false })
+    expect(wrapper.find('[data-agent-tools-switch="firstParty"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it('turns native backends off with its switch, and keeps the warning in the same card above it', async () => {
+    const setEnabled = vi.fn().mockResolvedValue({ ...overview(), enabled: false })
+    mockApi({ list: vi.fn().mockResolvedValue(overview()), setEnabled })
+    wrapper = mount(NativeBackendPanel, { global: { plugins: [i18n] } })
+    await flushPromises()
+
+    const card = wrapper.get('.native-backends-card')
+    const children = card.element.children
+    expect(children[0].classList.contains('native-backends-callout')).toBe(true)
+    const toggle = card.get('[data-native-backends-switch="enabled"]')
+    expect(toggle.attributes('role')).toBe('switch')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(setEnabled).toHaveBeenCalledWith(false)
+  })
+
+  // The sidebar marks the Developer page "On" with the switches that are on.
+  it.each([
+    ['none', { enabled: false, plugins: [], agentTools: { enabled: false, externalCallers: false, firstParty: false } }, []],
+    ['first-party tools (the default)', { enabled: false, plugins: [], agentTools: { enabled: false, externalCallers: false, firstParty: true } }, ['settings.extensions.nativeBackends.agentTools.firstParty']],
+    ['native backends', { enabled: true, plugins: [], agentTools: { enabled: false, externalCallers: false, firstParty: false } }, ['settings.extensions.nativeBackends.enable']],
+    ['agent tools', { enabled: false, plugins: [], agentTools: { enabled: true, externalCallers: false, firstParty: false } }, ['settings.extensions.nativeBackends.agentTools.enable']],
+    ['agent tools and external callers', { enabled: false, plugins: [], agentTools: { enabled: true, externalCallers: true, firstParty: false } }, [
+      'settings.extensions.nativeBackends.agentTools.enable',
+      'settings.extensions.nativeBackends.agentTools.externalCallers',
+    ]],
+  ])('reports the switches that are on: %s', async (_name, state, keys) => {
+    mockApi({ list: vi.fn().mockResolvedValue(state) })
+    wrapper = mount(NativeBackendPanel, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect((wrapper.emitted('on') as string[][][]).at(-1)![0]).toEqual(keys.map((key) => i18n.global.t(key)))
   })
 })

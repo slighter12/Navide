@@ -65,4 +65,46 @@ describe('diffDisclosure', () => {
     const b = computeDisclosure(byName.get(to)!.manifest as never)
     expect(diffDisclosure(a, b)).toEqual(expected)
   })
+  // #647 review I2: risk is derived from the items, so a manifest cannot raise
+  // it without adding one; the rule still holds on its own for any
+  // disclosure handed in (a Registry listing, a stored one).
+  it('counts a risk rise alone as widened', () => {
+    const before = computeDisclosure(byName.get('scope-fs-docs-read')!.manifest as never)
+    const after = { ...before, risk: { ...before.risk, level: 'high' as const } }
+    const diff = diffDisclosure(before, after)
+    expect(diff.added).toEqual([])
+    expect(diff.removed).toEqual([])
+    expect(diff.widened).toBe(true)
+    expect(diffDisclosure(before, before).widened).toBe(false)
+  })
+})
+
+describe('aiCli in an update', () => {
+  // A package that gains aiCli can start an AI CLI and read all it prints
+  // (aiCli.output reaches every v2 package that declares it), so the update
+  // says so and counts as widened. Disclosure only: nothing is limited.
+  it('lists aiCli as added and the update as widened', () => {
+    const before = byName.get('ui-only')!.manifest as { permissions: { system: string[] } }
+    const after = JSON.parse(JSON.stringify(before)) as typeof before
+    after.permissions.system = [...after.permissions.system, 'aiCli']
+    const diff = diffDisclosure(computeDisclosure(before as never), computeDisclosure(after as never))
+    expect(diff.added).toContainEqual({ kind: 'system', key: 'aiCli', detail: null })
+    expect(diff.widened).toBe(true)
+  })
+
+  // Review L5 on #648: the case above also raises the risk level, so it would
+  // pass on the risk rule alone. Here the level is already the highest.
+  it('counts aiCli as widened when the risk level does not rise', () => {
+    const before = JSON.parse(JSON.stringify(byName.get('ui-only')!.manifest)) as {
+      permissions: { system: string[]; shell?: string }
+    }
+    before.permissions.shell = 'full'
+    const after = JSON.parse(JSON.stringify(before)) as typeof before
+    after.permissions.system = [...after.permissions.system, 'aiCli']
+    const diff = diffDisclosure(computeDisclosure(before as never), computeDisclosure(after as never))
+    expect(diff.from.risk).toBe('highest')
+    expect(diff.to.risk).toBe(diff.from.risk)
+    expect(diff.added).toEqual([{ kind: 'system', key: 'aiCli', detail: null }])
+    expect(diff.widened).toBe(true)
+  })
 })

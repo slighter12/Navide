@@ -9,10 +9,11 @@ import type { EditorNativeParams, EditorNativeResults, EditorNativeEvents } from
 import type { GitCapabilityParams, GitCapabilityResults } from './gitCapabilities.js'
 import type { GitAccountParams, GitAccountResults, GitCredentialEvents } from './gitAccounts.js'
 import type { IssueParams, IssueResults } from './issues.js'
+import type { AgentsParams, AgentsResults } from './agents.js'
 import type { EditorPreferenceParams, EditorPreferenceResults, EditorPreferenceEvents } from './editorPreferences.js'
 import type { FilePickerRequest } from './filePicker.js'
 export { validFilePickerRequest } from './filePicker.js'
-export type { FilePickerRequest } from './filePicker.js'
+export type { FilePickerRequest, FilePickerSearch, FilePickerTarget } from './filePicker.js'
 
 export * from './archive.js'
 export * from './aiTerminal.js'
@@ -21,6 +22,7 @@ export type { EditorAiParams, EditorAiResults, EditorAiEvents, EditorReviewResul
 export type { EditorNativeParams, EditorNativeResults, EditorNativeEvents, EditorFileSelection } from './editorNative.js'
 export * from './gitCapabilities.js'
 export * from './issues.js'
+export * from './agents.js'
 export * from './editorPreferences.js'
 export * from './staticScan.js'
 export { deriveAgentToolPrefix, validateAgentTools } from './agentToolsValidation.js'
@@ -36,7 +38,7 @@ export type StorageGetResult =
 
 export const V2_VIEW_LOCATIONS = ['top', 'bottom', 'right', 'left', 'main', 'window', 'detail'] as const
 export const V2_RECEIVER_LOCATIONS = ['left', 'detail'] as const
-export const V2_SYSTEM_NAMESPACES = ['fs', 'ui', 'aiCli', 'web'] as const
+export const V2_SYSTEM_NAMESPACES = ['fs', 'ui', 'aiCli', 'web', 'agents', 'agentMessages'] as const
 export const V2_SHELL_MODES = ['allowlist', 'full'] as const
 /** Most members one Extension Pack may list. */
 export const MAX_EXTENSION_PACK_MEMBERS = 20
@@ -86,6 +88,17 @@ export type PluginManifestV2Receiver = {
   closeGuard?: { protocolVersion: 1 }
 }
 
+export type PluginManifestV2CommandRun = { view: string; target?: Record<string, string> } | { method: string }
+
+export type PluginManifestV2Command = {
+  /** `<plugin id>.<name>`. The schema cannot express the prefix; the parser does. */
+  id: string
+  title: string
+  run: PluginManifestV2CommandRun
+  /** Shown as a suggestion in Settings; never bound without the user's click. */
+  suggestedKey?: string
+}
+
 export type PluginManifestV2View = {
   id: string
   kind: 'custom'
@@ -115,7 +128,7 @@ export type PluginManifestV2 = {
     categories?: string[]
     icon?: string
   }
-  contributes?: { views: PluginManifestV2View[] }
+  contributes?: { views: PluginManifestV2View[]; commands?: PluginManifestV2Command[] }
   backend?: {
     entry: string
     protocolVersion: 1
@@ -491,10 +504,14 @@ function parsePermissions(value: unknown): PluginManifestV2Permissions {
   assertOnlyKeys(permissions, ['system', 'shell', 'scopes'], 'manifest permissions')
   let system: PluginSystemNamespace[] | undefined
   if (Object.prototype.hasOwnProperty.call(permissions, 'system')) {
-    const values = uniqueStringArray(permissions.system, 'manifest permissions.system', 1, 4)
+    const values = uniqueStringArray(permissions.system, 'manifest permissions.system', 1, V2_SYSTEM_NAMESPACES.length)
     const unknown = values.find((item) => !V2_SYSTEM_NAMESPACES.includes(item as PluginSystemNamespace))
     if (unknown !== undefined) {
       fail(`manifest permissions.system contains an unknown namespace ${JSON.stringify(unknown)}; allowed: ${V2_SYSTEM_NAMESPACES.join(', ')}`)
+    }
+    // Message text is disclosed on top of the agent metadata it belongs to.
+    if (values.includes('agentMessages') && !values.includes('agents')) {
+      fail('manifest permissions.system declares agentMessages without agents')
     }
     system = values as PluginSystemNamespace[]
   }
@@ -540,7 +557,7 @@ function parseMarketplace(value: unknown): PluginManifestV2['marketplace'] {
 
 function parseViews(value: unknown): { views: PluginManifestV2View[] } {
   const contributes = assertObject(value, 'manifest contributes')
-  assertOnlyKeys(contributes, ['views'], 'manifest contributes')
+  assertOnlyKeys(contributes, ['views', 'commands'], 'manifest contributes')
   if (!Array.isArray(contributes.views) || contributes.views.length < 1 || contributes.views.length > 16) {
     fail('manifest contributes.views must contain 1-16 view(s)')
   }
@@ -704,6 +721,75 @@ function backendNameList(value: unknown, label: string, maxItems: number): strin
   return names
 }
 
+const MAX_COMMANDS = 32
+const COMMAND_NAME = /^[a-z][a-zA-Z0-9]*$/
+const COMMAND_TARGET_KEY = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+/** First segments of the Host's own command ids. A publisher may be called any
+ *  of these, so a prefix check on the plugin id alone would not keep a plugin
+ *  command from reading as Navide's. */
+const RESERVED_COMMAND_HEADS = ['workbench', 'ui', 'editor', 'git', 'navide']
+
+function parseCommands(
+  value: unknown,
+  pluginId: string,
+  views: PluginManifestV2View[],
+  methods: string[] | undefined
+): PluginManifestV2Command[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_COMMANDS) {
+    fail(`manifest contributes.commands must contain 1-${MAX_COMMANDS} command(s)`)
+  }
+  const head = pluginId.split('.', 1)[0]
+  if (RESERVED_COMMAND_HEADS.includes(head)) {
+    fail(`manifest contributes.commands cannot be declared under ${JSON.stringify(head)}, which is a namespace of Navide's own commands`)
+  }
+  const seen = new Set<string>()
+  return value.map((raw, index) => {
+    const label = `manifest contributes.commands[${index}]`
+    const command = assertObject(raw, label)
+    assertOnlyKeys(command, ['id', 'title', 'run', 'suggestedKey'], label)
+    const id = stringValue(required(command, 'id', label), `${label}.id`)
+    const prefix = `${pluginId}.`
+    if (!id.startsWith(prefix) || !COMMAND_NAME.test(id.slice(prefix.length))) {
+      fail(`${label}.id ${JSON.stringify(id)} is invalid; a command id is the plugin id, a dot, then a name of letters and digits starting with a lower-case letter, for example ${prefix}runTests`)
+    }
+    if (seen.has(id)) fail(`${label}.id ${JSON.stringify(id)} is declared twice`)
+    seen.add(id)
+    const title = displayText(required(command, 'title', label), `${label}.title`)
+    const run = assertObject(required(command, 'run', label), `${label}.run`)
+    let parsedRun: PluginManifestV2CommandRun
+    if (run.view !== undefined) {
+      assertOnlyKeys(run, ['view', 'target'], `${label}.run`)
+      const view = stringValue(run.view, `${label}.run.view`)
+      if (!views.some((candidate) => candidate.id === view)) {
+        fail(`${label}.run.view ${JSON.stringify(view)} is not a view this manifest declares`)
+      }
+      parsedRun = { view }
+      if (run.target !== undefined) {
+        const target = assertObject(run.target, `${label}.run.target`)
+        const entries = Object.entries(target)
+        if (entries.length < 1 || entries.length > 16) fail(`${label}.run.target must contain 1-16 key(s)`)
+        for (const [key, text] of entries) {
+          if (!COMMAND_TARGET_KEY.test(key)) fail(`${label}.run.target key ${JSON.stringify(key)} is invalid`)
+          stringValue(text, `${label}.run.target.${key}`, 0, 256)
+        }
+        parsedRun.target = target as Record<string, string>
+      }
+    } else if (run.method !== undefined) {
+      assertOnlyKeys(run, ['method'], `${label}.run`)
+      const method = stringValue(run.method, `${label}.run.method`)
+      if (!methods?.includes(method)) fail(`${label}.run.method ${JSON.stringify(method)} is not listed in backend.methods`)
+      parsedRun = { method }
+    } else {
+      fail(`${label}.run must name a view or a method`)
+    }
+    const parsed: PluginManifestV2Command = { id, title, run: parsedRun }
+    if (command.suggestedKey !== undefined) {
+      parsed.suggestedKey = stringValue(command.suggestedKey, `${label}.suggestedKey`, 1, 64)
+    }
+    return parsed
+  })
+}
+
 export function parseManifestV2(raw: unknown): PluginManifestV2 {
   const manifest = assertObject(raw, 'manifest')
   assertOnlyKeys(
@@ -755,8 +841,12 @@ export function parseManifestV2(raw: unknown): PluginManifestV2 {
   } else if (manifest.contributes === undefined && manifest.backend === undefined) {
     fail('manifest must declare contributes or backend')
   }
-  const contributes = manifest.contributes === undefined ? undefined : parseViews(manifest.contributes)
+  const contributes: PluginManifestV2['contributes'] = manifest.contributes === undefined ? undefined : parseViews(manifest.contributes)
   const backend = manifest.backend === undefined ? undefined : parseBackend(manifest.backend)
+  const declaredCommands = isRecord(manifest.contributes) ? manifest.contributes.commands : undefined
+  if (contributes && declaredCommands !== undefined) {
+    contributes.commands = parseCommands(declaredCommands, id, contributes.views, backend?.methods)
+  }
   return {
     schemaVersion: 2,
     apiVersion,
@@ -940,13 +1030,24 @@ export class PluginError extends Error {
   }
 }
 
-export interface PublicMethodParams extends EditorFilesystemParams, EditorAiParams, AiTerminalParams, EditorNativeParams, GitCapabilityParams, GitAccountParams, IssueParams, EditorPreferenceParams {
+export interface PublicMethodParams extends EditorFilesystemParams, EditorAiParams, AiTerminalParams, EditorNativeParams, GitCapabilityParams, GitAccountParams, IssueParams, EditorPreferenceParams, AgentsParams {
   'ui.openFilePicker': FilePickerRequest
   'fs.readFile': { path: string; encoding?: string; selectionGrant?: string }
   'fs.writeFile': { path: string; content: string; encoding?: string; expectedMtime?: number; selectionGrant?: string }
   'fs.readImage': { path: string; selectionGrant?: string }
   'fs.listDirectory': { path: string; showHidden?: boolean }
   'fs.listFilesFlat': { query?: string; maxResults?: number }
+  'fs.queryFiles': {
+    query: string
+    matchOn?: 'name' | 'path'
+    mode?: 'substring' | 'subsequence' | 'glob'
+    exclude?: string[]
+    respectGitignore?: boolean
+    includeHidden?: boolean
+    includeNoiseDirs?: boolean
+    limit?: number
+    cursor?: string
+  }
   'fs.glob': { pattern: string }
   'fs.stat': { path: string; selectionGrant?: string }
   'fs.statPath': { path: string; selectionGrant?: string }
@@ -972,7 +1073,7 @@ export interface PublicMethodParams extends EditorFilesystemParams, EditorAiPara
   'storage.delete': { scope: StoragePartitionScope; key: string }
 }
 
-export interface PublicMethodResults extends EditorFilesystemResults, EditorAiResults, AiTerminalResults, EditorNativeResults, GitCapabilityResults, GitAccountResults, IssueResults, EditorPreferenceResults {
+export interface PublicMethodResults extends EditorFilesystemResults, EditorAiResults, AiTerminalResults, EditorNativeResults, GitCapabilityResults, GitAccountResults, IssueResults, EditorPreferenceResults, AgentsResults {
   'ui.openFilePicker': { opened: boolean }
   'fs.readFile': {
     content: string
@@ -995,6 +1096,15 @@ export interface PublicMethodResults extends EditorFilesystemResults, EditorAiRe
     error?: string
   }
   'fs.listFilesFlat': { files?: string[]; ok?: boolean; truncated?: boolean; error?: string }
+  'fs.queryFiles': {
+    ok: boolean
+    files?: Array<{ path: string; name: string; matchSpans: Array<[number, number]>; size: number; mtime: number }>
+    nextCursor?: string
+    gitignoreApplied?: boolean
+    listingTruncated?: boolean
+    timedOut?: boolean
+    error?: string
+  }
   'fs.glob': { paths: string[] }
   'fs.stat': { kind: 'file' | 'directory'; size: number; modifiedAt: string }
   'fs.statPath': { exists: boolean }
@@ -1051,3 +1161,4 @@ export interface Disposable {
 }
 
 export { manifestV2Schema, capabilitiesV1, executionPolicyV1Schema }
+export { PLUGIN_API_VERSION, isPluginApiSupported, pluginApiMajor } from './apiVersion.js'

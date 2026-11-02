@@ -10,6 +10,7 @@ renamed `project.json.migrated-v1`.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -22,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import webhook_payload
 from .db import DB_FILENAME, WorkspaceDatabases
 from .path_guard import PROJECT_DIR_NAME
 
@@ -153,6 +155,87 @@ class StageRecord:
     slots: list[SlotRecord] = field(default_factory=list)
 
 
+#: A run's own fields: what a subpipeline call saves on run_stack and puts back.
+RUN_FIELDS = (
+    "task_description", "state", "current_stage_index", "total_stages", "agents_spawned",
+    "log_file_name", "pipeline_id", "node_states", "node_gate", "node_outputs",
+)
+
+
+class StageOutOfRange(IndexError):
+    """A stage index the run does not have; the message names the range."""
+
+    def __init__(self, stage_index: int, total: int) -> None:
+        span = f"0..{total - 1}" if total else "none"
+        super().__init__(f"stage_index {stage_index} out of range — the run has {total} stage(s) ({span})")
+        self.stage_index = stage_index
+        self.total = total
+
+
+class SlotNotFound(LookupError):
+    """No pipeline slot with that label in that stage of the run."""
+
+    def __init__(self, stage_index: int, slot_label: str) -> None:
+        super().__init__(f"no slot {slot_label!r} in stage {stage_index} of the run")
+        self.stage_index = stage_index
+        self.slot_label = slot_label
+
+
+class NoRunToResume(ValueError):
+    """resume_pipeline on a workspace with no recorded run."""
+
+
+class ParentRunSuspended(ValueError):
+    """A start refused because a parent run is suspended here, waiting for its
+    child; the message names the parent pipeline."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"a suspended parent run ({name or 'unnamed'}) is waiting for its sub-pipeline here; "
+            "resume or reset it first"
+        )
+        self.pipeline_name = name
+
+
+class PipelineAlreadyRunning(ValueError):
+    """A start or resume refused because a window still drives this
+    workspace's run. A stored ``running`` run nobody drives any more (see
+    pipeline_liveness) is not refused: that is the crash case, which Start
+    Over and Resume exist for.
+
+    ``error_code`` is what MCP and the scheduler answer with; the WS handlers
+    answer with its upper-case twin, as pipeline_running / PIPELINE_RUNNING."""
+
+    error_code = "pipeline_already_running"
+
+    def __init__(self, what: str) -> None:
+        super().__init__(
+            f"cannot {what}: a pipeline run is already in progress in this workspace — "
+            "abort it first"
+        )
+
+
+def _refuse_live_run(project: "Project", what: str) -> None:
+    from . import pipeline_liveness
+
+    if pipeline_liveness.run_is_live(project):
+        raise PipelineAlreadyRunning(what)
+
+
+def _stage_record(s: dict[str, Any]) -> "StageRecord":
+    """A StageRecord back from asdict() (a run_stack frame), slots included."""
+    known = {f for f in StageRecord.__dataclass_fields__} - {"slots"}
+    slot_known = {f for f in SlotRecord.__dataclass_fields__}
+    record = StageRecord(**{k: v for k, v in s.items() if k in known})
+    record.slots = [SlotRecord(**{k: v for k, v in sl.items() if k in slot_known}) for sl in s.get("slots") or []]
+    return record
+
+
+def _pane_record(p: dict[str, Any]) -> "PaneRecord":
+    known = {f for f in PaneRecord.__dataclass_fields__}
+    return PaneRecord(**{k: v for k, v in p.items() if k in known})
+
+
 @dataclass
 class Project:
     id: str
@@ -163,7 +246,7 @@ class Project:
     task_description: str = ""
     state: str = "idle"  # idle / running / completed / aborted
     current_stage_index: int = -1
-    total_stages: int = 5
+    total_stages: int = 0  # len(stages): 0 until a run records its stage blueprint
     stages: list[StageRecord] = field(default_factory=list)
     panes: list[PaneRecord] = field(default_factory=list)   # unified: pipeline slots + manual panes
     manual_panes: list[ManualPaneRecord] = field(default_factory=list)  # legacy — kept for backward compat
@@ -218,6 +301,12 @@ class Project:
     # Last output summary per graph node, kept ACROSS runs so a pinned node
     # can hand its frozen output to downstream nodes ({{prev.summary}}).
     node_outputs: dict[str, Any] = field(default_factory=dict)
+    # Sub-pipeline calls: one frame per parent run suspended at a subpipeline
+    # node while its child runs here (innermost last). A frame holds the
+    # parent's run fields (RUN_FIELDS) as they were when it suspended, plus
+    # {id, node_id, next_index, pipeline_name, child_pipeline_id, taint,
+    # suspended_at}. Empty for every run that calls no sub-pipeline.
+    run_stack: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -561,47 +650,63 @@ class ProjectStore:
         backend_version: str = "",
         pipeline_id: str = "",
         start_index: int = 0,
+        child_of: str = "",
     ) -> Project:
         """start_index > 0 is a restart-from-node run: the stages before it
         are not run again (their last output is reused) and are recorded as
-        completed, so a later resume does not walk back into them."""
-        project = self.load_or_create(workspace_path, backend_version=backend_version)
-        project.task_description = task_description
-        project.total_stages = total_stages
-        if pipeline_id:
-            project.pipeline_id = pipeline_id
-        project.state = "running"
-        project.current_stage_index = -1  # spawn_stage will bump to 0
-        project.stages = [
-            StageRecord(
-                stage_id=s["stage_id"],
-                title=s.get("title", ""),
-                slots=[
-                    SlotRecord(
-                        label=sl.get("label", ""),
-                        agent=sl.get("agent", ""),
-                        role=sl.get("role", ""),
-                    )
-                    for sl in s.get("slots", [])
-                ],
-            )
-            for s in stage_blueprint
-        ]
-        for skipped in project.stages[: max(0, start_index)]:
-            skipped.status = "completed"
-        # Clear stale pipeline panes from previous runs; preserve manual panes.
-        project.panes = [p for p in project.panes if p.origin != "pipeline"]
-        project.node_states = {}
-        project.node_gate = {}
-        # Each pipeline run gets its own log file.
-        project.log_file_name = _make_log_filename(task_description)
-        self.save(project)
+        completed, so a later resume does not walk back into them.
+
+        While a parent run is suspended here (run_stack), the only run that
+        may start is the child it is waiting for: ``child_of`` naming the top
+        frame's id. Anything else raises :class:`ParentRunSuspended`.
+
+        A run a window still drives raises :class:`PipelineAlreadyRunning`
+        rather than being overwritten underneath its panes."""
+        with self._save_lock:
+            project = self.load_or_create(workspace_path, backend_version=backend_version)
+            if project.run_stack:
+                top = project.run_stack[-1]
+                if child_of != top.get("id") or project.state != "suspended":
+                    raise ParentRunSuspended(str(top.get("pipeline_name") or top.get("run", {}).get("pipeline_id") or ""))
+            elif child_of:
+                raise ValueError("no parent run is waiting for a child run")
+            _refuse_live_run(project, "start a pipeline run")
+            project.task_description = task_description
+            project.total_stages = total_stages
+            if pipeline_id:
+                project.pipeline_id = pipeline_id
+            project.state = "running"
+            project.current_stage_index = -1  # spawn_stage will bump to 0
+            project.stages = [
+                StageRecord(
+                    stage_id=s["stage_id"],
+                    title=s.get("title", ""),
+                    slots=[
+                        SlotRecord(
+                            label=sl.get("label", ""),
+                            agent=sl.get("agent", ""),
+                            role=sl.get("role", ""),
+                        )
+                        for sl in s.get("slots", [])
+                    ],
+                )
+                for s in stage_blueprint
+            ]
+            for skipped in project.stages[: max(0, start_index)]:
+                skipped.status = "completed"
+            # Clear stale pipeline panes from previous runs; preserve manual panes.
+            project.panes = [p for p in project.panes if p.origin != "pipeline"]
+            project.node_states = {}
+            project.node_gate = {}
+            # Each pipeline run gets its own log file.
+            project.log_file_name = _make_log_filename(task_description)
+            self.save(project)
         self.append_event(
             workspace_path,
             {
                 "event": "pipeline_start",
                 "project_id": project.id,
-                "task": task_description,
+                "task": webhook_payload.log_safe_task(task_description),
                 "total_stages": total_stages,
                 "log_file": project.log_file_name,
             },
@@ -618,26 +723,27 @@ class ProjectStore:
         agent: str,
         role: str,
     ) -> Project:
-        project = self.load_or_create(workspace_path)
-        if stage_index < 0 or stage_index >= len(project.stages):
-            raise IndexError(f"stage_index {stage_index} out of range")
-        # mark previous stage completed (if any) before bumping pointer
-        if 0 <= project.current_stage_index < len(project.stages):
-            prev = project.stages[project.current_stage_index]
-            if prev.status == "running":
-                prev.status = "completed"
-                prev.ended_at = _now_iso()
-        stage = project.stages[stage_index]
-        stage.status = "running"
-        stage.started_at = _now_iso()
-        stage.pane_id = pane_id
-        if agent:
-            stage.agent = agent
-        if role:
-            stage.role = role
-        project.current_stage_index = stage_index
-        project.agents_spawned += 1
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            if stage_index < 0 or stage_index >= len(project.stages):
+                raise StageOutOfRange(stage_index, len(project.stages))
+            # mark previous stage completed (if any) before bumping pointer
+            if 0 <= project.current_stage_index < len(project.stages):
+                prev = project.stages[project.current_stage_index]
+                if prev.status == "running":
+                    prev.status = "completed"
+                    prev.ended_at = _now_iso()
+            stage = project.stages[stage_index]
+            stage.status = "running"
+            stage.started_at = _now_iso()
+            stage.pane_id = pane_id
+            if agent:
+                stage.agent = agent
+            if role:
+                stage.role = role
+            project.current_stage_index = stage_index
+            project.agents_spawned += 1
+            self.save(project)
         self.append_event(
             workspace_path,
             {
@@ -709,33 +815,34 @@ class ProjectStore:
         run_group_id: str = "",
         launch_id: str = "",
     ) -> Project:
-        project = self.load_or_create(workspace_path)
-        if stage_index < 0 or stage_index >= len(project.stages):
-            raise IndexError(f"stage_index {stage_index} out of range")
-        stage = project.stages[stage_index]
-        pane = self._find_slot_pane(project, stage_index, slot_label)
-        if pane is None:
-            pane = PaneRecord(pane_id=pane_id, origin="pipeline",
-                              stage_id=stage.stage_id, stage_index=stage_index, slot_label=slot_label)
-            project.panes.append(pane)
-        self._adopt_pending_stub(project, pane, pane_id)
-        # Same re-key as the manual path: a pipeline pane has no parent of its
-        # own, but it can be one — an MCP spawn from inside it produces children
-        # whose spawned_by points here.
-        if pane.pane_id != pane_id:
-            self._rekey_spawned_by(project, pane.pane_id, pane_id)
-        pane.pane_id = pane_id
-        pane.spawn_status = "spawned"
-        if not pane.spawned_at: pane.spawned_at = _now_iso()
-        if launch_id: pane.last_live_launch = launch_id
-        if agent: pane.agent = agent
-        if role: pane.role = role
-        # Claude pins its session id at spawn; Codex/Gemini use record_slot_session() later.
-        if session_id: pane.session_id = session_id
-        if session_home_id: pane.session_home_id = session_home_id
-        if profile_id: pane.profile_id = profile_id
-        if run_group_id: pane.run_group_id = run_group_id
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            if stage_index < 0 or stage_index >= len(project.stages):
+                raise StageOutOfRange(stage_index, len(project.stages))
+            stage = project.stages[stage_index]
+            pane = self._find_slot_pane(project, stage_index, slot_label)
+            if pane is None:
+                pane = PaneRecord(pane_id=pane_id, origin="pipeline",
+                                  stage_id=stage.stage_id, stage_index=stage_index, slot_label=slot_label)
+                project.panes.append(pane)
+            self._adopt_pending_stub(project, pane, pane_id)
+            # Same re-key as the manual path: a pipeline pane has no parent of its
+            # own, but it can be one — an MCP spawn from inside it produces children
+            # whose spawned_by points here.
+            if pane.pane_id != pane_id:
+                self._rekey_spawned_by(project, pane.pane_id, pane_id)
+            pane.pane_id = pane_id
+            pane.spawn_status = "spawned"
+            if not pane.spawned_at: pane.spawned_at = _now_iso()
+            if launch_id: pane.last_live_launch = launch_id
+            if agent: pane.agent = agent
+            if role: pane.role = role
+            # Claude pins its session id at spawn; Codex/Gemini use record_slot_session() later.
+            if session_id: pane.session_id = session_id
+            if session_home_id: pane.session_home_id = session_home_id
+            if profile_id: pane.profile_id = profile_id
+            if run_group_id: pane.run_group_id = run_group_id
+            self.save(project)
         return project
 
     def record_slot_session(
@@ -747,11 +854,12 @@ class ProjectStore:
         session_id: str,
     ) -> Project:
         """Persist the CLI session id for a slot so it can be resumed on restart."""
-        project = self.load_or_create(workspace_path)
-        pane = self._find_slot_pane(project, stage_index, slot_label)
-        if pane:
-            pane.session_id = session_id
-            self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = self._find_slot_pane(project, stage_index, slot_label)
+            if pane:
+                pane.session_id = session_id
+                self.save(project)
         return project
 
     def slot_pane_id(self, workspace_path: str, *, stage_index: int, slot_label: str) -> str:
@@ -759,7 +867,7 @@ class ProjectStore:
         retirement settles that pane's terminals before it touches the record)."""
         project = self.load_or_create(workspace_path)
         if stage_index < 0 or stage_index >= len(project.stages):
-            raise IndexError(f"stage_index {stage_index} out of range")
+            raise StageOutOfRange(stage_index, len(project.stages))
         pane = self._find_slot_pane(project, stage_index, slot_label)
         return pane.pane_id if pane is not None else ""
 
@@ -775,21 +883,22 @@ class ProjectStore:
 
         `expected_pane_id` binds the write to the pane whose terminals the caller settled: if the
         slot now holds another pane, nothing is written and RetirementTargetChanged is raised."""
-        project = self.load_or_create(workspace_path)
-        if stage_index < 0 or stage_index >= len(project.stages):
-            raise IndexError(f"stage_index {stage_index} out of range")
-        stage = project.stages[stage_index]
-        pane = self._find_slot_pane(project, stage_index, slot_label)
-        if expected_pane_id is not None and (pane.pane_id if pane is not None else "") != expected_pane_id:
-            raise RetirementTargetChanged(
-                f"slot {stage_index}/{slot_label} now holds another pane than the one settled")
-        if pane is None:
-            return project
-        self._adopt_orphans(project, pane)
-        pane.spawn_status = "removed"
-        pane.removed_at = _now_iso()
-        pane.kickoff_status = "none"
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            if stage_index < 0 or stage_index >= len(project.stages):
+                raise StageOutOfRange(stage_index, len(project.stages))
+            stage = project.stages[stage_index]
+            pane = self._find_slot_pane(project, stage_index, slot_label)
+            if expected_pane_id is not None and (pane.pane_id if pane is not None else "") != expected_pane_id:
+                raise RetirementTargetChanged(
+                    f"slot {stage_index}/{slot_label} now holds another pane than the one settled")
+            if pane is None:
+                return project
+            self._adopt_orphans(project, pane)
+            pane.spawn_status = "removed"
+            pane.removed_at = _now_iso()
+            pane.kickoff_status = "none"
+            self.save(project)
         self.append_event(
             workspace_path,
             {"event": "slot_unspawn", "stage_index": stage_index,
@@ -907,73 +1016,74 @@ class ProjectStore:
         window_kind: str = "",
         launch_id: str = "",
     ) -> Project:
-        project = self.load_or_create(workspace_path)
-        pane = self._find_manual_pane(project, pane_id, previous_pane_id, session_id)
-        # "main" is a window pane's surface too (unmarked is every older record).
-        if surface and pane is not None and pane.surface in ("", "main"):
-            # A panel's spawn (it reaches here from terminal.create, which a
-            # plugin window's broker can send) naming a window pane's record:
-            # leave that record alone. Taking it over would mark it a panel's,
-            # and the main window would stop restoring the pane.
-            return project
-        if surface and any(p.pane_id == pane_id and p.surface in ("", "main") for p in project.panes):
-            # Any other record under this id is not a panel's either — a
-            # pipeline pane (which _find_manual_pane skips) or a window pane's
-            # pending stub. Adding a second record beside it, or folding the
-            # stub into the panel's, would corrupt that pane's restore.
-            return project
-        if pane is None:
-            pane = PaneRecord(pane_id=pane_id, origin=origin or "manual")
-            project.panes.append(pane)
-        self._adopt_pending_stub(project, pane, pane_id)
-        # pane_id is regenerated on every restart and re-linked via
-        # previous_pane_id. Any child still pointing spawned_by at this
-        # record's OLD id becomes a dead pointer the instant we overwrite it,
-        # so rewrite the children first — in this same save(), never as a
-        # follow-up RPC. A stale lineage is worse than no lineage: spawn-depth
-        # checks read it and would mis-count.
-        if pane.pane_id != pane_id:
-            self._rekey_spawned_by(project, pane.pane_id, pane_id)
-        pane.pane_id = pane_id
-        pane.agent = agent
-        pane.role = role
-        pane.command = command
-        pane.spawn_status = "spawned"
-        # Set once: the rebuild path re-spawns an existing record, and the pane
-        # the user is looking at started at the ORIGINAL time, not this hop.
-        if not pane.spawned_at: pane.spawned_at = _now_iso()
-        if launch_id: pane.last_live_launch = launch_id
-        if session_id: pane.session_id = session_id
-        if session_home_id: pane.session_home_id = session_home_id
-        if profile_id: pane.profile_id = profile_id
-        # Guarded like origin below: the rebuild path re-spawns with an empty
-        # model/effort, and an unconditional write would erase the pick the
-        # user made before the restart.
-        if model: pane.model = model
-        if effort: pane.effort = effort
-        if run_group_id: pane.run_group_id = run_group_id
-        if output_log_file: pane.output_log_file = output_log_file
-        # Guarded like the fields above: an omitted origin must not blank an
-        # existing record back to "manual" (that would strip the mcp marker).
-        if origin: pane.origin = origin
-        if spawned_by: pane.spawned_by = spawned_by
-        # Only a dock's spawn passes these; a main-window spawn leaves them
-        # empty and the record exactly as before.
-        if surface: pane.surface = surface
-        if window_kind: pane.window_kind = window_kind
-        # A rebuild hop owns its session: retire any OTHER spawned manual
-        # record sharing it (legacy duplicate accumulation) so restore cannot
-        # resurrect a ghost pane. Gated on previous_pane_id for the same
-        # reason as the lookup fallback — plain spawns may share a session
-        # with a live pane on purpose.
-        if previous_pane_id and session_id:
-            for other in project.panes:
-                if (other is not pane and other.origin != "pipeline"
-                        and other.session_id == session_id
-                        and other.spawn_status == "spawned"):
-                    other.spawn_status = "removed"
-                    other.removed_at = _now_iso()
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = self._find_manual_pane(project, pane_id, previous_pane_id, session_id)
+            # "main" is a window pane's surface too (unmarked is every older record).
+            if surface and pane is not None and pane.surface in ("", "main"):
+                # A panel's spawn (it reaches here from terminal.create, which a
+                # plugin window's broker can send) naming a window pane's record:
+                # leave that record alone. Taking it over would mark it a panel's,
+                # and the main window would stop restoring the pane.
+                return project
+            if surface and any(p.pane_id == pane_id and p.surface in ("", "main") for p in project.panes):
+                # Any other record under this id is not a panel's either — a
+                # pipeline pane (which _find_manual_pane skips) or a window pane's
+                # pending stub. Adding a second record beside it, or folding the
+                # stub into the panel's, would corrupt that pane's restore.
+                return project
+            if pane is None:
+                pane = PaneRecord(pane_id=pane_id, origin=origin or "manual")
+                project.panes.append(pane)
+            self._adopt_pending_stub(project, pane, pane_id)
+            # pane_id is regenerated on every restart and re-linked via
+            # previous_pane_id. Any child still pointing spawned_by at this
+            # record's OLD id becomes a dead pointer the instant we overwrite it,
+            # so rewrite the children first — in this same save(), never as a
+            # follow-up RPC. A stale lineage is worse than no lineage: spawn-depth
+            # checks read it and would mis-count.
+            if pane.pane_id != pane_id:
+                self._rekey_spawned_by(project, pane.pane_id, pane_id)
+            pane.pane_id = pane_id
+            pane.agent = agent
+            pane.role = role
+            pane.command = command
+            pane.spawn_status = "spawned"
+            # Set once: the rebuild path re-spawns an existing record, and the pane
+            # the user is looking at started at the ORIGINAL time, not this hop.
+            if not pane.spawned_at: pane.spawned_at = _now_iso()
+            if launch_id: pane.last_live_launch = launch_id
+            if session_id: pane.session_id = session_id
+            if session_home_id: pane.session_home_id = session_home_id
+            if profile_id: pane.profile_id = profile_id
+            # Guarded like origin below: the rebuild path re-spawns with an empty
+            # model/effort, and an unconditional write would erase the pick the
+            # user made before the restart.
+            if model: pane.model = model
+            if effort: pane.effort = effort
+            if run_group_id: pane.run_group_id = run_group_id
+            if output_log_file: pane.output_log_file = output_log_file
+            # Guarded like the fields above: an omitted origin must not blank an
+            # existing record back to "manual" (that would strip the mcp marker).
+            if origin: pane.origin = origin
+            if spawned_by: pane.spawned_by = spawned_by
+            # Only a dock's spawn passes these; a main-window spawn leaves them
+            # empty and the record exactly as before.
+            if surface: pane.surface = surface
+            if window_kind: pane.window_kind = window_kind
+            # A rebuild hop owns its session: retire any OTHER spawned manual
+            # record sharing it (legacy duplicate accumulation) so restore cannot
+            # resurrect a ghost pane. Gated on previous_pane_id for the same
+            # reason as the lookup fallback — plain spawns may share a session
+            # with a live pane on purpose.
+            if previous_pane_id and session_id:
+                for other in project.panes:
+                    if (other is not pane and other.origin != "pipeline"
+                            and other.session_id == session_id
+                            and other.spawn_status == "spawned"):
+                        other.spawn_status = "removed"
+                        other.removed_at = _now_iso()
+            self.save(project)
         self.append_event(
             workspace_path,
             {"event": "manual_pane_spawn", "pane_id": pane_id, "agent": agent, "role": role},
@@ -999,19 +1109,20 @@ class ProjectStore:
 
         Returns the project and whether a record was actually retired.
         """
-        project = self.load_or_create(workspace_path)
-        matches = [
-            p for p in project.panes
-            if p.pane_id == pane_id and p.spawn_status != "removed"
-        ]
-        if not matches:
-            return project, False
-        for pane in matches:
-            self._adopt_orphans(project, pane)
-            pane.spawn_status = "removed"
-            pane.removed_at = _now_iso()
-            pane.kickoff_status = "none"
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            matches = [
+                p for p in project.panes
+                if p.pane_id == pane_id and p.spawn_status != "removed"
+            ]
+            if not matches:
+                return project, False
+            for pane in matches:
+                self._adopt_orphans(project, pane)
+                pane.spawn_status = "removed"
+                pane.removed_at = _now_iso()
+                pane.kickoff_status = "none"
+            self.save(project)
         self.append_event(
             workspace_path,
             {"event": "pane_unspawn_by_id", "pane_id": pane_id, "count": len(matches)},
@@ -1060,18 +1171,19 @@ class ProjectStore:
         Returns the project and the ids of the records actually marked removed,
         so the caller can take down every PTY that just lost its record.
         """
-        project = self.load_or_create(workspace_path)
-        matches = self._manual_unspawn_matches(project, pane_id, session_id)
-        if settled_pane_ids is not None and any(p.pane_id not in settled_pane_ids for p in matches):
-            # Bound to what the caller settled: a match that appeared meanwhile is not retired.
-            raise RetirementTargetChanged("a record matching this close was not among the settled panes")
-        if not matches:
-            return project, []
-        for pane in matches:
-            self._adopt_orphans(project, pane)
-            pane.spawn_status = "removed"
-            pane.removed_at = _now_iso()
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            matches = self._manual_unspawn_matches(project, pane_id, session_id)
+            if settled_pane_ids is not None and any(p.pane_id not in settled_pane_ids for p in matches):
+                # Bound to what the caller settled: a match that appeared meanwhile is not retired.
+                raise RetirementTargetChanged("a record matching this close was not among the settled panes")
+            if not matches:
+                return project, []
+            for pane in matches:
+                self._adopt_orphans(project, pane)
+                pane.spawn_status = "removed"
+                pane.removed_at = _now_iso()
+            self.save(project)
         self.append_event(
             workspace_path,
             {"event": "manual_pane_unspawn", "pane_id": pane_id, "count": len(matches)},
@@ -1097,32 +1209,33 @@ class ProjectStore:
         remaining fields without touching custom_name. An unspawned stub stays
         'pending' and is skipped by restore, so it can't resurrect an empty pane.
         """
-        project = self.peek(workspace_path)
-        if project is None:
-            return None
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            pane = PaneRecord(pane_id=pane_id, origin="manual")
-            project.panes.append(pane)
-        if pane.spawn_status == "pending":
-            self._stub_name_intent.add(pane_id)
-        pane.custom_name = custom_name
-        # Naming a pane — including clearing the name — is the user taking
-        # ownership of the title, so no auto-namer writes to this record again.
-        # A name already stored in auto_name keeps showing (clearing custom_name
-        # falls back to it); the lock stops NEW auto-names, it doesn't rewrite
-        # the display chain.
-        pane.name_locked = True
-        # Keep the renderer-owned history mirror consistent at the source:
-        # detached windows never persist it themselves and the renderer's
-        # debounced snapshot can be lost on quit, so patch it here too.
-        for entry in project.ui_spawn_history or []:
-            if isinstance(entry, dict) and entry.get("paneId") == pane_id:
-                if custom_name:
-                    entry["customName"] = custom_name
-                else:
-                    entry.pop("customName", None)
-        self.save(project)
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                pane = PaneRecord(pane_id=pane_id, origin="manual")
+                project.panes.append(pane)
+            if pane.spawn_status == "pending":
+                self._stub_name_intent.add(pane_id)
+            pane.custom_name = custom_name
+            # Naming a pane — including clearing the name — is the user taking
+            # ownership of the title, so no auto-namer writes to this record again.
+            # A name already stored in auto_name keeps showing (clearing custom_name
+            # falls back to it); the lock stops NEW auto-names, it doesn't rewrite
+            # the display chain.
+            pane.name_locked = True
+            # Keep the renderer-owned history mirror consistent at the source:
+            # detached windows never persist it themselves and the renderer's
+            # debounced snapshot can be lost on quit, so patch it here too.
+            for entry in project.ui_spawn_history or []:
+                if isinstance(entry, dict) and entry.get("paneId") == pane_id:
+                    if custom_name:
+                        entry["customName"] = custom_name
+                    else:
+                        entry.pop("customName", None)
+            self.save(project)
         return project
 
     def set_pane_auto_name(
@@ -1155,33 +1268,34 @@ class ProjectStore:
         Like rename_pane(), an accepted write also patches the spawn-history
         mirror (under its own autoName key) so the name survives pane removal.
         """
-        project = self.peek(workspace_path)
-        if project is None:
-            return None, False
-        if not auto_name:
-            return project, False
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is not None and (pane.custom_name or pane.name_locked):
-            return project, False
-        if pane is not None and pane.auto_name:
-            # The one permitted second write: the model's answer replacing the
-            # heuristic placeholder. Two llm writes racing still resolve
-            # first-wins, so the name settles.
-            upgrading = source == "llm" and pane.auto_name_source != "llm"
-            if not upgrading:
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None, False
+            if not auto_name:
                 return project, False
-        if pane is None:
-            pane = PaneRecord(pane_id=pane_id, origin="manual")
-            project.panes.append(pane)
-        pane.auto_name = auto_name
-        pane.auto_name_source = source
-        # Keep the renderer-owned history mirror consistent at the source (same
-        # reasoning as rename_pane), but under a separate key: customName is the
-        # user's name and must never be overwritten by an auto-derived one.
-        for entry in project.ui_spawn_history or []:
-            if isinstance(entry, dict) and entry.get("paneId") == pane_id:
-                entry["autoName"] = auto_name
-        self.save(project)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is not None and (pane.custom_name or pane.name_locked):
+                return project, False
+            if pane is not None and pane.auto_name:
+                # The one permitted second write: the model's answer replacing the
+                # heuristic placeholder. Two llm writes racing still resolve
+                # first-wins, so the name settles.
+                upgrading = source == "llm" and pane.auto_name_source != "llm"
+                if not upgrading:
+                    return project, False
+            if pane is None:
+                pane = PaneRecord(pane_id=pane_id, origin="manual")
+                project.panes.append(pane)
+            pane.auto_name = auto_name
+            pane.auto_name_source = source
+            # Keep the renderer-owned history mirror consistent at the source (same
+            # reasoning as rename_pane), but under a separate key: customName is the
+            # user's name and must never be overwritten by an auto-derived one.
+            for entry in project.ui_spawn_history or []:
+                if isinstance(entry, dict) and entry.get("paneId") == pane_id:
+                    entry["autoName"] = auto_name
+            self.save(project)
         return project, True
 
     def rename_history_entry(
@@ -1198,20 +1312,21 @@ class ProjectStore:
         resets to the default label. Returns None when no project exists or
         the mirror has no matching entry (nothing was saved).
         """
-        project = self.peek(workspace_path)
-        if project is None:
-            return None
-        changed = False
-        for entry in project.ui_spawn_history or []:
-            if isinstance(entry, dict) and entry.get("paneId") == pane_id:
-                if custom_name:
-                    entry["customName"] = custom_name
-                else:
-                    entry.pop("customName", None)
-                changed = True
-        if not changed:
-            return None
-        self.save(project)
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            changed = False
+            for entry in project.ui_spawn_history or []:
+                if isinstance(entry, dict) and entry.get("paneId") == pane_id:
+                    if custom_name:
+                        entry["customName"] = custom_name
+                    else:
+                        entry.pop("customName", None)
+                    changed = True
+            if not changed:
+                return None
+            self.save(project)
         return project
 
     def star_history_entry(
@@ -1228,20 +1343,21 @@ class ProjectStore:
         Returns None when no project exists or the mirror has no matching
         entry (nothing was saved).
         """
-        project = self.peek(workspace_path)
-        if project is None:
-            return None
-        changed = False
-        for entry in project.ui_spawn_history or []:
-            if isinstance(entry, dict) and entry.get("paneId") == pane_id:
-                if starred:
-                    entry["starred"] = True
-                else:
-                    entry.pop("starred", None)
-                changed = True
-        if not changed:
-            return None
-        self.save(project)
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            changed = False
+            for entry in project.ui_spawn_history or []:
+                if isinstance(entry, dict) and entry.get("paneId") == pane_id:
+                    if starred:
+                        entry["starred"] = True
+                    else:
+                        entry.pop("starred", None)
+                    changed = True
+            if not changed:
+                return None
+            self.save(project)
         return project
 
     def record_detected_session(
@@ -1281,15 +1397,16 @@ class ProjectStore:
         can't resurrect an empty pane. Clearing (empty session_id) never
         creates a stub — there is nothing to preserve.
         """
-        project = self.load_or_create(workspace_path)
-        pane = self._find_manual_pane(project, pane_id)
-        if pane is None:
-            if not session_id:
-                return project
-            pane = PaneRecord(pane_id=pane_id, origin="manual")
-            project.panes.append(pane)
-        pane.session_id = session_id
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = self._find_manual_pane(project, pane_id)
+            if pane is None:
+                if not session_id:
+                    return project
+                pane = PaneRecord(pane_id=pane_id, origin="manual")
+                project.panes.append(pane)
+            pane.session_id = session_id
+            self.save(project)
         return project
 
     def reconnect_pane_session(
@@ -1333,12 +1450,13 @@ class ProjectStore:
         while the record on disk keeps it, so the assignment comes back on the
         next restore and the pane lands on a tab that no longer matches.
         """
-        project = self.load_or_create(workspace_path)
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            return None
-        pane.run_group_id = run_group_id
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                return None
+            pane.run_group_id = run_group_id
+            self.save(project)
         return project
 
     def set_pane_parent(
@@ -1359,19 +1477,20 @@ class ProjectStore:
         and the sidebar's lineage walk would spin). A pane cannot be its own
         parent for the same reason.
         """
-        project = self.load_or_create(workspace_path)
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            return "not_found"
-        if spawned_by:
-            if spawned_by == pane_id:
-                return "cycle"
-            if not any(p.pane_id == spawned_by for p in project.panes):
-                return "parent_not_found"
-            if ProjectStore._would_cycle(project, pane_id, spawned_by):
-                return "cycle"
-        pane.spawned_by = spawned_by
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                return "not_found"
+            if spawned_by:
+                if spawned_by == pane_id:
+                    return "cycle"
+                if not any(p.pane_id == spawned_by for p in project.panes):
+                    return "parent_not_found"
+                if ProjectStore._would_cycle(project, pane_id, spawned_by):
+                    return "cycle"
+            pane.spawned_by = spawned_by
+            self.save(project)
         return project
 
     def set_pane_stopped(
@@ -1382,12 +1501,13 @@ class ProjectStore:
         stopped: bool,
     ) -> Project:
         """Set/clear a pane's STOP badge flag (persisted). No-op if pane not found."""
-        project = self.load_or_create(workspace_path)
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            return project
-        pane.stopped = stopped
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                return project
+            pane.stopped = stopped
+            self.save(project)
         return project
 
     def set_pane_minimized(
@@ -1398,12 +1518,13 @@ class ProjectStore:
         is_minimized: bool,
     ) -> Project:
         """Persist the collapsed-to-sidebar state. No-op if pane not found."""
-        project = self.load_or_create(workspace_path)
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            return project
-        pane.is_minimized = is_minimized
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                return project
+            pane.is_minimized = is_minimized
+            self.save(project)
         return project
 
     def set_pane_muted(
@@ -1414,12 +1535,13 @@ class ProjectStore:
         is_muted: bool,
     ) -> Project:
         """Persist the per-pane mute. No-op if pane not found."""
-        project = self.load_or_create(workspace_path)
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            return project
-        pane.is_muted = is_muted
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                return project
+            pane.is_muted = is_muted
+            self.save(project)
         return project
 
     PANE_TURN_STATES = ("working", "idle")
@@ -1442,29 +1564,30 @@ class ProjectStore:
         the project on each one. An unknown turn state is ignored. No-op if
         pane not found.
         """
-        project = self.load_or_create(workspace_path)
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            return project
-        changed = False
-        if last_turn_state in self.PANE_TURN_STATES and pane.last_turn_state != last_turn_state:
-            pane.last_turn_state = last_turn_state
-            changed = True
-        if report_to is not None and pane.report_to != report_to:
-            pane.report_to = report_to
-            changed = True
-        if report_pending is not None and pane.report_pending != report_pending:
-            pane.report_pending = report_pending
-            changed = True
-        if report_cross is not None and pane.report_cross != report_cross:
-            pane.report_cross = report_cross
-            changed = True
-        # An idle reclaim sends "" (its CLI is gone); spawns stamp it themselves.
-        if last_live_launch is not None and pane.last_live_launch != last_live_launch:
-            pane.last_live_launch = last_live_launch
-            changed = True
-        if changed:
-            self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                return project
+            changed = False
+            if last_turn_state in self.PANE_TURN_STATES and pane.last_turn_state != last_turn_state:
+                pane.last_turn_state = last_turn_state
+                changed = True
+            if report_to is not None and pane.report_to != report_to:
+                pane.report_to = report_to
+                changed = True
+            if report_pending is not None and pane.report_pending != report_pending:
+                pane.report_pending = report_pending
+                changed = True
+            if report_cross is not None and pane.report_cross != report_cross:
+                pane.report_cross = report_cross
+                changed = True
+            # An idle reclaim sends "" (its CLI is gone); spawns stamp it themselves.
+            if last_live_launch is not None and pane.last_live_launch != last_live_launch:
+                pane.last_live_launch = last_live_launch
+                changed = True
+            if changed:
+                self.save(project)
         return project
 
     def set_pane_collapsed(
@@ -1475,12 +1598,13 @@ class ProjectStore:
         collapsed: bool,
     ) -> Project:
         """Persist whether this pane's lineage subtree is folded in the lists."""
-        project = self.load_or_create(workspace_path)
-        pane = next((p for p in project.panes if p.pane_id == pane_id), None)
-        if pane is None:
-            return project
-        pane.collapsed = collapsed
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = next((p for p in project.panes if p.pane_id == pane_id), None)
+            if pane is None:
+                return project
+            pane.collapsed = collapsed
+            self.save(project)
         return project
 
     def set_pane_order(
@@ -1496,18 +1620,67 @@ class ProjectStore:
         pane are ignored. Returns None when no project exists for the
         workspace (peek semantics — never creates one).
         """
-        project = self.peek(workspace_path)
-        if project is None:
-            return None
-        rank = {pid: i for i, pid in enumerate(pane_ids)}
-        listed = sorted(
-            (p for p in project.panes if p.pane_id in rank),
-            key=lambda p: rank[p.pane_id],
-        )
-        rest = [p for p in project.panes if p.pane_id not in rank]
-        project.panes = listed + rest
-        self.save(project)
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            rank = {pid: i for i, pid in enumerate(pane_ids)}
+            listed = sorted(
+                (p for p in project.panes if p.pane_id in rank),
+                key=lambda p: rank[p.pane_id],
+            )
+            rest = [p for p in project.panes if p.pane_id not in rank]
+            project.panes = listed + rest
+            self.save(project)
         return project
+
+    def set_layout_mode(self, workspace_path: str, layout_mode: str) -> Project | None:
+        """Persist the pane layout mode. Returns None when no project exists
+        for the workspace (peek semantics — never creates one).
+
+        Read and saved under the save lock, so a write another thread makes
+        meanwhile is not overwritten with a stale copy.
+        """
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            project.layout_mode = layout_mode
+            self.save(project)
+            return project
+
+    def set_theme(
+        self,
+        workspace_path: str,
+        *,
+        theme: str | None,
+        theme_custom: dict[str, Any] | None,
+    ) -> Project | None:
+        """Persist the theme name and/or custom overrides; a None (or empty
+        theme) leaves that field as it is. Peek semantics and locking as
+        set_layout_mode."""
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            if theme:
+                project.theme = theme
+            if theme_custom is not None:
+                project.theme_custom = theme_custom
+            self.save(project)
+            return project
+
+    def set_language(self, workspace_path: str, language: str | None) -> Project | None:
+        """Persist the UI language; None or empty leaves it as it is. Peek
+        semantics and locking as set_layout_mode."""
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            if language:
+                project.language = language
+            self.save(project)
+            return project
 
     def set_display_name(
         self,
@@ -1564,11 +1737,12 @@ class ProjectStore:
         (the frontend skips ids with no matching group). Returns None when no
         project exists for the workspace (peek semantics — never creates one).
         """
-        project = self.peek(workspace_path)
-        if project is None:
-            return None
-        project.tab_order = list(tab_order)
-        self.save(project)
+        with self._save_lock:
+            project = self.peek(workspace_path)
+            if project is None:
+                return None
+            project.tab_order = list(tab_order)
+            self.save(project)
         return project
 
     def set_ui_state(
@@ -1626,9 +1800,13 @@ class ProjectStore:
         slot_label: str,
         kickoff_status: str,
     ) -> Project:
-        project = self.load_or_create(workspace_path)
-        pane = self._find_slot_pane(project, stage_index, slot_label)
-        if pane:
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            pane = self._find_slot_pane(project, stage_index, slot_label)
+            if pane is None:
+                # Answering ok here told the window its kickoff was recorded
+                # against a slot the run does not have.
+                raise SlotNotFound(stage_index, slot_label)
             pane.kickoff_status = kickoff_status
             self.save(project)
         return project
@@ -1640,20 +1818,23 @@ class ProjectStore:
         nodes: dict[str, Any],
         gate: dict[str, Any] | None = None,
         outputs: dict[str, Any] | None = None,
+        known_ids: set[str] | None = None,
     ) -> Project:
         """Merge per-node run states reported by the engine (a node absent from
         `nodes` keeps its last state). gate=None leaves the paused gate as it
-        is; {} clears it. outputs merge into node_outputs."""
-        project = self.load_or_create(workspace_path)
-        for nid, state in nodes.items():
-            if isinstance(state, dict):
-                project.node_states[str(nid)] = state
-        if gate is not None:
-            project.node_gate = gate
-        for nid, out in (outputs or {}).items():
-            if isinstance(out, dict):
-                project.node_outputs[str(nid)] = out
-        self.save(project)
+        is; {} clears it. outputs merge into node_outputs. With `known_ids`, a
+        state or output for any other node id is not stored."""
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            for nid, state in nodes.items():
+                if isinstance(state, dict) and (known_ids is None or str(nid) in known_ids):
+                    project.node_states[str(nid)] = state
+            if gate is not None:
+                project.node_gate = gate
+            for nid, out in (outputs or {}).items():
+                if isinstance(out, dict) and (known_ids is None or str(nid) in known_ids):
+                    project.node_outputs[str(nid)] = out
+            self.save(project)
         return project
 
     def resume_pipeline(self, workspace_path: str) -> tuple[Project, int]:
@@ -1661,30 +1842,46 @@ class ProjectStore:
 
         next_stage_index = -1 means "all stages already completed".
         Picks the first stage whose status is not 'completed'.
+
+        Only a stopped run resumes: one a window still drives raises
+        :class:`PipelineAlreadyRunning`, so its running stage keeps its pane.
         """
-        project = self.load_or_create(workspace_path)
-        if not project.stages:
-            raise ValueError("no pipeline to resume — start one first")
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            _refuse_live_run(project, "resume the pipeline run")
+            if project.state == "suspended" and project.run_stack:
+                # Stopped after the parent suspended but before its child
+                # started: put the parent back as it was; the window calls the
+                # sub-pipeline again when it reaches the node.
+                frame = project.run_stack.pop()
+                for key in RUN_FIELDS:
+                    if key in frame["run"]:
+                        setattr(project, key, copy.deepcopy(frame["run"][key]))
+                project.stages = [_stage_record(s) for s in frame["run"].get("stages", [])]
+                kept = [p for p in project.panes if p.origin != "pipeline"]
+                project.panes = kept + [_pane_record(p) for p in frame["run"].get("panes", [])]
+            if not project.stages:
+                raise NoRunToResume("no pipeline to resume — start one first")
 
-        next_idx = -1
-        for i, s in enumerate(project.stages):
-            if s.status != "completed":
-                next_idx = i
-                break
+            next_idx = -1
+            for i, s in enumerate(project.stages):
+                if s.status != "completed":
+                    next_idx = i
+                    break
 
-        if next_idx == -1:
-            project.state = "completed"
-        else:
-            project.state = "running"
-            project.current_stage_index = next_idx
-            # Reset that stage's bookkeeping so a fresh pane records cleanly.
-            stage = project.stages[next_idx]
-            stage.status = "running"
-            stage.started_at = _now_iso()
-            stage.ended_at = None
-            stage.pane_id = None
+            if next_idx == -1:
+                project.state = "completed"
+            else:
+                project.state = "running"
+                project.current_stage_index = next_idx
+                # Reset that stage's bookkeeping so a fresh pane records cleanly.
+                stage = project.stages[next_idx]
+                stage.status = "running"
+                stage.started_at = _now_iso()
+                stage.ended_at = None
+                stage.pane_id = None
 
-        self.save(project)
+            self.save(project)
         self.append_event(
             workspace_path,
             {
@@ -1698,16 +1895,17 @@ class ProjectStore:
         return project, next_idx
 
     def complete_pipeline(self, workspace_path: str) -> Project:
-        project = self.load_or_create(workspace_path)
-        # Close any still-running stage
-        if 0 <= project.current_stage_index < len(project.stages):
-            cur = project.stages[project.current_stage_index]
-            if cur.status == "running":
-                cur.status = "completed"
-                cur.ended_at = _now_iso()
-        project.state = "completed"
-        project.run_count += 1
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            # Close any still-running stage
+            if 0 <= project.current_stage_index < len(project.stages):
+                cur = project.stages[project.current_stage_index]
+                if cur.status == "running":
+                    cur.status = "completed"
+                    cur.ended_at = _now_iso()
+            project.state = "completed"
+            project.run_count += 1
+            self.save(project)
         self.append_event(
             workspace_path,
             {"event": "pipeline_complete", "project_id": project.id, "run_count": project.run_count},
@@ -1716,20 +1914,121 @@ class ProjectStore:
         return project
 
     def abort_pipeline(self, workspace_path: str, *, reason: str = "user") -> Project:
-        project = self.load_or_create(workspace_path)
-        if 0 <= project.current_stage_index < len(project.stages):
-            cur = project.stages[project.current_stage_index]
-            if cur.status == "running":
-                cur.status = "aborted"
-                cur.ended_at = _now_iso()
-        project.state = "aborted"
-        self.save(project)
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            if 0 <= project.current_stage_index < len(project.stages):
+                cur = project.stages[project.current_stage_index]
+                if cur.status == "running":
+                    cur.status = "aborted"
+                    cur.ended_at = _now_iso()
+            project.state = "aborted"
+            self.save(project)
         self.append_event(
             workspace_path,
             {"event": "pipeline_abort", "reason": reason, "project_id": project.id},
             log_file_name=project.log_file_name,
         )
         return project
+
+    def suspend_for_child(
+        self,
+        workspace_path: str,
+        *,
+        node_id: str,
+        next_index: int,
+        pipeline_name: str,
+        child_pipeline_id: str,
+        taint: str = "",
+    ) -> tuple[Project, dict[str, Any]]:
+        """Suspend the running run at subpipeline node ``node_id``: its run
+        fields go onto run_stack (stages before ``next_index`` recorded as
+        completed, so the resume after the child continues at next_index) and
+        the project waits for the child (state "suspended"). Raises ValueError
+        when no run is going or the nesting limit is reached."""
+        from .pipeline_graph import MAX_SUBPIPELINE_DEPTH
+
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            if project.state != "running":
+                raise ValueError("only a running run can call a sub-pipeline")
+            if len(project.run_stack) + 1 >= MAX_SUBPIPELINE_DEPTH:
+                raise ValueError(
+                    f"sub-pipelines nest at most {MAX_SUBPIPELINE_DEPTH} deep; "
+                    f"this run is already at depth {len(project.run_stack) + 1}"
+                )
+            now = _now_iso()
+            for stage in project.stages[: max(0, next_index)]:
+                if stage.status != "completed":
+                    stage.status = "completed"
+                    stage.ended_at = stage.ended_at or now
+            snapshot = {key: copy.deepcopy(getattr(project, key)) for key in RUN_FIELDS}
+            snapshot["stages"] = [asdict(s) for s in project.stages]
+            snapshot["panes"] = [asdict(p) for p in project.panes if p.origin == "pipeline"]
+            frame = {
+                "id": f"call-{int(time.time() * 1000)}-{len(project.run_stack)}",
+                "node_id": node_id,
+                "next_index": next_index,
+                "pipeline_name": pipeline_name,
+                "child_pipeline_id": child_pipeline_id,
+                "taint": taint,
+                "suspended_at": now,
+                "run": snapshot,
+            }
+            project.run_stack.append(frame)
+            project.state = "suspended"
+            self.save(project)
+        self.append_event(
+            workspace_path,
+            {"event": "pipeline_suspend", "node_id": node_id, "child_pipeline_id": child_pipeline_id,
+             "depth": len(project.run_stack)},
+            log_file_name=project.log_file_name,
+        )
+        return project, frame
+
+    def finish_child(
+        self,
+        workspace_path: str,
+        *,
+        outcome: str,
+        summary: str = "",
+        output: Any = None,
+        error: str = "",
+    ) -> tuple[Project, dict[str, Any]] | None:
+        """The child run ended (``outcome`` "completed" or "failed"): pop the
+        top frame and restore its parent's run fields, with the subpipeline
+        node recorded done (its output = the child's summary and output) or
+        failed. The parent stays stopped ("aborted") until the window resumes
+        or fails it. None when no parent is waiting."""
+        with self._save_lock:
+            project = self.load_or_create(workspace_path)
+            if not project.run_stack:
+                return None
+            frame = project.run_stack.pop()
+            child_run = {"pipeline_id": project.pipeline_id, "log_file_name": project.log_file_name, "outcome": outcome}
+            run = frame["run"]
+            for key in RUN_FIELDS:
+                if key in run:
+                    setattr(project, key, copy.deepcopy(run[key]))
+            project.stages = [_stage_record(s) for s in run.get("stages", [])]
+            kept = [p for p in project.panes if p.origin != "pipeline"]
+            project.panes = kept + [_pane_record(p) for p in run.get("panes", [])]
+            node_id = frame["node_id"]
+            now = _now_iso()
+            prev = dict(project.node_states.get(node_id) or {})
+            if outcome == "completed":
+                project.node_states[node_id] = {**prev, "status": "done", "endedAt": now, "summary": summary, "output": output}
+                project.node_outputs[node_id] = {"summary": summary, "at": now, "output": output}
+            else:
+                project.node_states[node_id] = {**prev, "status": "failed", "endedAt": now,
+                                                "error": error or "the sub-pipeline run failed"}
+            project.state = "aborted"
+            self.save(project)
+        self.append_event(
+            workspace_path,
+            {"event": "pipeline_child_finished", "node_id": node_id, "outcome": outcome, "child": child_run},
+            log_file_name=project.log_file_name,
+        )
+        return project, frame
 
     def reset_pipeline(self, workspace_path: str) -> Project | None:
         """Return the workspace's last run to idle (pipeline_reset).
@@ -1738,12 +2037,15 @@ class ProjectStore:
         directory stay as history. Without this an aborted run outlived reset
         and restart and kept answering pipeline_status (#417). None when the
         workspace has no project yet."""
-        if self.peek(workspace_path) is None:
-            return None
-        project = self.load_or_create(workspace_path)
-        previous = project.state
-        project.state = "idle"
-        self.save(project)
+        with self._save_lock:
+            if self.peek(workspace_path) is None:
+                return None
+            project = self.load_or_create(workspace_path)
+            previous = project.state
+            project.state = "idle"
+            # A reset ends every suspended parent too: nothing waits any more.
+            project.run_stack = []
+            self.save(project)
         self.append_event(
             workspace_path,
             {"event": "pipeline_reset", "previous_state": previous, "project_id": project.id},

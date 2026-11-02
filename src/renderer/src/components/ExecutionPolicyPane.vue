@@ -20,19 +20,29 @@ import type {
 const props = defineProps<{
   workspacePath?: string
 }>()
+// What this page warns about, one line per warning, for the Settings sidebar:
+// the page is one of several, so its warnings must show before it is opened.
+const emit = defineEmits<{ attention: [reasons: string[]] }>()
 
 const { t, te } = useI18n()
+// Messages keep their i18n key and are translated when shown, so a language
+// change never leaves one in the previous language. Text from the main
+// process (no key for its code) is shown as given.
+type PaneMessage = { key: string; params?: Record<string, unknown> } | { text: string }
+function messageText(message: PaneMessage): string {
+  return 'key' in message ? t(message.key, message.params ?? {}) : message.text
+}
 const snapshot = ref<ExecutionPolicySettingsSnapshot | null>(null)
 const draft = ref<ExecutionPolicy | null>(null)
 const draftBasePolicy = ref<ExecutionPolicy | null>(null)
 const draftBaseRevision = ref<number | null>(null)
 const selectedSource = ref<ExecutionPolicySource | null>(null)
 const shellInput = ref('')
-const shellInputError = ref('')
+const shellInputError = ref<PaneMessage | null>(null)
 const loading = ref(false)
 const busy = ref(false)
-const error = ref('')
-const notice = ref('')
+const error = ref<PaneMessage | null>(null)
+const notice = ref<PaneMessage | null>(null)
 const fullConfirmed = ref(false)
 const repositoryFullConfirmed = ref(false)
 const rebuildArmed = ref(false)
@@ -90,7 +100,7 @@ function replaceDraftFromSnapshot(next: ExecutionPolicySettingsSnapshot): void {
   draftBasePolicy.value = clonePolicy(source)
   draftBaseRevision.value = next.global.revision
   fullConfirmed.value = false
-  shellInputError.value = ''
+  shellInputError.value = null
   externalUpdate.value = false
 }
 
@@ -108,20 +118,20 @@ function applySnapshotPreservingDraft(next: ExecutionPolicySettingsSnapshot): vo
 async function load(options: { replaceDraft?: boolean } = {}): Promise<void> {
   const api = policyApi()
   if (!api) {
-    error.value = t('settings.executionPolicy.unavailable')
+    error.value = { key: 'settings.executionPolicy.unavailable' }
     return
   }
   const sequence = ++loadSequence
   const replaceDraft = options.replaceDraft ?? !draftDirty.value
   loading.value = true
-  if (!externalUpdate.value) error.value = ''
+  if (!externalUpdate.value) error.value = null
   try {
     const next = await api.inspect(props.workspacePath)
     if (sequence !== loadSequence) return
     if (replaceDraft) replaceDraftFromSnapshot(next)
     else applySnapshotPreservingDraft(next)
   } catch {
-    if (sequence === loadSequence) error.value = t('settings.executionPolicy.unavailable')
+    if (sequence === loadSequence) error.value = { key: 'settings.executionPolicy.unavailable' }
   } finally {
     if (sequence === loadSequence) loading.value = false
   }
@@ -154,6 +164,43 @@ const canSave = computed(() => {
   if (!draft.value || busy.value || !policyMutationAvailable.value) return false
   return !draftIsHighRisk.value || fullConfirmed.value
 })
+// The same conditions the page renders its warnings on, worded "<section>: <state>".
+const attention = computed<string[]>(() => {
+  const out: string[] = []
+  const labeled = (label: string, value: string) => t('settings.extensionsPolicy.labeledValue', { label, value })
+  const workspace = workspaceSnapshot.value
+  if (workspace) {
+    if (workspace.status !== 'active') {
+      out.push(labeled(t('settings.executionPolicy.effectiveTitle'), t(`settings.executionPolicy.status.${workspace.status}`)))
+    }
+    if (isHighRiskExecutionPolicy(workspace.policy)) {
+      out.push(labeled(t('settings.executionPolicy.effectiveTitle'), modeLabel(workspace.policy.mode)))
+    }
+  }
+  const sourceState = snapshot.value?.sourceRecovery.state
+  if (sourceState === 'corrupt' || sourceState === 'unsafe-entry' || sourceState === 'unavailable') {
+    out.push(labeled(
+      t('settings.executionPolicy.sourceTitle'),
+      sourceState === 'unavailable' ? t('settings.executionPolicy.status.unavailable') : recoveryStateLabel(sourceState),
+    ))
+  }
+  const rec = recommendation.value
+  if (rec?.state === 'valid' && recommendationIsHighRisk.value && rec.policy) {
+    out.push(labeled(t('settings.executionPolicy.recommendationTitle'), modeLabel(rec.policy.mode)))
+  }
+  if (rec?.state === 'valid' && workspace?.selectedSource !== 'repository') {
+    out.push(labeled(t('settings.executionPolicy.recommendationTitle'), t('settings.executionPolicy.untrusted')))
+  }
+  if (draftIsHighRisk.value && draft.value) {
+    out.push(labeled(t('settings.executionPolicy.userTitle'), modeLabel(draft.value.mode)))
+  }
+  const recoveryState = snapshot.value?.recovery.state
+  if (recoveryState === 'corrupt' || recoveryState === 'unsafe-entry' || recoveryState === 'directory-unsafe' || recoveryState === 'directory-unavailable') {
+    out.push(labeled(t('settings.executionPolicy.recoveryTitle'), recoveryStateLabel(recoveryState)))
+  }
+  return out
+})
+watch(attention, (reasons) => emit('attention', reasons), { immediate: true })
 const hasUserPolicy = computed(() => snapshot.value?.userPolicy !== null && snapshot.value?.userPolicy !== undefined)
 
 function modeLabel(mode: ExecutionPolicyMode): string {
@@ -174,6 +221,14 @@ function recoveryStateLabel(state: NonNullable<ExecutionPolicySettingsSnapshot['
 
 function listOrNone(values: readonly string[]): string {
   return values.length > 0 ? values.join(', ') : t('settings.executionPolicy.none')
+}
+
+/** A system list by name (as the checkboxes show it), not by manifest id. */
+function systemListOrNone(values: readonly string[]): string {
+  return listOrNone(values.map((id) => {
+    const key = `settings.executionPolicy.namespace.${id}`
+    return te(key) ? t(key) : id
+  }))
 }
 
 /** `full` and `denylist` are both high risk but for opposite reasons — one says
@@ -218,14 +273,14 @@ function toggleSystem(namespace: PluginSystemNamespace): void {
 
 function addShell(): void {
   if (!draft.value || draft.value.mode === 'full') return
-  shellInputError.value = ''
+  shellInputError.value = null
   const name = shellInput.value.trim().toLowerCase()
   if (!/^[a-z0-9][a-z0-9._+-]*$/u.test(name)) {
-    shellInputError.value = t('settings.executionPolicy.shellInvalid')
+    shellInputError.value = { key: 'settings.executionPolicy.shellInvalid' }
     return
   }
   if (draft.value.shell.includes(name)) {
-    shellInputError.value = t('settings.executionPolicy.shellDuplicate', { name })
+    shellInputError.value = { key: 'settings.executionPolicy.shellDuplicate', params: { name } }
     return
   }
   draft.value.shell = [...draft.value.shell, name]
@@ -239,9 +294,9 @@ function removeShell(name: string): void {
 
 type OperationKind = 'save' | 'resetUser' | 'source' | 'rebuild' | 'resetSources'
 
-function operationErrorMessage(operationError: ExecutionPolicyError): string {
+function operationErrorMessage(operationError: ExecutionPolicyError): PaneMessage {
   const key = `settings.executionPolicy.errors.${operationError.code}`
-  return te(key) ? t(key) : operationError.message
+  return te(key) ? { key } : { text: operationError.message }
 }
 
 function applyOperationResult(
@@ -259,7 +314,7 @@ function applyOperationResult(
   } else {
     applySnapshotPreservingDraft(result.snapshot)
   }
-  notice.value = t(`settings.executionPolicy.notice.${operation}`)
+  notice.value = { key: `settings.executionPolicy.notice.${operation}` }
   return true
 }
 
@@ -269,8 +324,8 @@ async function save(): Promise<void> {
   const expectedRevision = draftBaseRevision.value
   if (expectedRevision === null) return
   busy.value = true
-  error.value = ''
-  notice.value = ''
+  error.value = null
+  notice.value = null
   try {
     const result = await api.setUser({
       policy: clonePolicy(draft.value),
@@ -280,7 +335,7 @@ async function save(): Promise<void> {
     })
     applyOperationResult(result, 'save')
   } catch {
-    error.value = t('settings.executionPolicy.unavailable')
+    error.value = { key: 'settings.executionPolicy.unavailable' }
   } finally {
     busy.value = false
   }
@@ -292,8 +347,8 @@ async function resetUser(): Promise<void> {
   const expectedRevision = snapshot.value?.global.revision
   if (expectedRevision === undefined) return
   busy.value = true
-  error.value = ''
-  notice.value = ''
+  error.value = null
+  notice.value = null
   try {
     const result = await api.resetUser(
       {
@@ -303,7 +358,7 @@ async function resetUser(): Promise<void> {
     )
     applyOperationResult(result, 'resetUser')
   } catch {
-    error.value = t('settings.executionPolicy.unavailable')
+    error.value = { key: 'settings.executionPolicy.unavailable' }
   } finally {
     busy.value = false
   }
@@ -324,8 +379,8 @@ async function selectSource(source: ExecutionPolicySource): Promise<void> {
     return
   }
   busy.value = true
-  error.value = ''
-  notice.value = ''
+  error.value = null
+  notice.value = null
   try {
     const result = await api.selectSource({
       workspacePath,
@@ -337,7 +392,7 @@ async function selectSource(source: ExecutionPolicySource): Promise<void> {
     applyOperationResult(result, 'source')
   } catch {
     if (snapshot.value) selectedSource.value = sourceSelectionFor(snapshot.value)
-    error.value = t('settings.executionPolicy.unavailable')
+    error.value = { key: 'settings.executionPolicy.unavailable' }
   } finally {
     busy.value = false
   }
@@ -347,8 +402,8 @@ async function rebuild(): Promise<void> {
   const api = policyApi()
   if (!api || !rebuildConfirmed.value) return
   busy.value = true
-  error.value = ''
-  notice.value = ''
+  error.value = null
+  notice.value = null
   try {
     const result = await api.rebuild({
       confirmed: true,
@@ -359,7 +414,7 @@ async function rebuild(): Promise<void> {
       rebuildConfirmed.value = false
     }
   } catch {
-    error.value = t('settings.executionPolicy.unavailable')
+    error.value = { key: 'settings.executionPolicy.unavailable' }
   } finally {
     busy.value = false
   }
@@ -379,8 +434,8 @@ async function resetSourceSelections(): Promise<void> {
   const api = policyApi()
   if (!api || !sourceResetConfirmed.value) return
   busy.value = true
-  error.value = ''
-  notice.value = ''
+  error.value = null
+  notice.value = null
   try {
     const result = await api.resetSourceSelections({
       confirmed: true,
@@ -391,7 +446,7 @@ async function resetSourceSelections(): Promise<void> {
       sourceResetConfirmed.value = false
     }
   } catch {
-    error.value = t('settings.executionPolicy.unavailable')
+    error.value = { key: 'settings.executionPolicy.unavailable' }
   } finally {
     busy.value = false
   }
@@ -423,11 +478,11 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
 <template>
   <div class="execution-policy-pane">
     <p v-if="loading" class="ep-loading">{{ $t('settings.executionPolicy.loading') }}</p>
-    <p v-if="error" class="ep-error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="ep-notice" role="status">{{ notice }}</p>
+    <p v-if="error" class="ep-error" role="alert">{{ messageText(error) }}</p>
+    <p v-if="notice" class="ep-notice" role="status">{{ messageText(notice) }}</p>
     <div v-if="externalUpdate" class="ep-conflict" role="alert">
       <span>{{ $t('settings.executionPolicy.externalUpdate') }}</span>
-      <button type="button" :disabled="busy" @click="reloadLatest">
+      <button type="button" class="nv-btn nv-btn--sm" :disabled="busy" @click="reloadLatest">
         {{ $t('settings.executionPolicy.reloadLatest') }}
       </button>
     </div>
@@ -446,98 +501,14 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
           <strong>{{ effectiveSource ? sourceLabel(effectiveSource) : $t('settings.executionPolicy.status.unavailable') }}</strong>
           · {{ $t('settings.executionPolicy.modeLabel') }}: <strong>{{ modeLabel(workspaceSnapshot.policy.mode) }}</strong>
         </p>
+        <div class="ep-policy-card ep-effective-policy">
+          <div><span class="ep-k">{{ $t('settings.executionPolicy.systemLabel') }}</span><span class="ep-v">{{ systemListOrNone(workspaceSnapshot.policy.system) }}</span></div>
+          <div><span class="ep-k">{{ $t('settings.executionPolicy.shellLabel') }}</span><span class="ep-v">{{ listOrNone(workspaceSnapshot.policy.shell) }}</span></div>
+        </div>
         <p v-if="workspaceSnapshot.status !== 'active'" class="ep-warning" role="alert">
           {{ $t(`settings.executionPolicy.statusDetail.${workspaceSnapshot.status}`) }}
         </p>
       </template>
-    </section>
-
-    <section class="ep-section" data-section="host-default">
-      <div class="ep-section-heading">
-        <h2>{{ $t('settings.executionPolicy.hostDefaultTitle') }}</h2>
-        <span class="ep-readonly">{{ $t('settings.executionPolicy.readOnly') }}</span>
-      </div>
-      <p class="ep-hint">{{ $t('settings.executionPolicy.hostDefaultHint') }}</p>
-      <div v-if="snapshot" class="ep-policy-card">
-        <div><strong>{{ $t('settings.executionPolicy.modeLabel') }}</strong>: {{ modeLabel(snapshot.defaultPolicy.mode) }}</div>
-        <div><strong>{{ $t('settings.executionPolicy.systemLabel') }}</strong>: {{ listOrNone(snapshot.defaultPolicy.system) }}</div>
-        <div><strong>{{ $t('settings.executionPolicy.shellLabel') }}</strong>: {{ listOrNone(snapshot.defaultPolicy.shell) }}</div>
-      </div>
-    </section>
-
-    <section v-if="snapshot && draft" class="ep-section" data-section="user-policy">
-      <div class="ep-section-heading">
-        <h2>{{ $t('settings.executionPolicy.userTitle') }}</h2>
-        <span class="ep-readonly" v-if="!hasUserPolicy">{{ $t('settings.executionPolicy.notCreated') }}</span>
-      </div>
-      <p class="ep-hint">{{ $t('settings.executionPolicy.userHint') }}</p>
-      <div class="ep-mode-list" role="radiogroup" :aria-label="$t('settings.executionPolicy.modeLabel')">
-        <label v-for="mode in policyModes" :key="mode" class="ep-mode-option" :data-mode="mode">
-          <input
-            type="radio"
-            name="execution-policy-mode"
-            :value="mode"
-            :checked="draft.mode === mode"
-            @change="setMode(mode)"
-          />
-          <span>{{ modeLabel(mode) }}</span>
-        </label>
-      </div>
-
-      <div v-if="draftIsHighRisk" class="ep-full-warning" role="alert">
-        {{ $t(highRiskWarningKey(draft.mode)) }}
-        <label class="ep-confirm-label">
-          <input v-model="fullConfirmed" type="checkbox" class="ep-full-confirmation" />
-          {{ $t(highRiskConfirmationKey(draft.mode)) }}
-        </label>
-      </div>
-
-      <template v-if="draft.mode !== 'full'">
-        <div class="ep-editor-block">
-          <h3>{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'systemDenylistLabel' : 'systemAllowlistLabel'}`) }}</h3>
-          <p class="ep-hint">{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'systemDenylistHint' : 'systemAllowlistHint'}`) }}</p>
-          <div class="ep-checkbox-grid">
-            <label v-for="namespace in systemNamespaces" :key="namespace">
-              <input
-                type="checkbox"
-                :checked="draft.system.includes(namespace)"
-                :data-system="namespace"
-                @change="toggleSystem(namespace)"
-              />
-              <code>{{ namespace }}</code>
-            </label>
-          </div>
-        </div>
-        <div class="ep-editor-block">
-          <h3>{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'shellDenylistLabel' : 'shellAllowlistLabel'}`) }}</h3>
-          <p class="ep-hint">{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'shellDenylistHint' : 'shellAllowlistHint'}`) }}</p>
-          <p v-if="draft.mode === 'denylist'" class="ep-hint ep-shell-scope">
-            {{ $t('settings.executionPolicy.shellDenylistScope', { executables: hostSupportedShellList }) }}
-          </p>
-          <form class="ep-shell-add" @submit.prevent="addShell">
-            <input
-              v-model="shellInput"
-              :placeholder="$t('settings.executionPolicy.shellPlaceholder')"
-              :aria-invalid="Boolean(shellInputError)"
-              pattern="[A-Za-z0-9][A-Za-z0-9._+-]*"
-            />
-            <button type="submit" :disabled="!shellInput.trim()">{{ $t('settings.executionPolicy.add') }}</button>
-          </form>
-          <p v-if="shellInputError" class="ep-error" role="alert">{{ shellInputError }}</p>
-          <div v-if="draft.shell.length" class="ep-chip-list">
-            <span v-for="name in draft.shell" :key="name" class="ep-chip">
-              <code>{{ name }}</code>
-              <button type="button" :aria-label="$t('settings.executionPolicy.removeShell', { name })" @click="removeShell(name)">×</button>
-            </span>
-          </div>
-          <p v-else class="ep-empty">{{ $t('settings.executionPolicy.none') }}</p>
-        </div>
-      </template>
-
-      <div class="ep-actions">
-        <button class="ep-save" :disabled="!canSave" @click="save">{{ $t('settings.executionPolicy.save') }}</button>
-        <button class="ep-reset" :disabled="busy || !hasUserPolicy || !policyMutationAvailable" @click="resetUser">{{ $t('settings.executionPolicy.resetUser') }}</button>
-      </div>
     </section>
 
     <section v-if="snapshot" class="ep-section" data-section="policy-source">
@@ -545,8 +516,17 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
         <h2>{{ $t('settings.executionPolicy.sourceTitle') }}</h2>
       </div>
       <p class="ep-hint">{{ $t('settings.executionPolicy.sourceHint') }}</p>
-      <div class="ep-source-list">
-        <label v-for="source in (['default', 'user', 'repository'] as ExecutionPolicySource[])" :key="source" class="ep-source-option">
+      <!-- A choice per workspace: without one there is nothing to choose, so
+           only the hint below shows. With no explicit choice yet, the source
+           in effect carries the selected fill and an "Automatic" note; its
+           radio stays unchecked so picking it records an explicit choice. -->
+      <div v-if="workspaceSnapshot" class="ep-source-list settings-segmented">
+        <label
+          v-for="source in (['default', 'user', 'repository'] as ExecutionPolicySource[])"
+          :key="source"
+          class="ep-source-option"
+          :class="{ 'ep-source-implicit': selectedSource === null && workspaceSnapshot.activeSource === source }"
+        >
           <input
             type="radio"
             name="execution-policy-source"
@@ -558,6 +538,7 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
           <span>
             <strong>{{ sourceLabel(source) }}</strong>
             <small v-if="source === 'repository' && recommendation">{{ recommendationStateLabel(recommendation.state) }}</small>
+            <small v-if="selectedSource === null && workspaceSnapshot.activeSource === source">{{ $t('settings.executionPolicy.sourceImplicit') }}</small>
           </span>
         </label>
       </div>
@@ -573,7 +554,7 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
       </ul>
       <button
         v-if="snapshot.sourceRecovery.canReset && !sourceResetArmed"
-        class="ep-reset-sources"
+        class="ep-reset-sources nv-btn nv-btn--sm"
         :disabled="busy"
         type="button"
         @click="armSourceReset"
@@ -581,12 +562,12 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
       <form v-if="sourceResetArmed" class="ep-source-reset-confirm" role="dialog" aria-modal="true" @submit.prevent="resetSourceSelections">
         <p>{{ $t('settings.executionPolicy.resetSourceSelectionsBody') }}</p>
         <label>
-          <input v-model="sourceResetConfirmed" type="checkbox" />
+          <input v-model="sourceResetConfirmed" type="checkbox" class="nv-check" />
           {{ $t('settings.executionPolicy.resetSourceSelectionsCheck') }}
         </label>
         <div class="ep-actions">
-          <button type="submit" :disabled="!sourceResetConfirmed || busy">{{ $t('settings.executionPolicy.resetSourceSelectionsConfirm') }}</button>
-          <button type="button" @click="cancelSourceReset">{{ $t('settings.executionPolicy.cancel') }}</button>
+          <button type="submit" class="nv-btn nv-btn--danger nv-btn--sm" :disabled="!sourceResetConfirmed || busy">{{ $t('settings.executionPolicy.resetSourceSelectionsConfirm') }}</button>
+          <button type="button" class="nv-btn nv-btn--sm" @click="cancelSourceReset">{{ $t('settings.executionPolicy.cancel') }}</button>
         </div>
       </form>
     </section>
@@ -599,23 +580,116 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
       <p class="ep-hint">{{ $t('settings.executionPolicy.recommendationHint') }}</p>
       <p class="ep-recommendation-state">{{ recommendationStateLabel(recommendation.state) }}</p>
       <div v-if="recommendation.policy" class="ep-policy-card ep-recommendation-policy">
-        <div><strong>{{ $t('settings.executionPolicy.modeLabel') }}</strong>: {{ modeLabel(recommendation.policy.mode) }}</div>
-        <div><strong>{{ $t('settings.executionPolicy.systemLabel') }}</strong>: {{ listOrNone(recommendation.policy.system) }}</div>
-        <div><strong>{{ $t('settings.executionPolicy.shellLabel') }}</strong>: {{ listOrNone(recommendation.policy.shell) }}</div>
+        <div><span class="ep-k">{{ $t('settings.executionPolicy.modeLabel') }}</span><span class="ep-v">{{ modeLabel(recommendation.policy.mode) }}</span></div>
+        <div><span class="ep-k">{{ $t('settings.executionPolicy.systemLabel') }}</span><span class="ep-v">{{ systemListOrNone(recommendation.policy.system) }}</span></div>
+        <div><span class="ep-k">{{ $t('settings.executionPolicy.shellLabel') }}</span><span class="ep-v">{{ listOrNone(recommendation.policy.shell) }}</span></div>
       </div>
-      <div v-if="recommendation.state === 'valid' && recommendationIsHighRisk" class="ep-warning">
+      <div v-if="recommendation.state === 'valid' && recommendationIsHighRisk" class="ep-warning" role="alert">
         <p>{{ $t(highRiskWarningKey(recommendation.policy?.mode)) }}</p>
         <label>
-          <input v-model="repositoryFullConfirmed" type="checkbox" class="ep-repository-full-confirmation" />
+          <input v-model="repositoryFullConfirmed" type="checkbox" class="ep-repository-full-confirmation nv-check" />
           {{ $t(highRiskConfirmationKey(recommendation.policy?.mode)) }}
         </label>
       </div>
-      <button
-        v-if="recommendation.state === 'valid' && recommendation.fingerprint && workspaceSnapshot?.selectedSource !== 'repository'"
-        class="ep-accept-recommendation"
-        :disabled="busy || repositoryNeedsConfirmation"
-        @click="selectSource('repository')"
-      >{{ $t('settings.executionPolicy.acceptRecommendation') }}</button>
+      <div v-if="recommendation.state === 'valid' && recommendation.fingerprint && workspaceSnapshot?.selectedSource !== 'repository'" class="ep-accept-row">
+        <button
+          class="ep-accept-recommendation nv-btn"
+          :disabled="busy || repositoryNeedsConfirmation"
+          @click="selectSource('repository')"
+        >{{ $t('settings.executionPolicy.acceptRecommendation') }}</button>
+      </div>
+    </section>
+
+    <section v-if="snapshot && draft" class="ep-section" data-section="user-policy">
+      <div class="ep-section-heading">
+        <h2>{{ $t('settings.executionPolicy.userTitle') }}</h2>
+        <span class="ep-readonly" v-if="!hasUserPolicy">{{ $t('settings.executionPolicy.notCreated') }}</span>
+      </div>
+      <p class="ep-hint">{{ $t('settings.executionPolicy.userHint') }}</p>
+      <div class="ep-mode-list settings-segmented" role="radiogroup" :aria-label="$t('settings.executionPolicy.modeLabel')">
+        <label v-for="mode in policyModes" :key="mode" class="ep-mode-option" :data-mode="mode">
+          <input
+            type="radio"
+            name="execution-policy-mode"
+            :value="mode"
+            :checked="draft.mode === mode"
+            @change="setMode(mode)"
+          />
+          <span>{{ modeLabel(mode) }}</span>
+        </label>
+      </div>
+
+      <div v-if="draftIsHighRisk" class="ep-full-warning" role="alert">
+        {{ $t(highRiskWarningKey(draft.mode)) }}
+        <label class="ep-confirm-label">
+          <input v-model="fullConfirmed" type="checkbox" class="ep-full-confirmation nv-check" />
+          {{ $t(highRiskConfirmationKey(draft.mode)) }}
+        </label>
+      </div>
+
+      <template v-if="draft.mode !== 'full'">
+        <div class="ep-editor-block">
+          <h3>{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'systemDenylistLabel' : 'systemAllowlistLabel'}`) }}</h3>
+          <p class="ep-hint">{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'systemDenylistHint' : 'systemAllowlistHint'}`) }}</p>
+          <div class="ep-checkbox-grid">
+            <label v-for="namespace in systemNamespaces" :key="namespace">
+              <input
+                type="checkbox"
+                class="nv-check"
+                :checked="draft.system.includes(namespace)"
+                :data-system="namespace"
+                @change="toggleSystem(namespace)"
+              />
+              <!-- The name, not the manifest id; the id stays on hover. -->
+              <span :title="namespace">{{ $t(`settings.executionPolicy.namespace.${namespace}`) }}</span>
+            </label>
+          </div>
+        </div>
+        <div class="ep-editor-block">
+          <h3>{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'shellDenylistLabel' : 'shellAllowlistLabel'}`) }}</h3>
+          <p class="ep-hint">{{ $t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'shellDenylistHint' : 'shellAllowlistHint'}`) }}</p>
+          <p v-if="draft.mode === 'denylist'" class="ep-hint ep-shell-scope">
+            {{ $t('settings.executionPolicy.shellDenylistScope', { executables: hostSupportedShellList }) }}
+          </p>
+          <form class="ep-shell-add" @submit.prevent="addShell">
+            <input
+              v-model="shellInput"
+              class="nv-input"
+              :aria-label="$t(`settings.executionPolicy.${draft.mode === 'denylist' ? 'shellDenylistLabel' : 'shellAllowlistLabel'}`)"
+              :placeholder="$t('settings.executionPolicy.shellPlaceholder')"
+              :aria-invalid="Boolean(shellInputError)"
+              pattern="[A-Za-z0-9][A-Za-z0-9._+-]*"
+            />
+            <button type="submit" class="nv-btn" :disabled="!shellInput.trim()">{{ $t('settings.executionPolicy.add') }}</button>
+          </form>
+          <p v-if="shellInputError" class="ep-error" role="alert">{{ messageText(shellInputError) }}</p>
+          <div v-if="draft.shell.length" class="ep-chip-list">
+            <span v-for="name in draft.shell" :key="name" class="ep-chip">
+              <code>{{ name }}</code>
+              <button type="button" :aria-label="$t('settings.executionPolicy.removeShell', { name })" @click="removeShell(name)">×</button>
+            </span>
+          </div>
+          <p v-else class="ep-empty">{{ $t('settings.executionPolicy.none') }}</p>
+        </div>
+      </template>
+
+      <div class="ep-actions">
+        <button class="ep-save nv-btn nv-btn--primary" :disabled="!canSave" @click="save">{{ $t('settings.executionPolicy.save') }}</button>
+        <button class="ep-reset nv-btn" :disabled="busy || !hasUserPolicy || !policyMutationAvailable" @click="resetUser">{{ $t('settings.executionPolicy.resetUser') }}</button>
+      </div>
+    </section>
+
+    <section class="ep-section" data-section="host-default">
+      <div class="ep-section-heading">
+        <h2>{{ $t('settings.executionPolicy.hostDefaultTitle') }}</h2>
+        <span class="ep-readonly">{{ $t('settings.executionPolicy.readOnly') }}</span>
+      </div>
+      <p class="ep-hint">{{ $t('settings.executionPolicy.hostDefaultHint') }}</p>
+      <div v-if="snapshot" class="ep-policy-card">
+        <div><span class="ep-k">{{ $t('settings.executionPolicy.modeLabel') }}</span><span class="ep-v">{{ modeLabel(snapshot.defaultPolicy.mode) }}</span></div>
+        <div><span class="ep-k">{{ $t('settings.executionPolicy.systemLabel') }}</span><span class="ep-v">{{ systemListOrNone(snapshot.defaultPolicy.system) }}</span></div>
+        <div><span class="ep-k">{{ $t('settings.executionPolicy.shellLabel') }}</span><span class="ep-v">{{ listOrNone(snapshot.defaultPolicy.shell) }}</span></div>
+      </div>
     </section>
 
     <section v-if="snapshot" class="ep-section" data-section="recovery">
@@ -632,22 +706,22 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
       <ul v-if="snapshot.recovery.unsafePaths.length" class="ep-path-list">
         <li v-for="path in snapshot.recovery.unsafePaths" :key="path"><code>{{ path }}</code></li>
       </ul>
-      <button v-if="snapshot.recovery.canRebuild && !rebuildArmed" class="ep-rebuild" :disabled="busy" @click="armRebuild">
+      <button v-if="snapshot.recovery.canRebuild && !rebuildArmed" class="ep-rebuild nv-btn nv-btn--sm" :disabled="busy" @click="armRebuild">
         {{ $t('settings.executionPolicy.rebuild') }}
       </button>
       <button
         v-if="snapshot.recovery.state === 'unsafe-entry' || snapshot.recovery.state === 'directory-unsafe' || snapshot.recovery.state === 'directory-unavailable' || snapshot.sourceRecovery.state === 'unsafe-entry' || snapshot.sourceRecovery.state === 'unavailable'"
-        class="ep-recheck"
+        class="ep-recheck nv-btn nv-btn--sm"
         :disabled="busy"
         type="button"
         @click="reloadLatest"
       >{{ $t('settings.executionPolicy.recheck') }}</button>
       <form v-if="rebuildArmed" class="ep-rebuild-confirm" @submit.prevent="rebuild">
         <p>{{ $t('settings.executionPolicy.rebuildConfirmBody') }}</p>
-        <label><input v-model="rebuildConfirmed" type="checkbox" /> {{ $t('settings.executionPolicy.rebuildConfirmCheck') }}</label>
+        <label><input v-model="rebuildConfirmed" type="checkbox" class="nv-check" /> {{ $t('settings.executionPolicy.rebuildConfirmCheck') }}</label>
         <div class="ep-actions">
-          <button type="submit" :disabled="!rebuildConfirmed || busy">{{ $t('settings.executionPolicy.rebuildConfirm') }}</button>
-          <button type="button" @click="cancelRebuild">{{ $t('settings.executionPolicy.cancel') }}</button>
+          <button type="submit" class="nv-btn nv-btn--danger nv-btn--sm" :disabled="!rebuildConfirmed || busy">{{ $t('settings.executionPolicy.rebuildConfirm') }}</button>
+          <button type="button" class="nv-btn nv-btn--sm" @click="cancelRebuild">{{ $t('settings.executionPolicy.cancel') }}</button>
         </div>
       </form>
     </section>
@@ -658,54 +732,221 @@ watch(() => props.workspacePath, () => { void load({ replaceDraft: !draftDirty.v
 .execution-policy-pane {
   /* The Extensions page that hosts this pane owns the scroll, so this is a
      plain block: a second scroller here would split one page into two. */
-  padding: 0 22px 24px;
+  padding: 0 22px var(--space-2);
   font-size: var(--font-sm);
+  color: var(--text-primary);
 }
+/* Each part of the policy is a settings card: a row with its title on the left
+   and its state on the right, then its description and controls, with
+   hairlines between sub-rows — the same grammar as the other Settings pages. */
 .ep-section {
-  margin: 0 0 22px;
-  padding: 16px 0 0;
+  margin: 0;
+  padding: var(--space-4) 0;
   border-top: 1px solid var(--border-muted);
 }
-.ep-section:first-of-type { border-top: 0; padding-top: 0; }
-.ep-section-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
-.ep-section h2 { margin: 0; font-size: 15px; color: var(--text-bright); }
-.ep-section h3 { margin: 0 0 4px; font-size: 13px; color: var(--text-bright); }
-.ep-hint, .ep-summary, .ep-recommendation-state, .ep-empty { color: var(--text-secondary); margin: 5px 0 10px; line-height: 1.45; }
-.ep-loading, .ep-notice, .ep-error { margin: 0 0 10px; }
-.ep-error, .ep-warning { color: var(--text-danger, #c44); }
-.ep-notice { color: var(--text-success, #1a7f37); }
-.ep-readonly, .ep-untrusted, .ep-status { font-size: var(--font-2xs); color: var(--text-secondary); }
-.ep-untrusted { color: #c77400; }
-.ep-status { padding: 2px 6px; border-radius: 4px; background: var(--bg-subtle); }
-.ep-status-active, .ep-status-healthy { color: var(--text-success, #1a7f37); }
-.ep-status-corrupt, .ep-status-stale, .ep-status-unavailable, .ep-status-unsafe-entry, .ep-status-directory-unsafe, .ep-status-directory-unavailable { color: #c77400; }
-.ep-policy-card, .ep-rebuild-confirm { padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-card); background: var(--bg-subtle); line-height: 1.7; }
-.ep-conflict { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding: 9px 12px; border: 1px solid #c77400; border-radius: var(--radius-card); background: rgba(199, 116, 0, .1); color: var(--text-bright); }
+.ep-section.ep-effective { border-top: 0; padding-top: var(--space-1); }
+/* Sections are divided by hairlines, Linear-style; the one part the user edits
+   is the page's single card. */
+[data-section='user-policy'] {
+  margin: var(--space-2) 0 var(--space-4);
+  padding: var(--space-row-y) var(--space-row-x);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--bg-subtle);
+}
+/* Inside the card its heading is the card's first row title, not a second
+   section-label style. */
+[data-section='user-policy'] .ep-section-heading h2 {
+  font-size: var(--font-row-title);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-bright);
+}
+[data-section='user-policy'] + .ep-section { border-top: 0; }
+.ep-effective {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--space-5);
+}
+.ep-effective > .ep-section-heading,
+.ep-effective > .ep-warning,
+.ep-effective > .ep-hint { flex-basis: 100%; }
+.ep-effective > .ep-summary { margin: 0; }
+.ep-effective > .ep-effective-policy { flex-basis: 100%; margin-top: var(--space-2); margin-bottom: 0; }
+.ep-section:last-child { margin-bottom: 0; }
+/* A healthy store is a line, not a card: it only becomes a card with something to say. */
+.ep-section[data-section='recovery']:not(:has(.ep-warning, .ep-path-list, form, button)) {
+  padding-block: var(--space-1);
+  border-color: transparent;
+  background: transparent;
+}
+.ep-accept-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ep-section-heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: 2px; }
+/* The section's state sits right beside its title. */
+/* Section headings share SettingsSection's small uppercase label. */
+.ep-section h2 { margin: 0; font-size: var(--font-row-desc); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); }
+.ep-section h3 { margin: 0 0 2px; font-size: var(--font-sm); font-weight: 600; color: var(--text-bright); }
+.ep-hint, .ep-summary, .ep-recommendation-state, .ep-empty {
+  margin: 2px 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-row-desc);
+  line-height: var(--lh-base);
+}
+.ep-section > :last-child { margin-bottom: 0; }
+.ep-summary { font-size: var(--font-sm); color: var(--text-primary); }
+.ep-summary strong { color: var(--text-bright); font-weight: 600; }
+.ep-loading, .ep-notice, .ep-error { margin: 0 0 var(--space-3); font-size: var(--font-xs); }
+.ep-error, .ep-warning { color: var(--danger-fg); }
+.ep-warning { font-size: var(--font-xs); line-height: var(--lh-base); }
+.ep-notice { color: var(--success-fg); }
+/* Small status words beside a heading: a quiet pill, coloured by meaning. */
+.ep-readonly, .ep-untrusted, .ep-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+/* Untrusted is "not yet checked", a caution; risk and danger tones stay for real risk. */
+.ep-untrusted { background: var(--attention-subtle); color: var(--attention-on-subtle); }
+/* Every button on the page has a 32px target. */
+.execution-policy-pane .nv-btn { min-height: var(--control-h-lg); }
+/* An offset ring that also shows on the filled Save button (the house ring is inset). */
+.execution-policy-pane .nv-btn:focus-visible { outline: 2px solid var(--accent-focus); outline-offset: 2px; }
+.ep-status-active, .ep-status-healthy { background: var(--success-subtle); color: var(--success-fg); }
+.ep-status-corrupt, .ep-status-stale, .ep-status-unavailable, .ep-status-unsafe-entry, .ep-status-directory-unsafe, .ep-status-directory-unavailable { background: var(--risk-subtle); color: var(--risk-fg); }
+/* Read-only policies as definition rows: the field on the left, its value on
+   the right, hairlines between — the settings row, read-only. */
+.ep-policy-card {
+  display: grid;
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-sm);
+  line-height: var(--lh-base);
+}
+.ep-policy-card > div {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: 6px 0;
+  border-top: 1px solid var(--border-muted);
+}
+.ep-policy-card .ep-k { color: var(--text-secondary); }
+.ep-policy-card .ep-v { color: var(--text-primary); font-family: var(--font-mono); font-size: var(--font-xs); }
+.ep-rebuild-confirm, .ep-source-reset-confirm {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger-muted);
+  border-radius: var(--radius-card);
+  background: var(--danger-subtle);
+  font-size: var(--font-xs);
+  line-height: var(--lh-base);
+}
+.ep-rebuild-confirm p, .ep-source-reset-confirm p { margin-top: 0; }
+.ep-rebuild-confirm label, .ep-source-reset-confirm label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h-sm); cursor: pointer; }
+.ep-conflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--risk-muted);
+  border-radius: var(--radius-card);
+  background: var(--risk-subtle);
+  color: var(--text-bright);
+  font-size: var(--font-xs);
+}
 .ep-conflict button { flex: 0 0 auto; }
-.ep-recommendation-policy { margin: 8px 0 10px; }
-.ep-mode-list, .ep-source-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
-.ep-mode-option, .ep-source-option { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-control); }
-.ep-source-option { min-width: 150px; }
-.ep-source-option span { display: flex; flex-direction: column; gap: 2px; }
-.ep-source-option small { color: var(--text-secondary); }
-.ep-full-warning { padding: 10px 12px; border-left: 3px solid #c77400; background: rgba(199, 116, 0, .1); line-height: 1.5; }
-.ep-confirm-label { display: block; margin-top: 9px; font-weight: 600; }
-.ep-editor-block { margin: 14px 0; }
-.ep-checkbox-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-.ep-checkbox-grid label { display: flex; gap: 6px; align-items: center; }
-.ep-shell-add { display: flex; gap: 8px; }
-.ep-shell-add input { min-width: 180px; }
-.ep-chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.ep-chip { display: inline-flex; gap: 5px; align-items: center; padding: 3px 7px; border-radius: 999px; background: var(--bg-subtle); border: 1px solid var(--border-default); }
-.ep-chip button { border: 0; padding: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
-.ep-path-list { margin: 7px 0 10px; padding-left: 20px; color: var(--text-secondary); }
+.ep-recommendation-policy { margin-top: var(--space-2); }
+/* Mode and source are the Settings modal's shared segmented control
+   (.settings-segmented); the radio stays in the DOM for keyboard and
+   assistive tech and the segment draws its focus. Only the spacing and the
+   hidden radio are set here, so the pane still works mounted on its own. */
+.ep-mode-list, .ep-source-list { margin: var(--space-1) 0 var(--space-3); }
+.ep-mode-option, .ep-source-option { position: relative; }
+.ep-mode-option input, .ep-source-option input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+/* The recommendation's state sits beside the source name, so every segment
+   (here and in the mode strip) keeps one height. */
+.ep-source-option span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; min-width: 0; }
+.ep-source-option strong { font-weight: inherit; }
+.ep-source-option small { color: var(--text-secondary); font-size: var(--font-2xs); font-weight: 400; }
+.ep-source-option.ep-source-implicit {
+  background: var(--bg-selected);
+  color: var(--accent-bright);
+  font-weight: 600;
+}
+.ep-full-warning, .ep-warning:has(label) {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--risk-fg);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--risk-subtle);
+  color: var(--text-primary);
+  font-size: var(--font-xs);
+  line-height: var(--lh-base);
+}
+.ep-warning:has(label) p { margin: 0; }
+.ep-confirm-label, .ep-warning:has(label) label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h-sm); margin-top: var(--space-2); font-weight: 600; cursor: pointer; }
+/* The allowlist and shell parts are sub-rows of the user policy card. */
+.ep-editor-block {
+  margin: 0 calc(-1 * var(--space-row-x)) var(--space-3);
+  padding: var(--space-3) var(--space-row-x) 0;
+  border-top: 1px solid var(--border-muted);
+}
+.ep-editor-block .ep-hint { margin-bottom: var(--space-2); }
+.ep-checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
+}
+.ep-checkbox-grid label { display: flex; gap: var(--space-2); align-items: center; min-height: var(--control-h-sm); cursor: pointer; }
+.ep-checkbox-grid code, .ep-chip code { font-family: var(--font-mono); font-size: var(--font-xs); }
+.ep-shell-add { display: flex; gap: var(--space-2); }
+/* Wide enough for the longest placeholder (ru, about 36 characters). */
+.ep-shell-add input { flex: 0 1 340px; min-width: 0; }
+.ep-chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-2); }
+.ep-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 24px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--bg-base);
+}
+.ep-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.ep-chip button { position: relative; }
+/* The visible circle stays small inside the chip; the hit area is 32px. */
+.ep-chip button::after { content: ''; position: absolute; inset: -6px; }
+.ep-chip button:hover { background: var(--bg-hover-strong); color: var(--text-bright); }
+.ep-chip button:focus-visible { outline: 2px solid var(--accent-focus); outline-offset: 1px; }
+.ep-empty { margin-top: var(--space-2); font-style: italic; }
+.ep-path-list { margin: var(--space-2) 0 var(--space-3); padding-left: 20px; color: var(--text-secondary); font-size: var(--font-xs); }
 .ep-path-list code { overflow-wrap: anywhere; }
-.ep-actions { display: flex; gap: 8px; margin-top: 14px; }
-.ep-actions button, .ep-accept-recommendation, .ep-rebuild, .ep-reset-sources, .ep-recheck { transition: filter var(--motion-fast) var(--ease-out); }
-.ep-actions button:hover:not(:disabled), .ep-accept-recommendation:hover:not(:disabled), .ep-rebuild:hover:not(:disabled), .ep-reset-sources:hover:not(:disabled), .ep-recheck:hover:not(:disabled) { filter: brightness(.93); }
-.ep-rebuild-confirm { margin-top: 10px; }
-.ep-rebuild-confirm p { margin-top: 0; }
-.ep-source-reset-confirm { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-card); background: var(--bg-subtle); line-height: 1.5; }
-.ep-source-reset-confirm p { margin-top: 0; }
-.ep-recheck { margin-left: 8px; }
+.ep-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.ep-recheck { margin-left: var(--space-2); }
 </style>

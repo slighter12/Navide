@@ -15,6 +15,9 @@ export interface NativeBackendOverview {
   /** Plan B switches: agents may call third-party agent tools (DB8), and so
    * may external MCP clients (DB4). Both off by default. Absent when unwired. */
   agentTools?: AgentToolSwitches
+  /** #642 review L2: the switch is off for this run but that could not be
+   * saved, so it will be on again after a restart. Absent otherwise. */
+  offUnsaved?: true
 }
 
 /** The agent-tool switches and the catalog refresh behind them. */
@@ -49,6 +52,7 @@ export function registerNativeBackendIpc(
   listSpecs: () => ThirdPartyLaunchSpec[],
   isEnabled: () => boolean,
   agentTools?: NativeBackendAgentToolsControls,
+  offUnsaved?: () => boolean,
 ): void {
   const assertAuthorized = (event: IpcMainInvokeEvent): void => {
     if (!authorize(event)) throw new Error('unauthorized plugin management sender')
@@ -63,6 +67,7 @@ export function registerNativeBackendIpc(
     enabled: isEnabled(),
     plugins: await controller.statuses(listSpecs()),
     ...(agentTools ? { agentTools: agentTools.switches() } : {}),
+    ...(offUnsaved?.() ? { offUnsaved: true as const } : {}),
   })
   const changed = async (): Promise<void> => {
     await agentTools?.refresh().catch(() => undefined)
@@ -103,7 +108,7 @@ export function registerNativeBackendIpc(
   handle('plugins:nativeBackends:setAgentTools', async (event, args) => {
     assertAuthorized(event)
     if (!agentTools) throw new Error('agent tools are unavailable')
-    const { enabled, externalCallers } = record(args)
+    const { enabled, externalCallers, firstParty } = record(args)
     const change: Partial<AgentToolSwitches> = {}
     if (enabled !== undefined) {
       if (typeof enabled !== 'boolean') throw new Error('invalid agent tool setting')
@@ -112,6 +117,10 @@ export function registerNativeBackendIpc(
     if (externalCallers !== undefined) {
       if (typeof externalCallers !== 'boolean') throw new Error('invalid agent tool setting')
       change.externalCallers = externalCallers
+    }
+    if (firstParty !== undefined) {
+      if (typeof firstParty !== 'boolean') throw new Error('invalid agent tool setting')
+      change.firstParty = firstParty
     }
     if (Object.keys(change).length !== 1) throw new Error('invalid agent tool setting')
     await agentTools.setSwitches(change)

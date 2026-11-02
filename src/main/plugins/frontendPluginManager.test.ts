@@ -7,6 +7,7 @@ import { homedir, tmpdir } from 'node:os'
 import { isWindows, platformId, setPlatformId } from '../../shared/osplat'
 import { AI_CLI_PROFILES } from '../../shared/aiCliProfiles'
 import { backendEntryOnDisk } from './installedPlugins'
+import { aiTerminalStorageIdentity } from './aiTerminalStorage'
 
 // Many real fsyncs per test that no assertion can observe; see tests/support/noFsync.ts.
 vi.mock('node:fs', async (importOriginal) =>
@@ -362,7 +363,7 @@ vi.mock('./pluginWebViewHost', async () => {
           toJPEG: () => Buffer.from('jpeg'),
         }),
         navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: () => {}, goForward: () => {} },
-        debugger: { isAttached: () => false, attach: () => {}, detach: () => {}, sendCommand: async () => ({}) },
+        debugger: { isAttached: () => false, attach: () => {}, detach: () => {}, sendCommand: async () => ({}), on: () => {} },
       }
       const guest = {
         options,
@@ -409,6 +410,7 @@ import {
   closeGitLeftPluginView,
   GIT_PLUGIN_ID,
   PLANS_PLUGIN_ID,
+  PLANS_INITIATOR_PANE_VERSION,
   PLANS_BACKEND_STOPPED_MESSAGE,
   MINI_IDE_PLUGIN_ID,
   bundledMiniIdeDir,
@@ -425,6 +427,7 @@ import {
   MAX_DIAGNOSTIC_LINES_PER_EMISSION,
   builtinPluginDisabledMessage,
   parseAgentToolCallRequest,
+  AI_SESSION_RECLAIM_MS,
   type PluginLaunchDescriptor,
   type PluginViewLaunchDescriptor,
 } from './frontendPluginManager'
@@ -459,7 +462,7 @@ import type { ExecutionPolicySnapshot } from './executionPolicy'
 import type { JsonValue } from '../../../packages/plugin-contracts/src/index'
 import type { FilePickerInvocation } from '../filePicker'
 import { NativeBackendStore } from './pluginNativeBackendStore'
-import { ThirdPartyBackendController, thirdPartyBackendLaunchSpec } from './pluginThirdPartyBackends'
+import { NativeBackendRefusal, ThirdPartyBackendController, thirdPartyBackendLaunchSpec } from './pluginThirdPartyBackends'
 import { readInstalledManifestV2, type ThirdPartyLaunchSpec } from './pluginThirdPartyBackends'
 import { PluginAgentToolsHost } from './pluginAgentToolsHost'
 import { pluginWebViewRegistry } from './pluginWebViewHost'
@@ -2748,6 +2751,74 @@ describe('createPluginBackendChildEnvironment', () => {
     } finally {
       vi.unstubAllEnvs()
     }
+  })
+})
+
+describe('Plans agent initiator pane', () => {
+  async function initiatorFor(packageVersion: string, pane: string | undefined): Promise<Record<string, unknown>> {
+    const mgr = new FrontendPluginManager()
+    const workspacePath = process.cwd()
+    mgr.registerDescriptor({
+      id: PLANS_PLUGIN_ID,
+      packageVersion,
+      packageDir: process.cwd(),
+      requires: ['fs'],
+      devUrl: '',
+      entryFile: '/plugins/navide.plans/frontend/window/index.html',
+      views: [],
+      capabilityPolicy: manifestV2CapabilityPolicy({ system: ['fs'] }),
+    }, { builtin: true })
+    mgr.registerBackendActivation({
+      pluginId: PLANS_PLUGIN_ID,
+      packageVersion,
+      packageDir: process.cwd(),
+      entryFile: '/plugins/navide.plans/backend/navide-plans',
+      protocolVersion: 1,
+      activation: 'startup',
+      approvedMethods: ['plans.add_note'],
+      agentMethods: ['plans.add_note'],
+      approvedEvents: ['plans.changed'],
+      approvedBridgePorts: ['filesystem'],
+    })
+    mgr.setCapabilityGrantResolver(() => ({ packageVersion, system: ['fs'], storage: true }))
+    mgr.setExecutionPolicyResolver(() => ({
+      policy: { schemaVersion: 1, mode: 'allowlist', system: ['fs'], shell: [] },
+      revision: 1,
+      state: 'user',
+    }))
+    const bind = vi.spyOn(PluginBackendHost.prototype, 'bindWorkspace').mockResolvedValue('headless-1')
+    const call = vi.spyOn(PluginBackendHost.prototype, 'call').mockResolvedValue({ ok: true } as never)
+    try {
+      await expect(mgr.executeAgentBackendCallForWorkspace(
+        PLANS_PLUGIN_ID,
+        workspacePath,
+        { reqId: 'agent-note', name: 'plans.add_note', args: {} },
+        pane,
+      )).resolves.toMatchObject({ ok: true })
+      const options = call.mock.calls[0][3] as { initiator: Record<string, unknown> }
+      return options.initiator
+    } finally {
+      call.mockRestore()
+      bind.mockRestore()
+      await mgr.closeBackendPlugins()
+    }
+  }
+
+  it('names the calling pane to Plans 1.1.0 and later', async () => {
+    expect(await initiatorFor(PLANS_INITIATOR_PANE_VERSION, 'Reviewer')).toEqual({
+      kind: 'agent', source: 'mcp', id: expect.any(String), pane: 'Reviewer',
+    })
+    expect(await initiatorFor('2.0.0', 'Reviewer')).toMatchObject({ pane: 'Reviewer' })
+  })
+
+  it('sends an older Plans package exactly the three agent keys it accepts', async () => {
+    const initiator = await initiatorFor('1.0.0', 'Reviewer')
+    expect(Object.keys(initiator).sort()).toEqual(['id', 'kind', 'source'])
+  })
+
+  it('sends no pane when the core named none, as an older core does', async () => {
+    const initiator = await initiatorFor(PLANS_INITIATOR_PANE_VERSION, undefined)
+    expect(Object.keys(initiator).sort()).toEqual(['id', 'kind', 'source'])
   })
 })
 
@@ -8766,15 +8837,20 @@ describe('opaque view instance ownership', () => {
         bounds: 'fill',
       })
       mgr.noteTerminalRoutes(handle.instanceId, 'terminal.create', {
-        terminal_session_id: 'stable-route',
+        terminal_session_id: 'new-session',
       })
 
       const newContext = v2Context({ audience: 'same-audience', sessionId: 'new-session' })
       mgr.setCapabilityContext(packageDesc.id, newContext)
-      dispatchEvent(mgr, 'terminal.output', output('stable-route', 'still attached'))
+      dispatchEvent(mgr, 'terminal.output', output('new-session', 'still attached'))
       vi.advanceTimersByTime(12)
 
-      expect(eventsOf(host.children[0] as FakeViewLike, 'terminal.output')).toHaveLength(1)
+      // Still attached: the PTY reaches the view, as the public event only.
+      const view = host.children[0] as FakeViewLike
+      expect(eventsOf(view, 'terminal.output')).toHaveLength(0)
+      expect(eventsOf(view, 'aiCli.output')).toEqual([
+        { type: 'aiCli.output', data: { sessionId: 'new-session', data: 'still attached' } },
+      ])
       const source = { ...newContext.runtimeBinding!, instanceId: handle.instanceId }
       mgr.dispatchPublicCapabilityEvent(
         packageDesc.id,
@@ -8782,7 +8858,88 @@ describe('opaque view instance ownership', () => {
         { sessionId: 'new-session', data: 'new binding reached the view' },
         source
       )
-      expect(eventsOf(host.children[0] as FakeViewLike, 'aiCli.output')).toHaveLength(1)
+      expect(eventsOf(view, 'aiCli.output')).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Review L4 on #648: a route made before a context change keeps reaching
+  // its view when the new context still binds that session.
+  it('keeps delivering a route made before a context change that still binds its session', async () => {
+    vi.useFakeTimers()
+    try {
+      const mgr = new FrontendPluginManager()
+      const packageDesc = v2PackageDescriptor()
+      const oldContext = v2Context({ audience: 'same-audience', sessionId: 'old-session' })
+      mgr.registerDescriptor({ ...packageDesc, capabilityContext: oldContext })
+      const host = new FakeBrowserWindow()
+      const handle = await mgr.openView(packageDesc, packageDesc.views![0], {
+        hostWindow: asHost(host),
+        bounds: 'fill',
+      })
+      mgr.noteTerminalRoutes(handle.instanceId, 'terminal.create', {
+        terminal_session_id: 'old-session',
+      })
+
+      const newContext = v2Context({ audience: 'same-audience', sessionId: 'new-session' })
+      newContext.sessionBindings = new Map([
+        ['old-session', newContext.runtimeBinding!],
+        ['new-session', newContext.runtimeBinding!],
+      ])
+      mgr.setCapabilityContext(packageDesc.id, newContext)
+      dispatchEvent(mgr, 'terminal.output', output('old-session', 'made before the change'))
+      vi.advanceTimersByTime(12)
+
+      const view = host.children[0] as FakeViewLike
+      expect(eventsOf(view, 'terminal.output')).toHaveLength(0)
+      expect(eventsOf(view, 'aiCli.output')).toEqual([
+        { type: 'aiCli.output', data: { sessionId: 'old-session', data: 'made before the change' } },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Review L1 on #648: the aiCli path returns before the raw-event guard for
+  // every package that declares aiCli, so this one does not: its own v2 route
+  // still never gets terminal.*, which carries the pane id and stream.
+  it('never sends raw terminal events to a v2 route of a package without aiCli', async () => {
+    vi.useFakeTimers()
+    try {
+      const mgr = new FrontendPluginManager()
+      const id = 'acme.no-aicli'
+      const context: HostCapabilityContext = {
+        ...v2Context({ pluginId: id, sessionId: 'raw-session' }),
+        userGrant: { packageVersion: '1.0.0', system: ['fs'] },
+      }
+      const packageDesc: PluginLaunchDescriptor = {
+        ...v2PackageDescriptor(id),
+        capabilityPolicy: manifestV2CapabilityPolicy({ system: ['fs'] }),
+        capabilityContext: context,
+      }
+      mgr.registerDescriptor(packageDesc)
+      const host = new FakeBrowserWindow()
+      const handle = await mgr.openView(packageDesc, packageDesc.views![0], {
+        hostWindow: asHost(host),
+        bounds: 'fill',
+      })
+      mgr.noteTerminalRoutes(handle.instanceId, 'terminal.create', {
+        terminal_session_id: 'raw-session',
+      })
+      const routes = (mgr as unknown as { terminalRoutes: Map<string, { instanceId: string | null; legacy?: boolean }> })
+        .terminalRoutes
+      expect(routes.get('raw-session')).toMatchObject({ instanceId: handle.instanceId })
+      expect(routes.get('raw-session')?.legacy).toBeFalsy()
+
+      dispatchEvent(mgr, 'terminal.output', output('raw-session', 'raw text'))
+      vi.advanceTimersByTime(12)
+      dispatchEvent(mgr, 'terminal.exit', { terminal_session_id: 'raw-session', pane_id: 'p', exit_code: 0 })
+
+      const view = host.children[0] as FakeViewLike
+      for (const type of ['terminal.output', 'terminal.exit', 'aiCli.output', 'aiCli.exited']) {
+        expect(eventsOf(view, type)).toHaveLength(0)
+      }
     } finally {
       vi.useRealTimers()
     }
@@ -8948,7 +9105,7 @@ describe('opaque view instance ownership', () => {
       const reopened = await mgr.openView(packageDesc, packageDesc.views![0], {
         hostWindow: asHost(reopenedHost),
         bounds: 'fill',
-        capabilityContext: v2Context({ audience: 'left-audience' }),
+        capabilityContext: v2Context({ audience: 'left-audience', sessionId: 't-v2-reconnect' }),
       })
       expect(
         mgr.filterTerminalReattachPayload(reopened.instanceId, {
@@ -8962,7 +9119,10 @@ describe('opaque view instance ownership', () => {
       })
       dispatchEvent(mgr, 'terminal.output', output('t-v2-reconnect', 'reconnected'))
       vi.advanceTimersByTime(12)
-      expect(eventsOf(reopenedHost.children[0] as FakeViewLike, 'terminal.output')).toHaveLength(1)
+      const reopenedView = reopenedHost.children[0] as FakeViewLike
+      expect(eventsOf(reopenedView, 'aiCli.output')).toHaveLength(1)
+      expect(eventsOf(reopenedView, 'terminal.output')).toHaveLength(0)
+      expect(eventsOf(siblingView, 'aiCli.output')).toHaveLength(0)
       expect(eventsOf(siblingView, 'terminal.output')).toHaveLength(0)
     } finally {
       vi.useRealTimers()
@@ -9116,6 +9276,647 @@ describe('opaque view instance ownership', () => {
     expect(response).toMatchObject({ ok: true, result: { accepted: true } })
     expect(plans[0]).toMatchObject({ runtime: { instanceId: handle.instanceId } })
     expect(plans[0]).not.toMatchObject({ runtime: { instanceId: 'plugin-supplied-instance' } })
+  })
+
+  // A third-party package that declares aiCli used to get no session output at
+  // all: only navide.git/plans/mini-ide were translated to the public events,
+  // everyone else fell through to the undocumented terminal.* stream.
+  describe('a third-party aiCli package', () => {
+    type Internal = {
+      aiSessions: Map<string, Record<string, unknown>>
+      wsClient: unknown
+      running: Map<string, { capabilityContext: HostCapabilityContext }>
+    }
+
+    async function openThirdParty(
+      mgr: FrontendPluginManager,
+      options: { id?: string; audience?: string; sessionId?: string; packageVersion?: string } = {},
+    ) {
+      const id = options.id ?? 'acme.devmap'
+      const desc = { ...v2PackageDescriptor(id), ...(options.packageVersion ? { packageVersion: options.packageVersion } : {}) }
+      mgr.registerDescriptor(desc, id.startsWith('navide.') ? { official: true } : {})
+      const host = new FakeBrowserWindow()
+      const handle = await mgr.openView(desc, desc.views![0], {
+        hostWindow: asHost(host),
+        bounds: 'fill',
+        workspacePath: '/workspace',
+        capabilityContext: v2Context({
+          pluginId: id,
+          workspaceId: mgr.workspaceIdForPath('/workspace') ?? undefined,
+          ...(options.packageVersion ? { packageVersion: options.packageVersion } : {}),
+          audience: options.audience ?? 'devmap-main',
+          sessionId: options.sessionId,
+        }),
+      })
+      return { id, handle, view: host.children[0] as FakeViewLike }
+    }
+
+    function exit(id: string, code: number): Record<string, unknown> {
+      return { terminal_session_id: id, pane_id: 'p', exit_code: code }
+    }
+
+    it('gets its own session as aiCli.output and aiCli.exited, with only sessionId, data and exitCode', async () => {
+      vi.useFakeTimers()
+      try {
+        const mgr = new FrontendPluginManager()
+        const a = await openThirdParty(mgr, { sessionId: 'devmap-session' })
+        mgr.noteTerminalRoutes(a.handle.instanceId, 'terminal.create', { terminal_session_id: 'devmap-session' })
+        dispatchEvent(mgr, 'terminal.output', output('devmap-session', 'hello'))
+        vi.advanceTimersByTime(12)
+        dispatchEvent(mgr, 'terminal.exit', exit('devmap-session', 3))
+        expect(eventsOf(a.view, 'aiCli.output')).toEqual([
+          { type: 'aiCli.output', data: { sessionId: 'devmap-session', data: 'hello' } },
+        ])
+        expect(eventsOf(a.view, 'aiCli.exited')).toEqual([
+          { type: 'aiCli.exited', data: { sessionId: 'devmap-session', exitCode: 3 } },
+        ])
+        // Never the raw PTY vocabulary, which carries the pane id and stream.
+        expect(eventsOf(a.view, 'terminal.output')).toHaveLength(0)
+        expect(eventsOf(a.view, 'terminal.exit')).toHaveLength(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('never sees the session of another package, or of another view of its own', async () => {
+      vi.useFakeTimers()
+      try {
+        const mgr = new FrontendPluginManager()
+        const a = await openThirdParty(mgr, { id: 'acme.devmap', sessionId: 'a-session' })
+        const b = await openThirdParty(mgr, { id: 'other.spy', sessionId: 'a-session' })
+        // A second view of the same contribution, its binding naming the id too.
+        const a2 = await openThirdParty(mgr, { id: 'acme.devmap', sessionId: 'a-session' })
+        mgr.noteTerminalRoutes(a.handle.instanceId, 'terminal.create', { terminal_session_id: 'a-session' })
+        dispatchEvent(mgr, 'terminal.output', output('a-session', 'secret'))
+        vi.advanceTimersByTime(12)
+        dispatchEvent(mgr, 'terminal.exit', exit('a-session', 0))
+        expect(eventsOf(a.view, 'aiCli.output')).toHaveLength(1)
+        for (const other of [b, a2]) {
+          expect(eventsOf(other.view, 'aiCli.output')).toHaveLength(0)
+          expect(eventsOf(other.view, 'aiCli.exited')).toHaveLength(0)
+          expect(eventsOf(other.view, 'terminal.output')).toHaveLength(0)
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('refuses input to a session another package started', async () => {
+      const mgr = new FrontendPluginManager()
+      const a = await openThirdParty(mgr, { id: 'acme.devmap', sessionId: 'a-session' })
+      const b = await openThirdParty(mgr, { id: 'other.spy' })
+      mgr.noteTerminalRoutes(a.handle.instanceId, 'terminal.create', { terminal_session_id: 'a-session' })
+      mgr.setBackendWsUrl('ws://third-party-aicli-write-test')
+      const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+      socket.open()
+      const internal = mgr as unknown as Internal
+      const runtime = internal.running.get(b.handle.instanceId)!.capabilityContext.runtimeBinding!
+      for (const address of ['aiCli.sendInput', 'aiCli.stopSession', 'aiCli.reattachSession'] as const) {
+        await expect(mgr.executePublicCapability({
+          kind: 'public',
+          address,
+          scope: 'workspace',
+          runtime,
+          args: { sessionId: 'a-session', data: 'rm -rf ~\n', cols: 80, rows: 24 },
+        })).rejects.toThrow(/no longer owned by this view/)
+      }
+      expect(socket.sent).toHaveLength(0)
+    })
+
+    // Review M2 on #648: resume finds a detached session by package, version,
+    // workspace and audience; same audience and workspace are not enough.
+    it('resumes only a detached session of the same package and version', async () => {
+      const resumeAs = async (options: { id: string; packageVersion?: string }) => {
+        const mgr = new FrontendPluginManager()
+        const opened = await openThirdParty(mgr, options)
+        mgr.setBackendWsUrl(`ws://third-party-aicli-resume-${options.id}-${options.packageVersion ?? ''}`)
+        const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+        socket.open()
+        const internal = mgr as unknown as Internal
+        internal.aiSessions.set('detached', {
+          sessionId: 'detached',
+          profileId: 'claude',
+          pluginId: 'acme.devmap',
+          packageVersion: '1.0.0',
+          workspaceId: mgr.workspaceIdForPath('/workspace'),
+          audience: 'devmap-main',
+          attachedInstanceId: null,
+          client: internal.wsClient,
+          createdAt: Date.now(),
+        })
+        const plugin = internal.running.get(opened.handle.instanceId)!
+        plugin.capabilityContext.aiCliProfiles = ['claude']
+        const result = mgr.executePublicCapability({
+          kind: 'public',
+          address: 'aiCli.resumeSession',
+          scope: 'workspace',
+          runtime: plugin.capabilityContext.runtimeBinding!,
+          args: { cols: 80, rows: 24 },
+        })
+        return { result, socket }
+      }
+
+      // Another package with the same audience and workspace, and a new version.
+      for (const options of [{ id: 'other.spy' }, { id: 'acme.devmap', packageVersion: '2.0.0' }]) {
+        const { result, socket } = await resumeAs(options)
+        await expect(result).resolves.toBeNull()
+        expect(socket.sent).toHaveLength(0)
+      }
+      // The control: the same package and version reaches the backend.
+      const { result, socket } = await resumeAs({ id: 'acme.devmap' })
+      await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+      const request = JSON.parse(socket.sent[0]!) as { id: string; type: string }
+      expect(request).toMatchObject({
+        type: 'terminal.reattach',
+        payload: { terminal_session_ids: ['detached'] },
+      })
+      // Answer it: an unanswered request rejects on its 10s timeout after the
+      // test has ended, as an unhandled rejection in whichever test is running.
+      socket.receive({ id: request.id, type: request.type, ok: true, payload: { alive: ['detached'], dead: [] }, error: null, timestamp: '' })
+      await expect(result).resolves.toEqual({ sessionId: 'detached', profileId: 'claude' })
+    })
+
+    // Each third-party package version has its own terminal storage key, so a
+    // new version never reads or clears an older one's stored session. The
+    // bundled Navide plugins keep the key they had before versions were added.
+    it('keeps terminal storage per package version, except for the bundled plugins', async () => {
+      const identityOf = async (id: string, packageVersion: string) => {
+        const mgr = new FrontendPluginManager()
+        const opened = await openThirdParty(mgr, { id, packageVersion })
+        const internal = mgr as unknown as Internal & { terminalStorageIdentity(plugin: unknown): unknown }
+        return internal.terminalStorageIdentity(internal.running.get(opened.handle.instanceId)!) as
+          { origin: string; resumeKey: string }
+      }
+      const v1 = await identityOf('acme.devmap', '1.0.0')
+      expect(await identityOf('acme.devmap', '1.0.0')).toEqual(v1)
+      expect((await identityOf('acme.devmap', '2.0.0')).resumeKey).not.toBe(v1.resumeKey)
+      expect(v1).toEqual(aiTerminalStorageIdentity({
+        pluginId: 'acme.devmap',
+        contributionKey: 'acme.devmap.left',
+        workspacePath: resolve('/workspace'),
+        packageVersion: '1.0.0',
+      }))
+      for (const id of ['navide.git', 'navide.plans', 'navide.mini-ide']) {
+        const bundled = await identityOf(id, '1.0.0')
+        expect(await identityOf(id, '2.0.0')).toEqual(bundled)
+        expect(bundled).toEqual(aiTerminalStorageIdentity({
+          pluginId: id,
+          contributionKey: `${id}.left`,
+          workspacePath: resolve('/workspace'),
+        }))
+      }
+    })
+
+    // Security review on #648, (b): even if storage named it, a third-party
+    // view never takes over, or overwrites, a session the ledger records for
+    // another version.
+    it('does not resume from storage a session the ledger records for another version', async () => {
+      const resumeFromStorage = async (recordedVersion: string | null) => {
+        const mgr = new FrontendPluginManager()
+        const opened = await openThirdParty(mgr, { id: 'acme.devmap', packageVersion: '2.0.0' })
+        mgr.setTerminalStorageHandler(async () => ({ fontSize: 12, lastSize: null, ptyId: 'old-pty', snapshot: null }))
+        mgr.setBackendWsUrl(`ws://storage-resume-${recordedVersion}`)
+        const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+        socket.open()
+        const internal = mgr as unknown as Internal
+        const plugin = internal.running.get(opened.handle.instanceId)!
+        plugin.capabilityContext.aiCliProfiles = ['claude']
+        const runtime = plugin.capabilityContext.runtimeBinding!
+        const recorded = recordedVersion === null ? undefined : {
+          sessionId: 'old-pty',
+          profileId: 'claude',
+          pluginId: 'acme.devmap',
+          packageVersion: recordedVersion,
+          workspaceId: runtime.workspaceId,
+          audience: runtime.audience,
+          attachedInstanceId: null,
+          client: internal.wsClient,
+          createdAt: Date.now(),
+          persistView: true,
+        }
+        if (recorded) internal.aiSessions.set('old-pty', recorded)
+        const result = mgr.executePublicCapability({
+          kind: 'public',
+          address: 'aiCli.resumeSession',
+          scope: 'workspace',
+          runtime,
+          args: { cols: 80, rows: 24, persistView: true },
+        })
+        return { result, socket, internal, recorded }
+      }
+
+      const refused = await resumeFromStorage('1.0.0')
+      await expect(refused.result).resolves.toBeNull()
+      expect(refused.socket.sent).toHaveLength(0)
+      expect(refused.internal.aiSessions.get('old-pty')).toBe(refused.recorded)
+      // The control: a stored session the ledger does not record still resumes.
+      const allowed = await resumeFromStorage(null)
+      await vi.waitFor(() => expect(allowed.socket.sent).toHaveLength(1))
+      const request = JSON.parse(allowed.socket.sent[0]!) as { id: string; type: string }
+      expect(request).toMatchObject({
+        type: 'terminal.reattach',
+        payload: { terminal_session_ids: ['old-pty'] },
+      })
+      // Answer it, so the request does not reject unhandled after the test.
+      allowed.socket.receive({
+        id: request.id,
+        type: request.type,
+        ok: true,
+        payload: {
+          alive: ['old-pty'],
+          dead: [],
+          sessions: { 'old-pty': { agent_key: 'claude', workspace_path: '/workspace', origin: 'acme.devmap' } },
+        },
+        error: null,
+        timestamp: '',
+      })
+      await expect(allowed.result).resolves.toEqual({ sessionId: 'old-pty', profileId: 'claude' })
+    })
+
+    // Review L6 on #648: a session found again through storage is marked
+    // stored, so closing the view that resumed it keeps it running.
+    it('keeps a session resumed from storage when that view closes too', async () => {
+      vi.useFakeTimers()
+      try {
+        const mgr = new FrontendPluginManager()
+        const opened = await openThirdParty(mgr, { id: 'acme.devmap' })
+        mgr.setTerminalStorageHandler(async () => ({ fontSize: 12, lastSize: null, ptyId: 'stored-pty', snapshot: null }))
+        mgr.setBackendWsUrl('ws://storage-resume-then-close')
+        const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+        socket.open()
+        const internal = mgr as unknown as Internal
+        const plugin = internal.running.get(opened.handle.instanceId)!
+        plugin.capabilityContext.aiCliProfiles = ['claude']
+        const resume = mgr.executePublicCapability({
+          kind: 'public',
+          address: 'aiCli.resumeSession',
+          scope: 'workspace',
+          runtime: plugin.capabilityContext.runtimeBinding!,
+          args: { cols: 80, rows: 24, persistView: true },
+        })
+        await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+        const request = JSON.parse(socket.sent[0]!) as { id: string; type: string }
+        socket.receive({
+          id: request.id,
+          type: request.type,
+          ok: true,
+          payload: {
+            alive: ['stored-pty'],
+            dead: [],
+            sessions: { 'stored-pty': { agent_key: 'claude', workspace_path: '/workspace', origin: 'acme.devmap' } },
+          },
+          error: null,
+          timestamp: '',
+        })
+        await expect(resume).resolves.toEqual({ sessionId: 'stored-pty', profileId: 'claude' })
+        expect(internal.aiSessions.get('stored-pty')).toMatchObject({ storedForResume: true, attachedInstanceId: opened.handle.instanceId })
+        opened.view.webContents.close()
+        await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS * 2)
+        const kills = socket.sent.filter((raw) => JSON.parse(raw).type === 'terminal.kill')
+        expect(kills).toHaveLength(0)
+        expect(internal.aiSessions.get('stored-pty')?.attachedInstanceId).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    describe('a session left behind when its view closes', () => {
+      async function withDetachedSession(id: string, persist: 'no' | 'asked' | 'stored' = 'no') {
+        const mgr = new FrontendPluginManager()
+        const a = await openThirdParty(mgr, { id, sessionId: 'left-session' })
+        mgr.setBackendWsUrl(`ws://reclaim-${id}`)
+        const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+        socket.open()
+        const internal = mgr as unknown as Internal
+        const runtime = internal.running.get(a.handle.instanceId)!.capabilityContext.runtimeBinding!
+        mgr.noteTerminalRoutes(a.handle.instanceId, 'terminal.create', { terminal_session_id: 'left-session' })
+        internal.aiSessions.set('left-session', {
+          sessionId: 'left-session',
+          profileId: 'claude',
+          pluginId: runtime.pluginId,
+          packageVersion: runtime.packageVersion,
+          workspaceId: runtime.workspaceId,
+          audience: runtime.audience,
+          attachedInstanceId: a.handle.instanceId,
+          client: internal.wsClient,
+          createdAt: Date.now(),
+          // 'asked': the package passed persistView, but storage never got the
+          // session. 'stored': the Host wrote its ptyId to terminal storage.
+          ...(persist !== 'no'
+            ? { persistView: true, storageIdentity: { origin: 'acme.devmap', resumeKey: 'k' } }
+            : {}),
+          ...(persist === 'stored' ? { storedForResume: true } : {}),
+        })
+        a.view.webContents.close()
+        const kills = () => socket.sent
+          .map((raw) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> })
+          .filter((message) => message.type === 'terminal.kill')
+        return { mgr, internal, kills, socket, runtime }
+      }
+
+      it('is ended once, by its own session id, after the reclaim wait', async () => {
+        vi.useFakeTimers()
+        try {
+          const { internal, kills } = await withDetachedSession('acme.devmap')
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS - 1)
+          expect(kills()).toHaveLength(0)
+          await vi.advanceTimersByTimeAsync(1)
+          expect(kills()).toEqual([
+            expect.objectContaining({ payload: { terminal_session_id: 'left-session', force: true } }),
+          ])
+          expect(internal.aiSessions.has('left-session')).toBe(false)
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS * 2)
+          expect(kills()).toHaveLength(1)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('is kept when a new view resumed it, or left alone once something else ended it', async () => {
+        vi.useFakeTimers()
+        try {
+          const resumed = await withDetachedSession('acme.devmap')
+          resumed.internal.aiSessions.get('left-session')!.attachedInstanceId = 'a-new-view'
+          const stopped = await withDetachedSession('acme.devmap')
+          stopped.internal.aiSessions.delete('left-session')
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS)
+          expect(resumed.kills()).toHaveLength(0)
+          expect(resumed.internal.aiSessions.has('left-session')).toBe(true)
+          expect(stopped.kills()).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('waits the full time again after each detach, so an earlier close cannot end it early', async () => {
+        vi.useFakeTimers()
+        try {
+          // Review M1 on #648: closed at 0, resumed at 1 s, closed again at 50 s.
+          const { mgr, internal, kills } = await withDetachedSession('acme.devmap')
+          await vi.advanceTimersByTimeAsync(1_000)
+          const entry = internal.aiSessions.get('left-session')!
+          const second = await openThirdParty(mgr, { id: 'acme.devmap', sessionId: 'left-session' })
+          mgr.noteTerminalRoutes(second.handle.instanceId, 'terminal.reattach', { alive: ['left-session'] })
+          entry.attachedInstanceId = second.handle.instanceId
+          await vi.advanceTimersByTimeAsync(49_000)
+          second.view.webContents.close()
+          // 60.5 s: the first close's wait would be over, the second's is not.
+          await vi.advanceTimersByTimeAsync(10_500)
+          expect(kills()).toHaveLength(0)
+          expect(internal.aiSessions.get('left-session')).toBe(entry)
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS - 10_500 - 1)
+          expect(kills()).toHaveLength(0)
+          await vi.advanceTimersByTimeAsync(1)
+          expect(kills()).toHaveLength(1)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('is ended once when the package is disabled or removed, not again by the reclaim', async () => {
+        vi.useFakeTimers()
+        try {
+          const { mgr, kills } = await withDetachedSession('acme.devmap')
+          mgr.preparePluginRemoval('acme.devmap')
+          expect(kills()).toHaveLength(1)
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS * 2)
+          expect(kills()).toHaveLength(1)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('is left to the backend shutdown when the app quits', async () => {
+        vi.useFakeTimers()
+        try {
+          const { mgr, kills } = await withDetachedSession('acme.devmap')
+          mgr.setAppQuittingProbe(() => true)
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS)
+          expect(kills()).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('is kept, and can be resumed, when the Host stored it for resume (D1)', async () => {
+        vi.useFakeTimers()
+        try {
+          const { mgr, internal, kills, socket } = await withDetachedSession('acme.devmap', 'stored')
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS * 2)
+          expect(kills()).toHaveLength(0)
+          expect(internal.aiSessions.has('left-session')).toBe(true)
+          const next = await openThirdParty(mgr, { id: 'acme.devmap' })
+          const plugin = internal.running.get(next.handle.instanceId)!
+          plugin.capabilityContext.aiCliProfiles = ['claude']
+          void mgr.executePublicCapability({
+            kind: 'public',
+            address: 'aiCli.resumeSession',
+            scope: 'workspace',
+            runtime: plugin.capabilityContext.runtimeBinding!,
+            args: { cols: 80, rows: 24 },
+          })
+          await vi.waitFor(() => expect(socket.sent.map((raw) => JSON.parse(raw).type)).toContain('terminal.reattach'))
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('is still reclaimed when the package only asked for persistView', async () => {
+        vi.useFakeTimers()
+        try {
+          const { internal, kills } = await withDetachedSession('acme.devmap', 'asked')
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS)
+          expect(kills()).toHaveLength(1)
+          expect(internal.aiSessions.has('left-session')).toBe(false)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      // Review L3 on #648: the reclaim wait ending while a view is resuming the
+      // session does not end it under that view.
+      describe('when the wait ends during a resume', () => {
+        async function resumeNearTheEnd() {
+          const left = await withDetachedSession('acme.devmap')
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS - 1_000)
+          const next = await openThirdParty(left.mgr, { id: 'acme.devmap' })
+          const plugin = left.internal.running.get(next.handle.instanceId)!
+          plugin.capabilityContext.aiCliProfiles = ['claude']
+          const resume = left.mgr.executePublicCapability({
+            kind: 'public',
+            address: 'aiCli.resumeSession',
+            scope: 'workspace',
+            runtime: plugin.capabilityContext.runtimeBinding!,
+            args: { cols: 80, rows: 24 },
+          })
+          await vi.waitFor(() => expect(left.socket.sent).toHaveLength(1))
+          const request = JSON.parse(left.socket.sent[0]!) as { id: string; type: string }
+          expect(request.type).toBe('terminal.reattach')
+          await vi.advanceTimersByTimeAsync(2_000)
+          expect(left.kills()).toHaveLength(0)
+          return { ...left, next, resume, request }
+        }
+
+        it('keeps it once the resume attaches it', async () => {
+          vi.useFakeTimers()
+          try {
+            const { socket, internal, kills, next, resume, request } = await resumeNearTheEnd()
+            socket.receive({
+              id: request.id, type: request.type, ok: true,
+              payload: { alive: ['left-session'], dead: [] }, error: null, timestamp: '',
+            })
+            await expect(resume).resolves.toEqual({ sessionId: 'left-session', profileId: 'claude' })
+            expect(internal.aiSessions.get('left-session')?.attachedInstanceId).toBe(next.handle.instanceId)
+            await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS * 2)
+            expect(kills()).toHaveLength(0)
+          } finally {
+            vi.useRealTimers()
+          }
+        })
+
+        it('ends it once, a full wait later, when the resume fails', async () => {
+          vi.useFakeTimers()
+          try {
+            const { socket, internal, kills, resume, request } = await resumeNearTheEnd()
+            socket.receive({
+              id: request.id, type: request.type, ok: false,
+              payload: {}, error: { code: 'X', message: 'reattach failed' }, timestamp: '',
+            })
+            await expect(resume).rejects.toThrow(/reattach failed/)
+            expect(internal.aiSessions.get('left-session')?.attachedInstanceId).toBeNull()
+            expect(kills()).toHaveLength(0)
+            // The timer that fired during the resume started a new wait.
+            await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS)
+            expect(kills()).toHaveLength(1)
+            expect(internal.aiSessions.has('left-session')).toBe(false)
+            await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS * 2)
+            expect(kills()).toHaveLength(1)
+          } finally {
+            vi.useRealTimers()
+          }
+        })
+      })
+
+      // #648 version isolation: the kill is not awaited, so a stored session
+      // also leaves terminal storage when its version is revoked or its
+      // package removed; nothing can resume it from there afterwards.
+      describe('terminal storage when the package ends it', () => {
+        function recordStorage(mgr: FrontendPluginManager) {
+          const requests: Array<{ origin: string; request: Record<string, unknown>; canDispatch: boolean }> = []
+          mgr.setTerminalStorageHandler(async (origin, request, canDispatch) => {
+            requests.push({ origin, request: request as unknown as Record<string, unknown>, canDispatch: canDispatch() })
+            return null
+          })
+          return requests
+        }
+
+        it('clears the stored session when its version is revoked', async () => {
+          const { mgr, kills, runtime } = await withDetachedSession('acme.devmap', 'stored')
+          const requests = recordStorage(mgr)
+          await mgr.revokePackageVersion('acme.devmap', runtime.packageVersion)
+          expect(kills()).toHaveLength(1)
+          expect(requests).toEqual([{
+            origin: 'acme.devmap',
+            request: { operation: 'session', resumeKey: 'k', ptyId: null },
+            canDispatch: true,
+          }])
+        })
+
+        it('clears the stored session when the package is disabled or removed', async () => {
+          const { mgr, kills } = await withDetachedSession('acme.devmap', 'stored')
+          const requests = recordStorage(mgr)
+          mgr.preparePluginRemoval('acme.devmap')
+          await Promise.resolve()
+          expect(kills()).toHaveLength(1)
+          expect(requests.map(({ request }) => request)).toEqual([
+            { operation: 'session', resumeKey: 'k', ptyId: null },
+          ])
+        })
+
+        it.each([
+          ['a session storage never got', 'acme.devmap', 'asked'],
+          ['a session never meant to persist', 'acme.devmap', 'no'],
+          ['a bundled plugin, whose key spans its versions', 'navide.mini-ide', 'stored'],
+        ] as const)('leaves terminal storage alone for %s', async (_case, id, persist) => {
+          const { mgr, kills } = await withDetachedSession(id, persist)
+          const requests = recordStorage(mgr)
+          mgr.preparePluginRemoval(id)
+          await Promise.resolve()
+          expect(kills()).toHaveLength(1)
+          expect(requests).toEqual([])
+        })
+      })
+
+      it('is not reclaimed for the first-party packages, which end their own', async () => {
+        vi.useFakeTimers()
+        try {
+          const { internal, kills } = await withDetachedSession('navide.mini-ide')
+          await vi.advanceTimersByTimeAsync(AI_SESSION_RECLAIM_MS * 2)
+          expect(kills()).toHaveLength(0)
+          expect(internal.aiSessions.has('left-session')).toBe(true)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      // 0.2.32 must-do: the sessions kept past a close are listed on the
+      // package's Settings entry, each with an End button.
+      describe('listed in Settings while it keeps running', () => {
+        it('lists only a stored, detached session of a third-party package', async () => {
+          const stored = await withDetachedSession('acme.devmap', 'stored')
+          expect(stored.mgr.backgroundAiSessions('acme.devmap')).toEqual([{
+            sessionId: 'left-session',
+            profileId: 'claude',
+            packageVersion: stored.runtime.packageVersion,
+            since: expect.any(Number),
+          }])
+          expect(stored.mgr.backgroundAiSessions('other.spy')).toEqual([])
+          // Attached to a view again: not in the background.
+          stored.internal.aiSessions.get('left-session')!.attachedInstanceId = 'a-new-view'
+          expect(stored.mgr.backgroundAiSessions('acme.devmap')).toEqual([])
+          // Not stored (reclaimed within the wait), and the bundled plugins: never listed.
+          for (const [id, persist] of [['acme.devmap', 'asked'], ['acme.devmap', 'no'], ['navide.mini-ide', 'stored']] as const) {
+            const other = await withDetachedSession(id, persist)
+            expect(other.mgr.backgroundAiSessions(id)).toEqual([])
+          }
+        })
+
+        it('ends a listed session once, and nothing it does not list', async () => {
+          const { mgr, internal, kills } = await withDetachedSession('acme.devmap', 'stored')
+          expect(mgr.endBackgroundAiSession('other.spy', 'left-session')).toBe(false)
+          expect(mgr.endBackgroundAiSession('acme.devmap', 'unknown')).toBe(false)
+          expect(kills()).toHaveLength(0)
+          expect(mgr.endBackgroundAiSession('acme.devmap', 'left-session')).toBe(true)
+          expect(kills()).toEqual([
+            expect.objectContaining({ payload: { terminal_session_id: 'left-session', force: true } }),
+          ])
+          expect(internal.aiSessions.has('left-session')).toBe(false)
+          expect(mgr.backgroundAiSessions('acme.devmap')).toEqual([])
+          expect(mgr.endBackgroundAiSession('acme.devmap', 'left-session')).toBe(false)
+          expect(kills()).toHaveLength(1)
+        })
+
+        it('does not end a session a view has resumed, or one of a bundled plugin', async () => {
+          const resumed = await withDetachedSession('acme.devmap', 'stored')
+          resumed.internal.aiSessions.get('left-session')!.attachedInstanceId = 'a-new-view'
+          expect(resumed.mgr.endBackgroundAiSession('acme.devmap', 'left-session')).toBe(false)
+          expect(resumed.kills()).toHaveLength(0)
+          const bundled = await withDetachedSession('navide.mini-ide', 'stored')
+          expect(bundled.mgr.endBackgroundAiSession('navide.mini-ide', 'left-session')).toBe(false)
+          expect(bundled.kills()).toHaveLength(0)
+        })
+
+        it('leaves the list when it exits by itself; a bundled plugin keeps its ledger entry as before', async () => {
+          const stored = await withDetachedSession('acme.devmap', 'stored')
+          dispatchEvent(stored.mgr, 'terminal.exit', exit('left-session', 0))
+          expect(stored.mgr.backgroundAiSessions('acme.devmap')).toEqual([])
+          expect(stored.internal.aiSessions.has('left-session')).toBe(false)
+          const bundled = await withDetachedSession('navide.mini-ide', 'stored')
+          dispatchEvent(bundled.mgr, 'terminal.exit', exit('left-session', 0))
+          expect(bundled.internal.aiSessions.has('left-session')).toBe(true)
+        })
+      })
+    })
   })
 })
 
@@ -10858,6 +11659,203 @@ describe('first-party Git private bridge', () => {
     expect(bind).not.toHaveBeenCalled()
   })
 
+  it('searches the file picker with the caller\'s strategy when it sends one', async () => {
+    const { mgr, instanceId } = await openGitView('/workspace', 'git-file-picker-strategy')
+    mgr.setBackendWsUrl('ws://public-file-picker-strategy-test')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const runtime = (
+      mgr as unknown as {
+        running: Map<string, { capabilityContext: HostCapabilityContext }>
+      }
+    ).running.get(instanceId)!.capabilityContext.runtimeBinding!
+    const invocationRef: { current: Pick<FilePickerInvocation, 'search'> | null } = { current: null }
+    let found: string[] = []
+    mgr.setFilePickerHost({
+      open: vi.fn(async (candidate: FilePickerInvocation) => {
+        invocationRef.current = candidate
+        found = await candidate.search('foo')
+        return { opened: true }
+      }),
+      cancelInstance: vi.fn(),
+      cancelSession: vi.fn(),
+    })
+
+    const pending = mgr.executePublicCapability({
+      kind: 'public',
+      address: 'ui.openFilePicker',
+      scope: 'workspace',
+      runtime,
+      args: { query: 'foo', candidates: [], search: { matchOn: 'path', mode: 'subsequence', exclude: ['vendor/*'] } },
+    })
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    const request = JSON.parse(socket.sent[0]!) as { id: string; type: string }
+    expect(request).toMatchObject({
+      type: 'fs.query_files',
+      payload: { workspace_path: '/workspace', query: 'foo', match_on: 'path', mode: 'subsequence', exclude: ['vendor/*'], limit: 20 },
+    })
+    socket.receive({
+      id: request.id,
+      type: request.type,
+      ok: true,
+      payload: { ok: true, files: [{ path: 'z/foo.ts', name: 'foo.ts', matchSpans: [], size: 1, mtime: 1 }, { path: 'a/foo.ts', name: 'foo.ts', matchSpans: [], size: 1, mtime: 1 }] },
+      error: null,
+      timestamp: '',
+    })
+    await expect(pending).resolves.toEqual({ opened: true })
+    expect(found).toEqual(['z/foo.ts', 'a/foo.ts'])
+  })
+
+  it('queues a file picker search behind the plugin\'s own query, and holds the slot while it runs', async () => {
+    const { mgr, instanceId } = await openGitView('/workspace', 'file-picker-slot')
+    mgr.setBackendWsUrl('ws://public-file-picker-slot-test')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const runtime = (
+      mgr as unknown as {
+        running: Map<string, { capabilityContext: HostCapabilityContext }>
+      }
+    ).running.get(instanceId)!.capabilityContext.runtimeBinding!
+    const answer = (index: number, files: unknown[]) => {
+      const request = JSON.parse(socket.sent[index]!) as { id: string; type: string }
+      socket.receive({ id: request.id, type: request.type, ok: true, payload: { ok: true, files }, error: null, timestamp: '' })
+    }
+    const query = () => mgr.executePublicCapability({
+      kind: 'public', address: 'fs.queryFiles', scope: 'workspace', runtime, args: { query: 'own' },
+    })
+    const picker: { search: FilePickerInvocation['search'] | null } = { search: null }
+    mgr.setFilePickerHost({
+      open: vi.fn(async (candidate: FilePickerInvocation) => {
+        picker.search = candidate.search
+        return { opened: true }
+      }),
+      cancelInstance: vi.fn(),
+      cancelSession: vi.fn(),
+    })
+    await mgr.executePublicCapability({
+      kind: 'public',
+      address: 'ui.openFilePicker',
+      scope: 'workspace',
+      runtime,
+      args: { query: '', candidates: [], search: { mode: 'subsequence' } },
+    })
+
+    const own = query()
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    const superseded = picker.search!('fo')
+    const latest = picker.search!('foo')
+    await expect(superseded).resolves.toEqual([])
+    expect(socket.sent).toHaveLength(1)
+
+    answer(0, [])
+    await own
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(JSON.parse(socket.sent[1]!)).toMatchObject({ type: 'fs.query_files', payload: { query: 'foo' } })
+    await expect(query()).resolves.toEqual({ ok: false, error: 'busy' })
+
+    answer(1, [{ path: 'foo.ts' }])
+    await expect(latest).resolves.toEqual(['foo.ts'])
+    const next = query()
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
+    answer(2, [])
+    await next
+  })
+
+  it('answers a second fs.queryFiles from one plugin with busy at once, and leaves the first alone', async () => {
+    const { mgr, instanceId } = await openGitView('/workspace', 'fs-query-busy')
+    mgr.setBackendWsUrl('ws://public-fs-query-busy-test')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const runtime = (
+      mgr as unknown as {
+        running: Map<string, { capabilityContext: HostCapabilityContext }>
+      }
+    ).running.get(instanceId)!.capabilityContext.runtimeBinding!
+    const query = (text: string) => mgr.executePublicCapability({
+      kind: 'public', address: 'fs.queryFiles', scope: 'workspace', runtime, args: { query: text },
+    })
+
+    const first = query('first')
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    await expect(query('second')).resolves.toEqual({ ok: false, error: 'busy' })
+    expect(socket.sent).toHaveLength(1)
+
+    const request = JSON.parse(socket.sent[0]!) as { id: string; type: string }
+    const result = { ok: true, files: [], gitignoreApplied: true, listingTruncated: false }
+    socket.receive({ id: request.id, type: request.type, ok: true, payload: result, error: null, timestamp: '' })
+    await expect(first).resolves.toEqual(result)
+
+    const third = query('third')
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const next = JSON.parse(socket.sent[1]!) as { id: string; type: string }
+    socket.receive({ id: next.id, type: next.type, ok: true, payload: result, error: null, timestamp: '' })
+    await expect(third).resolves.toEqual(result)
+  })
+
+  it('frees the fs.queryFiles slot when the backend call fails', async () => {
+    const { mgr, instanceId } = await openGitView('/workspace', 'fs-query-busy-failure')
+    mgr.setBackendWsUrl('ws://public-fs-query-busy-failure-test')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const runtime = (
+      mgr as unknown as {
+        running: Map<string, { capabilityContext: HostCapabilityContext }>
+      }
+    ).running.get(instanceId)!.capabilityContext.runtimeBinding!
+    const query = () => mgr.executePublicCapability({
+      kind: 'public', address: 'fs.queryFiles', scope: 'workspace', runtime, args: { query: 'a' },
+    })
+
+    const first = query()
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    const request = JSON.parse(socket.sent[0]!) as { id: string; type: string }
+    socket.receive({ id: request.id, type: request.type, ok: false, payload: null, error: 'boom', timestamp: '' })
+    await expect(first).rejects.toThrow()
+
+    const second = query()
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const next = JSON.parse(socket.sent[1]!) as { id: string; type: string }
+    socket.receive({ id: next.id, type: next.type, ok: true, payload: { ok: true, files: [] }, error: null, timestamp: '' })
+    await expect(second).resolves.toEqual({ ok: true, files: [] })
+  })
+
+  it('forwards fs.queryFiles to the backend under the bound workspace, with the caller\'s strategy', async () => {
+    const { mgr, instanceId } = await openGitView('/workspace', 'fs-query-files')
+    mgr.setBackendWsUrl('ws://public-fs-query-test')
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const runtime = (
+      mgr as unknown as {
+        running: Map<string, { capabilityContext: HostCapabilityContext }>
+      }
+    ).running.get(instanceId)!.capabilityContext.runtimeBinding!
+
+    const pending = mgr.executePublicCapability({
+      kind: 'public',
+      address: 'fs.queryFiles',
+      scope: 'workspace',
+      runtime,
+      args: { query: 'app/Foo', matchOn: 'path', mode: 'subsequence', exclude: ['vendor/*'], limit: 5, cursor: '7' },
+    })
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    const request = JSON.parse(socket.sent[0]!) as { id: string; type: string }
+    expect(request).toMatchObject({
+      type: 'fs.query_files',
+      payload: {
+        workspace_path: '/workspace',
+        query: 'app/Foo',
+        match_on: 'path',
+        mode: 'subsequence',
+        exclude: ['vendor/*'],
+        limit: 5,
+        cursor: '7',
+      },
+    })
+    const result = { ok: true, files: [], gitignoreApplied: true, listingTruncated: false }
+    socket.receive({ id: request.id, type: request.type, ok: true, payload: result, error: null, timestamp: '' })
+    await expect(pending).resolves.toEqual(result)
+  })
+
   it('opens the Host file picker with bound view context and Host-owned search', async () => {
     const { mgr, instanceId } = await openGitView('/workspace', 'git-file-picker')
     mgr.setBackendWsUrl('ws://public-file-picker-test')
@@ -11360,6 +12358,8 @@ describe('first-party Git private bridge', () => {
 
   it('loads the selected factory contribution with its actual provenance regardless of the development environment flag', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'plans-factory-query-')))
+    // The real manifest is copied in below; its version names the artifact.
+    const plansVersion = JSON.parse(readFileSync('plugins/navide-plans/manifest.json', 'utf8')).version as string
     const mgr = new FrontendPluginManager()
     try {
       const packageDir = join(
@@ -11368,7 +12368,7 @@ describe('first-party Git private bridge', () => {
         'official-artifacts',
         'factory-resources',
         PLANS_PLUGIN_ID,
-        '0.1.0',
+        plansVersion,
         `${process.platform}-${process.arch}`,
         'package',
       )
@@ -11382,24 +12382,24 @@ describe('first-party Git private bridge', () => {
       expect(registerBundledPlans(mgr, {
         isPackaged: false,
         resourcesPath: '',
-        artifactVersion: '0.1.0',
+        artifactVersion: plansVersion,
         devRoot: root,
       })).toEqual({ registered: true })
       mgr.setPlansDiagnosticsEnabled(true)
-      mgr.setCapabilityGrantResolver(() => ({ packageVersion: '0.1.0', system: ['fs', 'ui', 'aiCli'], storage: true }))
+      mgr.setCapabilityGrantResolver(() => ({ packageVersion: plansVersion, system: ['fs', 'ui', 'aiCli'], storage: true }))
       const descriptor = mgr.getDescriptor(PLANS_PLUGIN_ID)!
       const contribution = descriptor.views!.find((view) => view.location === 'window')!
       const host = new FakeBrowserWindow()
       await mgr.openView({ ...descriptor, entryFile: contribution.entryFile }, contribution, {
         hostWindow: asHost(host), bounds: 'fill', workspacePath: root,
-        capabilityContext: mgr.plansCapabilityContext('0.1.0', root, 'plans-window'),
+        capabilityContext: mgr.plansCapabilityContext(plansVersion, root, 'plans-window'),
         query: '?plans_package_source=spoofed',
       })
       const loaded = (host.children[0] as FakeViewLike).webContents.loads[0]
       expect(loaded).toContain(contribution.entryFile)
       const query = new URLSearchParams(loaded.split('?')[1])
       expect(query.get('plans_package_source')).toBe('factory-bundled')
-      expect(query.get('plans_package_version')).toBe('0.1.0')
+      expect(query.get('plans_package_version')).toBe(plansVersion)
     } finally {
       await mgr.closeBackendPlugins()
       rmSync(root, { recursive: true, force: true })
@@ -14720,6 +15720,55 @@ describe('first-party Git private bridge', () => {
     await expect(resume).resolves.toEqual({ sessionId: 'attested-session', profileId: 'claude' })
   })
 
+  // D1 on #648: a session is kept past its view's close only when the Host
+  // really wrote its ptyId to terminal storage, not because the package asked.
+  it.each([
+    ['written', true],
+    ['refused by storage', false],
+  ])('marks a persistView start stored for resume only when the storage write is %s', async (_case, writes) => {
+    const opened = await openGitView('/workspace', 'git-window')
+    opened.mgr.setTerminalStorageHandler(async (_origin, request) => {
+      if (request.operation === 'session' && !writes) throw new Error('storage unavailable')
+      return null
+    })
+    opened.mgr.setBackendWsUrl(`ws://persist-start-${writes}`)
+    const socket = wsMock.FakeNodeWebSocket.instances.at(-1)!
+    socket.open()
+    const internal = opened.mgr as unknown as {
+      running: Map<string, { capabilityContext: HostCapabilityContext }>
+      aiSessions: Map<string, { storedForResume?: boolean }>
+    }
+    const runtime = internal.running.get(opened.instanceId)!.capabilityContext.runtimeBinding!
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const start = opened.mgr.executePublicCapability({
+        kind: 'public',
+        address: 'aiCli.startSession',
+        scope: 'workspace',
+        runtime,
+        args: { profileId: 'claude', requestId: 'persist-start', cols: 80, rows: 24, persistView: true },
+      })
+      for (let answered = 0; answered < 2; answered += 1) {
+        await vi.waitFor(() => expect(socket.sent.length).toBeGreaterThan(answered))
+        const request = JSON.parse(socket.sent[answered]!) as { id: string; type: string; payload: Record<string, unknown> }
+        socket.receive({
+          id: request.id,
+          type: request.type,
+          ok: true,
+          payload: request.type === 'terminal.create'
+            ? { terminal_session_id: 'persisted', pane_id: request.payload.pane_id, create_generation: 'persist-start' }
+            : { settings: {} },
+          error: null,
+          timestamp: '',
+        })
+      }
+      await expect(start).resolves.toEqual({ sessionId: 'persisted' })
+      expect(internal.aiSessions.get('persisted')?.storedForResume === true).toBe(writes)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('rejects a detached ledger session whose profile is no longer Host-allowlisted before backend dispatch', async () => {
     const opened = await openGitView('/workspace', 'git-window')
     opened.mgr.setBackendWsUrl('ws://git-ai-revoked-profile-test')
@@ -15834,6 +16883,51 @@ describe('agent capability requests the Host cannot serve', () => {
       })
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('req-malformed'))
     } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('passes the optional calling pane of a workspace request on, and refuses a malformed one', async () => {
+    const { mgr, socket } = connectHost('acme.agent-pane', true)
+    await flush()
+    const execute = vi.spyOn(mgr, 'executeAgentBackendCallForWorkspace')
+      .mockResolvedValue({ reqId: 'inner', ok: true, result: null } as never)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const workspaceRequest = (requestId: string, extra: Record<string, unknown>): Record<string, unknown> => ({
+      request_id: requestId,
+      target: { plugin_id: PLANS_PLUGIN_ID, workspace_path: '/workspace' },
+      operation: 'backend',
+      payload: { reqId: 'inner', name: 'plans.add_note', args: {} },
+      ...extra,
+    })
+    try {
+      request(socket, workspaceRequest('req-pane', { pane: 'Reviewer' }))
+      request(socket, workspaceRequest('req-no-pane', {}))
+      request(socket, workspaceRequest('req-pane-id', { pane: 'p-1' }))
+      await flush()
+      expect(execute).toHaveBeenNthCalledWith(1, PLANS_PLUGIN_ID, '/workspace', expect.anything(), 'Reviewer')
+      expect(execute).toHaveBeenNthCalledWith(2, PLANS_PLUGIN_ID, '/workspace', expect.anything(), undefined)
+      expect(execute).toHaveBeenNthCalledWith(3, PLANS_PLUGIN_ID, '/workspace', expect.anything(), 'p-1')
+
+      // A name the core would never send (150 emoji = 300 UTF-16 units, U+FEFF
+      // only) is refused here; the core sends the pane id instead.
+      const refusedPanes = ['', '  ', 7, 'x'.repeat(201), { id: 'p-1' }, '\u{1F600}'.repeat(150), '\uFEFF']
+      for (const [index, pane] of (refusedPanes as unknown[]).entries()) {
+        request(socket, workspaceRequest(`req-bad-${index}`, { pane }))
+      }
+      request(socket, workspaceRequest('req-extra', { pane: 'Reviewer', token: 't' }))
+      await flush()
+      expect(execute).toHaveBeenCalledTimes(3)
+      const refused = resultsOf(socket).filter((message) => String(message.payload.request_id).startsWith('req-bad') ||
+        message.payload.request_id === 'req-extra')
+      expect(refused).toHaveLength(8)
+      for (const message of refused) {
+        expect(message.payload.response).toEqual(expect.objectContaining({
+          ok: false, error: expect.objectContaining({ code: 'BAD_REQUEST' }),
+        }))
+      }
+    } finally {
+      execute.mockRestore()
       warn.mockRestore()
     }
   })
@@ -17179,7 +18273,8 @@ describe('third-party agent tool calls (contract 4.2)', () => {
         },
       })
       await settle()
-      expect(plansRoute).toHaveBeenCalledWith('navide.plans', f.workspace, { reqId: 'r', name: 'plans.list', args: {} })
+      // No calling pane was named, so none is passed on.
+      expect(plansRoute).toHaveBeenCalledWith('navide.plans', f.workspace, { reqId: 'r', name: 'plans.list', args: {} }, undefined)
       expect(f.call).not.toHaveBeenCalled()
     } finally {
       plansRoute.mockRestore()
@@ -17319,7 +18414,7 @@ describe('the Disabled switch for the built-in Plans, Git and Mini-IDE', () => {
     const mgr = new FrontendPluginManager()
     mgr.setDisabledPluginResolver(() => true)
     expect(mgr.isBuiltinPluginDisabled('acme.demo')).toBe(false)
-    expect(mgr.listDisabledBuiltinPlugins()).toEqual([GIT_PLUGIN_ID, MINI_IDE_PLUGIN_ID, PLANS_PLUGIN_ID].sort())
+    expect(mgr.listDisabledBuiltinPlugins()).toEqual(['navide.browser', GIT_PLUGIN_ID, MINI_IDE_PLUGIN_ID, PLANS_PLUGIN_ID].sort())
   })
 
   it('drains the real Plans backend activation on Disable and registers it again on Enable', async () => {
@@ -17857,6 +18952,29 @@ describe('web.* view capabilities (Host web view registry)', () => {
     expect(a.host.children).toHaveLength(1)
   })
 
+  it('attaches several views at once and answers RESOURCE_LIMIT past the view cap', async () => {
+    const mgr = newManager()
+    const a = await openWeb(mgr, 'acme.web-caps')
+    const ids: string[] = []
+    for (let index = 0; index < 32; index++) {
+      ids.push((await a.call('create', { space: `s-${index}` }, gesture)).result!.viewId as string)
+    }
+    await expect(a.call('create', { space: 'one-more' }, gesture)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'RESOURCE_LIMIT', message: 'web view limit reached (LIMIT_REACHED)' },
+    })
+    await a.call('attach', { viewId: ids[0], rect: { x: 0, y: 0, width: 50, height: 50 } })
+    await a.call('attach', { viewId: ids[1], rect: { x: 50, y: 0, width: 50, height: 50 } })
+    expect(pluginWebViewRegistry().list('acme.web-caps').filter(view => view.attached).map(view => view.viewId))
+      .toEqual([ids[0], ids[1]])
+    for (const viewId of ids.slice(2, 9)) await a.call('attach', { viewId, rect: { x: 0, y: 0, width: 10, height: 10 } })
+    await expect(a.call('attach', { viewId: ids[9], rect: { x: 0, y: 0, width: 10, height: 10 } })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'RESOURCE_LIMIT' },
+    })
+    pluginWebViewRegistry().destroyPlugin('acme.web-caps')
+  })
+
   it('follows the plugin view bounds and visibility, and keeps views running after the view closes', async () => {
     const mgr = newManager()
     const a = await openWeb(mgr, 'acme.web-follow')
@@ -17984,5 +19102,233 @@ describe('web.* view capabilities (Host web view registry)', () => {
     expect(webHostMock.cleared).toContain('persist:navide-web:acme.web-clear')
     await mgr.clearPluginWebData('acme.not-web')
     expect(webHostMock.cleared).not.toContain('persist:navide-web:acme.not-web')
+  })
+})
+
+describe('a third-party window view opens without its native backend', () => {
+  // v0.2.30: a local devmap whose backend the user had not allowed failed to
+  // open as a window ("the user did not allow the native backend") while its
+  // main-location view rendered. A refused or failed bind is now not fatal for
+  // the window either: it opens, stays unbound, and says why.
+  function setup() {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'third-party-window-')))
+    const workspace = join(root, 'workspace')
+    const packageDir = join(root, 'package')
+    mkdirSync(workspace)
+    mkdirSync(join(packageDir, 'backend'), { recursive: true })
+    writeFileSync(join(packageDir, 'backend', 'acme-map'), 'binary', { mode: 0o700 })
+    writeFileSync(join(packageDir, 'manifest.json'), JSON.stringify({
+      schemaVersion: 2, apiVersion: '^1.0.0', id: 'acme.map', name: 'Map', version: '1.0.0', publisher: 'acme',
+      permissions: { system: ['fs'] },
+      marketplace: { description: 'Map a repo.', license: 'MIT' },
+      contributes: { views: [{ id: 'main', kind: 'custom', location: 'window', title: 'Map', entry: 'frontend/main/index.html' }] },
+      backend: { entry: 'backend/acme-map', protocolVersion: 1, activation: 'startup', methods: ['map.read'] },
+    }))
+    const spec = thirdPartyBackendLaunchSpec({
+      pluginId: 'acme.map', packageVersion: '1.0.0', packageDir, views: [],
+      backend: { entryFile: join(packageDir, 'backend', 'acme-map'), protocolVersion: 1, activation: 'startup' },
+    })!
+    const view: NonNullable<PluginLaunchDescriptor['views']>[number] = {
+      id: 'main', contributionKey: 'acme.map.main', kind: 'custom', location: 'window', title: 'Map',
+      entryFile: join(packageDir, 'frontend/main/index.html'),
+    }
+    const descriptor: PluginLaunchDescriptor = {
+      id: 'acme.map', packageVersion: '1.0.0', packageDir, requires: ['fs'],
+      capabilityPolicy: manifestV2CapabilityPolicy({ system: ['fs'] }),
+      devUrl: '', entryFile: view.entryFile, views: [view],
+    }
+    const mgr = new FrontendPluginManager()
+    mgr.setCapabilityGrantResolver(() => ({ packageVersion: '1.0.0', system: ['fs'], storage: true }))
+    mgr.registerDescriptor(descriptor, { builtin: true })
+    mgr.registerBackendActivation(spec)
+    return { mgr, workspace, root }
+  }
+
+  const running = (mgr: FrontendPluginManager) =>
+    [...(mgr as unknown as { running: Map<string, { backendWorkspaceId: string | null; backendUnavailable?: string }> }).running.values()]
+
+  it.each([
+    ['the global switch is off', new NativeBackendRefusal('third-party native backends are turned off', 'disabled-globally'), 'third-party native backends are turned off', 'disabled-globally'],
+    ['the user declined consent', new NativeBackendRefusal('the user did not allow the native backend', 'needs-consent'), 'the user did not allow the native backend', 'needs-consent'],
+    ['consent was declined earlier', new NativeBackendRefusal('the native backend has not been allowed', 'needs-consent'), 'the native backend has not been allowed', 'needs-consent'],
+    ['the sandbox is unavailable', new NativeBackendRefusal('macOS sandbox-exec is unavailable', 'sandbox-unavailable'), 'macOS sandbox-exec is unavailable', 'sandbox-unavailable'],
+    // Any other failure may carry paths or a stack: only a generic reason leaves.
+    ['the bind failed', new Error('spawn EACCES ' + '/Users/someone/private/acme-map'), 'the native backend could not start', 'unavailable'],
+    // #641 L3: BACKEND_UNAVAILABLE alone is not a pass: only the admission
+    // gates' own refusals are known to carry fixed text.
+    ['a BACKEND_UNAVAILABLE from elsewhere', new BackendPluginError('BACKEND_UNAVAILABLE', 'cannot open ' + '/Users/someone/private/acme-map'), 'the native backend could not start', 'unavailable'],
+  ])('opens and stays unbound when %s', async (_case, refusal, reason, status) => {
+    const { mgr, workspace, root } = setup()
+    const bind = vi.spyOn(PluginBackendHost.prototype, 'bindView').mockRejectedValue(refusal)
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const result = await mgr.openContributionWindow(asHost(new FakeBrowserWindow()), 'acme.map.main', {
+        workspacePath: workspace,
+        query: '',
+      })
+      expect(result).toEqual({ ok: true, backendUnavailable: reason, backendUnavailableStatus: status })
+      // The view is there, and its backend is not: no second bind tried
+      // another way, and no workspace was bound, so its calls fail closed.
+      const views = running(mgr)
+      expect(views).toHaveLength(1)
+      expect(views[0].backendWorkspaceId).toBeNull()
+      expect(views[0].backendUnavailable).toBe(reason)
+      expect(bind).toHaveBeenCalledOnce()
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('could not bind'))
+    } finally {
+      warning.mockRestore()
+      bind.mockRestore()
+      await mgr.closeBackendPlugins()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reports nothing when the backend binds', async () => {
+    const { mgr, workspace, root } = setup()
+    const bind = vi.spyOn(PluginBackendHost.prototype, 'bindView').mockResolvedValue(undefined)
+    try {
+      const result = await mgr.openContributionWindow(asHost(new FakeBrowserWindow()), 'acme.map.main', {
+        workspacePath: workspace,
+        query: '',
+      })
+      expect(result).toEqual({ ok: true })
+      expect(running(mgr)[0].backendWorkspaceId).toBe(mgr.workspaceIdForPath(workspace))
+    } finally {
+      bind.mockRestore()
+      await mgr.closeBackendPlugins()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Navide plugin commands', () => {
+  const views: PluginLaunchDescriptor['views'] = [
+    { id: 'win', contributionKey: 'acme.runner.win', kind: 'custom', location: 'window', title: 'W', entryFile: '/p/w.html' },
+    { id: 'tab', contributionKey: 'acme.runner.tab', kind: 'custom', location: 'main', title: 'M', entryFile: '/p/m.html' },
+    { id: 'side', contributionKey: 'acme.runner.side', kind: 'custom', location: 'left', title: 'L', entryFile: '/p/l.html' },
+    { id: 'more', contributionKey: 'acme.runner.more', kind: 'custom', location: 'detail', title: 'D', entryFile: '/p/d.html' },
+  ]
+  const managerWith = (hostWindow: object) => {
+    const mgr = new FrontendPluginManager()
+    mgr.registerDescriptor({
+      ...descriptor('acme.runner'),
+      views,
+      displayName: 'Runner',
+      commands: [
+        { id: 'acme.runner.win', title: 'Win', run: { view: 'win', target: { tab: 'a' } }, suggestedKey: 'cmd+alt+t' },
+        { id: 'acme.runner.tab', title: 'Tab', run: { view: 'tab', target: { tab: 'b' } } },
+        { id: 'acme.runner.side', title: 'Side', run: { view: 'side' } },
+        { id: 'acme.runner.more', title: 'More', run: { view: 'more' } },
+        { id: 'acme.runner.call', title: 'Call', run: { method: 'tests.run' } },
+      ],
+    })
+    const internals = mgr as unknown as {
+      running: Map<string, unknown>
+      sendOpenTarget: (record: unknown, params: Record<string, string>) => void
+    }
+    const sent = vi.spyOn(internals, 'sendOpenTarget').mockImplementation(() => {})
+    const mount = (contributionKey: string, visible: boolean): void => {
+      internals.running.set(contributionKey, { contributionKey, hostWindow, workspacePath: '/ws', visible })
+    }
+    return { mgr, mount, sent }
+  }
+  const host = {} as never
+
+  it('lists nothing for a package that declares none', () => {
+    const mgr = new FrontendPluginManager()
+    mgr.registerDescriptor(descriptor('acme.plain'))
+    expect(mgr.listCommandCatalog()).toEqual([])
+    expect(mgr.resolveCommandRun(host, 'acme.plain.go', '/ws')).toEqual({ ok: false, reason: 'not-installed' })
+  })
+
+  it('names the plugin and the suggested key', () => {
+    expect(managerWith(host).mgr.listCommandCatalog()[0]).toEqual({
+      commandId: 'acme.runner.win', title: 'Win', pluginId: 'acme.runner', pluginName: 'Runner', suggestedKey: 'cmd+alt+t',
+    })
+  })
+
+  it('hands a window view back to be opened with its target', () => {
+    expect(managerWith(host).mgr.resolveCommandRun(host, 'acme.runner.win', '/ws')).toEqual({
+      ok: true, window: { contributionKey: 'acme.runner.win', params: { tab: 'a' } },
+    })
+  })
+
+  it('reveals a mounted main tab and delivers the target', () => {
+    const { mgr, mount, sent } = managerWith(host)
+    mount('acme.runner.tab', false)
+    expect(mgr.resolveCommandRun(host, 'acme.runner.tab', '/ws')).toEqual({ ok: true, reveal: 'acme.runner.tab' })
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ contributionKey: 'acme.runner.tab' }), { tab: 'b' })
+  })
+
+  it('never mounts a view nobody opened', () => {
+    const { mgr, sent } = managerWith(host)
+    expect(mgr.resolveCommandRun(host, 'acme.runner.tab', '/ws')).toEqual({ ok: false, reason: 'view-not-open' })
+    expect(mgr.resolveCommandRun(host, 'acme.runner.side', '/ws')).toEqual({ ok: false, reason: 'view-not-open' })
+    expect(sent).not.toHaveBeenCalled()
+  })
+
+  it('leaves a hidden region alone, and uses one that is on screen', () => {
+    const { mgr, mount } = managerWith(host)
+    mount('acme.runner.side', false)
+    expect(mgr.resolveCommandRun(host, 'acme.runner.side', '/ws')).toEqual({ ok: false, reason: 'view-not-open' })
+    mount('acme.runner.side', true)
+    expect(mgr.resolveCommandRun(host, 'acme.runner.side', '/ws')).toEqual({ ok: true })
+  })
+
+  it('ignores a view mounted in another window or workspace', () => {
+    const { mgr, mount } = managerWith({})
+    mount('acme.runner.tab', true)
+    expect(mgr.resolveCommandRun(host, 'acme.runner.tab', '/ws')).toEqual({ ok: false, reason: 'view-not-open' })
+  })
+
+  it('refuses a detail view as a target', () => {
+    expect(managerWith(host).mgr.resolveCommandRun(host, 'acme.runner.more', '/ws')).toEqual({ ok: false, reason: 'view-not-openable' })
+  })
+
+  describe('a method command', () => {
+    const withHandler = (hostWindow: object, answer: { ok: boolean }) => {
+      const made = managerWith(hostWindow)
+      const internals = made.mgr as unknown as {
+        running: Map<string, unknown>
+        backendCallHandler: (plugin: unknown, payload: Record<string, unknown>) => Promise<{ ok: boolean }>
+      }
+      const handler = vi.fn(async () => answer)
+      internals.backendCallHandler = handler
+      const record = { id: 'acme.runner', contributionKey: 'acme.runner.tab', hostWindow, workspacePath: '/ws', visible: false }
+      return { ...made, handler, internals, record }
+    }
+
+    it('starts nothing when no view of the plugin is open', async () => {
+      const { mgr, handler } = withHandler(host, { ok: true })
+      expect(await mgr.runCommand(host, 'acme.runner.call', '/ws')).toEqual({ ok: false, reason: 'view-not-open' })
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it("goes through the open view's own call path, as that view", async () => {
+      const { mgr, handler, internals, record } = withHandler(host, { ok: true })
+      internals.running.set('i', record)
+      expect(await mgr.runCommand(host, 'acme.runner.call', '/ws')).toEqual({ ok: true })
+      expect(handler).toHaveBeenCalledWith(record, { reqId: expect.any(String), name: 'tests.run', args: {} })
+    })
+
+    it('says so when the call fails', async () => {
+      const { mgr, internals, record } = withHandler(host, { ok: false })
+      internals.running.set('i', record)
+      expect(await mgr.runCommand(host, 'acme.runner.call', '/ws')).toEqual({ ok: false, reason: 'method-failed' })
+    })
+
+    it('ignores a view of the plugin in another window', async () => {
+      const { mgr, handler, internals, record } = withHandler({}, { ok: true })
+      internals.running.set('i', record)
+      expect(await mgr.runCommand(host, 'acme.runner.call', '/ws')).toEqual({ ok: false, reason: 'view-not-open' })
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('leaves a view command to resolveCommandRun', async () => {
+      const { mgr } = withHandler(host, { ok: true })
+      expect(await mgr.runCommand(host, 'acme.runner.win', '/ws')).toEqual({
+        ok: true, window: { contributionKey: 'acme.runner.win', params: { tab: 'a' } },
+      })
+    })
   })
 })

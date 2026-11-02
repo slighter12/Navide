@@ -107,6 +107,40 @@ describe('McpPane', () => {
     expect(groups[1]).toContain('Codex')
   })
 
+  it('discloses a shell or desktop-control server on its card and in the drawer, without blocking it', async () => {
+    const windowsMcp: NativeMcpServer = {
+      ...native[0], name: 'windows-mcp', command: 'uvx', args: ['windows-mcp'], env: {},
+    }
+    const shellServer = {
+      ...navideServers()[0], name: 'runner', command: 'node', args: ['runner.js'], env: {},
+      tools: [{ name: 'execute_command', description: 'runs a command' }],
+    }
+    wrapper = mountPane({ servers: [...navideServers(), shellServer], native: [...native, windowsMcp] })
+
+    const tagged = wrapper.findAll('.mcp-card')
+      .filter((c) => c.find('[data-testid="mcp-risk-tag"]').exists())
+      .map((c) => c.find('strong').text())
+    expect(tagged.sort()).toEqual(['runner', 'windows-mcp'])
+
+    await openCard(wrapper, 'windows-mcp')
+    const card = wrapper.find('[data-testid="mcp-risk-card"]')
+    expect(card.text()).toContain('control your mouse and keyboard')
+    expect(card.text()).toContain('run shell commands')
+    expect(card.text()).toContain('Navide does not block it')
+
+    await openCard(wrapper, 'runner')
+    const runnerCard = wrapper.find('[data-testid="mcp-risk-card"]')
+    expect(runnerCard.text()).toContain('run shell commands')
+    expect(runnerCard.text()).not.toContain('mouse and keyboard')
+  })
+
+  it('shows no risk card for an ordinary server', async () => {
+    wrapper = mountPane()
+    expect(wrapper.find('[data-testid="mcp-risk-tag"]').exists()).toBe(false)
+    await openCard(wrapper, 'context7')
+    expect(wrapper.find('[data-testid="mcp-risk-card"]').exists()).toBe(false)
+  })
+
   it('shows every place a server is configured on its card', () => {
     wrapper = mountPane()
 
@@ -197,6 +231,35 @@ describe('McpPane', () => {
 
     await secretRow!.findAll('button').find((b) => b.text() === 'Show')!.trigger('click')
     expect(secretRow!.findAll('input')[1].attributes('type')).toBe('text')
+  })
+
+  it('says which servers still need a value filled in on this machine', async () => {
+    const synced = { ...navideServers()[0], env: { API_KEY: '', LOG_LEVEL: 'debug' } }
+    wrapper = mountPane({ servers: [synced] })
+    expect(wrapper.find('.mcp-card .pchip.needs').text()).toBe('Needs setup')
+    await openCard(wrapper, 'context7')
+    expect(wrapper.find('.mcp-drawer-hint.warn').text()).toContain('never sync between devices')
+
+    await wrapper.setProps({ servers: navideServers() })
+    await flushPromises()
+    expect(wrapper.find('.pchip.needs').exists()).toBe(false)
+  })
+
+  it('says a server needs setup when a credential in its arguments or URL arrived empty', async () => {
+    const synced = { ...navideServers()[0], args: ['-y', 'srv', '--token', ''] }
+    wrapper = mountPane({ servers: [synced] })
+    expect(wrapper.find('.mcp-card .pchip.needs').text()).toBe('Needs setup')
+    await openCard(wrapper, 'context7')
+    expect(wrapper.find('.mcp-drawer-hint.warn').text()).toContain('credentials in the URL and arguments')
+
+    const remote = { name: 'remote', transport: 'http', url: 'https://@mcp.example.test/v1?api_key=', headers: {}, enabled: true }
+    await wrapper.setProps({ servers: [remote] })
+    await flushPromises()
+    expect(wrapper.find('.mcp-card .pchip.needs').exists()).toBe(true)
+
+    await wrapper.setProps({ servers: [{ ...remote, url: 'https://mcp.example.test/v1?region=eu' }, navideServers()[0]] })
+    await flushPromises()
+    expect(wrapper.find('.pchip.needs').exists()).toBe(false)
   })
 
   it('asks the parent to remove a server rather than deleting it itself', async () => {
@@ -300,7 +363,7 @@ describe('McpPane', () => {
   it('says so when nothing is configured anywhere', () => {
     wrapper = mountPane({ servers: [], native: [] })
 
-    expect(wrapper.find('.nv-empty').exists()).toBe(true)
+    expect(wrapper.find('.settings-empty').exists()).toBe(true)
     expect(wrapper.findAll('.mcp-card')).toHaveLength(0)
   })
 
@@ -370,6 +433,49 @@ describe('McpPane', () => {
         'Failed to start: the server exited with code 1 before answering initialize',
       )
       expect(wrapper.find('[data-testid="mcp-stderr-tail"] pre').text()).toBe('npm error 404 Not Found')
+    })
+
+    it('says the tool list could not be read instead of showing zero tools', async () => {
+      wrapper = mountPane({
+        servers: withStatus({ status: 'connected', tool_count: 0, tools: [], tools_error: 'listing tools timed out' }),
+        selectName: 'context7',
+      })
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="mcp-tools-error"]').text()).toBe(
+        'Could not list its tools: listing tools timed out',
+      )
+    })
+  })
+
+  describe('a server that needs Node.js', () => {
+    it('says so on the card and offers the install in the drawer', async () => {
+      wrapper = mountPane({ nodeMissing: true })
+
+      const card = wrapper.findAll('.mcp-card').find((c) => c.find('strong').text() === 'context7')!
+      expect(card.get('[data-testid="mcp-needs-node"]').text()).toBe(i18n.global.t('settings.mcp.needs-node'))
+
+      await openCard(wrapper, 'context7')
+      const notice = wrapper.get('[data-testid="mcp-needs-node-notice"]')
+      expect(notice.text()).toContain(i18n.global.t('settings.mcp.needs-node-hint', { command: 'npx' }))
+      await notice.get('button').trigger('click')
+      expect(wrapper.emitted('install-node')).toEqual([[]])
+    })
+
+    it('stays quiet while Node.js is there, and for servers that do not use it', async () => {
+      wrapper = mountPane()
+      expect(wrapper.find('[data-testid="mcp-needs-node"]').exists()).toBe(false)
+      wrapper.unmount()
+
+      const servers = navideServers().map((s) => ({ ...s, command: '/usr/local/bin/uvx' }))
+      wrapper = mountPane({ nodeMissing: true, servers })
+      expect(wrapper.find('[data-testid="mcp-needs-node"]').exists()).toBe(false)
+    })
+
+    it('recognises a Windows npx.cmd by its full path', async () => {
+      const servers = navideServers().map((s) => ({ ...s, command: 'C:\\Program Files\\nodejs\\npx.cmd' }))
+      wrapper = mountPane({ nodeMissing: true, servers })
+      expect(wrapper.find('[data-testid="mcp-needs-node"]').exists()).toBe(true)
     })
   })
 })

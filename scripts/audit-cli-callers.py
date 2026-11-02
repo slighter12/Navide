@@ -50,7 +50,7 @@ ROW = re.compile(r"""\b""" + FACT_KEY + r"""['"]?\s*[:=]\s*(['"])([^'"]+)\1""")
 SPAWN = re.compile(
     r"\b(?:subprocess\.(?:Popen|run|check_output|check_call)|create_subprocess_exec|"
     r"create_subprocess_shell|os\.forkpty|pty\.fork|winpty\.PtyProcess|child_process\.(?:spawn|exec)|"
-    r"\bspawn\()"
+    r"(?<!this\.)\bspawn\()"
 )
 
 

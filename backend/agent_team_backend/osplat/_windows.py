@@ -58,9 +58,15 @@ log = logging.getLogger(__name__)
 # line on stderr when none can be made. A random name rather than
 # GetTempFileName: that creates tmpXXXX.tmp and fails for good once 65535 are
 # left behind by hooks killed mid-wait; curl creates this file itself.
+# .NET calls only, never Join-Path / Get-Content / Remove-Item: those live in
+# Microsoft.PowerShell.Management, and its first use per process autoloads the
+# module, which cost about 23 s per hook run on the windows-11-arm runner where
+# `exit 0` starts in 0.4 s (release run 40904538508). The `throw` keeps
+# Join-Path's refusal of an unset TEMP; Combine would return a relative path.
 _PS_TEMP_PATH = (
     "$TMP = $null; $TMPERR = ''; "
-    "try { $TMP = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName()) } catch { $TMPERR = \"$_\" }; "
+    "try { if (-not $env:TEMP) { throw 'TEMP is not set' }; "
+    "$TMP = [IO.Path]::Combine($env:TEMP, [IO.Path]::GetRandomFileName()) } catch { $TMPERR = \"$_\" }; "
     "if (-not $TMP) { [Console]::Error.Write('navide hook: no temp file: ' + $TMPERR + "
     "[Environment]::NewLine); exit 0 }; "
 )
@@ -146,6 +152,7 @@ class WindowsResourceProbe:
 # ---------------------------------------------------------------------------
 
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+CREATE_SUSPENDED = 0x00000004
 JobObjectExtendedLimitInformation = 9
 PROCESS_TERMINATE = 0x0001
 PROCESS_SET_QUOTA = 0x0100
@@ -484,6 +491,58 @@ class WindowsProcessTree:
         # No process groups: the "group" is the subtree rooted at gid.
         self.kill_tree(gid, force=force)
 
+    def own_group_spawn_kwargs(self) -> dict[str, int]:
+        # Suspended until `start_own_group` has put it in its job: a child
+        # that ran first could start a process (cmd\git.exe starts the real
+        # git.exe at once) before the assignment, and that one and everything
+        # it starts would be outside the job.
+        return {"creationflags": CREATE_SUSPENDED}
+
+    def end_own_group(self, pid: int) -> None:
+        return None
+
+    def start_own_group(self, pid: int) -> int | None:
+        job: int | None = None
+        try:
+            job = self.contain(pid)
+        except OSError as exc:
+            # Degraded, not fatal: the run works, and a timeout falls back to
+            # killing the snapshot of its tree.
+            log.warning("job object unavailable for pid %s: %s", pid, exc)
+        try:
+            # NtResumeProcess: Popen has already closed the thread handle.
+            psutil.Process(pid).resume()
+        except psutil.Error as exc:
+            if job is not None:
+                self.end_contained(pid, job)
+            else:
+                try:
+                    self.kill(pid, force=True)
+                except OSError:
+                    pass
+            raise _translate(exc) from None
+        return job
+
+    def release_contained(self, pid: int, job: int) -> None:
+        with _jobs_lock:
+            entry = _jobs.get(pid)
+            if entry is not None and entry[0] == job:
+                del _jobs[pid]
+        k = _kernel32()
+        # Zeroed limits: no KILL_ON_JOB_CLOSE, so the close below ends nothing.
+        info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        if k.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation, ctypes.byref(info), ctypes.sizeof(info)
+        ):
+            k.CloseHandle(job)
+            return
+        # Closing it now would end what the run left running: keep the handle.
+        log.warning(
+            "could not clear kill-on-close for pid %s (error %s); keeping its job open",
+            pid,
+            ctypes.get_last_error(),  # type: ignore[attr-defined]
+        )
+
     def contain(self, pid: int) -> int | None:
         job = _create_kill_on_close_job()
         try:
@@ -645,6 +704,11 @@ _EXIT_WATCH_MS = 250
 _EXIT_DRAIN_S = 0.05
 #: How long `watch_writable` waits before retrying a drain (see module doc).
 _WRITE_RETRY_S = 0.05
+#: Output a pause may leave queued before the oldest chunks are dropped. A
+#: pause cannot throttle the CLI here (see `pause_reading`), so this is what
+#: bounds the backend's memory while a drain stalls. Equal to terminals'
+#: _BUF_CAP, the bound POSIX applies to the same stall one layer up.
+_PAUSED_QUEUE_CAP = 5 * 1024 * 1024
 
 
 class WindowsTerminalHandle:
@@ -663,6 +727,8 @@ class WindowsTerminalHandle:
         self._job = job
         self.proc = _WindowsChild(pid, process_handle)
         self._chunks: deque[bytes] = deque()
+        self._queued = 0
+        self._dropped = 0
         self._lock = threading.Lock()
         self._eof = False
         self._closed = False
@@ -689,9 +755,11 @@ class WindowsTerminalHandle:
             head = self._chunks[0]
             if len(head) <= max_bytes:
                 self._chunks.popleft()
-                return head
-            self._chunks[0] = head[max_bytes:]
-            return head[:max_bytes]
+            else:
+                self._chunks[0] = head[max_bytes:]
+                head = head[:max_bytes]
+            self._queued -= len(head)
+            return head
 
     def start_reading(
         self, loop: asyncio.AbstractEventLoop, callback: Callable[[], None]
@@ -737,6 +805,12 @@ class WindowsTerminalHandle:
     def resume_reading(self) -> None:
         with self._lock:
             self._paused = False
+            dropped, self._dropped = self._dropped, 0
+        if dropped:
+            log.warning(
+                "conpty output dropped pid=%s bytes=%d (paused queue over %d)",
+                self.pid, dropped, _PAUSED_QUEUE_CAP,
+            )
         self._notify()
 
     def stop_reading(self) -> None:
@@ -826,6 +900,13 @@ class WindowsTerminalHandle:
     def _enqueue(self, data: bytes) -> None:
         with self._lock:
             self._chunks.append(data)
+            self._queued += len(data)
+            # Only a pause lets the queue build up; drop the oldest, keeping
+            # at least the chunk that just arrived.
+            while self._paused and self._queued > _PAUSED_QUEUE_CAP and len(self._chunks) > 1:
+                old = self._chunks.popleft()
+                self._queued -= len(old)
+                self._dropped += len(old)
         self._notify()
 
     def _notify(self) -> None:
@@ -1627,6 +1708,18 @@ def _ps_quote(value: str) -> str:
     return f"'{escaped}'"
 
 
+def _ps_read_port(port_file: str) -> str:
+    """`$PORT` from the port file, `$null`-ish when it cannot be read.
+
+    What `Get-Content -ErrorAction SilentlyContinue` gave, without loading the
+    module it lives in (see `_PS_TEMP_PATH`): the lines with their endings
+    stripped, falsy for a missing or empty file, and a one-line file reads and
+    interpolates as that line. The path is literal, where Get-Content's -Path
+    read `[` and `]` in it as wildcards.
+    """
+    return f"$PORT = $null; try {{ $PORT = [IO.File]::ReadAllLines({_ps_quote(port_file)}) }} catch {{}}; "
+
+
 class WindowsScripts:
     def hook_entry(self, command: str) -> dict:
         # Without `shell`, Claude Code looks for Git Bash and only falls back
@@ -1674,12 +1767,12 @@ class WindowsScripts:
                 f"{_PS_TEMP_PATH}"
                 f"{post}; "
                 f"$OUTB = $null; try {{ $OUTB = [IO.File]::ReadAllBytes($TMP) }} catch {{}}; "
-                f"Remove-Item -LiteralPath $TMP -Force -ErrorAction SilentlyContinue; "
+                f"try {{ [IO.File]::Delete($TMP) }} catch {{}}; "
                 f"if ($OUTB) {{ $OUTS = [Console]::OpenStandardOutput(); "
                 f"$OUTS.Write($OUTB, 0, $OUTB.Length); $OUTS.Flush() }}"
             )
         return (
-            f"$PORT = Get-Content -ErrorAction SilentlyContinue {_ps_quote(port_file)}; "
+            f"{_ps_read_port(port_file)}"
             f"if ($PORT) {{ {post} }}; exit 0"
         )
 
@@ -1695,7 +1788,7 @@ class WindowsScripts:
         # left the parent console on 65001 when two hooks interleaved or one
         # was killed mid-wait.
         return (
-            f"$PORT = Get-Content -ErrorAction SilentlyContinue {_ps_quote(port_file)}; "
+            f"{_ps_read_port(port_file)}"
             f"if (-not $PORT) {{ exit 0 }}; "
             f"{_PS_TEMP_PATH}"
             f"& ($env:SystemRoot + '\\System32\\curl.exe') -fsS -m {timeout_s} -o $TMP -X POST "
@@ -1705,7 +1798,7 @@ class WindowsScripts:
             f"--data-binary '@-' "
             f'"http://127.0.0.1:$PORT{url_path}" 2>$null; '
             f"$BODY = $null; try {{ $BODY = [IO.File]::ReadAllLines($TMP, [Text.Encoding]::UTF8) }} catch {{}}; "
-            f"Remove-Item -LiteralPath $TMP -Force -ErrorAction SilentlyContinue; "
+            f"try {{ [IO.File]::Delete($TMP) }} catch {{}}; "
             f"if (($BODY -join '').Trim()) {{ "
             f"$ERRB = [Text.Encoding]::UTF8.GetBytes(($BODY -join [Environment]::NewLine) + [Environment]::NewLine); "
             f"$ERRS = [Console]::OpenStandardError(); $ERRS.Write($ERRB, 0, $ERRB.Length); $ERRS.Flush(); "

@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { transformWithEsbuild } from 'vite'
 import { MAX_KICKOFF_ATTEMPTS, runPipelineKickoff } from '../../lib/cliCoordination'
-import { linearPipelineDag } from './pipelineDagTestStub'
+import { linearPipelineDag, RUN_SLOT_STUB } from './pipelineDagTestStub'
 
 // A pipeline used to pre-spawn EVERY stage the moment Start was pressed, so an
 // N-stage run held N×M CLIs at once and paid the ~190MB-per-claude floor for
@@ -41,7 +41,7 @@ const prewarmSource = block(
 )
 
 const activateSource = block(
-  'async function activateStage(index: number): Promise<void> {',
+  'async function activateStage(index: number, opts: { only?: string; note?: string } = {}): Promise<void> {',
   '\nasync function spawnPipelineStage(',
 )
 
@@ -82,7 +82,7 @@ type SpawnCall = { stageId: string; slotLabel: string }
  *  spawns here is what Start itself decided to spawn. */
 async function loadStart(over: { stageCount?: number } = {}) {
   const { code } = await transformWithEsbuild(
-    `${preSpawnSource}\n${startSource}\nreturn { onPipelineStart, preSpawnStage }`,
+    `${RUN_SLOT_STUB}\n${preSpawnSource}\n${startSource}\nreturn { onPipelineStart, preSpawnStage }`,
     'AppPipelineStart.ts',
     { loader: 'ts' },
   )
@@ -100,6 +100,7 @@ async function loadStart(over: { stageCount?: number } = {}) {
   const factory = new Function(
     'pipeline',
     'pipelinesApi',
+    'runPipelineId',
     'stagesApi',
     'panes',
     'stageCompletions',
@@ -123,6 +124,7 @@ async function loadStart(over: { stageCount?: number } = {}) {
   const api = factory(
     pipeline,
     { activePipelineId: { value: 'pl-1' }, setActivePipeline: vi.fn(), error: { value: '' } },
+    { value: '' },
     { isLoaded: { value: true }, stages: { value: stageList }, refresh: vi.fn(), error: { value: '' } },
     { value: [] as unknown[] },
     new Map(),
@@ -182,9 +184,13 @@ async function loadActivate(over: {
   /** Per-pane kickoff injection; default: every kickoff lands. */
   injectPane?: (paneId: string, text: string, tag: string, preserve: boolean, x: unknown, evidence?: { echo?: unknown }) => Promise<boolean>
   heldKickoffCopy?: (paneId: string, text: string) => unknown
+  /** Every pane's role status as the pre-spawn left it; default 'sent'. */
+  injectionStatus?: string
+  /** The role registry's lookup; default: no role found. */
+  findRole?: (key: string) => unknown
 } = {}) {
   const { code } = await transformWithEsbuild(
-    `${prewarmSource}\n${activateSource}\nreturn { activateStage, awaitStagePrewarm, prewarmNextStage }`,
+    `${RUN_SLOT_STUB}\n${prewarmSource}\n${activateSource}\nreturn { activateStage, awaitStagePrewarm, prewarmNextStage }`,
     'AppPipelineActivate.ts',
     { loader: 'ts' },
   )
@@ -217,7 +223,7 @@ async function loadActivate(over: {
         origin: 'pipeline',
         realized: true,
         roleKey: slot.roleKey,
-        injectionStatus: 'sent',
+        injectionStatus: over.injectionStatus ?? 'sent',
         kickoffStatus: 'none',
         sessionMarker: 'm',
       })),
@@ -295,7 +301,7 @@ async function loadActivate(over: {
     vi.fn(),
     vi.fn(),
     vi.fn(),
-    { find: () => null },
+    { find: over.findRole ?? (() => null) },
     vi.fn(async () => {}),
     vi.fn(async () => 'settled'),
     [],
@@ -461,5 +467,75 @@ describe('a stage whose kickoff fails', () => {
     expect(submit).toHaveBeenCalledTimes(1)
     expect(inject.mock.calls.map((c) => c[0])).toEqual(['S1-1'])
     expect(events).toContain('watch 0 S1-0')
+  })
+})
+
+describe('a slot whose role prompt never reached its agent (#448)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+  const findRole = () => ({ label: 'team', system_prompt: 'you are on the team' })
+  const isRole = (tag: string) => tag.startsWith('role:')
+
+  it('retries a role that failed at pre-spawn before sending the kickoff', async () => {
+    const tags: Array<[string, string]> = []
+    const { api, pipeline, events } = await loadActivate({
+      injectionStatus: 'failed',
+      findRole,
+      injectPane: async (paneId, _text, tag) => { tags.push([paneId, tag]); return true },
+    })
+    pipeline.stageIndex = 0
+    await api.activateStage(0)
+    expect(tags.filter(([pane]) => pane === 'S1-0').map(([, tag]) => tag)).toEqual(['role:team', 'kickoff:stage-S1'])
+    expect(events).toContain('watch 0 S1-0')
+    expect(pipeline.log.some((l) => l.includes('role') && l.includes('retry'))).toBe(true)
+  })
+
+  it('fails the run with the reason, and sends no kickoff, when the retried role fails too', async () => {
+    const tags: string[] = []
+    const { api, pipeline, events, failRunOnKickoff, startStageWatcher } = await loadActivate({
+      injectionStatus: 'failed',
+      findRole,
+      injectPane: async (_paneId, _text, tag) => { tags.push(tag); return !isRole(tag) },
+    })
+    pipeline.stageIndex = 1
+    await api.activateStage(1)
+    expect(tags.some((t) => t.startsWith('kickoff:'))).toBe(false)
+    expect(failRunOnKickoff).toHaveBeenCalled()
+    expect(failRunOnKickoff.mock.calls[0][2]).toContain('role prompt never reached the agent')
+    expect(startStageWatcher).not.toHaveBeenCalled()
+    const spawn = events.findIndex((e) => e.startsWith('send pipeline.stage_spawn 1'))
+    const fail = events.findIndex((e) => e.startsWith('fail 1/'))
+    expect(spawn, 'stage_spawn for the failed stage').toBeGreaterThan(-1)
+    expect(fail).toBeGreaterThan(spawn)
+  })
+
+  it('fails the run when a deferred role does not land, instead of sending the kickoff anyway', async () => {
+    const tags: string[] = []
+    const { api, pipeline, failRunOnKickoff } = await loadActivate({
+      injectionStatus: 'skipped',
+      findRole,
+      injectPane: async (_paneId, _text, tag) => { tags.push(tag); return !isRole(tag) },
+    })
+    pipeline.stageIndex = 0
+    await api.activateStage(0)
+    expect(tags.some((t) => t.startsWith('kickoff:'))).toBe(false)
+    expect(failRunOnKickoff.mock.calls[0][2]).toContain('role prompt never reached the agent')
+  })
+
+  it('a role that landed at pre-spawn is not injected again', async () => {
+    const tags: string[] = []
+    const { api, pipeline } = await loadActivate({
+      findRole,
+      injectPane: async (_paneId, _text, tag) => { tags.push(tag); return true },
+    })
+    pipeline.stageIndex = 0
+    await api.activateStage(0)
+    expect(tags.some(isRole)).toBe(false)
+  })
+
+  it('the spawn-time path fails the run instead of sending the kickoff after a failed role', () => {
+    const schedule = block('function scheduleInjection(pane: ActivePane): void {', '\ninterface SpawnInternal')
+    const roleFail = schedule.slice(schedule.indexOf('role injection failed'))
+    expect(roleFail.slice(0, 400)).toContain('not sending the kickoff')
+    expect(roleFail.slice(0, 400)).toContain("await failRunOnKickoff(roleStageIndex, pane.slotLabel ?? '', 'role prompt never reached the agent')")
   })
 })

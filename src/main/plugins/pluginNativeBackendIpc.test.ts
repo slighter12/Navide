@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { NativeBackendStore } from './pluginNativeBackendStore'
 import type { IpcMainInvokeEvent } from 'electron'
 import { registerNativeBackendIpc, type NativeBackendAgentToolsControls } from './pluginNativeBackendIpc'
 import type { ThirdPartyBackendController, ThirdPartyLaunchSpec } from './pluginThirdPartyBackends'
 
 type Listener = (event: IpcMainInvokeEvent, args: unknown) => unknown
 
-function setup(options: { agentTools?: boolean; authorized?: boolean } = {}) {
+function setup(options: { agentTools?: boolean; authorized?: boolean; isEnabled?: () => boolean; offUnsaved?: () => boolean } = {}) {
   const handlers = new Map<string, Listener>()
   const controller = {
     status: vi.fn(async (spec: ThirdPartyLaunchSpec) => ({ pluginId: spec.pluginId, status: 'ready' })),
@@ -27,8 +31,9 @@ function setup(options: { agentTools?: boolean; authorized?: boolean } = {}) {
     () => options.authorized ?? true,
     controller as unknown as ThirdPartyBackendController,
     () => [{ pluginId: 'acme.indexer' } as ThirdPartyLaunchSpec],
-    () => true,
+    options.isEnabled ?? (() => true),
     options.agentTools === false ? undefined : controls,
+    options.offUnsaved,
   )
   const invoke = (channel: string, args?: unknown) =>
     Promise.resolve(handlers.get(channel)!({} as IpcMainInvokeEvent, args))
@@ -45,6 +50,14 @@ describe('native backend IPC: agent-tool switches (plan B1-b)', () => {
     expect(handlers.has('plugins:nativeBackends:setAgentTools')).toBe(true)
   })
 
+  it('says an "off" is unsaved only while the store says so (#642 L2)', async () => {
+    let unsaved = true
+    const { invoke } = setup({ isEnabled: () => false, offUnsaved: () => unsaved })
+    await expect(invoke('plugins:nativeBackends:list')).resolves.toMatchObject({ enabled: false, offUnsaved: true })
+    unsaved = false
+    expect(await invoke('plugins:nativeBackends:list')).not.toHaveProperty('offUnsaved')
+  })
+
   it('reports both switches, off by default, and changes one at a time', async () => {
     const { invoke, controls } = setup()
     await expect(invoke('plugins:nativeBackends:list')).resolves.toMatchObject({
@@ -57,6 +70,10 @@ describe('native backend IPC: agent-tool switches (plan B1-b)', () => {
     await expect(invoke('plugins:nativeBackends:setAgentTools', { externalCallers: true })).resolves.toMatchObject({
       agentTools: { enabled: true, externalCallers: true },
     })
+    await expect(invoke('plugins:nativeBackends:setAgentTools', { firstParty: false })).resolves.toMatchObject({
+      agentTools: { firstParty: false },
+    })
+    expect(controls.setSwitches).toHaveBeenCalledWith({ firstParty: false })
   })
 
   it('refuses malformed changes and untrusted senders', async () => {
@@ -64,6 +81,8 @@ describe('native backend IPC: agent-tool switches (plan B1-b)', () => {
     await expect(invoke('plugins:nativeBackends:setAgentTools', { enabled: 'yes' })).rejects.toThrow('invalid')
     await expect(invoke('plugins:nativeBackends:setAgentTools', { enabled: true, externalCallers: true })).rejects.toThrow('invalid')
     await expect(invoke('plugins:nativeBackends:setAgentTools', {})).rejects.toThrow('invalid')
+    await expect(invoke('plugins:nativeBackends:setAgentTools', { firstParty: 'off' })).rejects.toThrow('invalid')
+    await expect(invoke('plugins:nativeBackends:setAgentTools', { firstParty: false, enabled: true })).rejects.toThrow('invalid')
     expect(controls.setSwitches).not.toHaveBeenCalled()
     const untrusted = setup({ authorized: false })
     await expect(untrusted.invoke('plugins:nativeBackends:setAgentTools', { enabled: true })).rejects.toThrow('unauthorized')
@@ -124,3 +143,17 @@ describe('resource notice IPC', () => {
   })
 })
 
+describe('native backend IPC: the default switch (0.2.31)', () => {
+  it('reports the switch on for a fresh profile and off once the user turns it off (the Developer page and its On badge)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'native-backend-ipc-'))
+    try {
+      const store = new NativeBackendStore(join(dir, 'store'))
+      const { invoke } = setup({ isEnabled: () => store.isEnabled() })
+      await expect(invoke('plugins:nativeBackends:list')).resolves.toMatchObject({ enabled: true })
+      store.setEnabled(false)
+      await expect(invoke('plugins:nativeBackends:list')).resolves.toMatchObject({ enabled: false })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

@@ -254,6 +254,27 @@ describe('Issue 03/04 public Host planner', () => {
     ...overrides,
   })
 
+  // Review M2 on #648: a session is owned by one package and one version, not
+  // just one instance id. A binding that differs only there is refused.
+  it.each([
+    ['another package', { pluginId: 'other.plugin' }],
+    ['another version of the package', { packageVersion: '0.9.0' }],
+  ])('refuses a session bound to %s for input, stop and resize', (_case, differs) => {
+    const calls: Array<Partial<CapabilityCall>> = [
+      { method: 'sendInput', args: { sessionId: 'session-1', data: 'x' } },
+      { method: 'stopSession', args: { sessionId: 'session-1', force: true } },
+      { method: 'resizeSession', args: { sessionId: 'session-1', cols: 80, rows: 24 } },
+    ]
+    for (const overrides of calls) {
+      expect(planPublicCapabilityCall(call(overrides), policy, context({
+        sessionBindings: new Map([['session-1', binding]]),
+      }))).toMatchObject({ kind: 'allow' })
+      expect(planPublicCapabilityCall(call(overrides), policy, context({
+        sessionBindings: new Map([['session-1', { ...binding, ...differs }]]),
+      }))).toMatchObject({ kind: 'deny', response: { error: { message: 'AI CLI session ownership mismatch' } } })
+    }
+  })
+
   it('returns a Host-owned plan only after grant, binding, and schema checks', () => {
     expect(planPublicCapabilityCall(call(), policy, context())).toMatchObject({
       kind: 'allow',
@@ -1292,5 +1313,36 @@ describe('agent initiator caller (plan B1-b)', () => {
     ]) {
       expect(isAuthenticatedInitiator({ ...base, caller })).toBe(false)
     }
+  })
+})
+
+describe('agent initiator pane', () => {
+  const base = { kind: 'agent', source: 'mcp', id: 'a-1' }
+  const caller = { kind: 'pane', paneId: 'p-1', workspace: '/w', verifiedTo: 'pane' }
+
+  it('accepts the calling pane name or id next to the agent keys, with or without a caller', () => {
+    expect(isAuthenticatedInitiator({ ...base, pane: 'Reviewer' })).toBe(true)
+    expect(isAuthenticatedInitiator({ ...base, pane: 'p-1', caller })).toBe(true)
+    expect(isAuthenticatedInitiator({ ...base, pane: 'x'.repeat(200) })).toBe(true)
+  })
+
+  it('counts UTF-16 code units and trims as JavaScript does, which the core matches', () => {
+    // 100 emoji are 200 code units; 150 are 300. The core sends the pane id instead.
+    expect(isAuthenticatedInitiator({ ...base, pane: '\u{1F600}'.repeat(100) })).toBe(true)
+    expect(isAuthenticatedInitiator({ ...base, pane: '\u{1F600}'.repeat(150) })).toBe(false)
+    expect(isAuthenticatedInitiator({ ...base, pane: '\u{20000}'.repeat(101) })).toBe(false)
+    expect(isAuthenticatedInitiator({ ...base, pane: '\uFEFF' })).toBe(false)
+    expect(isAuthenticatedInitiator({ ...base, pane: ' \u2028\u3000\uFEFF ' })).toBe(false)
+    // The id the core falls back to passes.
+    expect(isAuthenticatedInitiator({ ...base, pane: 'p-1' })).toBe(true)
+  })
+
+  it('refuses an empty, oversized or non-string pane, a pane on a user, and any other extra key', () => {
+    for (const pane of ['', '   ', 'x'.repeat(201), 7, null, { id: 'p-1' }]) {
+      expect(isAuthenticatedInitiator({ ...base, pane })).toBe(false)
+    }
+    expect(isAuthenticatedInitiator({ kind: 'user', id: 'u', pane: 'Reviewer' })).toBe(false)
+    expect(isAuthenticatedInitiator({ ...base, pane: 'Reviewer', token: 't' })).toBe(false)
+    expect(isAuthenticatedInitiator({ ...base, pane: 'Reviewer', caller: null })).toBe(false)
   })
 })

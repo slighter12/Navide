@@ -373,7 +373,9 @@ describe('MarketplacePane', () => {
     await flushPromises()
 
     const dialog = wrapper.get('.ext-trust-dialog')
-    expect(dialog.get('.ext-backend-risk').text()).toContain('native backend executable')
+    // 0.2.31: confirming is the backend consent, so the warning says so.
+    expect(dialog.get('.ext-backend-risk').text()).toContain('native backend program')
+    expect(dialog.get('.ext-backend-risk').text()).toContain('Navide will not ask again')
     expect(dialog.text()).not.toContain('requests sensitive capabilities')
     expect(api.commitInstall).not.toHaveBeenCalled()
 
@@ -1820,7 +1822,7 @@ describe('MarketplacePane', () => {
       await wrapper.get('.ext-search input').setValue('zzz')
       await wrapper.get('.ext-search button').trigger('click')
       await flushPromises()
-      await wrapper.get('.mkt-empty .mkt-state-actions .nv-btn').trigger('click')
+      await wrapper.get('.mkt-empty .settings-empty-actions .nv-btn').trigger('click')
       await flushPromises()
       expect((wrapper.get('.ext-search input').element as HTMLInputElement).value).toBe('')
       expect(api.marketplaceSearch).toHaveBeenLastCalledWith(undefined, 'downloads', expect.anything())
@@ -2032,7 +2034,7 @@ describe('MarketplacePane', () => {
       }
     })
 
-    it('marks every state page with the signature diamond', async () => {
+    it('marks the error page with the signature diamond and uses the shared empty state', async () => {
       mockPlugins({ marketplaceSearch: vi.fn().mockRejectedValue(new Error('offline')) })
       wrapper = mountMarketplace()
       await flushPromises()
@@ -2042,7 +2044,8 @@ describe('MarketplacePane', () => {
       mockPlugins({ marketplaceSearch: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 20 }) })
       wrapper = mountMarketplace()
       await flushPromises()
-      expect(wrapper.find('.mkt-empty .mkt-sigil').exists()).toBe(true)
+      expect(wrapper.find('.mkt-empty.settings-empty').exists()).toBe(true)
+      expect(wrapper.find('.mkt-empty .mkt-sigil').exists()).toBe(false)
     })
   })
 })

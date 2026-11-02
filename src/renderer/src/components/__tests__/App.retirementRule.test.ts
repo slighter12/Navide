@@ -79,7 +79,7 @@ describe('callers that start a replacement (or retire more) only after a proven 
   it.each([
     ['rebuildPaneViaResume', 'await spawnPane({'],
     ['rebuildPaneClean', 'await spawnPane({'],
-    ['onPipelineRestart', 'await onPipelineStart(payload)'],
+    ['onPipelineRestart', 'await onPipelineStart('],
     ['activateStage', 'registerStage(stageCompletions, index, stage.slots.length)'],
   ])('%s', (name, replacement) => {
     const body = fn(name)

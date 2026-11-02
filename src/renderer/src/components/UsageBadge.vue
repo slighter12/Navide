@@ -2,6 +2,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useWelcomeTour } from '../composables/useWelcomeTour'
 import {
+  absentSessionNote,
   accountUsageFor,
   formatRemaining,
   formatResetAbsolute,
@@ -67,6 +68,7 @@ const snap = computed(() =>
     : usageFor(props.agentKey)
 )
 const remaining = computed(() => remainingPercent(snap.value))
+const sessionNote = computed(() => absentSessionNote(snap.value))
 const tier = computed(() => (remaining.value === null ? 'ok' : remainingTier(remaining.value)))
 const expired = computed(() => snap.value?.status === 'expired')
 // No general quota left at all. Distinct from the red "<15% left" tier on
@@ -462,6 +464,7 @@ async function chooseDefault(id: string): Promise<void> {
 }
 
 function onRowClick(id: string): void {
+  if (paneOnlyMode.value) return moveThisPane(id)
   void (followMode.value ? chooseDefault(id) : selectProfile(id))
 }
 
@@ -482,6 +485,25 @@ function unpinAll(): void {
   if (!pins) return
   closePop()
   void pins.unpinAll()
+}
+
+// A pane with "follow account switch" off: a row moves only this pane, into
+// that account's own dir (reopened once, its conversation resumed). The live
+// credential, the default and every other pane stay as they are. An account
+// with no dir login yet starts that sign-in instead; the built-in Default has
+// no dir, so it is refused.
+const paneOnlyMode = computed(() => liveMode.value && props.paneFollow === 'fixed' && !!props.paneId)
+
+function moveThisPane(id: string): void {
+  if (!pins || !props.paneId || switching.value !== null) return
+  if (id === paneDirProfileId.value) return
+  if (id === '') {
+    void notifyAlert(t('account-follow.pin-default-refused'), { title: t('cli-account.switch-title') })
+    return
+  }
+  if (!accountDirSignedIn(id)) return signInDir(id)
+  closePop()
+  void pins.movePane(props.paneId, id)
 }
 
 // ── Renaming an account from the list ───────────────────────────────────────
@@ -754,6 +776,14 @@ function acctTitle(profileId: string | null): string {
       </div>
       <div v-if="cached && snap.staleExpired" class="usage-pop-expired">
         {{ $t('usage.cached-reset-expired') }}
+      </div>
+      <div v-if="sessionNote" class="usage-row" data-part="session-note">
+        <div class="usage-row-top">
+          <span class="usage-row-label" v-truncate>{{ $t('usage.window-claude-session') }}</span>
+          <span class="usage-row-left" :class="{ ok: sessionNote === 'unlimited' }">
+            {{ $t(`usage.window-${sessionNote}`) }}
+          </span>
+        </div>
       </div>
       <div v-for="w in snap.windows" :key="w.kind + w.label" class="usage-row">
         <div class="usage-row-top">

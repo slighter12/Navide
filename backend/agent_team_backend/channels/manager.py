@@ -41,8 +41,8 @@ from .. import error_ledger, prompt_skills
 from .mirror import (
     CHILD_SUMMARY_CHARS, MSG_SUMMARY_TAIL, Mirror, normalize_verbosity, result_text, source_chat, summarize,
 )
-from .base import ChannelAdapter, InboundMessage, Location, MediaTooLarge
-from .pairing import LinkInvites, SenderGate, parse_link_code
+from .base import ChannelAdapter, InboundMessage, Location, MediaTooLarge, is_shared_sender
+from .pairing import LinkInvites, SenderGate, normalize_code, parse_link_code
 from .registry import PLATFORMS, load_module
 from .store import DEFAULT_ACCOUNT, DEFAULT_VERBOSITY, VERBOSITIES, Binding, ChannelStore
 from .text import chunk_for, msg_blocks, strip_msg_markers
@@ -62,6 +62,10 @@ SKILLS_CALLBACK = "nv4:skills"
 MCP_CALLBACK = "nv4:mcp"
 WAKE_CALLBACK = "nv4:wake"
 WAKE_WORDS = {"/wake"}
+# Mattermost's client takes a leading "/" for one of its own slash commands and, finding no
+# "wake" among them, never posts the message; it has no buttons either. So there the bare word
+# wakes too, and is what the hint names.
+MATTERMOST_WAKE_WORD = "wake"
 _CALLBACK_COMMANDS = {CANCEL_CALLBACK: "/cancel", STOP_CALLBACK: "stop", RESUME_CALLBACK: "/resume",
                       PROMPTS_CALLBACK: "/prompts", SKILLS_CALLBACK: "/skills", MCP_CALLBACK: "/mcp",
                       WAKE_CALLBACK: "/wake"}
@@ -104,6 +108,7 @@ STATUS_POLL_S = 1.0
 DEBOUNCE_S = 0.5  # lines from one sender to one location within this window become one message
 DEBOUNCE_MAX_S = 3.0
 LONG_REPLY_MAX_CHUNKS = 3  # past this, a reply is a preview plus the whole text as a file
+TELEGRAM_DIRECT_KINDS = ("private", "direct")  # the adapter's chat type; what _remember_chat stores
 REPLY_QUOTE_MAX_CHARS = 500  # a native reply's quoted message, cut before it reaches the pane
 REPLY_QUOTE_NAME_MAX_CHARS = 64
 # Fixed wording: an untrusted author's display name is attacker-controlled text too.
@@ -130,6 +135,9 @@ MSG_TYPED_HINT = "可直接輸入：{commands}"
 BUSY_BUTTONS = [("↩️ 撤回排隊中的訊息", CANCEL_CALLBACK), ("⏹ 中斷 pane", STOP_CALLBACK)]
 MSG_UNBOUND = "🔌 這個聊天室已和 pane「{name}」中斷連接，之後的訊息不會再送進 pane。"
 MSG_BOUND = "🔗 已連接 pane「{name}」，在這裡傳的訊息會送進這個 pane；傳 stop 可以中斷。"
+MSG_BOUND_NEEDS_APPROVAL = "⚠️ 已連接 pane「{name}」，但這個聊天室的傳送者要先核准，訊息才會送進 pane。{how}"
+MSG_APPROVE_CODE = "請在 Navide 的 Settings → Channels 核准配對碼：{code}"
+MSG_APPROVE_SEND_FIRST = "請先私訊這個 bot 任一則訊息取得配對碼，再到 Navide 的 Settings → Channels 核准。"
 MSG_CHAT_TAKEN = "這個聊天室已連接到另一個 pane，請先在那個 pane 解除連接"
 MSG_LOGIN_PANE = "這個 pane 正在登入 CLI 帳號，畫面上有授權網址或代碼，不能連接到聊天室"
 MSG_UNBOUND_CLOSED = "🔌 pane「{name}」已關閉，這個聊天室已中斷連接。"
@@ -138,6 +146,7 @@ MSG_CHAT_RATE = "⚠️ 1 分鐘內傳了超過 {max} 則，這則沒有送進 p
 MSG_EMPTY_REPLY = "（pane 回合結束，沒有文字輸出）"
 MSG_READING_REPLY = "✅ 回合已結束，正在讀取回覆…"
 MSG_REPLY_LATE = "⏳ 回合已結束，但還沒讀到回覆文字；讀到後會補送。"
+MSG_REPLY_LOST = "⚠️ 一直讀不到這回合的回覆文字，先不等了；請到電腦上的視窗查看。"
 MSG_LATE_PREFIX = "（補送）"
 MSG_STILL_RUNNING = "⏳ 仍在執行，完成時會再回覆"
 MSG_USAGE_LIMIT = "⚠️ {agent} 額度已用完，{reset} 重置"
@@ -167,7 +176,12 @@ MSG_PENDING_RELISTED = "↓ 已重新列在下方"
 MSG_HELD_BY_PROMPT = "⚠️ pane 正在等確認，這則訊息沒有送出。{how}"
 MSG_LINKED = "✅ 已連結 Navide。回到 Navide 在 pane 的聊天按鈕選這個聊天室即可。"
 MSG_LINK_FAILED = "⚠️ 連結失敗，請回到 Navide 重新取得代碼"
+MSG_LINK_PENDING = "⏳ 已收到代碼，請回到 Navide 核准這個連結（配對碼：{code}）"
+MSG_LINK_DM_ONLY = "⚠️ 這個代碼只能在和 bot 的私訊裡使用，已失效，請回到 Navide 重新取得代碼"
 LINK_TARGETS = ("direct", "group")
+# Platforms whose "direct" code travels only in a DM deep link (a separate "group"
+# code exists): seeing one in a group means it leaked, so it links nothing there.
+DM_ONLY_LINK_PLATFORMS = frozenset({"telegram"})
 QUICK_ADD_TIMEOUT_S = 10.0  # how long a quick add waits for the platform to accept the credential
 QUICK_ADD_POLL_S = 0.1
 # A whole quick add, the channels lock included: under the window's 45 s (QUICK_ADD_TIMEOUT_MS)
@@ -194,6 +208,10 @@ def _secret_name(platform: str, account: str = DEFAULT_ACCOUNT) -> str:
 def _legacy_secret_name(platform: str) -> str:
     """Where the one bot per platform kept its secret before accounts; still read for "default"."""
     return f"channel-{platform}"
+
+
+async def _no_turn_text() -> str:
+    return ""
 
 
 @dataclass
@@ -262,6 +280,9 @@ class Seams:
     # conversation, or {ok: False, code, started, detail?, agent?}; never a fresh conversation.
     # `started` is False when it was refused before anything was opened
     wake: Callable[[str, str, str], Awaitable[dict[str, Any]]] = lambda *_a: _no_wake()
+    # The text the pane's own log holds for its last turn since a wall-clock time ("" when
+    # it holds none): a direct read, for a run whose log events never came.
+    turn_text: Callable[[str, float], Awaitable[str]] = lambda *_a: _no_turn_text()
 
 
 async def _no_limit() -> dict[str, Any]:
@@ -412,6 +433,9 @@ class ChannelManager:
         self.store = store
         self.gate = SenderGate(store)
         self.invites = LinkInvites()
+        # Invite codes redeemed by someone not yet allowed, by (platform, pairing code):
+        # (the invite code, the redeeming message). Approving that pairing code links the chat.
+        self._pending_links: dict[tuple[str, str], tuple[str, InboundMessage]] = {}
         self._seams = seams
         self._factory_for = factory_for
         self._clock = clock
@@ -1084,12 +1108,27 @@ class ChannelManager:
 
     def pairing_list(self, platform: str | None) -> dict[str, Any]:
         self.gate.prune()
-        return {"ok": True, "requests": [r.public() for r in self.store.list_pairing(platform or None)]}
+        # "invite": the request came from a redeemed link code (see ``_link_chat``).
+        return {"ok": True, "requests": [
+            {**r.public(), "source": "invite" if (r.platform, r.code) in self._pending_links else "pairing"}
+            for r in self.store.list_pairing(platform or None)]}
 
     async def pairing_approve(self, platform: str, code: str) -> dict[str, Any]:
-        req = self.gate.approve(platform, code)
+        via_invite = (platform, normalize_code(code)) in self._pending_links
+        req = self.gate.approve(platform, code, "invite" if via_invite else "pairing")
         if req is None:
             return {"ok": False, "error": "配對碼不存在或已過期 (unknown or expired code)"}
+        pending_link = self._pending_links.pop((platform, req.code), None)
+        if pending_link is not None:
+            # An invite redeemed by this sender: approving it completes that link.
+            invite_code, link_msg = pending_link
+            adapter = self._adapters.get((platform, req.account))
+            if adapter is None:
+                await self._link_failed(platform, invite_code, f"{platform} is not connected")
+                await self._changed()
+            else:
+                await self._complete_link(adapter, link_msg, invite_code)
+            return {"ok": True, "sender_id": req.sender_id}
         # Only the bot the sender wrote to can DM them back (it is stored with the request).
         adapter = self._adapters.get((platform, req.account))
         # The approved sender's DM is a chat the pane picker can offer right away.
@@ -1113,11 +1152,15 @@ class ChannelManager:
 
     async def pairing_reject(self, platform: str, code: str) -> dict[str, Any]:
         req = self.gate.reject(platform, code)
+        pending_link = self._pending_links.pop((platform, req.code), None) if req else None
+        if pending_link is not None:
+            await self._link_failed(platform, pending_link[0], "the link was rejected")
         await self._changed()
         return {"ok": req is not None, **({} if req else {"error": "unknown code"})}
 
     def link_create(self, platform: str, target: str, account: str = DEFAULT_ACCOUNT) -> dict[str, Any]:
-        """A one-time code that links whoever sends it to the bot (see ``_link_chat``)."""
+        """A one-time code that links whoever sends it to the bot once the user approves
+        them (see ``_link_chat``)."""
         _check_platform(platform)
         _check_account(account)
         target = target or "direct"
@@ -1133,7 +1176,10 @@ class ChannelManager:
                 "expires_at": invite.expires_at, "url": url or None}
 
     def allow_list(self, platform: str | None) -> dict[str, Any]:
-        return {"ok": True, "entries": self.store.list_allow(platform or None)}
+        # "shared": a Telegram id that stands for many people; the gate refuses it, and the
+        # UI offers to remove a row that names one (written before that rule).
+        return {"ok": True, "entries": [{**e, "shared": is_shared_sender(e["platform"], e["sender_id"])}
+                                        for e in self.store.list_allow(platform or None)]}
 
     async def allow_remove(self, platform: str, sender_id: str, account: str = DEFAULT_ACCOUNT) -> dict[str, Any]:
         _check_account(account)
@@ -1152,6 +1198,22 @@ class ChannelManager:
             for loc in known():
                 merged[str(loc.get("chat_id"))] = {**merged.get(str(loc.get("chat_id")), {}), **loc}
         return {"ok": True, "locations": list(merged.values())}
+
+    def _chat_usable(self, platform: str, account: str, chat_id: str, kind: str) -> bool:
+        """Whether a message from this chat can pass the sender gate. A Telegram DM's chat
+        id is its user's id, so that one sender is asked about. Any other chat (a group,
+        another platform's DM, a kind not known) names no sender here: all that can be
+        said is that a bot with nobody allowed refuses everyone."""
+        if platform == "telegram" and kind in TELEGRAM_DIRECT_KINDS:
+            return self.gate.is_allowed(platform, chat_id, account)
+        return self.gate.has_linked(platform, account)
+
+    def _bound_needs_approval(self, name: str, loc: Location) -> str:
+        """What a refused chat is told when bound: the code already waiting for it, else how to get one."""
+        self.gate.prune()
+        req = next((r for r in self.store.list_pairing(loc.platform, loc.account) if r.chat_id == loc.chat_id), None)
+        how = MSG_APPROVE_CODE.format(code=f"{req.code[:4]}-{req.code[4:]}") if req else MSG_APPROVE_SEND_FIRST
+        return MSG_BOUND_NEEDS_APPROVAL.format(name=name, how=how)
 
     async def bind(self, pane_id: str, pane_name: str, platform: str, mode: str,
                    chat_id: str, thread_id: str = "", title: str = "", *, verbosity: str = "",
@@ -1207,9 +1269,13 @@ class ChannelManager:
         self.mirror.schedule_sync()  # children the pane already has get their topics now
         # Tell the chat which pane it now drives; off the request path like unbind,
         # on the chat's worker so a quick unbind's notice cannot overtake it.
-        text = MSG_BOUND.format(name=pane_name or loc.title or pane_id)
+        name = pane_name or loc.title or pane_id
+        kind = next((str(c.get("kind") or "") for c in self.locations(platform, account)["locations"]
+                     if str(c.get("chat_id")) == loc.chat_id), "")
+        usable = self._chat_usable(platform, account, loc.chat_id, kind)
+        text = MSG_BOUND.format(name=name) if usable else self._bound_needs_approval(name, loc)
         self._enqueue(loc.key(), lambda: self._notice(adapter, loc, text))
-        return {"ok": True, "binding": binding.public()}
+        return {"ok": True, "binding": binding.public(), **({} if usable else {"needs_approval": True})}
 
     async def unbind(self, pane_id: str, *, reason: str = "", pane_name: str = "") -> dict[str, Any]:
         removed = self.store.unbind(pane_id)
@@ -1397,7 +1463,8 @@ class ChannelManager:
 
     async def _watch_await(self, pane_id: str, held: _AwaitText) -> None:
         """While a hook-ended run waits for its text: say it is being read, then that it
-        will follow; give up quietly once RUN_WATCH_MAX_S has passed."""
+        will follow. Once RUN_WATCH_MAX_S has passed, read the log directly; if that finds
+        nothing either, stop waiting and tell the chat, since it was promised the text."""
         pending = held.pending
 
         def still() -> bool:
@@ -1423,11 +1490,34 @@ class ChannelManager:
         if adapter is not None and not pending.silent:
             await self._notice(adapter, pending.loc, MSG_REPLY_LATE)
         await asyncio.sleep(max(0.0, RUN_WATCH_MAX_S - EMPTY_TURN_GRACE_S))
-        waiting = self._await_text.get(pane_id)
-        if waiting and held in waiting:
-            waiting.remove(held)
-            if not waiting:
-                del self._await_text[pane_id]
+        if not still():
+            return
+        text = await self._reread_turn(pane_id, held)
+        if not still():
+            return
+        if text.strip():
+            self._settle_held(pane_id, held, text)
+            return
+        waiting = self._await_text[pane_id]
+        waiting.remove(held)
+        if not waiting:
+            del self._await_text[pane_id]
+        adapter = self._adapters.get((pending.loc.platform, pending.loc.account))
+        if adapter is not None and not pending.silent:
+            await self._notice(adapter, pending.loc, MSG_REPLY_LOST)
+
+    async def _reread_turn(self, pane_id: str, held: _AwaitText) -> str:
+        """The held run's text straight from the pane's log. With several runs waiting the
+        last text could be any of theirs, so the oldest ones are not answered from it."""
+        if len(self._await_text.get(pane_id, [])) != 1:
+            return ""
+        armed = held.pending.armed_at or held.pending.started
+        since = time.time() - (self._clock() - armed)
+        try:
+            return await self._seams.turn_text(pane_id, since)
+        except Exception as exc:  # noqa: BLE001 — the chat is told either way
+            log.warning("channels: could not read the turn of %s from its log: %s", pane_id, exc)
+            return ""
 
     def _mirror_unclaimed_turn(self, pane_id: str, text: str) -> None:
         """A turn end no chat message asked for (typed at the keyboard, delegated by
@@ -1611,13 +1701,13 @@ class ChannelManager:
         return None
 
     async def _reply(self, msg: InboundMessage, text: str,
-                     buttons: list[tuple[str, str]] | None = None) -> str:
+                     buttons: list[tuple[str, str]] | None = None, typed_hint: str = MSG_TYPED_HINT) -> str:
         adapter = self._adapters.get((msg.platform, msg.account))
         if adapter is None:
             return ""
         loc = Location(msg.platform, msg.account, msg.chat_id, msg.thread_id)
         if not adapter.capabilities.buttons:
-            text += _typed_hint(buttons or [])
+            text += _typed_hint(buttons or [], typed_hint, msg.platform)
             buttons = None
         try:
             ids = await self.mirror.send(loc, text, buttons=buttons)
@@ -1637,11 +1727,12 @@ class ChannelManager:
             return
         if self._is_duplicate(msg):
             return
-        # A live invite code links its sender before the gate: that is its whole point.
+        # A live invite code is handled before the gate: its sender asks to be linked
+        # (an approval request), so the group drop below must not swallow it.
         code = parse_link_code(msg.text) if msg.text and not msg.callback_data else ""
         invite = self.invites.consume(msg.platform, code, msg.account) if code else None
         if invite is not None:
-            self._enqueue(msg.location_key(), lambda: self._link_chat(msg, invite.code))
+            self._enqueue(msg.location_key(), lambda: self._link_chat(msg, invite.code, invite.target))
             return
         if not msg.is_direct and not self.gate.is_allowed(msg.platform, msg.sender_id, msg.account):
             return  # group strangers are dropped silently
@@ -1719,7 +1810,7 @@ class ChannelManager:
         # A typed /wake (offered where there are no buttons) is answered like the button, never
         # sent to the CLI as a prompt.
         wake_asked = wake_pressed or _command_word(
-            quick_menu.strip_mention(msg.text, self._identity(msg))) in WAKE_WORDS
+            quick_menu.strip_mention(msg.text, self._identity(msg))) in _wake_words(msg.platform)
         if wake_asked or key in self._wake_kept:
             # The pane is back (on its own, or a wake asked for before it came back): what
             # was kept for it goes in first, in order.
@@ -1773,12 +1864,13 @@ class ChannelManager:
             await self._reply(msg, wake.text(lang, "no_window"))
             return
         command = quick_menu.strip_mention(msg.text, self._identity(msg))
-        if _command_word(command) in WAKE_WORDS:
+        if _command_word(command) in _wake_words(msg.platform):
             await self._wake(msg, binding, lang)
             return
         word = _command_word(command)
         if _is_stop_word(command) or word in CANCEL_WORDS or word in RESUME_WORDS:
-            await self._reply(msg, wake.text(lang, "offline_wake_nothing_kept"), buttons=WAKE_BUTTONS)
+            await self._reply(msg, wake.text(lang, "offline_wake_nothing_kept"), buttons=wake_buttons(lang),
+                              typed_hint=wake.text(lang, "typed_hint", commands="{commands}"))
             return
         key = binding.location().key()
         kept = await self._live_kept(msg, key, lang)
@@ -1789,7 +1881,8 @@ class ChannelManager:
                                              items=_previews(dropped)))
         self._set_kept(key, kept)
         await self._reply(msg, wake.text(lang, "offline_wake", max=wake.STASH_MAX,
-                                         minutes=int(wake.STASH_TTL_S // 60)), buttons=WAKE_BUTTONS)
+                                         minutes=int(wake.STASH_TTL_S // 60)), buttons=wake_buttons(lang),
+                          typed_hint=wake.text(lang, "typed_hint", commands="{commands}"))
 
     async def _wake(self, msg: InboundMessage, binding: Binding, lang: str) -> None:
         key = binding.location().key()
@@ -1818,6 +1911,8 @@ class ChannelManager:
         current = self._binding_for(msg) or binding
         kept = await self._live_kept(msg, key, lang)
         await self._reply(msg, wake.text(lang, "woke_sent", count=len(kept)) if kept else wake.text(lang, "woke"))
+        if result.get("paid"):
+            await self._reply(msg, wake.text(lang, "woke_paid"))
         await self._deliver_kept(msg, current, pane_id, lang, reserve=0)
 
     def _set_kept(self, key: str, kept: list[tuple[float, InboundMessage]]) -> None:
@@ -2130,31 +2225,64 @@ class ChannelManager:
         self._spawn(self._follow_up(request.pane_id, request.loc, route.child if route else ""))
         await self._reply(msg, MSG_RELAY_PROMPT_CHANGED)
 
-    def _guard_vetoes(self, request: relay.RelayRequest) -> bool:
+    def _guard_vetoes(self, request: relay.RelayRequest, *, record: bool = True) -> bool:
         """Navide Guard on a remote approval: high/critical (or unscreenable)
-        prompts need someone at the computer. Deterministic, never an LLM."""
+        prompts need someone at the computer. Deterministic, never an LLM.
+        ``record=False`` only previews it, for the buttons a prompt offers."""
         if not request.prompt.strip():
             return True  # nothing to screen: a chat approval fails closed
         try:
             workspace = self._seams.pane_workspace(request.pane_id)
         except Exception:  # noqa: BLE001
             workspace = ""
-        return relay.screen_approval(request.pane_id, request.prompt, workspace).action != "allow"
+        return relay.screen_approval(request.pane_id, request.prompt, workspace, record=record).action != "allow"
 
-    async def _link_chat(self, msg: InboundMessage, code: str) -> None:
+    async def _link_chat(self, msg: InboundMessage, code: str, target: str = "") -> None:
+        """An invite code arrived. An allowed sender's chat is linked now; anyone else gets
+        the pairing request a stranger's DM gets, and the link completes when the user
+        approves it (``pairing_approve``). The code never admits anyone by itself."""
         # The invite is already spent, so every way out must reach the waiting UI.
         adapter = self._adapters.get((msg.platform, msg.account))
         if adapter is None:
             await self._link_failed(msg.platform, code, f"{msg.platform} is not connected")
             return
+        if not msg.sender_id or is_shared_sender(msg.platform, msg.sender_id):
+            await self._reply(msg, MSG_LINK_FAILED)
+            await self._link_failed(msg.platform, code, "the sender cannot be identified")
+            return
+        if target == "direct" and not msg.is_direct and msg.platform in DM_ONLY_LINK_PLATFORMS:
+            await self._reply(msg, MSG_LINK_DM_ONLY)
+            await self._link_failed(msg.platform, code, "a direct-message code was sent in a group")
+            return
+        if self.gate.is_allowed(msg.platform, msg.sender_id, msg.account):
+            await self._complete_link(adapter, msg, code)
+            return
         try:
-            if not self.gate.is_allowed(msg.platform, msg.sender_id, msg.account):
-                self.store.add_allow(msg.platform, msg.sender_id, msg.sender_name, int(time.time()), msg.account)
+            outcome = self.gate.request_pairing(msg.platform, msg.sender_id, msg.sender_name, msg.chat_id,
+                                                msg.account)
         except Exception as exc:  # noqa: BLE001 — reported to the sender and the UI below
-            log.warning("channels: allowlisting linked sender on %s failed: %s", msg.platform, exc)
+            log.warning("channels: pairing request for linked sender on %s failed: %s", msg.platform, exc)
             await self._reply(msg, MSG_LINK_FAILED)
             await self._link_failed(msg.platform, code, str(exc))
             return
+        if outcome.request is None:
+            await self._reply(msg, MSG_LINK_FAILED)
+            await self._link_failed(msg.platform, code, "too many pairing requests are waiting for approval")
+            return
+        live = {(r.platform, r.code) for r in self.store.list_pairing(None)}
+        self._pending_links = {k: v for k, v in self._pending_links.items() if k in live}
+        pairing_code = outcome.request.code
+        self._pending_links[(msg.platform, pairing_code)] = (code, msg)
+        await self._reply(msg, MSG_LINK_PENDING.format(code=f"{pairing_code[:4]}-{pairing_code[4:]}"))
+        if outcome.created:
+            await self._seams.broadcast("channels.pairing_request", {
+                "platform": msg.platform, "account": msg.account, "code": pairing_code,
+                "sender_name": msg.sender_name,
+            })
+        await self._changed()
+
+    async def _complete_link(self, adapter: ChannelAdapter, msg: InboundMessage, code: str) -> None:
+        """Remember an allowed sender's chat from invite ``code``, confirm it there and tell the UI."""
         kind = "direct" if msg.is_direct else "group"
         title = msg.sender_name
         if not msg.is_direct:
@@ -3091,6 +3219,14 @@ class ChannelManager:
         prompt = str(info.get("prompt") or "")
         kind = str(info.get("kind") or "") or "permission"
         options = [str(o) for o in (info.get("options") or [])]
+        if not options and str(info.get("agent") or "") in relay.MENU_AGENTS:
+            # No menu on screen, nothing to answer: the input box and footer an
+            # answered question leaves while the pane's AWAITING badge settles.
+            # A prompt relayed earlier stays up; leaving awaiting settles it.
+            shown = self._awaiting_shown.get(pane_id)
+            self._awaiting_failures.pop(pane_id, None)
+            self._awaiting_shown[pane_id] = _Shown(prompt, shown.request_id if shown else "")
+            return
         if kind == "question" and not options:
             # A plain-text question at turn end: the turn's text already reached the
             # chat, and a typed reply goes in like any message.
@@ -3113,6 +3249,9 @@ class ChannelManager:
         request = self.relay.create(pane_id, kind, options, loc, prompt=prompt,
                                     agent_key=str(info.get("agent") or ""),
                                     multi=any(relay.is_multi_select(o) for o in options))
+        if kind == "permission":
+            # An 允許 the guard is bound to refuse would only look like a dead button.
+            request.local_only = self._guard_vetoes(request, record=False)
         text = who + relay.prompt_text(request, prompt)
         buttons = _relay_buttons(adapter, request)
         try:
@@ -3250,8 +3389,10 @@ class ChannelManager:
                 "chat_id": b.chat_id, "title": "", "kind": "",
                 "supports_topics": bool(b.thread_id), "bindings": []})
             pane = self._pane_info(b, directory)
+            usable = self._chat_usable(b.platform, b.account, b.chat_id, chat["kind"])
             chat["bindings"].append({**b.public(), "pane_id": self._seams.resolve_pane(b.pane_id) or b.pane_id,
-                                     "created_at": b.created_at, "pane": pane})
+                                     "created_at": b.created_at, "pane": pane,
+                                     **({} if usable else {"needs_approval": True})})
             if not pane["exists"]:
                 entry["orphans"].append(b.pane_id)
         return {"ok": True, "bots": [{**v, "chats": list(v["chats"].values())} for v in bots.values()]}
@@ -3377,12 +3518,27 @@ def _previews(kept: list[tuple[float, InboundMessage]]) -> str:
     return wake.quoted([_preview(m) for _, m in kept])
 
 
-def _typed_hint(buttons: list[tuple[str, str]]) -> str:
+def _typed_hint(buttons: list[tuple[str, str]], template: str = MSG_TYPED_HINT, platform: str = "") -> str:
     """The commands ``buttons`` stand for, for a platform that cannot show them; "" when
     none of them has a typed form."""
-    commands = [f"{_CALLBACK_COMMANDS[data]} {label.split(' ', 1)[-1]}"
+    commands = [f"{_typed_command(data, platform)} {label.split(' ', 1)[-1]}"
                 for label, data in buttons if data in _CALLBACK_COMMANDS]
-    return "\n" + MSG_TYPED_HINT.format(commands=" · ".join(commands)) if commands else ""
+    return "\n" + template.format(commands=" · ".join(commands)) if commands else ""
+
+
+def _typed_command(data: str, platform: str) -> str:
+    if platform == "mattermost" and data == WAKE_CALLBACK:
+        return MATTERMOST_WAKE_WORD
+    return _CALLBACK_COMMANDS[data]
+
+
+def _wake_words(platform: str) -> set[str]:
+    return WAKE_WORDS | {MATTERMOST_WAKE_WORD} if platform == "mattermost" else WAKE_WORDS
+
+
+def wake_buttons(lang: str) -> list[tuple[str, str]]:
+    """WAKE_BUTTONS in the Navide language."""
+    return [(wake.text(lang, "button"), WAKE_CALLBACK)]
 
 
 def _command_word(text: str) -> str:

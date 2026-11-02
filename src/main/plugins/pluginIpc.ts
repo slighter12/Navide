@@ -24,11 +24,13 @@ import {
   isUpdateAvailable,
   defaultInstallerDeps,
   InstallError,
+  localVersionAlreadyInstalled,
   type PreparedInstall,
   type InstallerTrustConfig,
 } from './pluginInstaller'
 import { developerRegistryDownload, developerRegistryFetch, registryError } from './developerAccount'
 import type { DeveloperCallResult } from '../../shared/marketplaceDeveloper'
+import { registryClockRefusal, type RegistryClockRefusal } from '../../shared/registryClock'
 import {
   sensitiveCapabilities,
   assertRegistryUrlAllowed,
@@ -101,6 +103,7 @@ import {
 } from './pluginNativeBackendData'
 import { packOnlyMembers, PluginPackStore, type InstalledPackRecord } from './pluginPackStore'
 import type {
+  BackgroundAiSession,
   FrontendPluginManager,
   PluginLaunchDescriptor,
   PluginPackageRestartTransaction,
@@ -620,6 +623,15 @@ export interface PluginIpcOptions {
     /** Set when an agent's automatic update (O1) drove the switch. */
     agent?: PluginAgentRequester
   }) => void
+  /** H1: a switch between installed versions (Restart, an update taking
+   *  effect, Back to) passed its readiness check and is about to drain the
+   *  running views ('start'), then settled, switched or not ('end'). Lets the
+   *  main window show the plugin's views as switching. */
+  onPackageSwitching?: (notice: {
+    pluginId: string
+    toVersion: string
+    phase: 'start' | 'end'
+  }) => void
   /** O1: an agent's automatic update was staged but its switch failed; the
    *  old version runs again and the main window keeps a row to apply it. */
   onPackageSwitchFailed?: (notice: {
@@ -668,10 +680,17 @@ export interface PluginIpcOptions {
   pickLocalPackageFile?: (event: IpcMainInvokeEvent) => Promise<string | null>
   /** Card K3 (D7): drop the native backend consent and the agent tool write
    * answers of a package whose source changed, so nothing carries over. */
-  forgetBackendConsent?: (pluginId: string) => void
+  forgetBackendConsent?: (pluginId: string, keepInstallConsentFor?: string) => void
+  /** 0.2.31: the user confirmed this version's install dialog, which
+   *  discloses its native backend; its first start counts that as consent. */
+  noteInstallConsent?: (pluginId: string, packageVersion: string) => void
   /** `<userData>/plugin-storage-v2`: view storage, set aside with the native
    * backend data when a package's source changes (card K3, D7). */
   pluginStorageRoot?: string
+  /** H1: copy only the SDK view state (`view-state:` keys) of one version's
+   * storage over the same keys of another's. Called for a switch within one
+   * source only; a failure is logged and never fails the switch. */
+  carryPluginViewState?: (pluginId: string, fromVersion: string, toVersion: string) => Promise<void>
   /** Card K4: the Host's own folder dialog, parented to the window that
    * asked. Absent, loading from a folder is unavailable. */
   pickDeveloperFolder?: (event: IpcMainInvokeEvent) => Promise<string | null>
@@ -1313,6 +1332,11 @@ export function registerPluginIpc(
     return listInstalledSummaries()
   })
 
+  ipcMain.handle('plugins:listCommands', (event) => {
+    assertAuthorized(event)
+    return manager.listCommandCatalog()
+  })
+
   ipcMain.handle('plugins:listContributions', (event) => {
     assertAuthorized(event)
     const installed = new Map(manager.listInstalledPackages().map((pkg) => [pkg.id, pkg] as const))
@@ -1343,6 +1367,23 @@ export function registerPluginIpc(
   ipcMain.handle('plugins:backendCallConcurrency', (event): BackendCallConcurrency[] => {
     assertAuthorized(event)
     return options.backendCallConcurrency?.() ?? []
+  })
+
+  // A third-party package's AI CLI sessions that keep running after their view
+  // closed, and ending one of them. Disclosure, not a limit: nothing is ended
+  // unless the user asks.
+  ipcMain.handle('plugins:backgroundAiSessions', (event, args: { id?: unknown } | null): BackgroundAiSession[] => {
+    assertAuthorized(event)
+    return typeof args?.id === 'string' ? manager.backgroundAiSessions(args.id) : []
+  })
+
+  ipcMain.handle('plugins:endBackgroundAiSession', (
+    event,
+    args: { id?: unknown; sessionId?: unknown } | null,
+  ): { ok: boolean } => {
+    assertAuthorized(event)
+    if (typeof args?.id !== 'string' || typeof args.sessionId !== 'string') return { ok: false }
+    return { ok: manager.endBackgroundAiSession(args.id, args.sessionId) }
   })
 
   // Plan B D-f: one installed plugin's activity report. The Host fills
@@ -2523,6 +2564,14 @@ export function registerPluginIpc(
   type CommitInstallArgs = {
     id: string; publisherConfirmed?: boolean; riskConfirmed?: boolean; replaceConfirmed?: boolean; reattachBackendData?: boolean
   }
+  // Bookkeeping only: a failed save means the first start asks instead.
+  const noteInstallConsent = (pluginId: string, packageVersion: string): void => {
+    try {
+      options.noteInstallConsent?.(pluginId, packageVersion)
+    } catch (error) {
+      console.warn(`[plugins] install consent for ${pluginId} not recorded: ${errorText(error)}`)
+    }
+  }
   // Shared by the window's install flow and an agent's unchanged update (O1).
   const commitRegistryInstall = async (args: CommitInstallArgs) => {
       assertNoDeveloperFolder(args.id)
@@ -2637,7 +2686,10 @@ export function registerPluginIpc(
   }
   ipcMain.handle('plugins:commitInstall', async (event, args: CommitInstallArgs) => {
     assertAuthorized(event)
-    return activateIfFirstInstall(await commitRegistryInstall(args))
+    const version = prepared.get(args.id)?.pkg.version
+    const committed = await commitRegistryInstall(args)
+    if (version !== undefined) noteInstallConsent(committed.id, version)
+    return activateIfFirstInstall(committed)
   })
 
   // DX report A1 (card K3): install a `.vsix` the user picked in this window.
@@ -2741,6 +2793,10 @@ export function registerPluginIpc(
     }
     assertNoDeveloperFolder(pkg.id)
     assertEngineCompatible(pkg.id, pkg.version, pkg.manifest, hostAppVersion())
+    // Said now, before the consent dialog, in the words staging would use.
+    if (localVersionAlreadyInstalled(pkg, pluginsRoot)) {
+      throw new InstallError(`immutable candidate already exists for ${pkg.id}@${pkg.version}`)
+    }
     preparedLocal.set(pkg.id, pkg)
     const replaced = manager.listInstalledPackages().find((item) => item.id === pkg.id)
     const agentTools = isManifestV2(pkg.manifest) ? computeDisclosure(pkg.manifest).agentTools : []
@@ -2782,6 +2838,15 @@ export function registerPluginIpc(
         : backendDataOnReplace(pkg.id, 'local-unsigned')),
     }
   }
+
+  // #643 review L1: after a failed approval of a file install, whether the
+  // copy the dialog showed (its digest) is still held here, refused before it
+  // was used, so the dialog asks for the file again only once it is gone.
+  ipcMain.handle('plugins:preparedLocalInstall', (event, args: { id?: unknown; digest?: unknown } | null) => {
+    assertAuthorized(event)
+    const pkg = typeof args?.id === 'string' ? preparedLocal.get(args.id) : undefined
+    return { present: pkg !== undefined && typeof args?.digest === 'string' && pkg.digest === args.digest }
+  })
 
   ipcMain.handle('plugins:installFromFile', async (event) => {
     assertAuthorized(event)
@@ -2915,6 +2980,7 @@ export function registerPluginIpc(
       } finally {
         activeTransactions.delete(id)
       }
+      noteInstallConsent(id, pkg.version)
       return activateIfFirstInstall(committed)
     }
   )
@@ -3102,6 +3168,12 @@ export function registerPluginIpc(
       }
       return
     }
+    try {
+      await preflightDeveloperFolder(consent.path)
+    } catch (error) {
+      failed(error)
+      return
+    }
     autoReloading.add(pluginId)
     let loaded = false
     try {
@@ -3147,6 +3219,47 @@ export function registerPluginIpc(
     }).catch((error: unknown) => {
       console.warn(`[plugins] automatic reload of ${pluginId} failed: ${errorText(error)}`)
     })
+  }
+
+  /** Plan 4a05af P1: before the running version is unloaded, the folder's
+   * views are opened hidden and must report ready(), the check an install or
+   * update preflight makes; one that does not keeps the running version. The
+   * backend is not started here, so two versions of it never run at once: it
+   * still stops and starts with the switch. */
+  const preflightDeveloperFolder = async (dir: string): Promise<void> => {
+    await preflightViews(loadPluginDir(dir).descriptor)
+  }
+
+  /** The hidden-view readiness check of a package about to become active:
+   * a developer folder before its reload, and (H1) an installed version right
+   * before a switch drains the running one. A package without views has
+   * nothing to check; its backend is never started early. */
+  const preflightViews = async (descriptor: PluginLaunchDescriptor | undefined): Promise<void> => {
+    if (descriptor?.views?.length && options.preflightCandidateFrontend) {
+      await options.preflightCandidateFrontend(descriptor)
+    }
+  }
+
+  /** H1: tell the main window a switch drains views now, or has settled. A
+   * failure to tell never affects the switch. */
+  const reportSwitching = (pluginId: string, toVersion: string, phase: 'start' | 'end'): void => {
+    try {
+      options.onPackageSwitching?.({ pluginId, toVersion, phase })
+    } catch (error) {
+      console.warn(`[plugins] switching notice of ${pluginId} was not sent: ${errorText(error)}`)
+    }
+  }
+
+  /** H1: within one source, a switch hands the SDK view state of the version
+   * that ran to the one that runs next, so remounted views restore it. A
+   * failed copy is logged; the switch goes on. */
+  const carryViewState = async (pluginId: string, fromVersion: string, toVersion: string): Promise<void> => {
+    if (!options.carryPluginViewState || fromVersion === toVersion) return
+    try {
+      await options.carryPluginViewState(pluginId, fromVersion, toVersion)
+    } catch (error) {
+      console.warn(`[plugins] view state of ${pluginId} was not carried to ${toVersion}: ${errorText(error)}`)
+    }
   }
 
   const unloadDeveloperFolder = async (pluginId: string): Promise<void> => {
@@ -3249,6 +3362,22 @@ export function registerPluginIpc(
     return developerModeState()
   })
 
+  // Card K4: the launch reminder closes for this launch in every window, since
+  // each workspace window mounts its own copy. Memory only, so the next launch
+  // reminds again.
+  let developerModeReminderDismissed = false
+  ipcMain.handle('plugins:developerModeReminderDismissed', (event) => {
+    assertAuthorized(event)
+    return developerModeReminderDismissed
+  })
+  ipcMain.handle('plugins:dismissDeveloperModeReminder', (event) => {
+    assertAuthorized(event)
+    developerModeReminderDismissed = true
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('plugins:developerModeReminderDismissed')
+    }
+  })
+
   ipcMain.handle('plugins:setDeveloperMode', async (event, args: { enabled?: unknown } | null) => {
     assertAuthorized(event)
     if (typeof args?.enabled !== 'boolean') throw new Error('invalid Developer Mode switch value')
@@ -3339,6 +3468,7 @@ export function registerPluginIpc(
       consentedAt: new Date().toISOString(),
     })
     folderMeta.setLoadedBy(id, pending.dir, pending.loadedBy)
+    if (typeof described.summary.version === 'string') noteInstallConsent(id, described.summary.version)
     activateDeveloperFolder(id, 'user-load')
     return developerModeState()
   })
@@ -3422,6 +3552,7 @@ export function registerPluginIpc(
         preparedFolders.set(described.pluginId, { dir: consent.path, permissionsDigest: described.permissionsDigest, loadedBy: { kind: 'user' } })
         return { reloaded: false as const, requiresConsent: true as const, prepared: described.summary }
       }
+      await preflightDeveloperFolder(consent.path)
       await unloadDeveloperFolder(id)
       if (activateDeveloperFolder(id, 'manual-reload')) {
         reloadErrors.delete(id)
@@ -3690,6 +3821,30 @@ export function registerPluginIpc(
     return checkedExpiredTestplaceBuilds()
   })
 
+  // Disclose, don't restrict: an installed Registry package that is stopped
+  // because its trust data fails against this computer's clock. Only the
+  // console said so before; the Extensions page lists these and points at the
+  // clock. The check itself is the unchanged startup / refresh check.
+  ipcMain.handle('plugins:clockQuarantine', (event): Array<{ id: string; version: string | null; clock: RegistryClockRefusal }> => {
+    assertAuthorized(event)
+    const loaded = new Set(manager.listInstalledPackages().map((pkg) => pkg.id))
+    return discoverInstalledRegistryPackageIds(pluginsRoot).flatMap((id) => {
+      if (loaded.has(id)) return []
+      try {
+        const active = lifecycleSelector.read(id)?.active
+        const dir = active ? lifecycleSelector.packageDir(id, active) : join(pluginsRoot, id)
+        const decision = verifyInstalledRegistryPackage(dir, id, currentRegistryTrustContext())
+        if (decision.action !== 'quarantine') return []
+        const clock = registryClockRefusal(decision.reason)
+        if (!clock) return []
+        const receipt = JSON.parse(readFileSync(join(dir, REGISTRY_RECEIPT_NAME), 'utf8')) as Record<string, unknown>
+        return [{ id, version: typeof receipt.version === 'string' ? receipt.version : null, clock }]
+      } catch {
+        return []
+      }
+    })
+  })
+
   // "Keep using (expired)": the user's choice for this exact artifact. It is
   // loaded again at once; an update or a new install of the id asks again.
   ipcMain.handle('plugins:keepExpiredTestplace', async (event, args: { id?: unknown } | null): Promise<{ ok: true }> => {
@@ -3875,7 +4030,9 @@ export function registerPluginIpc(
     const finishSourceReplacement = (): void => {
       if (!sourceReplaced) return
       if (!localToLocal) lifecycleSelector.forgetPrevious(id)
-      options.forgetBackendConsent?.(id)
+      // The candidate's own install dialog (0.2.31) is not the replaced
+      // package's consent, so it stays.
+      options.forgetBackendConsent?.(id, selectedBeforeRestart.candidate?.packageVersion)
       if (!localCandidate) forgetLocalTrustRecords(pluginsRoot, id)
     }
     const legacyDir = join(pluginsRoot, id)
@@ -3934,6 +4091,7 @@ export function registerPluginIpc(
     let restartTransaction: PluginPackageRestartTransaction | undefined
     let drainedBackendOnly = false
     let promoted = false
+    let switching = false
     try {
       if (!selectedBeforeRestart.active && previousVersion && previousGrant &&
           (previousDescriptor?.packageDir === legacyDir || legacyBackendOnly)) {
@@ -3951,6 +4109,14 @@ export function registerPluginIpc(
           artifactDigest: legacyTrust.artifactDigest,
           layout: 'legacy-mutable',
         }, previousGrant)
+      }
+      // H1: the version about to run proves its views report ready before
+      // anything of the running one is drained; a failure here leaves it
+      // running and the update staged. The backend is never started early.
+      await preflightViews(scanned.descriptor)
+      if (previousVersion) {
+        switching = true
+        reportSwitching(id, selectedBeforeRestart.candidate.packageVersion, 'start')
       }
       lifecycleSelector.beginActivation(id, previousGrant && !isFactory ? { previousGrant } : {})
       if (previousVersion) {
@@ -4033,6 +4199,11 @@ export function registerPluginIpc(
         })
       }
       options.onActivationChange?.({ pluginId: id, activation })
+      // H1: within one source, the remounted views restore the view state the
+      // replaced version left; a change of source hands over nothing (D7).
+      if (previousVersion && scanned.descriptor && !sourceReplaced && !isFactory) {
+        await carryViewState(id, previousVersion, selected.active!.packageVersion)
+      }
       if (restartTransaction && !scanned.descriptor) {
         manager.completePackageRestartWithoutFrontend(restartTransaction)
         restartTransaction = undefined
@@ -4218,6 +4389,7 @@ export function registerPluginIpc(
       throw error
     } finally {
       activeTransactions.delete(id)
+      if (switching) reportSwitching(id, selectedBeforeRestart.candidate.packageVersion, 'end')
     }
   }
 
@@ -4527,11 +4699,21 @@ export function registerPluginIpc(
     // A backend-only activation has no descriptor, but its exact active
     // selector identity still owns a live runtime that must drain first.
     const currentVersion = currentDescriptor?.packageVersion ?? selectedBeforeRollback.active.packageVersion
+    // H1: going back within one source carries the view state; a kept file
+    // version never takes another file's data (MED-4).
+    const sameSource = !previousIsLocal &&
+      dataSourceOf(manager.listInstalledPackages().find((pkg) => pkg.id === id)) === 'marketplace'
     activeTransactions.add(id)
     let restartTransaction: PluginPackageRestartTransaction | undefined
     let drainedBackendOnly = false
     let promoted = false
+    let switching = false
     try {
+      // H1: the version gone back to proves its views report ready before the
+      // running one is drained; a failure here leaves the running one as is.
+      await preflightViews(previousScanned.descriptor)
+      switching = true
+      reportSwitching(id, previous.packageVersion, 'start')
       lifecycleSelector.beginRollback(id)
       if (currentDescriptor) {
         restartTransaction = await manager.beginPackageRestart(id, currentVersion)
@@ -4568,6 +4750,9 @@ export function registerPluginIpc(
           artifactDigest: currentPreviousTrust.artifactDigest,
         },
       })
+      if (sameSource && previousScanned.descriptor) {
+        await carryViewState(id, currentVersion, selected.active!.packageVersion)
+      }
       if (restartTransaction && previousScanned.descriptor) {
         const report = await manager.restorePackageRestart(restartTransaction, selected.active!.packageVersion)
         manager.completePackageRestart(restartTransaction)
@@ -4622,16 +4807,17 @@ export function registerPluginIpc(
       throw error
     } finally {
       activeTransactions.delete(id)
+      if (switching) reportSwitching(id, previous.packageVersion, 'end')
     }
   })
 
   const uninstallPlugin = async (rawId: unknown, rawDataChoice?: unknown): Promise<{ ok: true }> => {
     const id = assertPluginRemovalTarget(pluginsRoot, rawId)
-    // Plans, Git and Mini-IDE ship with Navide and can only be disabled; no
-    // other `navide.` package is removable, so its storage and grant always
-    // stay. A Marketplace first-party package (navide.browser) is the one
-    // exception: it installs from the Official Registry and is removed like
-    // any Marketplace package.
+    // Plans, Git, Mini-IDE and Browser ship with Navide and can only be
+    // disabled; no other `navide.` package is removable, so its storage and
+    // grant always stay. A Marketplace first-party package that is not bundled
+    // is the one exception: it installs from the Official Registry and is
+    // removed like any Marketplace package.
     if (isReservedPluginId(id) && !manager.isMarketplaceFirstPartyPackage(id)) {
       throw new Error(`first-party plugin ${id} cannot be removed or restored`)
     }

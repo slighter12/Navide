@@ -27,7 +27,7 @@ from agent_team_backend.channels.manager import (
     ChannelManager,
     Seams,
 )
-from agent_team_backend.channels.store import ChannelStore
+from agent_team_backend.channels.store import ChannelStore, PairingRequest
 from agent_team_backend.db import Database
 
 # Unique per call: time.monotonic_ns() repeats within a ~15.6 ms tick on Windows.
@@ -116,7 +116,10 @@ class FakeSeams:
         self.kind = "permission"
         self.prompt = "Allow Bash(npm run build)?"
         self.options: list[str] = []
+        self.agent = ""  # "" keeps the window-reports-no-vendor behaviour
         self.gone: set[str] = set()
+        self.turn_texts: list[str] = []  # what the log gives on a direct read, in turn
+        self.turn_text_calls: list[tuple[str, float]] = []
         self.answers: list[tuple[str, dict[str, Any]]] = []
         self.answer_result: dict[str, Any] = {"ok": True}
         self.expected: list[dict[str, Any] | None] = []
@@ -159,7 +162,7 @@ class FakeSeams:
         return self.states.get(pane_id, {"exists": True, "busy": False, "display_status": "idle"})
 
     async def awaiting_info(self, pane_id: str) -> dict[str, Any]:
-        return {"kind": self.kind, "prompt": self.prompt, "options": self.options}
+        return {"kind": self.kind, "prompt": self.prompt, "options": self.options, "agent": self.agent}
 
     async def limit_info(self, pane_id: str) -> dict[str, Any]:
         self.limit_probes += 1
@@ -190,6 +193,10 @@ class FakeSeams:
         self.mcp_tool_calls.append(name)
         return self.mcp_tools.get(name, [])
 
+    async def turn_text(self, pane_id: str, since_s: float) -> str:
+        self.turn_text_calls.append((pane_id, since_s))
+        return self.turn_texts.pop(0) if self.turn_texts else ""
+
     def seams(self) -> Seams:
         return Seams(deliver=self.deliver, await_verdict=self.await_verdict, interrupt=self.interrupt,
                      pane_state=self.pane_state, awaiting_info=self.awaiting_info, answer=self.answer,
@@ -199,7 +206,7 @@ class FakeSeams:
                      agent_skills=lambda a: self.skills.get(a, []), limit_info=self.limit_info,
                      agent_mcp=lambda a: [dict(r) for r in self.mcp_native.get(a, [])],
                      navide_mcp=self.navide_mcp, navide_mcp_tools=self.navide_mcp_tools,
-                     cancel=self.cancel, resume=self.resume)
+                     cancel=self.cancel, resume=self.resume, turn_text=self.turn_text)
 
 
 def _said(env: "Env", needle: str) -> bool:
@@ -801,6 +808,123 @@ async def test_bind_tells_the_chat_which_pane_it_drives(env: Env) -> None:
     assert res["ok"] is True
     await _until(lambda: any(t.startswith("🔗") for t in env.tg.texts()))
     assert "🔗 已連接 pane「api-refactor」，在這裡傳的訊息會送進這個 pane；傳 stop 可以中斷。" in env.tg.texts()
+
+
+def _seen_dm(env: Env, chat_id: str, kind: str = "private") -> None:
+    """The bot saw a DM from ``chat_id``: the adapter records it before the sender gate."""
+    env.tg.known_locations = lambda: [{"chat_id": chat_id, "title": "stranger", "kind": kind,  # type: ignore[attr-defined]
+                                       "supports_topics": False}]
+
+
+async def _bound_text(env: Env, adapter: FakeAdapter, needle: str = "pane「api-refactor」") -> str:
+    await _until(lambda: any(needle in t for t in adapter.texts()))
+    return next(t for t in adapter.texts() if needle in t)
+
+
+async def test_binding_a_stranger_dm_says_its_sender_must_be_approved_first(env: Env) -> None:
+    _seen_dm(env, "42")
+
+    res = await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "42", "")
+
+    assert res["ok"] is True and res["needs_approval"] is True
+    assert any(b.pane_id == "pane-2" and b.chat_id == "42" for b in env.store.bindings())  # the bind stands
+    text = await _bound_text(env, env.tg)
+    assert text == mgr_mod.MSG_BOUND_NEEDS_APPROVAL.format(name="api-refactor", how=mgr_mod.MSG_APPROVE_SEND_FIRST)
+    assert "Settings → Channels" in text
+    assert not env.m.gate.is_allowed("telegram", "42")  # telling the truth admits nobody
+
+
+async def test_binding_quotes_the_pairing_code_already_waiting_for_that_chat(env: Env) -> None:
+    await env.inbound("hello", sender="42", chat="42", thread="", direct=True)
+    code = next(r.code for r in env.store.list_pairing("telegram") if r.sender_id == "42")
+    _seen_dm(env, "42")
+
+    res = await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "42", "")
+
+    assert res["needs_approval"] is True
+    text = await _bound_text(env, env.tg)
+    assert f"{code[:4]}-{code[4:]}" in text
+    assert mgr_mod.MSG_APPROVE_SEND_FIRST not in text
+
+
+async def test_binding_does_not_quote_an_expired_code_or_another_chats(env: Env) -> None:
+    env.store.add_pairing(PairingRequest("telegram", "AAAABBBB", "42", "old", "42", 1))
+    env.store.add_pairing(PairingRequest("telegram", "CCCCDDDD", "43", "other", "43", int(time.time())))
+    _seen_dm(env, "42")
+
+    await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "42", "")
+
+    text = await _bound_text(env, env.tg)
+    assert "AAAA" not in text and "CCCC" not in text
+    assert mgr_mod.MSG_APPROVE_SEND_FIRST in text
+
+
+async def test_binding_an_approved_dm_is_exactly_the_plain_confirmation(env: Env) -> None:
+    env.store.add_allow("telegram", "42", "bob", 1)
+    _seen_dm(env, "42")
+
+    res = await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "42", "")
+
+    assert set(res) == {"ok", "binding"}
+    assert await _bound_text(env, env.tg) == mgr_mod.MSG_BOUND.format(name="api-refactor")
+
+
+async def test_a_dm_remembered_in_the_store_counts_as_direct(env: Env) -> None:
+    env.store.remember_chat("telegram", mgr_mod._bot_key(env.tg), "42", "bob", "direct", False, 1)  # noqa: SLF001
+
+    assert (await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "42", ""))["needs_approval"] is True
+
+
+async def test_a_chat_of_unknown_kind_is_not_taken_for_a_dm(env: Env) -> None:
+    """Never seen, or seen without a type: only "nobody is allowed on this bot" can be said."""
+    res = await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "42", "")
+
+    assert set(res) == {"ok", "binding"}
+    assert await _bound_text(env, env.tg) == mgr_mod.MSG_BOUND.format(name="api-refactor")
+
+
+async def test_a_group_on_a_bot_with_nobody_allowed_is_flagged(env: Env) -> None:
+    b = await _second_bot(env)
+
+    res = await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "-100", "50", account="bot-b1")
+
+    assert res["needs_approval"] is True
+    assert mgr_mod.MSG_APPROVE_SEND_FIRST in await _bound_text(env, b)
+
+
+async def test_a_group_on_a_bot_with_someone_allowed_is_the_plain_confirmation(env: Env) -> None:
+    await env.m.unbind("pane-1")
+
+    res = await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "-100", "50")
+
+    assert set(res) == {"ok", "binding"}
+
+
+async def test_another_platforms_dm_is_judged_by_the_bot_not_by_its_chat_id(env: Env) -> None:
+    """Off Telegram a DM's chat id is not its user's id, so ``is_allowed(chat_id)`` means nothing."""
+    assert (await env.m.configure("discord", {}, {"token": "tok-" + "D"}))["ok"]
+    d = env.adapters["discord"]
+    d.known_locations = lambda: [{"chat_id": "900", "title": "dm", "kind": "direct",  # type: ignore[attr-defined]
+                                  "supports_topics": False}]
+
+    alone = await env.m.bind("pane-2", "api-refactor", "discord", "existing", "900", "")
+    assert alone["needs_approval"] is True
+    env.store.add_allow("discord", "7", "alice", 1)
+    linked = await env.m.bind("pane-2", "api-refactor", "discord", "existing", "900", "")
+    assert "needs_approval" not in linked
+
+
+async def test_rebind_of_a_refused_chat_posts_nothing_new(env: Env) -> None:
+    _seen_dm(env, "42")
+    await env.m.bind("pane-2", "api-refactor", "telegram", "existing", "42", "")
+    await _bound_text(env, env.tg)
+    before = list(env.tg.texts())
+
+    res = await env.m.rebind("pane-2", "pane-3")
+
+    assert "needs_approval" not in res
+    await env.m.wait_idle()
+    assert env.tg.texts() == before
 
 
 async def test_a_chat_cannot_be_bound_to_a_cli_sign_in_pane(env: Env) -> None:
@@ -1725,6 +1849,9 @@ async def test_a_link_code_only_works_on_the_bot_that_issued_it(env: Env) -> Non
     await env.inbound(f"/start {code}", sender="99", chat="99", thread="", direct=True)
     assert not env.store.is_allowed("telegram", "99")  # the default bot does not know it
     await env.inbound(f"/start {code}", sender="99", chat="99", thread="", direct=True, account="bot-b1")
+    # The redeemed code waits for approval on the bot that issued it.
+    [req] = env.store.list_pairing("telegram", "bot-b1")
+    assert (await env.m.pairing_approve("telegram", req.code))["ok"]
     assert env.store.is_allowed("telegram", "99", "bot-b1") and not env.store.is_allowed("telegram", "99")
     assert any("已連結" in t for t in b.texts())
 
@@ -1974,6 +2101,70 @@ async def test_text_later_than_the_grace_follows_as_a_late_reply(env: Env, monke
     await _until(lambda: _said(env, mgr_mod.MSG_LATE_PREFIX + "slow reply"))
 
 
+def _short_watch(monkeypatch) -> None:
+    monkeypatch.setattr(mgr_mod, "LATE_TEXT_STATUS_AFTER_S", 0.01)
+    monkeypatch.setattr(mgr_mod, "EMPTY_TURN_GRACE_S", 0.02)
+    monkeypatch.setattr(mgr_mod, "RUN_WATCH_MAX_S", 0.06)
+
+
+async def test_the_log_is_read_once_before_a_held_reply_is_given_up(env: Env, monkeypatch) -> None:
+    _short_watch(monkeypatch)
+    env.fake.turn_texts = ["read directly"]
+    await env.inbound("go")
+    await _delivered(env)
+    _hook_end(env)
+    await _until(lambda: _said(env, mgr_mod.MSG_LATE_PREFIX + "read directly"))
+    assert len(env.fake.turn_text_calls) == 1
+    assert env.fake.turn_text_calls[0][0] == "pane-1"
+    assert not _said(env, mgr_mod.MSG_REPLY_LOST)
+    assert "pane-1" not in env.m._await_text
+
+
+async def test_a_reply_that_cannot_be_read_tells_the_chat(env: Env, monkeypatch) -> None:
+    _short_watch(monkeypatch)
+    await env.inbound("go")
+    await _delivered(env)
+    _hook_end(env)
+    await _until(lambda: _said(env, mgr_mod.MSG_REPLY_LOST))
+    assert len(env.fake.turn_text_calls) == 1
+    assert "pane-1" not in env.m._await_text
+
+
+async def test_a_failed_read_still_tells_the_chat(env: Env, monkeypatch) -> None:
+    _short_watch(monkeypatch)
+
+    async def broken(_pane: str, _since: float) -> str:
+        raise OSError("gone")
+
+    env.m._seams.turn_text = broken
+    await env.inbound("go")
+    await _delivered(env)
+    _hook_end(env)
+    await _until(lambda: _said(env, mgr_mod.MSG_REPLY_LOST))
+
+
+async def test_a_reply_the_log_delivers_never_reads_the_file(env: Env, monkeypatch) -> None:
+    _short_watch(monkeypatch)
+    await env.inbound("go")
+    await _delivered(env)
+    _hook_end(env)
+    _log_end(env, "on time")
+    await _until(lambda: _said(env, "on time"))
+    await asyncio.sleep(0.1)  # past the give-up
+    assert env.fake.turn_text_calls == []
+    assert not _said(env, mgr_mod.MSG_REPLY_LOST)
+
+
+async def test_text_arriving_after_the_give_up_is_still_posted(env: Env, monkeypatch) -> None:
+    _short_watch(monkeypatch)
+    await env.inbound("go")
+    await _delivered(env)
+    _hook_end(env)
+    await _until(lambda: _said(env, mgr_mod.MSG_REPLY_LOST))
+    _log_end(env, "very late")
+    await _until(lambda: _said(env, "very late"))
+
+
 async def test_a_turn_with_no_text_says_so_once_the_log_moves_on(env: Env, monkeypatch) -> None:
     monkeypatch.setattr(mgr_mod, "EMPTY_TURN_GRACE_S", 60.0)
     await env.inbound("go")
@@ -2082,3 +2273,140 @@ async def test_a_late_hook_does_not_close_the_next_messages_run(env: Env) -> Non
     _log_end(env, "reply two")
     await _until(lambda: _said(env, "reply two"))
     assert not _said(env, mgr_mod.MSG_LATE_PREFIX)
+
+
+# Claude Code 2.1.31x screens (awaitingPromptText's last lines). The idle input box
+# with only its footer is what an answered AskUserQuestion leaves behind while the
+# pane's AWAITING badge is still settling (see the renderer's AWAITING_SETTLE_MS).
+_RULE = "─" * 60
+_CLAUDE_INPUT_BOX = "\n".join([
+    "◐ medium · /effort", _RULE, "›", _RULE,
+    "  ▸▸ bypass permissions on (shift+tab to cycle) · esc to interrupt",
+])
+_CLAUDE_QUESTION = "\n".join([
+    "☐ Scope", "", "Which tests should run?", "",
+    "❯ 1. Only the changed ones", "     Fast smoke check",
+    "  2. The whole suite", "     Slow", "  3. Type something.", "",
+    "Enter to select · ↑/↓ to navigate · Esc to cancel",
+])
+_CLAUDE_PERMISSION = "\n".join([
+    "Bash command", "", "   npm run build", "", "Do you want to proceed?",
+    "❯ 1. Yes", "  2. Yes, and don't ask again for npm run build commands in this project",
+    "  3. No, and tell Claude what to do differently (esc)",
+])
+
+
+async def _claude_awaiting(env: Env, prompt: str, options: list[str]) -> None:
+    env.fake.agent = "claude"
+    env.fake.kind = "permission"  # claude's AskUserQuestion reports "permission" too
+    env.fake.prompt = prompt
+    env.fake.options = options
+    await _awaiting(env)
+
+
+async def test_answered_question_leaves_no_second_prompt_in_the_chat(clocked) -> None:
+    # 10-29 user report: after Submit on an AskUserQuestion, the chat got a second
+    # "⏸" prompt that was only the input box and footer (answer: yes/no), then
+    # "✔ 已在電腦上處理" on it. The pane was still AWAITING while its screen had
+    # already gone back to the input box.
+    env, clock = clocked
+    await _claude_awaiting(env, _CLAUDE_QUESTION,
+                           ["Only the changed ones", "The whole suite", "Type something."])
+    clock.t += 1
+    await _until_relay_prompt(env)
+    mid, text = _prompt_message(env)
+    env.fake.prompt = _CLAUDE_INPUT_BOX
+    env.fake.options = []
+    for _ in range(3):
+        clock.t += mgr_mod.AWAITING_PROBE_EVERY_S + 1
+        await asyncio.sleep(0.05)
+    assert sum(t.startswith("⏸") for t in env.tg.texts()) == 1
+    assert not any("esc to interrupt" in t for t in env.tg.texts())
+    assert not any(m == mid for m, _ in env.tg.edits)  # the question's prompt is not superseded
+    env.fake.states["pane-1"] = {"exists": True, "busy": True, "display_status": "running"}
+    clock.t += 1
+    await _until(lambda: any(m == mid for m, _ in env.tg.edits))
+    assert (mid, f"{text}\n\n{mgr_mod.MSG_RELAY_DONE_LOCALLY}") in env.tg.edits
+
+
+async def test_input_box_alone_is_not_relayed_as_a_prompt(clocked) -> None:
+    env, clock = clocked
+    await _claude_awaiting(env, _CLAUDE_INPUT_BOX, [])
+    for _ in range(3):
+        clock.t += mgr_mod.AWAITING_PROBE_EVERY_S + 1
+        await asyncio.sleep(0.05)
+    assert not any(t.startswith("⏸") for t in env.tg.texts())
+    assert env.m.relay._by_id == {}
+    # The menu that paints next is relayed.
+    env.fake.prompt = _CLAUDE_PERMISSION
+    env.fake.options = ["Yes", "Yes, and don't ask again for npm run build commands in this project",
+                        "No, and tell Claude what to do differently (esc)"]
+    clock.t += mgr_mod.AWAITING_PROBE_EVERY_S + 1
+    await _until_relay_prompt(env)
+    assert next(iter(env.m.relay._by_id.values())).kind == "permission"
+
+
+async def test_claude_permission_menu_is_still_relayed(clocked) -> None:
+    env, clock = clocked
+    await _claude_awaiting(env, _CLAUDE_PERMISSION,
+                           ["Yes", "Yes, and don't ask again for npm run build commands in this project",
+                            "No, and tell Claude what to do differently (esc)"])
+    clock.t += 1
+    await _until_relay_prompt(env)
+    request = next(iter(env.m.relay._by_id.values()))
+    assert request.kind == "permission" and "Do you want to proceed?" in request.prompt
+    await env.inbound(f"yes {request.id}")
+    assert env.fake.answers == [("pane-1", {"kind": "permission", "choice": "allow"})]
+
+
+async def test_claude_ask_user_question_is_still_relayed(clocked) -> None:
+    env, clock = clocked
+    await _claude_awaiting(env, _CLAUDE_QUESTION,
+                           ["Only the changed ones", "The whole suite", "Type something."])
+    clock.t += 1
+    await _until_relay_prompt(env)
+    request = next(iter(env.m.relay._by_id.values()))
+    assert request.kind == "question" and request.options[0] == "Only the changed ones"
+    await env.inbound(f"2 {request.id}")
+    assert env.fake.answers == [("pane-1", {"kind": "question", "option": 2})]
+
+
+async def test_claude_multi_select_menu_is_still_relayed(clocked) -> None:
+    env, clock = clocked
+    await _claude_awaiting(env, "\n".join([
+        "Which platforms?", "❯ 1. [ ] macOS", "  2. [ ] Windows", "  3. [ ] Linux", "",
+        "Enter to select · ↑/↓ to navigate · Esc to cancel",
+    ]), ["[ ] macOS", "[ ] Windows", "[ ] Linux"])
+    clock.t += 1
+    await _until_relay_prompt(env)
+    request = next(iter(env.m.relay._by_id.values()))
+    assert request.kind == "question" and request.multi
+
+
+async def test_line_prompt_vendor_without_a_menu_is_still_relayed(clocked) -> None:
+    # aider asks with "(Y)es/(N)o … [Yes]:" and never draws a menu: no options is normal.
+    env, clock = clocked
+    env.fake.agent = "aider"
+    env.fake.prompt = "Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]:"
+    env.fake.options = []
+    await _awaiting(env)
+    clock.t += 1
+    await _until_relay_prompt(env)
+    assert next(iter(env.m.relay._by_id.values())).kind == "permission"
+
+
+@pytest.mark.parametrize("sender", ["1087968824", "136817688", "777000"])
+async def test_telegram_shared_sender_ids_are_refused_at_the_gate(env: Env, sender: str) -> None:
+    """Anonymous admins, channel posts and service messages share one id: even a row allowing
+    it (written before this rule) lets nothing through, and a DM gets no pairing code."""
+    env.store._exec("INSERT INTO channel_allow (platform, account, sender_id, sender_name, added_at)"
+                    " VALUES ('telegram', 'default', ?, 'x', 1)", (sender,))
+    sent = len(env.tg.sent)
+    await env.inbound("rm -rf ~", sender=sender)  # the bound group topic
+    await env.inbound("hello", sender=sender, chat=sender, thread="", direct=True)
+    assert env.fake.delivered == []
+    assert len(env.tg.sent) == sent
+    assert env.store.list_pairing("telegram") == []
+    # An approved person in the same topic still gets through.
+    await env.inbound("hello", sender="7")
+    assert env.fake.delivered[-1][:2] == ("pane-1", "hello")

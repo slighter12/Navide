@@ -32,6 +32,7 @@ Navide は Project Telemetry Service を運営せず、Navide Account を必要�
 |---|---|---|
 | Coding Agent CLI | CLI Vendor または設定された Model Provider | Prompt、選択した Context、Tool Result、Provider 定義の Telemetry |
 | Cloud AI（Inline 編集と Code Review） | Anthropic、OpenAI、Google、Groq、DeepSeek、Mistral、xAI、Custom Endpoint | 選択したコード、Prompt、Model Parameter |
+| API キーアカウント | キーを発行したベンダー（Anthropic または OpenAI） | キー本体。CLI の呼び出し時と「キーをテスト」を押したときに送られます。[認証情報](#認証情報)を参照 |
 | Context7 Injection | Context7 と MCP Distribution/Runtime Dependency | 検出された Library Name と Documentation Query |
 | Web Search | Search Provider | Search Query Text |
 | Git Operation と Issue Detection | 設定された Git Host。Local `git`、`gh`、`glab` CLI 経由 | Repository/Issue Data と、CLI または Host Account Flow が扱う Credential |
@@ -92,11 +93,33 @@ Building the expected-address snapshot performs forward DNS lookups for declared
 
 ## 認証情報
 
-Agent CLI の Credential は各 CLI の Configuration に残ります。Cloud AI Key を Navide に入力すると、AI 機能（Inline 編集、Code Review）で利用できるようローカル保存されます。Settings Export では API Key と Token を Redact します。
+Agent CLI の Credential は各 CLI の Configuration に残ります（API キーアカウントは例外で、下記のとおりです）。Cloud AI Key を Navide に入力すると、AI 機能（Inline 編集、Code Review）で利用できるようローカル保存されます。Settings Export では API Key と Token を Redact します。
 
-**Portable Credential** はユーザーが自ら選ぶ例外です。各ベンダーが「別の Machine へ持ち運ぶ」ために公式に用意した値（例：`claude setup-token` が出力する Token）を、Settings → Accounts に貼り付けます。Navide はこの Device 上で暗号化して保存し、その CLI の新しい Pane を起動するときに環境変数としてのみ渡します。CLI 自身の Login File には書き込みません。ある Device から削除しても、その Device からだけ削除されます。
+**API キーアカウント**（Claude Code と Codex）。キーはこのコンピューターにのみ保存されます。
 
-貼り付けた Credential がアップロードされることはありません。アカウントの Credential と Key はご自身の Machine から出ることはありません。Settings → Sync に Credentials セクションはなく、古いビルドでオンのまま残った Credentials スイッチはオフとして扱われ、Navide Cloud はどのバージョンから送られた Credential の Record も受け付けません。MCP 設定は、同期を有効にした場合、Machine 上で暗号化してからアップロードされ、サーバーは復号キーを持ちません。
+| キー | 保存場所 |
+|---|---|
+| macOS の Claude Code | ログインキーチェーンの項目 |
+| Linux の Claude Code | Navide のデータフォルダー内の所有者のみ読める File。暗号化されておらず、キーチェーンでもありません |
+| Windows の Claude Code | このバージョンでは利用できません |
+| macOS と Linux の Codex | Navide のデータフォルダー内のアカウント用フォルダーにある所有者のみ読める `auth.json`。暗号化されておらず、キーチェーンでもありません |
+| Windows の Codex | 同じ File を、Windows アカウント用に DPAPI で暗号化 |
+| Codex のアカウントが使用中のとき | Codex 自身の `auth.json` にも保存されます。所有者のみ読める File で暗号化されておらず、Codex はここから読み取ります |
+
+Navide のローカルのアカウント記録にあるのは、名前、キーの末尾 4 文字、毎月の予算メモ、自動切り替えの設定だけで、キー本体はありません。
+
+キーの送信先は、発行元のベンダーだけです。
+
+- CLI は呼び出しのたびに、CLI に設定された宛先へキーを送ります。既定では Claude Code は Anthropic、Codex は OpenAI です。Claude の API キーアカウントのフォルダーには Claude の `settings.json` のコピーが置かれるため、そこで別のエンドポイントを設定していれば、そのエンドポイントにも送られます。
+- **キーをテスト** は、ベンダーがキーを受け付けるかを確認するため、`api.anthropic.com` または `api.openai.com` にモデル一覧のリクエストを 1 回送ります。ボタンを押したときにだけ実行されます。
+
+キーは Navide Cloud を経由せず、Cloud 同期、設定のエクスポート、共有バンドル、Navide のメッセージにも含まれません。MCP Tool がキーを返すことはなく、`cli_accounts_list` が示すのはどのアカウントが API キーアカウントかだけです。
+
+**ペイン内のプログラムはキーを取得できます。**Claude のペインは、アカウント用フォルダーにある小さなヘルパー `navide-api-key-helper` を通じてキーを取得します。ヘルパー自体はキーを持ちませんが、実行するとキーを出力するため、そのペインで動くプログラムや Agent も実行できます。Codex の `auth.json` は、あなたの権限で動くものなら何でも読めます。ペインで動くものからキーが隠されているとは考えないでください。アカウントを削除するとキーはこのコンピューターから消えますが、ベンダーの管理画面で失効させるまでキーは有効です。
+
+**Portable Credential**（`claude setup-token` が出力する Token などを貼り付けるもの）は Navide 0.2.32 で廃止されました。使っていた Device では、0.2.32 の初回起動時に暗号化して保存していた値、その暗号化に使った Key、旧バージョンがクラウド同期から取得したコピーを消去します。使っていない Device には何もしません。
+
+アカウントの Credential と Key はご自身の Machine から出ることはありません。Settings → Sync に 「認証情報とキー」セクションはなく、古いビルドでオンのまま残った「認証情報とキー」のスイッチはオフとして扱われ、Navide Cloud はどのバージョンから送られた Credential の Record も受け付けません。MCP 設定は、同期を有効にした場合、どの Server をインストールしたか（名前、Transport、Command、引数、URL、オン/オフ、環境変数と Header の名前）だけを同期します。環境変数と Header の値、および URL や引数に含まれる Credential（`user:password@` の部分、`api_key=` のクエリ値、`ghp_…` などの Token、`--token` の次の値）はご自身の Machine から出ることはなく、空のまま送られ、各 Machine で入力します。同期される内容は Machine 上で暗号化してからアップロードされ、サーバーは復号キーを持ちません。
 
 Local File Permission は、同じ Machine 上の他 User による偶発的 Access を減らしますが、Malware、Compromised User Account、Unrestricted Agent、Backup、同等権限の Process からは保護しません。
 

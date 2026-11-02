@@ -40,6 +40,7 @@ Consumer：Git Preference 使用驗證過的 Package／Workspace Storage Partiti
 |---|---|---|
 | Coding Agent CLI | CLI 供應商或設定的模型 Provider | Prompt、選取的 Context、Tool Result 與供應商定義的 Telemetry |
 | Cloud AI（Inline 編輯與 Code Review） | Anthropic、OpenAI、Google、Groq、DeepSeek、Mistral、xAI 或自訂 Endpoint | 選取的程式碼、Prompt 與 Model Parameter |
+| API key 帳號 | 發行該金鑰的廠商（Anthropic 或 OpenAI） | 金鑰本身，由 CLI 呼叫時送出，按「測試金鑰」時也會送出。見[憑證](#憑證) |
 | Context7 Injection | Context7 及其 MCP Distribution／Runtime 相依套件 | 偵測到的 Library Name 與文件查詢 |
 | Web Search | Search Provider | 搜尋查詢文字 |
 | Git Operation 與 Issue Detection | 設定的 Git Host，透過本機 `git`、`gh` 或 `glab` CLI | Repository／Issue 資料，以及由 CLI 或 Host Account Flow 處理的憑證 |
@@ -90,11 +91,33 @@ Building the expected-address snapshot performs forward DNS lookups for declared
 
 ## 憑證
 
-Agent CLI 憑證保留在各 CLI 自己的設定中。如果在 Navide 輸入 Cloud AI Key，Navide 會把它保存在本機，供 AI 功能（Inline 編輯、Code Review）使用。設定 Export 會遮蔽 API Key 與 Token。
+Agent CLI 憑證保留在各 CLI 自己的設定中，API key 帳號例外，見下方說明。如果在 Navide 輸入 Cloud AI Key，Navide 會把它保存在本機，供 AI 功能（Inline 編輯、Code Review）使用。設定 Export 會遮蔽 API Key 與 Token。
 
-**可攜憑證**是你主動選擇的例外：各家官方為「帶到別台機器」設計的值（例如 `claude setup-token` 印出的 token），在設定 → 帳號貼入。Navide 在這台裝置上加密保存，只在啟動該 CLI 的新 pane 時以環境變數交給它，不會寫進 CLI 自己的登入檔。從一台裝置移除，就只從那台裝置移除。
+**API key 帳號**（Claude Code 和 Codex）。金鑰只存在這台電腦：
 
-貼入的憑證永遠不會上傳。帳號憑證與金鑰不會離開你的機器：設定 → 同步沒有「憑證」區段，舊版留下開著的憑證開關一律視為關閉，Navide Cloud 也會拒收任何版本送來的憑證記錄。MCP 設定若你開啟同步，會先在你的機器加密才上傳，伺服器沒有解密金鑰。
+| 金鑰 | 存放位置 |
+|---|---|
+| macOS 上的 Claude Code | 你的登入鑰匙圈裡的一個項目 |
+| Linux 上的 Claude Code | Navide 資料夾裡僅限本人讀取的檔案，沒有加密，也不在鑰匙圈 |
+| Windows 上的 Claude Code | 這一版不支援 |
+| macOS、Linux 上的 Codex | Navide 資料夾內該帳號資料夾裡僅限本人讀取的 `auth.json`，沒有加密，也不在鑰匙圈 |
+| Windows 上的 Codex | 同一個檔案，以你的 Windows 帳號用 DPAPI 加密 |
+| Codex 帳號使用中時 | 同時也在 Codex 自己的 `auth.json`，僅限本人讀取、沒有加密，Codex 從這裡讀取 |
+
+Navide 的本機帳號紀錄只有名稱、金鑰最後四碼、每月預算備註和自動切換設定，沒有金鑰本身。
+
+金鑰只會送到一個地方，就是發行它的廠商：
+
+- CLI 每次呼叫時送出，對象是 CLI 設定的位址。預設是 Claude Code 送到 Anthropic、Codex 送到 OpenAI。Claude API key 帳號的資料夾會複製一份你的 Claude `settings.json`，所以你在那裡設定的其他端點也會收到金鑰。
+- **測試金鑰**會向 `api.anthropic.com` 或 `api.openai.com` 送一次列出模型的請求，確認廠商接受這把金鑰。只有你按下按鈕時才會送。
+
+金鑰不經 Navide Cloud，也不在雲端同步、設定匯出、分享包或 Navide 訊息裡：沒有 MCP 工具會回傳金鑰，`cli_accounts_list` 只會標示哪些是 API key 帳號。
+
+**pane 裡的程式取得得到金鑰。**Claude pane 透過帳號資料夾裡的小程式 `navide-api-key-helper` 取得金鑰。這個小程式本身不含金鑰，但執行時會印出金鑰，所以在該 pane 執行的程式或 Agent 也能執行它。Codex 的 `auth.json` 則是任何以你的身分執行的程式都讀得到。不要假設金鑰對 pane 裡執行的東西是隱藏的。刪除帳號會把金鑰從這台電腦移除；要到廠商後台撤銷，金鑰才會失效。
+
+**可攜憑證**（貼入的值，例如 `claude setup-token` 印出的 token）已在 Navide 0.2.32 移除。用過的裝置在第一次啟動 0.2.32 時，會清除加密存著的值、加密它的金鑰，以及舊版從雲端同步拉下來的副本；沒用過的裝置什麼都不會動。
+
+帳號憑證與金鑰不會離開你的機器：設定 → 同步沒有「憑證與金鑰」區段，舊版留下開著的憑證開關一律視為關閉，Navide Cloud 也會拒收任何版本送來的憑證記錄。MCP 設定若你開啟同步，只同步裝了哪些 server（名稱、傳輸方式、指令、參數、網址、開關，以及環境變數與標頭的名稱）；環境變數與標頭的值，以及網址或參數裡的憑證（`user:password@` 部分、`api_key=` 查詢值、`ghp_…` 之類的 token、`--token` 後面的值）都不會離開你的機器，會以空值送出，每台機器各自填寫。會同步的部分先在你的機器加密才上傳，伺服器沒有解密金鑰。
 
 本機檔案權限可以降低同一部電腦其他使用者意外存取的機會，但無法防範 Malware、遭入侵的使用者帳號、無限制 Agent、Backup，或具有同等權限的 Process。
 

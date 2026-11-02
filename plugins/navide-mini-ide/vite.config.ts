@@ -1,18 +1,15 @@
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 
 const packageRoot = resolve(__dirname)
 const repositoryRoot = resolve(packageRoot, '../..')
 const frontendRoot = resolve(packageRoot, 'frontend')
 const sourceManifest = JSON.parse(readFileSync(resolve(packageRoot, 'manifest.json'), 'utf8'))
-const artifactVersion = process.env.NAVIDE_PLUGIN_ARTIFACT_VERSION
-  ?? (existsSync(resolve(repositoryRoot, 'package.json'))
-    // The repository build stamps the root app version; an external consumer
-    // that copies this config has no root package.json and keeps its own.
-    ? JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8')).version
-    : sourceManifest.version)
+// The plugin versions independently of the App: the build keeps the source
+// manifest's version unless a one-off package build stamps another.
+const artifactVersion = process.env.NAVIDE_PLUGIN_ARTIFACT_VERSION ?? sourceManifest.version
 if (typeof artifactVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(artifactVersion)) {
   throw new Error('NAVIDE_PLUGIN_ARTIFACT_VERSION must be strict semver')
 }
@@ -36,9 +33,14 @@ const emitManifest: Plugin = {
     const manifest = { ...sourceManifest, version: artifactVersion }
     mkdirSync(outputRoot, { recursive: true })
     writeFileSync(resolve(outputRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+    // The manifest's icon lives in the package source (assets/), so a consumer
+    // building from a copy of this package brings it along with frontend/.
+    const assetsDir = resolve(outputRoot, 'assets')
+    mkdirSync(assetsDir, { recursive: true })
+    copyFileSync(resolve(packageRoot, 'assets/mini-ide.png'), resolve(assetsDir, 'mini-ide.png'))
     writeFileSync(
       resolve(outputRoot, 'artifact-files.json'),
-      `${JSON.stringify({ files: ['manifest.json', ...outputFiles(resolve(outputRoot, 'frontend')).map((file) => `frontend/${file}`)] }, null, 2)}\n`,
+      `${JSON.stringify({ files: ['manifest.json', 'assets/mini-ide.png', ...outputFiles(resolve(outputRoot, 'frontend')).map((file) => `frontend/${file}`)] }, null, 2)}\n`,
     )
   },
 }

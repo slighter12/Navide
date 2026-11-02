@@ -45,13 +45,14 @@ async function runtime(initialIds: string[]) {
     'onKill', 'onUserClosePane', 'stopGlobalManagerRouter', 'cancelAllWatchers',
     'stageCompletions', 'stagePrewarms', 'stageRouters', 'disposeStageRouter',
     'questionQueue', 'activeQuestion', 'clearStageStallAutoTimer', 'stageStallPrompt',
-    'pipeline', 'pipelineRunWorkspace',
+    'pipeline', 'pipelineRunWorkspace', 'runPipelineId', 'stagesApi',
     `${code}\nreturn { onKillAll, onPipelineReset }`,
   )
   const actions = factory(
     panes, panesInView, listedPanesInView, closingPaneIds, pendingPaneClose,
     onKill, onUserClosePane, () => {}, () => {}, new Map(), new Map(), new Map(),
     () => {}, [], { value: null }, () => {}, { value: null }, pipeline, '',
+    { value: 'run' }, { refresh: async () => {} },
   ) as { onKillAll: () => Promise<void>; onPipelineReset: () => Promise<void> }
   return {
     ...actions, panes, pipeline, requests, closing: closingPaneIds.value, onUserClosePane,

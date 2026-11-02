@@ -36,17 +36,20 @@ from . import (
     confirm_token,
     device_trust,
     executions_service,
+    guard_fail_closed,
     launch_id,
     native_mcp,
     native_memory,
     osplat,
+    pane_config_fingerprint,
     pane_policy,
-    portable_credentials,
+    pipeline_liveness,
     quota_failover,
     remote_roster,
     server_link,
     storage_service,
     trust_store,
+    webhook_service,
 )
 from .cli_vendors.codex import command_with_resume_id as codex_command_with_resume_id
 from .cli_runtime import CreateCancelled, RustTerminalService
@@ -62,9 +65,10 @@ from .mcp_settings import (
     MCPSettingsConflictError,
     MCPSettingsError,
     restore_mcp_server_secrets,
+    unfilled_mcp_secrets,
 )
 from .plan_index import resolve_plan_root
-from .stages_store import GraphNonLinearError
+from .stages_store import GraphNonLinearError, StoreNotFound, StoreRefused
 from .plan_provisioning import SPEC_FILENAME, TEMPLATE_FILENAME, ensure_plan_assets
 from .profiles_store import SUPPORTED_AGENT_KEYS as PROFILE_AGENT_KEYS
 from .skills_events import notify_skills_changed
@@ -169,7 +173,7 @@ def lookup(msg_type: str) -> Handler | None:
 # ── Editor AI (editor.*) ────────────────────────────────────────────────────
 #: The Navide plugins whose Disabled switch the Host reports (sent only while
 #: one is disabled).
-_DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide"})
+_DISABLEABLE_BUILTIN_PLUGINS = frozenset({"navide.plans", "navide.git", "navide.mini-ide", "navide.browser"})
 
 
 def _valid_disabled_plugins(value: object) -> bool:
@@ -804,6 +808,29 @@ async def fs_list_files_flat(session: "Session", msg_id: str, msg_type: str, pay
     max_results = int(payload.get("max_results", 100))
     result = await asyncio.to_thread(
         app.fs_service.list_files_flat, ws_path, query=query, max_results=max_results
+    )
+    await session.send_json(make_response(msg_id, msg_type, result))
+
+
+@handler("fs.query_files")
+async def fs_query_files(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    from . import app, file_query
+
+    ws_path = payload.get("workspace_path") or ""
+    # A disk change drops the listing, so the workspace needs a watcher.
+    await asyncio.to_thread(app._watch_plans_workspace_now, ws_path)
+    result = await asyncio.to_thread(
+        file_query.query_files,
+        ws_path,
+        payload.get("query") or "",
+        match_on=payload.get("match_on") or "name",
+        mode=payload.get("mode") or "substring",
+        exclude=payload.get("exclude") or [],
+        respect_gitignore=payload.get("respect_gitignore", True),
+        include_hidden=payload.get("include_hidden", False),
+        include_noise_dirs=payload.get("include_noise_dirs", False),
+        limit=int(payload.get("limit") or file_query.DEFAULT_LIMIT),
+        cursor=payload.get("cursor") or "",
     )
     await session.send_json(make_response(msg_id, msg_type, result))
 
@@ -2356,6 +2383,11 @@ def _account_dir_for_spawn(
     if agent_key != "claude":
         return ""
     slot = str(payload_profile_id or "")
+    if not slot:
+        # An API key account has no live credential to follow.
+        from . import api_key_accounts
+
+        slot = api_key_accounts.pane_default_slot(agent_key)
     if not slot or slot == DEFAULT_SLOT_ID:
         return ""
     profile = app.cli_profiles_store.get(slot)
@@ -2368,35 +2400,10 @@ def _account_dir_for_spawn(
     return slot
 
 
-#: Terminal metadata key carrying the portable slot a launch was injected
-#: with. Non-secret. Written once at spawn; read by the bookkeeping messages
-#: that follow (pipeline.slot_spawn, manual_pane.spawn) so they record the
-#: launch's identity rather than whatever slot is selected by then.
-PORTABLE_SLOT_METADATA_KEY = "portable_slot_id"
-
-
-def _launch_portable_slot(pane_id: str) -> str:
-    """The portable slot the pane's most recent launch ran on, or "".
-
-    The fact was fixed at terminal.create (``portable_credentials.note_launch``
-    plus the terminal's own metadata) — never the current selection, which
-    can have moved on between the launch and this message. It outlives the
-    terminal: a CLI that exits before the bookkeeping arrives has already
-    been reaped from _PTY_OWNERS, and reading only live terminals would
-    record it as native. A login or native relaunch of the same pane writes
-    "" over it, so a stale portable fact cannot resurface on a respawn."""
-    return portable_credentials.launch_slot(pane_id)
-
-
 def _profile_pin_for_bookkeeping(
     agent_key: str, pane_id: object, payload_profile_id: object
 ) -> str:
-    """``_profile_pin_for_spawn`` for the bookkeeping messages: the launch's
-    own portable slot when the pane has one, else the native rule."""
-    if agent_key in PROFILE_AGENT_KEYS:
-        launched = _launch_portable_slot(str(pane_id or ""))
-        if launched:
-            return launched
+    """``_profile_pin_for_spawn`` for the bookkeeping messages."""
     return _profile_pin_for_spawn(agent_key, payload_profile_id)
 
 
@@ -2419,7 +2426,6 @@ async def _broadcast_profiles_changed(
     from . import app
 
     view = await asyncio.to_thread(_profile_account_view)
-    portable = await asyncio.to_thread(_portable_credentials_view)
     doc = app.cli_profiles_store.list()
     payload = {
         "profiles": doc["profiles"],
@@ -2433,9 +2439,6 @@ async def _broadcast_profiles_changed(
         # {signedIn, email}}}, and the account new panes start on.
         "accountDirs": view["accountDirs"],
         "paneDefaults": doc["paneDefaults"],
-        # Pasted portable credentials, metadata only (never the value):
-        # {"<agentKey>/<slotId>": {configured, enabled, kind, updatedAt, ...}}.
-        "portable_credentials": portable,
         "reason": reason,
     }
     if harvested_profile_ids:
@@ -2465,7 +2468,6 @@ async def cli_profiles_list(session: "Session", msg_id: str, msg_type: str, payl
 
     doc = app.cli_profiles_store.list()
     view = await asyncio.to_thread(_profile_account_view)
-    portable = await asyncio.to_thread(_portable_credentials_view)
     await session.send_json(
         make_response(
             msg_id,
@@ -2479,8 +2481,6 @@ async def cli_profiles_list(session: "Session", msg_id: str, msg_type: str, payl
                 "accountDirs": view["accountDirs"],
                 "paneDefaults": doc["paneDefaults"],
                 "supported_agents": list(PROFILE_AGENT_KEYS),
-                "portable_credentials": portable,
-                "portable_supported": portable_credentials.supported_agent_keys(),
                 # Per vendor: hot/restart/manual, the credential pool, the
                 # provider scopes a new profile may bind to, resume ability.
                 "account_capabilities": quota_failover.capabilities(),
@@ -2489,92 +2489,15 @@ async def cli_profiles_list(session: "Session", msg_id: str, msg_type: str, payl
     )
 
 
-def _portable_credentials_view() -> dict[str, dict]:
-    """Metadata for every pasted portable credential, keyed
-    "<agentKey>/<slotId>" — the value itself is never part of it. Shadowing
-    is checked against the real home only; a pane's cwd is only known at
-    spawn. Blocking; call off the loop."""
-    try:
-        return portable_credentials.describe_all(home=Path.home())
-    except Exception as err:  # noqa: BLE001 - a locked vault must not break the accounts list
-        log.warning("portable credentials could not be listed: %s", err)
-        return {}
+@handler("cli_profiles.portable_removal_notice")
+async def cli_profiles_portable_removal_notice(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """``{"show": true}`` exactly once on a machine whose pasted credentials the
+    0.2.32 upgrade erased (portable_credentials_cleanup); false everywhere else."""
+    from . import app, portable_credentials_cleanup
 
-
-def _portable_address(payload: dict) -> tuple[str, str]:
-    """(agent_key, slot_id) from a cli_profiles.portable_* payload. The
-    built-in Default row sends "__default__" (or nothing) as its profile id."""
-    agent_key = str(payload.get("agent_key") or "")
-    slot_id = str(payload.get("profile_id") or DEFAULT_SLOT_ID)
-    return agent_key, slot_id
-
-
-async def _reply_portable(
-    session: "Session", msg_id: str, msg_type: str, reason: str, portable: dict | None
-) -> None:
-    body: dict[str, Any] = {"ok": True}
-    if portable is not None:
-        body["portable"] = portable
-    await session.send_json(make_response(msg_id, msg_type, body))
-    await _broadcast_profiles_changed(reason)
-
-
-@handler("cli_profiles.portable_get")
-async def cli_profiles_portable_get(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
-    agent_key, slot_id = _portable_address(payload)
-    try:
-        portable = await asyncio.to_thread(
-            portable_credentials.describe, agent_key, slot_id, home=Path.home()
-        )
-    except portable_credentials.PortableCredentialError as err:
-        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", _profile_error(err)))
-        return
-    await session.send_json(make_response(msg_id, msg_type, {"ok": True, "portable": portable}))
-
-
-@handler("cli_profiles.portable_set")
-async def cli_profiles_portable_set(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
-    """Store a pasted credential. The reply and the broadcast carry metadata
-    only; the secret is consumed here and never echoed."""
-    agent_key, slot_id = _portable_address(payload)
-    secret = payload.get("secret")
-    if not isinstance(secret, str):
-        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "secret must be a string"))
-        return
-    try:
-        portable = await asyncio.to_thread(portable_credentials.store, agent_key, slot_id, secret)
-    except portable_credentials.PortableCredentialError as err:
-        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", _profile_error(err)))
-        return
-    # On the loop, after the store: sync schedules its push as a task here.
-    portable_credentials.notify_saved(agent_key, slot_id)
-    await _reply_portable(session, msg_id, msg_type, "portable-set", portable)
-
-
-@handler("cli_profiles.portable_enable")
-async def cli_profiles_portable_enable(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
-    agent_key, slot_id = _portable_address(payload)
-    try:
-        portable = await asyncio.to_thread(
-            portable_credentials.set_enabled, agent_key, slot_id, bool(payload.get("enabled"))
-        )
-    except portable_credentials.PortableCredentialError as err:
-        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", _profile_error(err)))
-        return
-    await _reply_portable(session, msg_id, msg_type, "portable-enable", portable)
-
-
-@handler("cli_profiles.portable_clear")
-async def cli_profiles_portable_clear(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
-    """Local removal only: the entry on this machine goes away; nothing is
-    deleted anywhere else (the plan's chosen deletion semantics)."""
-    agent_key, slot_id = _portable_address(payload)
-    try:
-        await asyncio.to_thread(portable_credentials.forget, agent_key, slot_id)
-    except portable_credentials.PortableCredentialError as err:
-        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", _profile_error(err)))
-        return
-    await _reply_portable(session, msg_id, msg_type, "portable-clear", None)
+    show = await asyncio.to_thread(
+        portable_credentials_cleanup.take_notice, app.database, now=int(time.time()))
+    await session.send_json(make_response(msg_id, msg_type, {"show": show}))
 
 
 @handler("cli_profiles.create")
@@ -2699,6 +2622,12 @@ async def cli_profiles_delete(session: "Session", msg_id: str, msg_type: str, pa
             make_error(
                 msg_id, msg_type, "BAD_REQUEST", f"profile not found: {profile_id}"
             )
+        )
+        return
+    if profile.get("authKind") == "api-key":
+        # Archiving the slot would leave the key behind in the .deleted copy.
+        await session.send_json(
+            make_error(msg_id, msg_type, "API_KEY_ACCOUNT", "an API key account is deleted with cli_profiles.api_key_delete")
         )
         return
     agent_key = str(profile.get("agentKey") or "")
@@ -3089,6 +3018,15 @@ async def cli_profiles_set_default(session: "Session", msg_id: str, msg_type: st
                 make_error(
                     msg_id, msg_type, "BAD_REQUEST",
                     f"profile {profile_id} does not belong to agent {agent_key!r}",
+                )
+            )
+            return
+        is_api_key_slot = getattr(app.credential_vault, "is_api_key_slot", None)
+        if is_api_key_slot is not None and is_api_key_slot(agent_key, profile_id):
+            await session.send_json(
+                make_error(
+                    msg_id, msg_type, "API_KEY_ACCOUNT",
+                    "an API key account is chosen per pane; it does not replace the live login",
                 )
             )
             return
@@ -3688,7 +3626,7 @@ async def agent_reap_orphans(session: "Session", msg_id: str, msg_type: str, pay
 
 # ── MCP servers (mcp.*) ─────────────────────────────────────────────────────
 # Live MCP status fields passed through to Settings -> MCP as they are.
-_MCP_LIVE_DETAIL = ("starting_seconds", "slow_start", "error", "stderr_tail")
+_MCP_LIVE_DETAIL = ("starting_seconds", "slow_start", "error", "stderr_tail", "tools_error")
 
 
 @handler("mcp.list_servers")
@@ -4245,6 +4183,9 @@ async def memory_list(session: "Session", msg_id: str, msg_type: str, payload: d
     # The scan stats every candidate in the home and the workspace; a thread
     # keeps that file I/O off the loop, as the native MCP scan does.
     files = await asyncio.to_thread(native_memory.scan, None, workspace)
+    # Shown even before Claude has written anything, so the page can say where
+    # its notes for this project will appear.
+    memory_dir = await asyncio.to_thread(native_memory.auto_memory_dir, None, workspace)
     await session.send_json(
         make_response(
             msg_id,
@@ -4253,6 +4194,7 @@ async def memory_list(session: "Session", msg_id: str, msg_type: str, payload: d
                 "files": [f.as_dict() for f in files],
                 "agents": native_memory.agent_targets(),
                 "workspace_path": str(workspace) if workspace else "",
+                "auto_memory_dir": str(memory_dir) if memory_dir else "",
             },
         )
     )
@@ -4310,6 +4252,35 @@ async def memory_save(session: "Session", msg_id: str, msg_type: str, payload: d
         return
     await session.send_json(make_response(msg_id, msg_type, result))
     server_link.sync_soon("memory")
+
+
+@handler("memory.restore")
+async def memory_restore(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Write back the version the last save replaced, kept in Navide's data dir."""
+    workspace = _memory_workspace(payload)
+    path = str(payload.get("path") or "")
+    expected_raw = payload.get("expected_modified")
+    expected = float(expected_raw) if isinstance(expected_raw, (int, float)) else None
+    try:
+        result = await asyncio.to_thread(
+            native_memory.restore_previous, path, None, workspace, expected
+        )
+    except native_memory.MemoryConflictError as err:
+        await session.send_json(
+            make_error(msg_id, msg_type, "MEMORY_FILE_CONFLICT", str(err), {"path": path})
+        )
+        return
+    except ValueError as err:
+        await session.send_json(
+            make_error(msg_id, msg_type, "MEMORY_FILE_REJECTED", str(err), {"path": path})
+        )
+        return
+    except OSError as err:
+        await session.send_json(
+            make_error(msg_id, msg_type, "MEMORY_WRITE_FAILED", str(err), {"path": path})
+        )
+        return
+    await session.send_json(make_response(msg_id, msg_type, result))
 
 
 # ── Cross-device sync (sync.*) ──────────────────────────────────────────────
@@ -6114,6 +6085,7 @@ async def settings_bundle_import(session: "Session", msg_id: str, msg_type: str,
         # stages still name, and an imported document can name a key this
         # machine has never had.
         await _clear_dangling_role_refs("bundle_import")
+    mcp_needs_secrets: list[str] = []
     if isinstance(bundle.get("mcp_servers"), list):
         incoming_servers = bundle["mcp_servers"]
         if not all(isinstance(server, dict) for server in incoming_servers):
@@ -6132,6 +6104,7 @@ async def settings_bundle_import(session: "Session", msg_id: str, msg_type: str,
                 incoming_servers,
                 existing_servers,
             )
+            mcp_needs_secrets = unfilled_mcp_secrets(incoming_servers, restored_servers)
             app.mcp_settings_store.replace_servers(restored_servers)
         except ValidationError as err:
             await session.send_json(
@@ -6166,6 +6139,7 @@ async def settings_bundle_import(session: "Session", msg_id: str, msg_type: str,
     await session.send_json(make_response(msg_id, msg_type, {
         "ok": True,
         "applied": applied,
+        "mcp_needs_secrets": mcp_needs_secrets,
         "paths": app._settings_paths(),
     }))
 
@@ -6836,6 +6810,41 @@ async def roles_reset(session: "Session", msg_id: str, msg_type: str, payload: d
 
 
 # ── Pipelines registry (pipelines.*) ────────────────────────────────────────
+def _is_store_refusal(err: BaseException) -> bool:
+    """A refusal of the caller's request rather than a fault: one of the store's
+    own, or any store error that names itself with an `error_code` (snake
+    case, as the MCP tools answer)."""
+    return isinstance(err, (StoreNotFound, StoreRefused)) or isinstance(getattr(err, "error_code", None), str)
+
+
+def _store_error(msg_id: str, msg_type: str, err: BaseException, pipeline_id: str | None = None) -> dict:
+    """A store refusal as a coded answer. Without it the dispatcher reported a
+    missing pipeline as "missing field" and a user's mistake (deleting the last
+    pipeline) as INTERNAL_ERROR, recorded in the error ledger as a crash. The
+    details name what does exist, so the caller can correct itself."""
+    from . import app
+
+    code = getattr(err, "error_code", None)
+    if isinstance(code, str) and code:
+        # pipeline_running → PIPELINE_RUNNING: the WS spelling of the same code.
+        return make_error(msg_id, msg_type, code.upper(), str(err.args[0] if err.args else err))
+    if isinstance(err, StoreRefused):
+        return make_error(msg_id, msg_type, "PIPELINE_REFUSED", str(err), {"reason": err.reason})
+    message = str(err.args[0] if err.args else err)
+    ident = str(getattr(err, "ident", ""))
+    if getattr(err, "what", "") == "stage":
+        try:
+            stage_ids = [s.get("id") for s in app.stages_store.list(pipeline_id)]
+        except StoreNotFound:
+            stage_ids = []
+        return make_error(msg_id, msg_type, "STAGE_NOT_FOUND", message,
+                          {"stage_id": ident, "available_stage_ids": stage_ids})
+    return make_error(msg_id, msg_type, "PIPELINE_NOT_FOUND", message, {
+        "pipeline_id": ident,
+        "available_ids": [p["id"] for p in app.stages_store.list_pipelines()],
+    })
+
+
 @handler("pipelines.list")
 async def pipelines_list(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
@@ -6868,13 +6877,60 @@ async def pipelines_create(session: "Session", msg_id: str, msg_type: str, paylo
     }))
 
 
+@handler("pipelines.import_n8n")
+async def pipelines_import_n8n(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Convert an n8n workflow (dry_run: report only) or import it as a new
+    pipeline. Same conversion and storage as the MCP tool pipeline_import_n8n."""
+    from . import app
+    from .n8n_import import N8nImportError, import_into_store
+
+    dry_run = payload.get("dry_run", True) is not False
+    ws_path = payload.get("workspace_path", "") or ""
+    if not dry_run and ws_path:
+        proj = app.project_store.peek(ws_path)
+        if proj and proj.state == "running":
+            await session.send_json(
+                make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot import a pipeline while a project is running")
+            )
+            return
+    try:
+        out = await asyncio.to_thread(
+            import_into_store,
+            app.stages_store,
+            payload.get("json", ""),
+            dry_run=dry_run,
+            default_agent=str(payload.get("default_agent") or "claude"),
+            name=str(payload.get("name") or ""),
+        )
+    except N8nImportError as exc:
+        code = {"too-large": "N8N_TOO_LARGE", "store-refused": "N8N_REFUSED"}.get(exc.reason, "N8N_INVALID")
+        await session.send_json(make_error(msg_id, msg_type, code, str(exc),
+                                           {"reason": exc.reason, "params": exc.params}))
+        return
+    if not dry_run:
+        out["pipelines"] = app.stages_store.list_pipelines()
+    await session.send_json(make_response(msg_id, msg_type, out))
+    if not dry_run:
+        await app.broadcast(make_event("pipelines.changed", {
+            "pipelines": out["pipelines"],
+            "active_pipeline_id": app.stages_store.get_active_pipeline_id(),
+            "reason": "import",
+        }))
+
+
 @handler("pipelines.rename")
 async def pipelines_rename(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
 
     pipeline_id = payload.get("pipeline_id", "")
     name = payload.get("name", "")
-    pipeline = app.stages_store.rename_pipeline(pipeline_id, name)
+    try:
+        pipeline = app.stages_store.rename_pipeline(pipeline_id, name)
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err))
+        return
     pipelines = app.stages_store.list_pipelines()
     await session.send_json(
         make_response(msg_id, msg_type, {"pipeline": pipeline, "pipelines": pipelines})
@@ -6894,12 +6950,18 @@ async def pipelines_delete(session: "Session", msg_id: str, msg_type: str, paylo
     ws_path = payload.get("workspace_path", "") or ""
     if ws_path:
         proj = app.project_store.peek(ws_path)
-        if proj and proj.state == "running":
+        if pipeline_liveness.run_is_live(proj):
             await session.send_json(
                 make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot delete pipeline while a project is running")
             )
             return
-    pipelines = app.stages_store.delete_pipeline(pipeline_id)
+    try:
+        pipelines = app.stages_store.delete_pipeline(pipeline_id)
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err))
+        return
     await session.send_json(
         make_response(msg_id, msg_type, {"pipelines": pipelines})
     )
@@ -6918,12 +6980,18 @@ async def pipelines_set_active(session: "Session", msg_id: str, msg_type: str, p
     ws_path = payload.get("workspace_path", "") or ""
     if ws_path:
         proj = app.project_store.peek(ws_path)
-        if proj and proj.state == "running":
+        if pipeline_liveness.run_is_live(proj):
             await session.send_json(
                 make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot switch pipeline while a project is running")
             )
             return
-    app.stages_store.set_active_pipeline(pipeline_id)
+    try:
+        app.stages_store.set_active_pipeline(pipeline_id)
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err))
+        return
     pipelines = app.stages_store.list_pipelines()
     await session.send_json(
         make_response(msg_id, msg_type, {
@@ -6952,7 +7020,13 @@ async def pipelines_reset_builtin(session: "Session", msg_id: str, msg_type: str
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot reset stages while the active pipeline is running")
         )
         return
-    pipeline = app.stages_store.reset_builtin(pipeline_id)
+    try:
+        pipeline = app.stages_store.reset_builtin(pipeline_id)
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err))
+        return
     pipelines = app.stages_store.list_pipelines()
     stages = app.stages_store.list(pipeline_id)
     await session.send_json(
@@ -6984,12 +7058,15 @@ def _stage_edit_hits_running_pipeline(ws_path: str, pipeline_id: str | None) -> 
     if not ws_path:
         return False
     proj = app.project_store.peek(ws_path)
-    if not proj or proj.state != "running":
+    if not pipeline_liveness.run_is_live(proj):
         return False
     if not pipeline_id:
         # No id means "the active pipeline", which is what the run uses.
         return True
-    return pipeline_id == (proj.pipeline_id or app.stages_store.get_active_pipeline_id())
+    # A parent suspended at a sub-pipeline resumes on its own definition, so
+    # it is as much in use as the child's.
+    parents = {str((f.get("run") or {}).get("pipeline_id") or "") for f in getattr(proj, "run_stack", None) or []}
+    return pipeline_id == (proj.pipeline_id or app.stages_store.get_active_pipeline_id()) or pipeline_id in parents
 
 
 async def _broadcast_pipeline_summaries(reason: str) -> None:
@@ -7009,7 +7086,13 @@ async def stages_list(session: "Session", msg_id: str, msg_type: str, payload: d
     from . import app
 
     pipeline_id = payload.get("pipeline_id") or None
-    stages = app.stages_store.list(pipeline_id)
+    try:
+        stages = app.stages_store.list(pipeline_id)
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err))
+        return
     active_id = app.stages_store.get_active_pipeline_id()
     await session.send_json(
         make_response(
@@ -7031,10 +7114,16 @@ async def stages_upsert(session: "Session", msg_id: str, msg_type: str, payload:
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot edit stages while the active pipeline is running")
         )
         return
+    data = payload["stage"]
     try:
-        stage = app.stages_store.upsert(payload["stage"], pipeline_id)
+        stage = app.stages_store.upsert(data, pipeline_id)
     except GraphNonLinearError as err:
         await session.send_json(make_error(msg_id, msg_type, "GRAPH_NONLINEAR", str(err)))
+        return
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err, pipeline_id))
         return
     effective_pipeline_id = pipeline_id or app.stages_store.get_active_pipeline_id()
     updated_stages = app.stages_store.list(pipeline_id)
@@ -7060,10 +7149,16 @@ async def stages_reorder(session: "Session", msg_id: str, msg_type: str, payload
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot reorder stages while the active pipeline is running")
         )
         return
+    ids = payload["ids"]
     try:
-        updated_stages = app.stages_store.reorder(payload["ids"], pipeline_id)
+        updated_stages = app.stages_store.reorder(ids, pipeline_id)
     except GraphNonLinearError as err:
         await session.send_json(make_error(msg_id, msg_type, "GRAPH_NONLINEAR", str(err)))
+        return
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err, pipeline_id))
         return
     effective_pipeline_id = pipeline_id or app.stages_store.get_active_pipeline_id()
     await session.send_json(
@@ -7088,10 +7183,16 @@ async def stages_delete(session: "Session", msg_id: str, msg_type: str, payload:
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot delete stages while the active pipeline is running")
         )
         return
+    stage_id = payload["id"]
     try:
-        updated_stages = app.stages_store.delete(payload["id"], pipeline_id)
+        updated_stages = app.stages_store.delete(stage_id, pipeline_id)
     except GraphNonLinearError as err:
         await session.send_json(make_error(msg_id, msg_type, "GRAPH_NONLINEAR", str(err)))
+        return
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err, pipeline_id))
         return
     effective_pipeline_id = pipeline_id or app.stages_store.get_active_pipeline_id()
     await session.send_json(
@@ -7116,7 +7217,15 @@ async def stages_reset(session: "Session", msg_id: str, msg_type: str, payload: 
             make_error(msg_id, msg_type, "PIPELINE_RUNNING", "Cannot reset stages while the active pipeline is running")
         )
         return
-    updated_stages = app.stages_store.reset(pipeline_id)
+    try:
+        # Only an explicit true deletes a drawn graph (the editor sends it
+        # once the user confirmed); anything else is refused by the store.
+        updated_stages = app.stages_store.reset(pipeline_id, discard_graph=payload.get("discard_graph") is True)
+    except (KeyError, ValueError) as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err))
+        return
     effective_pipeline_id = pipeline_id or app.stages_store.get_active_pipeline_id()
     await session.send_json(
         make_response(msg_id, msg_type, {"stages": updated_stages})
@@ -7161,7 +7270,10 @@ async def _write_graph(session: "Session", msg_id: str, msg_type: str, payload: 
     try:
         out = write(pipeline_id)
     except GraphError as err:
-        await session.send_json(make_error(msg_id, msg_type, "GRAPH_INVALID", str(err), {"errors": err.errors}))
+        details: dict[str, Any] = {"errors": err.errors}
+        if err.code:
+            details["code"] = err.code
+        await session.send_json(make_error(msg_id, msg_type, "GRAPH_INVALID", str(err), details))
         return
     except KeyError as err:
         await session.send_json(_pipeline_not_found(msg_id, msg_type, err))
@@ -8226,6 +8338,11 @@ async def terminal_create(session: "Session", msg_id: str, msg_type: str, payloa
             session._terminal_create_transactions.pop(key, None)
             if not session.dead:
                 await session.send_json(make_error(msg_id, msg_type, err.code, str(err), err.details))
+        except webhook_service.LaunchRefused as err:
+            await _rollback_terminal_create(session, transaction)
+            session._terminal_create_transactions.pop(key, None)
+            if not session.dead:
+                await session.send_json(make_error(msg_id, msg_type, "WEBHOOK_LAUNCH_REFUSED", str(err)))
         except BaseException:
             await _rollback_terminal_create(session, transaction)
             session._terminal_create_transactions.pop(key, None)
@@ -8568,12 +8685,13 @@ async def _terminal_create_impl(
     for key in ("quota_transaction_id", "quota_original_pane_id", "credential_epoch",
                 "credential_store_verified", "credential_store_id", "credential_store_error",
                 "credential_launch_term_id", "guard_pane_token",
-                ACCOUNT_DIR_METADATA_KEY, "account_dir_login"):
+                ACCOUNT_DIR_METADATA_KEY, "account_dir_login",
+                pane_config_fingerprint.METADATA_KEY):
         metadata.pop(key, None)
     agent_key = payload.get("agent_key") or ""
     # The window's per-vendor env settings, first in the chain on purpose: the
     # vendor defaults below use setdefault, while onboarding, login profiles,
-    # home management, wiring and portable credentials all update over the top,
+    # home management and wiring all update over the top,
     # so a user value can never displace something the backend must control.
     # It is also the only untrusted source in the chain — filter it here, and
     # keep what survived so the window can be told which of its settings a
@@ -8592,6 +8710,22 @@ async def _terminal_create_impl(
     payload["command"] = app._command_with_installed_cli_alias(
         agent_key, payload.get("command")
     )
+    requested_command = payload.get("command")
+    if (webhooks := webhook_service.current()) is not None:
+        payload["command"] = webhooks.launch_command(
+            agent_key, payload.get("command"), pane_id=str(payload.get("pane_id") or ""), metadata=metadata,
+        )
+        env.pop(guard_fail_closed.ENV, None)
+        unattended_env = webhooks.launch_env(str(payload.get("pane_id") or ""))
+        env.update(unattended_env)
+        if unattended_env and agent_key == "claude":
+            from . import claude_hooks
+
+            settings = guard_fail_closed.claude_settings(str(app.backend_port_file()))
+            payload["command"] = claude_hooks.append_settings(payload["command"], settings)
+    elif webhook_service.unavailable():
+        payload["command"] = webhook_service.without_bypass(agent_key, payload.get("command"))
+    bypass_dropped_command = webhook_service.bypass_dropped_from(requested_command, payload.get("command"))
     try:
         startup_probe = await asyncio.get_running_loop().run_in_executor(
             _CLI_PROBE_EXECUTOR,
@@ -8862,6 +8996,15 @@ async def _terminal_create_impl(
                 Path(env.get("CODEX_HOME") or app.codex_home_manager.real_home),
                 app.backend_port_file(), hook_auth.header_file(),
             )
+            webhooks = webhook_service.current()
+            if (
+                webhooks is not None
+                and webhooks.is_run_pane(str(payload.get("pane_id") or ""))
+                and "hooks.PreToolUse" not in app._command_text(payload["command"])
+            ):
+                # wire() leaves the hooks out once Codex has shown its trust
+                # screen: a webhook pane would then run with no Guard at all.
+                raise webhook_service.LaunchRefused("codex has not trusted Navide's hooks, so no Guard would run")
     from . import guard_hooks
 
     if agent_key in guard_hooks.PANE_TOKEN_VENDORS:
@@ -8929,6 +9072,16 @@ async def _terminal_create_impl(
             if isinstance(session.terminals, RustTerminalService):
                 session.terminals.receipt_refused_create(str(payload.get("pane_id") or ""), refused)
             raise
+        # The builtin skills transformer cannot return lines; it keeps them.
+        from .plugins.builtin.navide_skills import skills_wiring
+
+        wiring_warnings.extend(skills_wiring.take_spawn_warnings(str(payload.get("pane_id") or "")))
+        # What this pane loaded, so a later MCP or skills change can name it
+        # stale (terminal.config_status). Read-only; the command is untouched.
+        if agent_key:
+            metadata[pane_config_fingerprint.METADATA_KEY] = await asyncio.to_thread(
+                pane_config_fingerprint.fingerprint, agent_key
+            )
     # Give the pane whatever its push channel needs (a port to serve on, a file
     # to watch) so a message can later reach it without being typed in. Last,
     # so the flags it adds cannot be displaced by MCP or skills wiring; a CLI
@@ -9141,54 +9294,6 @@ async def _terminal_create_impl(
                 ))
                 await _reclaim_codex_home(str(transaction.get("codex_home_id") or ""))
                 return
-            # The portable credential this agent's panes are set to run on,
-            # if any — read here, under the same lock, so a switch racing
-            # this spawn cannot pair one account's live files with another's
-            # token. The selection is its own record: it does not follow the
-            # native default profile or the payload's pin (bookkeeping, see
-            # _profile_pin_for_spawn), so a credential synced from another
-            # machine is usable without that account ever signing in here.
-            try:
-                # A login pane — isolated (login_profile_id, which does not
-                # reach this branch) or live (is_login alone) — exists to
-                # sign in; the token would make the CLI skip exactly that.
-                # An account-dir pane already runs on its account's own
-                # login; a portable token would outrank it and switch the
-                # identity silently.
-                injection = None if is_login or account_dir_slot else await vault_to_thread(
-                    functools.partial(
-                        portable_credentials.spawn_env, agent_key,
-                        home=Path.home(), cwd=Path(str(payload.get("cwd") or "")),
-                    )
-                )
-            except portable_credentials.PortableCredentialUnavailable as unavailable:
-                # Selected but unusable: refuse rather than start the pane on
-                # whatever login the CLI would fall back to — that would be a
-                # silent switch of identity. The data names what to fix.
-                app.log.warning("terminal.create refused: %s", unavailable)
-                await session.send_json(
-                    make_error(
-                        msg_id, msg_type, "PORTABLE_CREDENTIAL_UNAVAILABLE",
-                        str(unavailable),
-                        {
-                            "agent_key": agent_key,
-                            "profile_id": unavailable.slot_id,
-                            "reason": unavailable.reason,
-                            "shadowedBy": list(unavailable.shadowed_by),
-                        },
-                    )
-                )
-                await _reclaim_codex_home(str(transaction.get("codex_home_id") or ""))
-                return
-            if injection is not None:
-                env.update(injection.env)
-                env_remove = list(env_remove or []) + list(injection.env_remove)
-                metadata[PORTABLE_SLOT_METADATA_KEY] = injection.slot_id
-            # The launch's identity, fixed here for the bookkeeping that
-            # follows in separate messages (see _launch_portable_slot). A
-            # login or native launch writes "" and retires any earlier fact.
-            portable_credentials.note_launch(
-                str(payload["pane_id"]), injection.slot_id if injection else "")
             # Launch provenance for the account-switch authority: the profile
             # this pane starts on and the credential pool it resolves to,
             # decided under the same lock as the credentials themselves. The
@@ -9203,7 +9308,6 @@ async def _terminal_create_impl(
             )
             provenance = quota_failover.pane_auth_scope(
                 agent_key, launch_profile, env=env, env_remove=env_remove or (),
-                portable_slot_id=injection.slot_id if injection else None,
                 account_dir=bool(account_dir_slot),
             )
             metadata["launch_profile_id"] = provenance["profileId"]
@@ -9330,7 +9434,6 @@ async def _terminal_create_impl(
             finally:
                 switch_lock.release()
     else:
-        portable_credentials.note_launch(str(payload["pane_id"]), "")
         term = await _spawn_and_claim()
     # What became of the window's own env settings. Only now is the answer
     # final: `env` is written by six later sources and `env_remove` (applied
@@ -9348,6 +9451,11 @@ async def _terminal_create_impl(
             "denied": sorted(denied_env_keys),
             # Accepted, then replaced or removed by a higher-priority source.
             "overridden": overridden_env_keys,
+        }))
+    if bypass_dropped_command:
+        await session.send_json(make_event("cli.bypass_dropped", {
+            "pane_id": str(payload.get("pane_id") or ""),
+            "command": bypass_dropped_command,
         }))
     # Announced only now the PTY exists. Wiring the channel is a spawn-time
     # decision, but advertising it before the CLI is actually running would tell
@@ -9777,6 +9885,8 @@ async def terminal_resource_usage(session: "Session", msg_id: str, msg_type: str
             await session.send_json(make_response(msg_id, msg_type, {**cached, "cliRisks": risks}))
             return
         result = await _collect_resource_usage(session)
+        from . import acp_ws
+        result = await acp_ws.with_resource_rows(result)
         _resource_sweep_cache["at"] = now
         _resource_sweep_cache["payload"] = result
     risks = await asyncio.to_thread(
@@ -10093,7 +10203,6 @@ async def terminal_kill_surface(session: "Session", msg_id: str, msg_type: str, 
         app.attribution.unregister_pane(pane_id)
         ended.setdefault(pane_id, workspace_path)
     for pane_id, workspace_path in ended.items():
-        portable_credentials.forget_launch(pane_id)
         for ws in app.dev_time_store.pane_removed(pane_id):
             await app.broadcast(make_event("devtime.changed", {"workspace_path": ws}))
         entry = agent_messaging.get(pane_id)
@@ -10152,6 +10261,41 @@ async def terminal_dock_retire(session: "Session", msg_id: str, msg_type: str, p
     if pane_id and workspace_path and surface and surface != "main":
         _retire_dock_record(workspace_path, pane_id, surface)
     await session.send_json(make_response(msg_id, msg_type, {}))
+
+
+@handler("terminal.config_status")
+async def terminal_config_status(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """Which of this window's panes started before an MCP or skills change.
+
+    Disclosure only: the answer lists stale parts per terminal and the window
+    offers the user a rebuild; nothing is restarted here.
+    """
+    from . import app
+
+    ids = payload.get("terminal_session_ids") if isinstance(payload, dict) else None
+    if not isinstance(ids, list):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "terminal_session_ids must be a list")
+        )
+        return
+    stored_sessions = session.terminals._sessions  # noqa: SLF001
+    current: dict[str, dict[str, str | None]] = {}
+    stale: list[dict[str, Any]] = []
+    for tid in (str(x) for x in ids):
+        stored = stored_sessions.get(tid)
+        if stored is None or stored.closed or app._PTY_OWNERS.get(tid) is not session:
+            continue
+        recorded = stored.metadata.get(pane_config_fingerprint.METADATA_KEY)
+        if not isinstance(recorded, dict) or not stored.agent_key:
+            continue
+        if stored.agent_key not in current:
+            current[stored.agent_key] = await asyncio.to_thread(
+                pane_config_fingerprint.fingerprint, stored.agent_key
+            )
+        parts = pane_config_fingerprint.stale_parts(recorded, current[stored.agent_key])
+        if parts:
+            stale.append({"terminal_session_id": tid, "pane_id": stored.pane_id, "parts": parts})
+    await session.send_json(make_response(msg_id, msg_type, {"stale": stale}))
 
 
 @handler("terminal.reattach")
@@ -10367,10 +10511,7 @@ async def project_set_layout_mode(session: "Session", msg_id: str, msg_type: str
     mode = payload.get("layout_mode", "grid")
     if mode not in ("auto", "grid", "spotlight", "fullscreen"):
         mode = "grid"
-    project = app.project_store.peek(ws_raw)
-    if project:
-        project.layout_mode = mode
-        app.project_store.save(project)
+    app.project_store.set_layout_mode(ws_raw, mode)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
@@ -11076,15 +11217,13 @@ async def project_set_theme(session: "Session", msg_id: str, msg_type: str, payl
     # of truth. We just stash the latest theme + custom overrides so they
     # can sync across devices. Unknown workspace → silently no-op.
     ws_raw = payload.get("workspace_path", "") or ""
-    project = app.project_store.peek(ws_raw)
-    if project:
-        theme = payload.get("theme")
-        if isinstance(theme, str) and theme:
-            project.theme = theme
-        custom = payload.get("theme_custom")
-        if isinstance(custom, dict):
-            project.theme_custom = custom
-        app.project_store.save(project)
+    theme = payload.get("theme")
+    custom = payload.get("theme_custom")
+    app.project_store.set_theme(
+        ws_raw,
+        theme=theme if isinstance(theme, str) and theme else None,
+        theme_custom=custom if isinstance(custom, dict) else None,
+    )
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
@@ -11095,12 +11234,8 @@ async def project_set_language(session: "Session", msg_id: str, msg_type: str, p
     # Backup-only persistence: localStorage in the renderer is the source
     # of truth. Unknown workspace → silently no-op.
     ws_raw = payload.get("workspace_path", "") or ""
-    project = app.project_store.peek(ws_raw)
-    if project:
-        lang = payload.get("language")
-        if isinstance(lang, str) and lang:
-            project.language = lang
-        app.project_store.save(project)
+    lang = payload.get("language")
+    app.project_store.set_language(ws_raw, lang if isinstance(lang, str) and lang else None)
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
@@ -11189,33 +11324,197 @@ def _mirror_pipeline_state(project: "Project") -> None:
     )
 
 
+@handler("pipeline.suspend")
+async def pipeline_suspend(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The run reached a subpipeline node: suspend it (run_stack) so the
+    window can start the child run in this workspace."""
+    from . import app
+    from .guard.taint import pipeline_run_taint
+
+    ws = payload["workspace_path"]
+    try:
+        project, frame = app.project_store.suspend_for_child(
+            ws,
+            node_id=str(payload.get("node_id") or ""),
+            next_index=int(payload.get("next_index", 0) or 0),
+            pipeline_name=str(payload.get("pipeline_name") or ""),
+            child_pipeline_id=str(payload.get("child_pipeline_id") or ""),
+            taint=pipeline_run_taint(ws),
+        )
+    except ValueError as err:
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", str(err)))
+        return
+    app.tokens_store.suspend_run(ws)
+    _mirror_pipeline_state(project)
+    resp = app._project_payload(project)
+    resp["frame_id"] = frame["id"]
+    await session.send_json(make_response(msg_id, msg_type, resp))
+
+
+@handler("pipeline.child_finished")
+async def pipeline_child_finished(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The child run ended: restore its parent (run_stack pop) with the
+    subpipeline node done or failed. {popped: false} when no parent waits."""
+    from . import app
+    from .guard.taint import pipeline_run_resumed, pipeline_run_taint, restore_pipeline_run_taint
+
+    ws = payload["workspace_path"]
+    child = app.project_store.peek(ws)
+    child_run_id = _token_run_id(child.log_file_name, child.id) if child is not None else ""
+    outcome = "completed" if payload.get("outcome") == "completed" else "failed"
+    popped = app.project_store.finish_child(
+        ws, outcome=outcome, summary=str(payload.get("summary") or ""),
+        output=payload.get("output"), error=str(payload.get("error") or ""),
+    )
+    if popped is None:
+        await session.send_json(make_response(msg_id, msg_type, {"popped": False}))
+        return
+    project, frame = popped
+    app.tokens_store.resume_suspended_run(ws, child_run_id=child_run_id)
+    # Merged, never cleared: the child's output flows into the parent, so a
+    # taint the child run carries stays on the parent too.
+    restore_pipeline_run_taint(ws, str(frame.get("taint") or "") or pipeline_run_taint(ws))
+    # The parent itself imported: tainted even after a restart emptied the table.
+    pipeline_run_resumed(ws, _run_taint_detail(getattr(project, "pipeline_id", "")))
+    _mirror_pipeline_state(project)
+    resp = app._project_payload(project)
+    resp.update({"popped": True, "node_id": frame["node_id"], "next_index": frame["next_index"]})
+    await session.send_json(make_response(msg_id, msg_type, resp))
+
+
+@handler("pipeline.stack")
+async def pipeline_stack(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """The parent runs suspended in a workspace, outermost first, without
+    their saved run fields."""
+    from . import app
+
+    project = app.project_store.peek(payload.get("workspace_path") or "")
+    frames = [run_frame_view(f) for f in (project.run_stack if project is not None else [])]
+    await session.send_json(make_response(msg_id, msg_type, {"frames": frames, "state": project.state if project else ""}))
+
+
+def run_frame_view(frame: dict) -> dict:
+    """A run_stack frame as status surfaces show it."""
+    run = frame.get("run") or {}
+    return {
+        "id": frame.get("id", ""), "node_id": frame.get("node_id", ""),
+        "pipeline_id": run.get("pipeline_id", ""), "pipeline_name": frame.get("pipeline_name", ""),
+        "child_pipeline_id": frame.get("child_pipeline_id", ""), "next_index": frame.get("next_index", 0),
+        "task_description": run.get("task_description", ""), "suspended_at": frame.get("suspended_at", ""),
+    }
+
+
+def _imported_taint_detail(pipeline_id: str) -> str:
+    """Guard taint detail for a run of a pipeline imported from n8n, else ""."""
+    from . import app
+    from .n8n_import import import_detail
+
+    if not pipeline_id:
+        return ""
+    record = app.stages_store.imported_from(pipeline_id)
+    return import_detail(record) if record else ""
+
+
+def _run_taint_detail(pipeline_id: str) -> str:
+    """Guard taint detail a run of this pipeline carries whoever starts it: an
+    import, or a webhook trigger ever bound to it, deleted ones included."""
+    imported = _imported_taint_detail(pipeline_id)
+    if imported or not pipeline_id:
+        return imported
+    webhooks = webhook_service.current()
+    return "pipeline bound to a webhook trigger" if webhooks and webhooks.store.is_bound(pipeline_id) else ""
+
+
+@handler("pipeline.claim")
+async def pipeline_claim(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """A window's claim of the pipeline runs it drives, sent on every
+    (re)connect — an empty list when it drives none. See pipeline_liveness."""
+    workspaces = payload.get("workspaces")
+    if not isinstance(workspaces, list):
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "workspaces must be a list"))
+        return
+    pipeline_liveness.record_claim(session, [w for w in workspaces if isinstance(w, str)])
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+
+
 @handler("pipeline.resume")
 async def pipeline_resume(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+    from .projects import NoRunToResume
 
-    project, resume_index = app.project_store.resume_pipeline(payload["workspace_path"])
+    # Resuming a parent suspended at its sub-pipeline pops its frame: keep the
+    # taint the frame recorded (merged, never cleared).
+    peek = getattr(app.project_store, "peek", None)
+    before = peek(payload["workspace_path"]) if peek else None
+    stack = getattr(before, "run_stack", None) if before is not None else None
+    frame_taint = str(stack[-1].get("taint") or "") if before is not None and before.state == "suspended" and stack else ""
+    try:
+        project, resume_index = app.project_store.resume_pipeline(payload["workspace_path"])
+    except NoRunToResume as err:
+        await session.send_json(make_error(msg_id, msg_type, "NO_RUN_TO_RESUME", str(err)))
+        return
+    except ValueError as err:
+        if not _is_store_refusal(err):
+            raise
+        await session.send_json(_store_error(msg_id, msg_type, err))
+        return
+    from .guard.taint import pipeline_run_resumed, restore_pipeline_run_taint
+
+    restore_pipeline_run_taint(payload["workspace_path"], frame_taint)
+    pipeline_run_resumed(payload["workspace_path"], _run_taint_detail(getattr(project, "pipeline_id", "")))
+    pipeline_liveness.claim_run(session, project.workspace_path)
     _mirror_pipeline_state(project)
     resp = app._project_payload(project)
     resp["resume_index"] = resume_index
     await session.send_json(make_response(msg_id, msg_type, resp))
 
 
+def _token_run_id(log_file_name: str, project_id: str) -> str:
+    """The tokens_store run id pipeline.start gives a run: its run directory."""
+    log_name = log_file_name or ""
+    return (log_name.rsplit("/", 1)[0] if "/" in log_name else "") or project_id
+
+
 @handler("pipeline.start")
 async def pipeline_start(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+    from .projects import ParentRunSuspended
 
-    project = app.project_store.start_pipeline(
-        payload["workspace_path"],
-        task_description=payload.get("task_description", ""),
-        total_stages=int(payload.get("total_stages", 4)),
-        stage_blueprint=payload.get("stage_blueprint", []),
-        backend_version=app.__version__,
-        pipeline_id=payload.get("pipeline_id", "") or app.stages_store.get_active_pipeline_id(),
-        start_index=int(payload.get("start_index", 0) or 0),
-    )
-    from .guard.taint import pipeline_run_started
+    child_of = str(payload.get("child_of") or "")
+    frame = None
+    if child_of:
+        before = app.project_store.peek(payload["workspace_path"])
+        stack = getattr(before, "run_stack", None) or []
+        frame = stack[-1] if stack else None
+    try:
+        project = app.project_store.start_pipeline(
+            payload["workspace_path"],
+            task_description=payload.get("task_description", ""),
+            total_stages=int(payload.get("total_stages", len(payload.get("stage_blueprint") or []))),
+            stage_blueprint=payload.get("stage_blueprint", []),
+            backend_version=app.__version__,
+            pipeline_id=payload.get("pipeline_id", "") or app.stages_store.get_active_pipeline_id(),
+            start_index=int(payload.get("start_index", 0) or 0),
+            child_of=child_of,
+        )
+    except ParentRunSuspended as err:
+        await session.send_json(make_error(msg_id, msg_type, "PIPELINE_SUSPENDED", str(err)))
+        return
+    except ValueError as err:
+        if _is_store_refusal(err):
+            await session.send_json(_store_error(msg_id, msg_type, err))
+            return
+        await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", str(err)))
+        return
+    from .guard.taint import arm_pipeline_run, pipeline_run_started
 
-    pipeline_run_started(payload["workspace_path"])
+    if child_of and frame is not None and frame.get("taint"):
+        # A child run carries its parent's taint, task text included.
+        arm_pipeline_run(payload["workspace_path"], str(frame["taint"]))
+    pipeline_run_started(payload["workspace_path"], _run_taint_detail(getattr(project, "pipeline_id", "")))
+    if (webhooks := webhook_service.current()) is not None:
+        webhooks.run_started(project, child=bool(child_of))
+    pipeline_liveness.claim_run(session, project.workspace_path)
     app._register_workspace_and_backfill(project.workspace_path)
     _mirror_pipeline_state(project)
     # Start a fresh token-stats run for this workspace.
@@ -11227,6 +11526,7 @@ async def pipeline_start(session: "Session", msg_id: str, msg_type: str, payload
         task=project.task_description,
         run_dir=run_dir,
         pipeline_id=getattr(project, "pipeline_id", ""),
+        parent_run_id=_token_run_id(frame["run"].get("log_file_name", ""), project.id) if child_of and frame else "",
     )
     asyncio.create_task(
         app.broadcast(make_event("tokens.changed", app.tokens_store.snapshot(project.workspace_path)))
@@ -11239,17 +11539,23 @@ async def pipeline_start(session: "Session", msg_id: str, msg_type: str, payload
 @handler("pipeline.stage_spawn")
 async def pipeline_stage_spawn(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+    from .projects import StageOutOfRange
 
-    project = app.project_store.record_stage_spawn(
-        payload["workspace_path"],
-        stage_index=int(payload["stage_index"]),
-        pane_id=payload["pane_id"],
-        agent=payload.get("agent", ""),
-        role=payload.get("role", ""),
-    )
+    try:
+        project = app.project_store.record_stage_spawn(
+            payload["workspace_path"],
+            stage_index=int(payload["stage_index"]),
+            pane_id=payload["pane_id"],
+            agent=payload.get("agent", ""),
+            role=payload.get("role", ""),
+        )
+    except StageOutOfRange as err:
+        await session.send_json(_stage_out_of_range(msg_id, msg_type, err))
+        return
     from .guard.taint import pipeline_pane_spawned
 
     pipeline_pane_spawned(payload["workspace_path"], str(payload["pane_id"]))
+    pipeline_liveness.claim_run(session, project.workspace_path)
     await session.send_json(
         make_response(msg_id, msg_type, app._project_payload(project))
     )
@@ -11258,24 +11564,29 @@ async def pipeline_stage_spawn(session: "Session", msg_id: str, msg_type: str, p
 @handler("pipeline.slot_spawn")
 async def pipeline_slot_spawn(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+    from .projects import StageOutOfRange
 
     slot_pin = _profile_pin_for_bookkeeping(
         payload.get("agent", ""), payload.get("pane_id"), payload.get("profile_id"))
-    project = app.project_store.record_slot_spawn(
-        payload["workspace_path"],
-        stage_index=int(payload["stage_index"]),
-        slot_label=payload["slot_label"],
-        pane_id=payload["pane_id"],
-        agent=payload.get("agent", ""),
-        role=payload.get("role", ""),
-        # Claude passes its pinned --session-id here; Codex/Antigravity pass
-        # "" and persist later via pipeline.slot_session once detected.
-        session_id=payload.get("session_id", ""),
-        session_home_id=payload.get("session_home_id", ""),
-        profile_id=slot_pin,
-        run_group_id=payload.get("run_group_id", ""),
-        launch_id=launch_id.current(),
-    )
+    try:
+        project = app.project_store.record_slot_spawn(
+            payload["workspace_path"],
+            stage_index=int(payload["stage_index"]),
+            slot_label=payload["slot_label"],
+            pane_id=payload["pane_id"],
+            agent=payload.get("agent", ""),
+            role=payload.get("role", ""),
+            # Claude passes its pinned --session-id here; Codex/Antigravity pass
+            # "" and persist later via pipeline.slot_session once detected.
+            session_id=payload.get("session_id", ""),
+            session_home_id=payload.get("session_home_id", ""),
+            profile_id=slot_pin,
+            run_group_id=payload.get("run_group_id", ""),
+            launch_id=launch_id.current(),
+        )
+    except StageOutOfRange as err:
+        await session.send_json(_stage_out_of_range(msg_id, msg_type, err))
+        return
     app.pane_account_history.pin(str(payload["pane_id"]), _account_pin_for_history(slot_pin))
     from .guard.taint import pipeline_pane_spawned
 
@@ -11283,6 +11594,11 @@ async def pipeline_slot_spawn(session: "Session", msg_id: str, msg_type: str, pa
     await session.send_json(
         make_response(msg_id, msg_type, app._project_payload(project))
     )
+
+
+def _stage_out_of_range(msg_id: str, msg_type: str, err: Any) -> dict:
+    return make_error(msg_id, msg_type, "STAGE_OUT_OF_RANGE", str(err),
+                      {"stage_index": err.stage_index, "total_stages": err.total})
 
 
 @handler("pipeline.slot_session")
@@ -11397,13 +11713,18 @@ async def _sweep_pane_ptys(session: "Session", pane_id: str, *, force: bool = Tr
 @handler("pipeline.slot_unspawn")
 async def pipeline_slot_unspawn(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+    from .projects import StageOutOfRange
 
     stage_index = int(payload["stage_index"])
     slot_label = payload["slot_label"]
     # Settle BEFORE the record changes: a slot whose terminal (published, or a create still in
     # flight) is not proven gone keeps its record, and the close is refused.
-    pane_id = app.project_store.slot_pane_id(
-        payload["workspace_path"], stage_index=stage_index, slot_label=slot_label)
+    try:
+        pane_id = app.project_store.slot_pane_id(
+            payload["workspace_path"], stage_index=stage_index, slot_label=slot_label)
+    except StageOutOfRange as err:
+        await session.send_json(_stage_out_of_range(msg_id, msg_type, err))
+        return
     if (unresolved := await _settle_pane(session, pane_id)) is not None:
         await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", unresolved,
                                            {"pane_id": str(pane_id)}))
@@ -11415,11 +11736,13 @@ async def pipeline_slot_unspawn(session: "Session", msg_id: str, msg_type: str, 
             slot_label=slot_label,
             expected_pane_id=pane_id,
         )
+    except StageOutOfRange as err:
+        await session.send_json(_stage_out_of_range(msg_id, msg_type, err))
+        return
     except RetirementTargetChanged as err:
         await session.send_json(make_error(msg_id, msg_type, "PANE_RELEASE_UNRESOLVED", str(err),
                                            {"pane_id": str(pane_id)}))
         return
-    portable_credentials.forget_launch(str(pane_id or ""))
     await session.send_json(
         make_response(msg_id, msg_type, app._project_payload(project))
     )
@@ -11428,13 +11751,19 @@ async def pipeline_slot_unspawn(session: "Session", msg_id: str, msg_type: str, 
 @handler("pipeline.slot_kickoff")
 async def pipeline_slot_kickoff(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
+    from .projects import SlotNotFound
 
-    project = app.project_store.update_slot_kickoff(
-        payload["workspace_path"],
-        stage_index=int(payload["stage_index"]),
-        slot_label=payload["slot_label"],
-        kickoff_status=payload.get("kickoff_status", "sent"),
-    )
+    try:
+        project = app.project_store.update_slot_kickoff(
+            payload["workspace_path"],
+            stage_index=int(payload["stage_index"]),
+            slot_label=payload["slot_label"],
+            kickoff_status=payload.get("kickoff_status", "sent"),
+        )
+    except SlotNotFound as err:
+        await session.send_json(make_error(msg_id, msg_type, "SLOT_NOT_FOUND", str(err),
+                                           {"stage_index": err.stage_index, "slot_label": err.slot_label}))
+        return
     await session.send_json(
         make_response(msg_id, msg_type, app._project_payload(project))
     )
@@ -11462,6 +11791,8 @@ async def pipeline_abort(session: "Session", msg_id: str, msg_type: str, payload
     reason = payload.get("reason", "user")
     project = app.project_store.abort_pipeline(payload["workspace_path"], reason=reason)
     _mirror_pipeline_state(project)
+    if reason == "failed" and payload.get("kickoff_failed") is True and (webhooks := webhook_service.current()) is not None:
+        webhooks.note_kickoff_failed(payload["workspace_path"])
     app.tokens_store.end_run(
         project.workspace_path,
         # The engine aborts with reason "failed" when a run cannot go on (a
@@ -11526,10 +11857,19 @@ async def pipeline_node_states(session: "Session", msg_id: str, msg_type: str, p
     ):
         await session.send_json(make_error(msg_id, msg_type, "BAD_REQUEST", "nodes/gate/outputs must be objects"))
         return
+    # Only nodes of the run's own pipeline are stored; anything else is
+    # dropped and named back. A pipeline the store cannot read (deleted
+    # mid-run) filters nothing rather than dropping the run's states.
+    before = app.project_store.peek(payload["workspace_path"])
+    try:
+        known = app.stages_store.node_ids(getattr(before, "pipeline_id", "") or None)
+    except (KeyError, ValueError):
+        known = None
     project = app.project_store.record_node_states(
-        payload["workspace_path"], nodes=nodes, gate=gate, outputs=outputs
+        payload["workspace_path"], nodes=nodes, gate=gate, outputs=outputs, known_ids=known
     )
-    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+    dropped = sorted({str(n) for n in [*nodes, *(outputs or {})]} - known) if known is not None else []
+    await session.send_json(make_response(msg_id, msg_type, {"ok": True, **({"dropped": dropped} if dropped else {})}))
     await app.broadcast(make_event("pipeline.node_states_changed", {
         "workspace_path": project.workspace_path,
         "pipeline_id": project.pipeline_id,
@@ -11569,12 +11909,17 @@ async def pipeline_fetch_docs(session: "Session", msg_id: str, msg_type: str, pa
 async def pipeline_auto_answer(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
 
-    result = await app.analyzer_auto_answer(
-        questions=payload.get("questions", []),
-        task=payload.get("task", ""),
-        stage_title=payload.get("stage_title", ""),
-        model=payload.get("model") or app.ANALYZER_DEFAULT_MODEL,
-    )
+    try:
+        result = await app.analyzer_auto_answer(
+            questions=payload.get("questions", []),
+            task=payload.get("task", ""),
+            stage_title=payload.get("stage_title", ""),
+            model=payload.get("model") or app.ANALYZER_DEFAULT_MODEL,
+        )
+    except Exception as err:  # noqa: BLE001 — the local analyzer being down is not a backend fault
+        log.warning("pipeline.auto_answer failed: %s", err)
+        await session.send_json(make_error(msg_id, msg_type, "AUTO_ANSWER_FAILED", str(err)))
+        return
     app._record_analyzer_tokens(result, payload)
     await session.send_json(make_response(msg_id, msg_type, result))
 
@@ -11697,8 +12042,6 @@ async def manual_pane_unspawn(session: "Session", msg_id: str, msg_type: str, pa
     except RetirementTargetChanged as err:
         await refuse(str(err), pane_id)
         return
-    for swept_id in dict.fromkeys([pane_id, *removed_pane_ids]):
-        portable_credentials.forget_launch(str(swept_id))
     # A Codex pane's home is named after its pane id, or after the id a
     # restored pane kept using (session_home_id). Its PTY is down by now.
     for home_id in dict.fromkeys([
@@ -11898,7 +12241,7 @@ def _collect_orphan_sessions(workspace_path: str) -> list[dict]:
     """
     from . import app
 
-    files = ClaudeLogReader().session_files_for_workspace(workspace_path)
+    files = ClaudeLogReader().own_session_files(workspace_path)
     project = app.project_store.peek(workspace_path)
     live_ids: set[str] = set()
     history_names: dict[str, str] = {}
@@ -12408,6 +12751,12 @@ async def ui_invoke_result(session: "Session", msg_id: str, msg_type: str, paylo
         "result": payload.get("result"),
         "error": str(payload["error"]) if payload.get("error") is not None else None,
     }
+    # A coded refusal: the handler's code as error_code (the MCP shape), its
+    # params as they came; `error` keeps the sentence.
+    if isinstance(payload.get("code"), str) and payload["code"]:
+        result["error_code"] = payload["code"]
+    if isinstance(payload.get("params"), dict):
+        result["params"] = payload["params"]
     if payload.get("warnings"):
         result["warnings"] = payload["warnings"]
     delivered = plan_mcp.resolve_ui_invoke(request_id, result)
@@ -12491,6 +12840,43 @@ async def agent_msg_list(session: "Session", msg_id: str, msg_type: str, payload
                 entry["workspace_display_name"] = display
 
     await session.send_json(make_response(msg_id, msg_type, {"panes": entries}))
+
+
+@handler("agents.public")
+async def agents_public(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    """One read-only plugin `agents.*` query, Host-authenticated. The Host has
+    already checked Manifest, Grant and Execution Policy and binds the
+    workspace; see agents_host_api for what each answer may contain."""
+    from . import agents_host_api
+
+    if not session.host_authenticated:
+        await session.send_json(
+            make_error(msg_id, msg_type, "UNAUTHORIZED", "Host session is not authenticated")
+        )
+        return
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"workspace_path", "operation", "arguments"}
+        or not isinstance(payload.get("workspace_path"), str)
+        or not payload["workspace_path"].strip()
+        or payload.get("operation") not in agents_host_api.OPERATIONS
+        or not isinstance(payload.get("arguments"), dict)
+    ):
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "agents.public is malformed")
+        )
+        return
+    try:
+        result = await asyncio.to_thread(
+            agents_host_api.run,
+            payload["workspace_path"],
+            payload["operation"],
+            payload["arguments"],
+        )
+    except agents_host_api.AgentsApiError as err:
+        await session.send_json(make_error(msg_id, msg_type, err.code, str(err)))
+        return
+    await session.send_json(make_response(msg_id, msg_type, result))
 
 
 @handler("agent_msg.route")
@@ -12880,6 +13266,12 @@ async def agent_msg_log_append(session: "Session", msg_id: str, msg_type: str, p
             make_error(msg_id, msg_type, "BAD_REQUEST", "agent_msg.log_append needs a rows list")
         )
         return
+    # Which workspace each side is, resolved here while those panes are still
+    # registered; the renderer's own word for it is never taken.
+    for row in rows:
+        if isinstance(row, dict):
+            row["sender_workspace"] = agent_messaging.workspace_of_name(str(row.get("sender") or ""), session)
+            row["recipient_workspace"] = agent_messaging.workspace_of_name(str(row.get("recipient") or ""), session)
     written = app.agent_message_log.append(rows)
     agent_messaging.notify_message_rows(rows)
     await session.send_json(make_response(msg_id, msg_type, {"written": written}))
@@ -13078,7 +13470,10 @@ async def scheduler_upsert(session: "Session", msg_id: str, msg_type: str, paylo
     try:
         result = await scheduler.get_service().upsert(job)
     except scheduler.JobInvalid as err:
-        await _scheduler_bad_request(session, msg_id, msg_type, str(err))
+        if err.code:
+            await session.send_json(make_error(msg_id, msg_type, f"SCHEDULER_{err.code.upper()}", str(err)))
+        else:
+            await _scheduler_bad_request(session, msg_id, msg_type, str(err))
         return
     await session.send_json(make_response(msg_id, msg_type, result))
     await scheduler.broadcast_changed(exclude=session)
@@ -13201,6 +13596,25 @@ async def evolve_get(session: "Session", msg_id: str, msg_type: str, payload: di
     )
 
 
+@handler("evolve.retro_request")
+async def evolve_retro_request(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
+    # S5b: before an automatic or agent-requested reclaim. Waits at most
+    # evolve_service.RETRO_WAIT_S; handlers run as their own tasks, so this
+    # holds up nothing else.
+    from . import evolve_service
+
+    workspace = _evolve_workspace(payload)
+    pane_id = str(payload.get("pane_id") or "")
+    if workspace is None or not pane_id:
+        await session.send_json(
+            make_error(msg_id, msg_type, "BAD_REQUEST", "evolve.retro_request needs a workspace and a pane_id")
+        )
+        return
+    await session.send_json(
+        make_response(msg_id, msg_type, await evolve_service.get_service().retro_request(workspace, pane_id))
+    )
+
+
 @handler("evolve.set")
 async def evolve_set(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import evolve_service, scheduler
@@ -13247,7 +13661,7 @@ async def evolve_badges(session: "Session", msg_id: str, msg_type: str, payload:
 
 
 # ── CLI extensions (cli_extensions.*) ──────────────────────────────────────
-# The read-only inventory behind Settings → CLI Extensions. Scanning reads
+# The read-only inventory behind Settings → Extensions. Scanning reads
 # files and at most a declared listing command with a timeout, so a thread
 # keeps it off the loop.
 @handler("cli_extensions.list")
@@ -13341,6 +13755,15 @@ async def convenience_upgrade_ack(session: "Session", msg_id: str, msg_type: str
     await app.broadcast(make_event("convenience.changed", {}))
 
 
+# ── Webhook triggers (webhook.*) ────────────────────────────────────────────
+# The window's own management surface. Deliberately not an MCP tool, a ui.*
+# action or a plugin capability: an agent must not open a door for itself.
+from . import webhook_ws  # noqa: E402
+
+for _name, _webhook_handler in webhook_ws.HANDLERS.items():
+    handler(_name)(_webhook_handler)
+
+
 # ── Voice input (voice.*) ───────────────────────────────────────────────────
 # Handlers live in voice_handlers; the sidecar and model in stt_service. Both
 # stay inert until one of these messages arrives.
@@ -13380,3 +13803,10 @@ from . import credentials_scan  # noqa: E402
 
 for _credentials_type, _credentials_fn in credentials_scan.MESSAGE_HANDLERS.items():
     handler(_credentials_type)(_credentials_fn)
+
+# ── API key accounts (cli_profiles.api_key_*) ──
+# Renderer-only. A stored key never comes back through any of these.
+from . import api_key_accounts  # noqa: E402
+
+for _api_key_type, _api_key_fn in api_key_accounts.MESSAGE_HANDLERS.items():
+    handler(_api_key_type)(_api_key_fn)

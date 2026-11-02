@@ -214,16 +214,32 @@ describe('scheme A (plan claude_f1bf4b): live switch, panes follow unless fixed'
   })
 
   it('reopens fresh only on the single-pane account moves, never in a batch', () => {
-    // Fixing, unfixing and "continue on this account": the move is the point
-    // and a pane with no transcript has nothing to lose. The follow batch and
-    // every other rebuild keep the plain resume preflight.
+    // Fixing, unfixing, "continue on this account", moving a fixed pane
+    // from its own list and an agent's single-pane switch (cli_account_switch
+    // pane_id, moveAgentPaneAccount: a fixed pane or a following one): the
+    // move is the point
+    // and a pane with no transcript has nothing to lose. The API key takeover
+    // (reopenOnKey) moves one pane at a time for the same reason. The follow
+    // batch and every other rebuild keep the plain resume preflight.
     const optIns = appSource.split('freshWhenNoTranscript: true').length - 1
-    expect(optIns).toBe(3)
+    expect(optIns).toBe(7)
     expect(functionBody('toggleAccountPin').split('freshWhenNoTranscript: true').length - 1).toBe(2)
+    expect(functionBody('moveAgentPaneAccount').split('freshWhenNoTranscript: true').length - 1).toBe(2)
     expect(appSource).toContain(
       'await rebuildPaneViaResume(paneId, { profileId, forceWhenRunning: true, freshWhenNoTranscript: true })'
     )
     expect(functionBody('moveFollowPanes')).not.toContain('freshWhenNoTranscript')
+  })
+
+  it('reopens one fixed pane on its own, not through the live switch or the default', () => {
+    const start = appSource.indexOf('provide(accountPinKey, {')
+    expect(appSource.slice(start, appSource.indexOf('\n})\n', start))).toContain('movePane: moveFixedAccountPane,')
+    const body = functionBody('moveFixedAccountPane')
+    expect(body).toContain('if (!pane || pane.isLogin || !paneAccountFixed(pane) || !followDirSignedIn(profileId)) return')
+    expect(body).toContain('await rebuildPaneViaResume(paneId, { profileId, freshWhenNoTranscript: true })')
+    for (const banned of ['setPaneDefault', 'setDefault', 'cliAccountSwitch', 'accountFollow.add', 'continueWith']) {
+      expect(body).not.toContain(banned)
+    }
   })
 
   it("keeps #194's follow flow wired but no longer offered in this window", () => {

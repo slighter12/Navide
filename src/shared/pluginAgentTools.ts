@@ -70,7 +70,7 @@ export const CORE_TOOL_NAMES = [
   'cli_get_status', 'cli_inbox_summary', 'cli_interrupt', 'cli_list_sessions', 'cli_list_targets',
   'cli_message_log', 'cli_open_agent', 'cli_pending_incoming', 'cli_permission_settings', 'cli_place_pane',
   'cli_read_incoming', 'cli_read_log', 'cli_reclaim_agent', 'cli_send', 'cli_send_and_wait', 'cli_token_stats',
-  'cli_usage', 'cli_wait_idle', 'cli_whoami', 'credentials_findings', 'credentials_list', 'evolve_report',
+  'cli_usage', 'cli_wait_idle', 'cli_whoami', 'credentials_findings', 'credentials_list', 'evolve_report', 'evolve_retro',
   'marketplace_detail',
   'marketplace_developer_application_fill', 'marketplace_developer_application_open',
   'marketplace_developer_status', 'marketplace_open', 'marketplace_publish_fill', 'marketplace_publish_open',
@@ -78,7 +78,7 @@ export const CORE_TOOL_NAMES = [
   'marketplace_request_install', 'marketplace_request_rollback',
   'marketplace_request_status', 'marketplace_request_update', 'marketplace_search',
   'marketplace_testplace_invite_fill', 'marketplace_testplace_invite_open', 'mcp_list', 'memory_list',
-  'pipeline_abort', 'pipeline_define', 'pipeline_gate', 'pipeline_graph',
+  'pipeline_abort', 'pipeline_define', 'pipeline_gate', 'pipeline_graph', 'pipeline_import_n8n',
   'pipeline_list', 'pipeline_next', 'pipeline_reset', 'pipeline_restart', 'pipeline_restart_from',
   'pipeline_resume', 'pipeline_start', 'pipeline_status', 'plan_add_note', 'plan_add_todo', 'plan_create',
   'plan_list', 'plan_read', 'plan_update_stage', 'plan_update_todo',
@@ -158,7 +158,7 @@ export function validateAgentToolName(name: unknown, pluginId: unknown): AgentTo
  *  the braille blank), variation selectors and tag characters (which
  *  can smuggle ASCII an agent reads but a dialog does not show). One set for
  *  the text rule and for display. */
-const INVISIBLE_CHARACTERS =
+export const INVISIBLE_CHARACTERS =
   '\\u00ad\\u034f\\u061c\\u115f\\u1160\\u180e\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069\\u2800\\u3164' +
   '\\ufe00-\\ufe0f\\ufeff\\uffa0\\u{e0000}-\\u{e007f}'
 // Cc (C0, DEL, C1), the two Unicode line/paragraph separators, markup, and the

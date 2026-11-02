@@ -178,9 +178,13 @@ The current manual-spawn and maintenance flows are early implementations of this
 
 ```text
 Task description
-  → load configurable stages and slots
-  → pre-spawn eligible agent panes
+  → load the pipeline graph and derive its stages (one per longest-path layer over main, branch and error edges)
+  → pre-spawn the first stage's panes; activating a stage warms the next one
+  → hold at a gate until it is passed or rejected (a reject loops back)
+  → skip the stage's slots none of whose inputs was taken (an unchosen branch, the error edge of a slot that did not fail)
   → activate current stage with prior-stage context
+  → retry a slot whose try failed, on the same pane, as its retry policy allows
+  → at a subpipeline node, suspend the run (run_stack), run the child pipeline in the same workspace, then resume with its output
   → run slots in parallel
   → collect questions, analyzer signals, and completion sentinels
   → manager routes work when configured
@@ -247,6 +251,18 @@ Sessions should publish structured progress back to the Project Intelligence Lay
 - YOLO mode can remove external CLI approval or sandbox gates.
 - Cloud providers and MCP servers receive data according to the selected feature and configuration.
 - Cross-agent handoffs can propagate sensitive text.
+- A Navide plugin can read agent data of its own workspace through the
+  read-only `agents` namespace (panes, lineage, message delivery records,
+  session list) and, separately disclosed, message text through
+  `agentMessages`. Neither reads session transcripts, account or quota data,
+  other workspaces or other devices; the Host binds the workspace and the
+  backend (`agents_host_api.py`) returns fixed field lists only.
+- Webhook triggers take requests from outside. The listener is separate from
+  the backend's own port, binds loopback only and is off by default; reaching
+  it from elsewhere is a tunnel the user runs. A run it starts is Guard-tainted
+  and its panes lose the permission bypass unless the trigger is explicitly
+  unattended, including when a pane reopens one of the run's sessions under a
+  new pane id. Claude Code is the only CLI a webhook run can use. See [Pipeline webhooks](pipeline-webhooks.md).
 - Local API-key file permissions are defense in depth, not a secret vault.
 - Git history and run artifacts can preserve data after a working file is deleted.
 - A pane's identity on the Navide MCP endpoint (`/plan-mcp?pane=<id>`) is
@@ -296,6 +312,16 @@ failure instead of being hidden by the factory or legacy copy.
 Neither recovery path mutates Plugin Storage snapshots or legacy seeds. This
 is a compatibility recovery path, not a generic version lifecycle.
 
+## Plugin backends and core sources
+
+A first-party Python backend does not import `agent_team_backend`. It imports
+`navide_plugin_sdk` (`backend/navide_plugin_sdk/`), whose names are versioned
+with the plugin API; `backend/tests/test_plugin_sdk_surface.py` pins them. The
+sources behind those names are bundled into the backend at build time, so a
+Host update does not reach a published package, and a rename inside core needs
+only the SDK module updated. The SDK is not published for third-party authors
+yet, because it still needs the core sources at build time.
+
 ## Architectural direction
 
 Long-term architecture work must turn the current control plane and engineering surfaces into a complete AI-native engineering environment. It should not copy traditional IDE interfaces uncritically, but it must eventually cover the full professional workflow. The primary seams are:
@@ -303,6 +329,6 @@ Long-term architecture work must turn the current control plane and engineering 
 1. A declarative agent-adapter contract
 2. A durable orchestration event and artifact model
 3. Policy-controlled tool execution and workspace isolation
-4. Dependency-graph scheduling beyond a fixed linear pipeline
+4. Dependency-graph scheduling beyond layer-synchronized stages (pipelines already run as a graph with gates, reject loops, pinned nodes, restart-from, and branch and error edges whose untaken paths are skipped; the remaining gap is starting a node as soon as its inputs settle instead of with its whole layer)
 5. Connectors that turn external work items into reviewable delivery runs
 6. Integrated navigation, editing, execution, debugging, testing, review, versioning, and delivery

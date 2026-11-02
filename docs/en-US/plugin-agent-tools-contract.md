@@ -353,6 +353,8 @@ in this order, each only when it applies:
 | `networkViaShell` | `shell` is not `null` (`network` is `"via-shell"`) | `{}` |
 | `aiCli` | `system` contains `aiCli` | `{}` |
 | `web` | `system` contains `web` | `{}` |
+| `agents` | `system` contains `agents` | `{}` |
+| `agentMessages` | `system` contains `agentMessages` | `{}` |
 | `ui` | `system` contains `ui` | `{}` |
 | `agentTools` | at least one tool | `{read: <count>, write: <count>}` |
 | `network` | reserved for DB10; never produced in v1 | `{}` |
@@ -369,6 +371,8 @@ none apply. Reasons are listed in this fixed order:
 | `system.fs` | `system` contains `fs` (workspace read/write) | medium |
 | `system.aiCli` | `system` contains `aiCli` | high |
 | `system.web` | `system` contains `web` (plugin browser views and their saved sign-ins) | high |
+| `system.agents` | `system` contains `agents` (agent panes, lineage, message delivery records, session list; no message text) | medium |
+| `system.agentMessages` | `system` contains `agentMessages` (the text of messages between agents) | high |
 | `shell.allowlist` | `shell` is `allowlist` | high |
 | `nativeBackend` | the manifest has `backend` | high |
 | `agentTools.write` | at least one tool has `risk: "write"` | high |
@@ -552,7 +556,15 @@ schema changed shows up once under `removed` (old) and once under `added`
 }
 ```
 
-`widened` is true when `added` is non-empty or the risk level rose.
+`widened` is true when `added` holds anything other than a file-scope item
+(`fsScopeRoot`, `fsScopeRead`, `fsScopeWrite`), when the declared file scope
+grows, or when the risk level rose. A file scope is declared, never enforced:
+the `fs` capability reaches the same files with or without one. So declaring
+a scope for an `fs` that had none claims less and does not widen, while
+dropping a scope that `fs` keeps, any new read or write pattern (a path
+moving from read to write included) and a different `root` do. Scope items
+are listed in `added` and `removed` either way; the diff view tags an
+informational change "Declared scope (informational)".
 
 `diffScan(from, to)` is the scan half: it flattens each scan report (`null`
 counts as empty) into items `{kind, key}` and returns `{added, removed,
@@ -752,9 +764,15 @@ A Host event carrying the complete catalog; each one replaces the previous one.
 - `revision` increases strictly within one Host process; the backend ignores
   a snapshot whose revision is not greater than the last one it applied, and
   starts again from the first snapshot after a Host reconnect.
-- `enabled` is the DB8 master switch. While it is off since start-up, the Host
-  sends **nothing** (no-regression guarantee: `tools/list` equals main). When
-  it is switched off, the Host sends one snapshot with `enabled: false` and
+- `enabled` is true while the Host serves any tool. Two switches decide which
+  packages are in the snapshot: the DB8 master switch (off by default) covers
+  third-party packages, and the first-party switch (on by default; Settings →
+  Navide Plugins → **Let agents call tools from first-party Navide plugins**) covers
+  first-party packages (`navide.browser`). A package whose switch is off is
+  left out and its `agentMethods` stay `[]`. With the master switch off since
+  start-up and no first-party package served, the Host sends **nothing**
+  (no-regression guarantee: `tools/list` equals main). When the last served
+  package goes, the Host sends one snapshot with `enabled: false` and
   `tools: []`.
 - `externalCallers` is the DB4 switch.
 - `state` is `available` | `consent-required` | `plugin-disabled` |
@@ -809,7 +827,7 @@ result)` path:
 ```
 
 Host checks run on every call, in this order, regardless of what the CLI has
-cached: master switch → caller kind → package installed, enabled, not
+cached: the package's switch (DB8 for third-party, the first-party switch for first-party) → caller kind → package installed, enabled, not
 quarantined, not revoked, not stopping → tool in the consented list →
 workspace grant → first-write confirmation (DB3) → execution policy →
 headless binding → `callBound`.
@@ -942,7 +960,7 @@ ok: false, error, error_code}` with `BAD_REQUEST` | `NOT_INSTALLED` |
 Marketplace packages qualify: the bundled Navide plugins (the reserved
 `navide.*` namespace) are refused with `BUILTIN_PLUGIN` by the backend before
 it asks, and by the Host again. The Host switches the package exactly as the
-user's Extensions switch does (enable keeps the consent the user already
+user's switch on the Navide Plugins page does (enable keeps the consent the user already
 gave). When that changed the package (`changed: true`) it tells the user which
 caller did it (pane name, or "external MCP client" / "Navide Host") with a
 one-click undo; a package already in that state is left alone, nobody is told
@@ -954,7 +972,7 @@ Who disabled a package decides whether an agent may enable it (B2-c option B).
 The Host keeps, beside the Disabled list (whose file format older Navide
 versions read and which stays as it is), who disabled each Marketplace package
 in `.navide-disabled-source.json`: `{by: "user" | "agent", at (Unix ms), agent:
-{callerKind, paneId, paneName} | null}`. The user's Extensions switch, and the
+{callerKind, paneId, paneName} | null}`. The user's Navide Plugins switch, and the
 undo on an agent notice, record `user`; `plugins_disable` records `agent` with
 the caller. Enabling removes the entry. A disabled package with no entry
 (disabled before this was recorded, or an unreadable file) reads as the user.
@@ -1365,7 +1383,8 @@ the counts stay exact:
   way); it is `<failed>` only when it is known to have changed nothing:
   - its address is read-only (`PLUGIN_ACTIVITY_READ_ONLY_ADDRESSES`, each
     checked to write nothing to disk and start no process: `fs.readFile`,
-    `fs.readImage`, `fs.listDirectory`, `fs.listFilesFlat`, `fs.glob`,
+    `fs.readImage`, `fs.listDirectory`, `fs.listFilesFlat`, `fs.queryFiles`,
+    `fs.glob`,
     `fs.stat`, `fs.statPath`, `fs.listArchive`, `fs.previewResource`,
     `fs.convertOffice` and their legacy snake_case names; `fs.findInFiles`
     runs a search process and is not in it);

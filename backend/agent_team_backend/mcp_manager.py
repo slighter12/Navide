@@ -182,10 +182,15 @@ class MCPClient:
         # ``error`` saying why). Shown in Settings -> MCP while it lasts.
         self.status = "starting"
         self.error = ""
+        # Why the last list_tools() came back empty because it failed, so a
+        # failure is not mistaken for a server that has no tools.
+        self.tools_error = ""
         self._started_at: float | None = None
         self._process: Any = None
         self._errlog: TextIO | None = None
         self._stderr_path: Path | None = None
+        # The error stop() got from leaving the transport, if any (see start()).
+        self._transport_failure: Exception | None = None
 
     def starting_seconds(self) -> float:
         if self._started_at is None:
@@ -271,6 +276,30 @@ class MCPClient:
             if not init.done():
                 init.cancel()
 
+    def _failure_before_initialize(self, process: Any) -> Exception | None:
+        """Why the transport ended a start, read once stop() has left it, or
+        None when nothing shows it did (no transport failure, no exit code).
+
+        A broken or closed pipe means the server is gone, and its exit code
+        says why; any other failure is named itself — the exit code is then
+        only stop() ending a server that was still running.
+        """
+        import anyio
+
+        # Read once: its traceback holds this client's frames until dropped.
+        failure, self._transport_failure = self._transport_failure, None
+        cause: BaseException | None = failure
+        while isinstance(cause, BaseExceptionGroup) and cause.exceptions:
+            cause = cause.exceptions[0]
+        if cause is not None and not isinstance(cause, (anyio.BrokenResourceError, anyio.ClosedResourceError)):
+            return RuntimeError(f"the connection to the server failed: {type(cause).__name__}: {cause}")
+        code = _exit_code(process) if process is not None else None
+        if code is not None:
+            return RuntimeError(f"the server exited with code {code} before answering initialize")
+        if failure is not None:
+            return RuntimeError("the connection to the server closed before it answered initialize")
+        return None
+
     async def start(self) -> None:
         """Connect to the MCP server and perform the MCP handshake."""
         if not _MCP_AVAILABLE:
@@ -280,7 +309,11 @@ class MCPClient:
             return
         self.status = "starting"
         self.error = ""
+        self._transport_failure = None
         self._started_at = asyncio.get_running_loop().time()
+        task = asyncio.current_task()
+        assert task is not None
+        outside = task.cancelling()
         try:
             if self._config.transport == "stdio":
                 final_env = os.environ.copy()
@@ -324,14 +357,40 @@ class MCPClient:
             self.status = "connected"
             log.info("MCP '%s' connected", self.name)
         except asyncio.CancelledError:
-            await self.stop()
-            raise
+            # The transport and session were entered in this task, so their task
+            # groups cancel it when one of their tasks fails: stdio_client's
+            # writer when the server has exited (before the liveness poll has
+            # seen the exit), its reader when the server's stdout is not
+            # readable. Only once stop() has left those scopes can a cancel of
+            # start() itself be told apart from theirs.
+            process = self._process
+            try:
+                await self.stop()
+            except asyncio.CancelledError:
+                pass
+            err = self._failure_before_initialize(process)
+            if err is None or task.cancelling() > outside:
+                raise
+            log.warning("MCP '%s' failed to start: %s", self.name, err)
+            self.ready = False
+            self.status = "error"
+            self.error = _reason(err)
         except Exception as err:  # noqa: BLE001
             log.warning("MCP '%s' failed to start: %s", self.name, err)
             self.ready = False
             self.status = "error"
             self.error = _reason(err)
-            await self.stop()  # ensure spawned subprocess is cleaned up
+            try:
+                await self.stop()  # ensure spawned subprocess is cleaned up
+            except asyncio.CancelledError:
+                # The same transport cancel can land after the failure has
+                # been named, during this cleanup: only a cancel of start()
+                # itself goes on.
+                if task.cancelling() > outside:
+                    raise
+            finally:
+                # The reason is already named; nothing reads what stop() kept.
+                self._transport_failure = None
 
     async def stop(self) -> None:
         """Tear down the session and its underlying transport.
@@ -366,8 +425,10 @@ class MCPClient:
                     await self._exit_bounded(label, cm)
                 except asyncio.CancelledError as err:
                     cancelled = err
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as err:  # noqa: BLE001
+                    if label == "transport":
+                        # What ended the transport's task group, for start().
+                        self._transport_failure = err
         if leftovers:
             try:
                 await asyncio.to_thread(self._end_leftovers, leftovers)
@@ -431,10 +492,16 @@ class MCPClient:
             handle.cancel()
             for _ in range(ours):
                 task.uncancel()
+            ours = 0
             if task.cancelling() > outside:
                 raise
         finally:
             handle.cancel()
+            # An exit can absorb our cancel and return, or raise what ended it
+            # (an anyio task group whose own scope is cancelled does): take
+            # those cancels back too, or callers read them as one from outside.
+            for _ in range(ours):
+                task.uncancel()
 
     def _kill_server_group(self) -> None:
         """End the stdio server and everything it started. stdio_client spawns
@@ -484,17 +551,21 @@ class MCPClient:
             log.warning("MCP '%s' left %s running after stop; ended them", self.name, ended)
 
     async def list_tools(self) -> list[dict[str, str]]:
-        """Return the tools exposed by this server (best-effort, empty on failure)."""
+        """Return the tools exposed by this server (best-effort, empty on
+        failure -- ``tools_error`` then says why)."""
         if not self.ready or self._session is None:
             return []
         try:
             result = await asyncio.wait_for(self._session.list_tools(), timeout=10.0)
-            return [
-                {"name": t.name, "description": t.description or ""}
-                for t in result.tools
-            ]
-        except Exception:  # noqa: BLE001
+        except Exception as err:  # noqa: BLE001
+            self.tools_error = "listing tools timed out" if isinstance(err, TimeoutError) else _reason(err)
+            log.warning("MCP '%s' could not list its tools: %s", self.name, self.tools_error)
             return []
+        self.tools_error = ""
+        return [
+            {"name": t.name, "description": t.description or ""}
+            for t in result.tools
+        ]
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         if not self.ready or self._session is None:
@@ -597,6 +668,8 @@ class MCPManager:
                 entry["slow_start"] = seconds >= SLOW_START_NOTE_AFTER
             if client.status == "error":
                 entry["error"] = client.error
+            if client.tools_error:
+                entry["tools_error"] = client.tools_error
             if client.status != "connected":
                 tail = await asyncio.to_thread(client.stderr_tail)
                 if tail:

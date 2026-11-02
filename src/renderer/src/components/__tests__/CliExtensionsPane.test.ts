@@ -53,7 +53,7 @@ describe('CliExtensionsPane', () => {
   it('counts valid CLI extensions and in-process code', async () => {
     render()
     await flushPromises()
-    expect(wrapper.get('.cli-ext-counts').text()).toBe('3 CLI extensions · 1 run code inside their CLI')
+    expect(wrapper.get('.cli-ext-counts').text()).toBe('3 CLI extensions · 1 run inside their CLI · 2 run separate programs')
   })
 
   it('puts in-process code first and shows the vendor type label untranslated', async () => {
@@ -64,10 +64,18 @@ describe('CliExtensionsPane', () => {
     expect(ids[0]).toBe('nextstep@mkt')
     const mod = wrapper.get('[data-id="nextstep@mkt"]')
     expect(mod.get('.cli-ext-type').text()).toBe('Claude mod')
-    expect(mod.get('.cli-ext-tier').text()).toBe('L3 程序內程式碼')
+    expect(mod.get('.cli-ext-tier').text()).toBe('在 CLI 內執行')
     expect(mod.get('.cli-ext-disabled').text()).toBe('已停用')
     expect(mod.find('.cli-ext-inferred').exists()).toBe(true)
-    expect(mod.findAll('.cli-ext-cap').map((cap) => cap.text())).toEqual(['執行指令', '連網'])
+    expect(mod.findAll('.cli-ext-cap').map((cap) => cap.text())).toEqual(['執行 shell 指令', '連網'])
+  })
+
+  it('says "runs separate programs" once on an L2 row, not as a tier and an exec capability', async () => {
+    render()
+    await flushPromises()
+    const helper = wrapper.get('[data-id="helper@mkt"]')
+    expect(helper.get('.cli-ext-tier').text()).toBe('Runs separate programs')
+    expect(helper.findAll('.cli-ext-cap').map((cap) => cap.text())).toEqual(['Intercepts tool calls'])
   })
 
   it('marks the hooks Navide installed and shows their masked command line', async () => {
@@ -89,6 +97,32 @@ describe('CliExtensionsPane', () => {
     render()
     await flushPromises()
     expect(wrapper.get('[data-id="!broken"] .cli-ext-error').text()).toBe('Could not read: no plugins map')
+  })
+
+  it('shows an unreadable on/off switch as an unknown state with its reason, not as enabled or disabled', async () => {
+    send.mockResolvedValue({ ok: true, error: null, payload: { ...payload, items: [
+      item({ id: 'a@mkt', name: 'a', enabled: true, enabled_error: 'cannot parse settings.json: Expecting value',
+        capabilities: ['exec'], path: '/home/u/a' }),
+      item({ id: 'b@mkt', name: 'b', enabled: true }),
+      item({ id: '!broken', name: 'installed_plugins.json', valid: false, error: 'no plugins map', capabilities: ['exec'] }),
+    ] } })
+    render()
+    await flushPromises()
+    const unknown = wrapper.get('[data-id="a@mkt"]')
+    expect(unknown.get('.cli-ext-unknown').text()).toBe('State unknown')
+    expect(unknown.find('.cli-ext-disabled').exists()).toBe(false)
+    expect(unknown.classes()).not.toContain('off')
+    expect(unknown.get('.cli-ext-warning').text()).toBe('Could not tell whether this is enabled: cannot parse settings.json: Expecting value')
+    // The rest of a readable row is still shown; a broken row still shows only its error.
+    expect(unknown.find('.cli-ext-caps').exists()).toBe(true)
+    expect(unknown.find('.cli-ext-consent').exists()).toBe(true)
+    expect(unknown.get('.cli-ext-path').text()).toBe('/home/u/a')
+    const broken = wrapper.get('[data-id="!broken"]')
+    expect(broken.find('.cli-ext-caps').exists()).toBe(false)
+    expect(broken.find('.cli-ext-consent').exists()).toBe(false)
+    const known = wrapper.get('[data-id="b@mkt"]')
+    expect(known.find('.cli-ext-unknown').exists()).toBe(false)
+    expect(known.find('.cli-ext-warning').exists()).toBe(false)
   })
 
   it('has no button that changes anything: the only one rescans', async () => {
@@ -134,7 +168,9 @@ describe('CliExtensionsPane', () => {
     it('never scrolls sideways: long names wrap, paths and command lines truncate', () => {
       expect(rule('.cli-ext')).toMatch(/overflow-x:\s*hidden/)
       expect(rule('.cli-ext-name')).toMatch(/overflow-wrap:\s*anywhere/)
-      expect(rule('.cli-ext-detail, .cli-ext-path')).toMatch(/text-overflow:\s*ellipsis/)
+      expect(rule('.cli-ext-detail')).toMatch(/text-overflow:\s*ellipsis/)
+      // The path box only clips; the PathText inside shortens and ellipsizes.
+      expect(rule('.cli-ext-path')).toMatch(/overflow:\s*hidden/)
     })
 
     it('puts the name on its own line above the badges', async () => {

@@ -27,12 +27,23 @@ D7_LOGIN_FUNCTIONS = frozenset({
 })
 
 #: sha256 of each module's remaining non-blank lines on main (6d2b4fa6).
+#: quota_failover was updated deliberately in 0.2.32 for the removal of the
+#: portable-credential feature: credential_env_vars reads only
+#: AccountSwitchSpec.credential_env_vars (same names, same order), and
+#: pane_auth_scope loses its portable_slot_id parameter and "portable" source.
+#: Both modules were updated deliberately in 0.2.36 for API key accounts: the
+#: usage poll skips an active codex key, and _login_state holds a key back from
+#: failover until the user opts in.
+#: Both modules were updated deliberately in 0.2.37 for accounts with no 5-hour
+#: window: _quota_verdict accepts a window a successful read proved absent, and
+#: _cache_safe_snapshot keeps that field. An account that reports its windows is
+#: judged as before (test_quota_verdict_unchanged.py).
 MAIN_DIGESTS = {
     "usage_service": (
-        "bdf088458f80023a085c30a88987e01c13d550a5bfff66f73f8dd9d986188943", D7_LOGIN_FUNCTIONS,
+        "e5672d4b14a3bc7e0674f42c8710bbe4920e6bb1be242da276563b06dd6b49e1", D7_LOGIN_FUNCTIONS,
     ),
     "quota_failover": (
-        "9d83b2fb721f2e4ccea13c1d5e89a7f65c5eb3d08e5628a7966706988c880e6e", frozenset(),
+        "f4e256d8bb62785fbf918a235841001123869b620020281b7f5737e5a09ad59a", frozenset(),
     ),
 }
 

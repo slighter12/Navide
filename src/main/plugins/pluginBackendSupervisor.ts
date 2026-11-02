@@ -802,6 +802,10 @@ function executionPolicyNamespaceForBridgePort(
       return 'fs'
     case 'web':
       return 'web'
+    case 'agents':
+      return 'agents'
+    case 'agent-message-bodies':
+      return 'agentMessages'
     case 'shell':
       // The agent shell policy is judged on the command itself, like shell.run.
       return 'shell'
@@ -1146,6 +1150,7 @@ export function createAuthenticatedBackendRuntime(
         source: 'mcp' as const,
         id: runtime.initiator.id,
         ...(runtime.initiator.caller ? { caller: Object.freeze({ ...runtime.initiator.caller }) } : {}),
+        ...(runtime.initiator.pane !== undefined ? { pane: runtime.initiator.pane } : {}),
       })
     : Object.freeze({
         kind: 'user' as const,

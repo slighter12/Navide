@@ -66,6 +66,12 @@ export interface AppMenuHooks {
   onOpenSettings?: () => void
   /** App menu (macOS) / File menu (non-macOS): check for updates. */
   onCheckUpdates?: () => void
+  /** App menu (macOS) / File menu (non-macOS): put up the App Lock screen. */
+  onLockNow?: () => void
+  /** Whether Lock Now can run — App Lock is on and the screen is not up. */
+  lockNowEnabled?: () => boolean
+  /** Whether the App Lock screen is up: every Navide item is greyed out. */
+  appLocked?: () => boolean
   /** File menu: pick a workspace folder and open it. */
   onOpenWorkspace?: () => void
   /** File menu: open a recent workspace by absolute path. */
@@ -233,6 +239,14 @@ export function installApplicationMenu(
     label: s.checkUpdates,
     click: () => hooks.onCheckUpdates?.()
   }
+  // A modifier set nothing else binds: ⌘⇧L and ⌘L belong to the editor and
+  // terminal, and ⌃⌘Q is macOS's own Lock Screen.
+  const lockNowItem: MenuItemConstructorOptions = {
+    label: s.lockNow,
+    accelerator: 'CmdOrCtrl+Alt+L',
+    enabled: hooks.lockNowEnabled?.() ?? false,
+    click: () => hooks.onLockNow?.()
+  }
 
   const template: MenuItemConstructorOptions[] = [
     ...(mac
@@ -244,6 +258,7 @@ export function installApplicationMenu(
               { type: 'separator' },
               settingsItem,
               checkUpdatesItem,
+              lockNowItem,
               { type: 'separator' },
               { role: 'services' },
               { type: 'separator' },
@@ -284,6 +299,7 @@ export function installApplicationMenu(
               { type: 'separator' } as MenuItemConstructorOptions,
               settingsItem,
               checkUpdatesItem,
+              lockNowItem,
               { type: 'separator' } as MenuItemConstructorOptions,
               { role: 'quit' } as MenuItemConstructorOptions
             ])
@@ -399,5 +415,32 @@ export function installApplicationMenu(
     template.push({ label: 'Developer', submenu })
   }
 
+  if (hooks.appLocked?.()) disableWhileLocked(template)
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+/**
+ * Roles that stay usable under the App Lock screen. The Edit roles act on the
+ * focused page, which is the lock screen itself (it holds the focus), so the
+ * PIN box keeps paste and select-all; the rest only hide, size or quit the app.
+ * Toggle Developer Tools is greyed out too, so DevTools cannot be opened onto
+ * the window underneath; DevTools already open is left as it is.
+ */
+const ROLES_KEPT_WHILE_LOCKED = new Set<string>([
+  'about', 'services', 'hide', 'hideOthers', 'unhide', 'quit',
+  'undo', 'redo', 'cut', 'paste', 'pasteAndMatchStyle', 'delete', 'selectAll',
+  'togglefullscreen', 'minimize', 'zoom', 'front', 'close',
+])
+
+/**
+ * Grey out every Navide item while the App Lock screen is up, so neither a
+ * click nor an accelerator reaches the windows underneath. A disabled item's
+ * accelerator does not fire. Submenus stay open-able so the menu bar keeps its
+ * shape; locking and unlocking rebuild the menu (index.ts's onChange).
+ */
+function disableWhileLocked(items: MenuItemConstructorOptions[]): void {
+  for (const item of items) {
+    if (Array.isArray(item.submenu)) disableWhileLocked(item.submenu)
+    else if (item.type !== 'separator' && !(item.role && ROLES_KEPT_WHILE_LOCKED.has(item.role))) item.enabled = false
+  }
 }

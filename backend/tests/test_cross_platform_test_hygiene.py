@@ -98,6 +98,9 @@ POSIX_PROGRAM_ALLOWLIST: set[str] = {
     # skips itself off darwin (`pytest.skip(..., allow_module_level=True)`).
     "isolation_guard/test_native_guard_preflight.py",
     "isolation_guard/test_os_startup.py",
+    # Runs the POSIX hook line through the /bin/sh the CLI uses; the whole module
+    # is skipped on Windows, where unattended panes do not exist yet.
+    "test_guard_fail_closed.py",
 }
 
 
