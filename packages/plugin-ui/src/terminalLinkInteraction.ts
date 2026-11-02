@@ -16,7 +16,7 @@ const _EXCL = `[^\\x00<>?\\s!\`&*()'"\\\\;]`
 const _PATH_CHAR_RE = new RegExp(_EXCL)
 const _PREWRAP_WINDOW = 4
 const _PREWRAP_SLACK = 8
-const _SUFFIX_RE = /(?::([\d]+)(?:[.:]([\d]+))?|[(\[]([\d]+)(?:[,:]([\d]+))?[)\]]|#([\d]+)(?::([\d]+))?)$/
+const _SUFFIX_RE = /(?::([\d]+)(?:[.:]([\d]+))?|[(\[]([\d]+)(?:[,:]([\d]+))?[)\]]|#([\d]+)(?::([\d]+))?|:([\d]+)-([\d]+))$/
 
 const _PLAN_DOC_RE = /\.agent-team\/plans\/[A-Za-z0-9.-][A-Za-z0-9._-]*\.html/
 export function extractPlanDocRelPath(raw: string): string | undefined {
@@ -33,11 +33,17 @@ export function htmlReportRoute(
   return { workspace_path: root, rel_path: absPath.slice(root.length + 1) }
 }
 
-export function splitTerminalLinkSuffix(raw: string): { filepath: string; line?: number } {
+export function splitTerminalLinkSuffix(raw: string): { filepath: string; line?: number; endLine?: number } {
   const m = raw.match(_SUFFIX_RE)
   if (!m || m.index === undefined) return { filepath: raw }
-  const lineStr = m[1] ?? m[3] ?? m[5]
-  return { filepath: raw.slice(0, m.index), line: lineStr ? parseInt(lineStr, 10) : undefined }
+  const lineStr = m[1] ?? m[3] ?? m[5] ?? m[7]
+  const out: { filepath: string; line?: number; endLine?: number } = {
+    filepath: raw.slice(0, m.index),
+    line: lineStr ? parseInt(lineStr, 10) : undefined,
+  }
+  const endLine = m[8] ? parseInt(m[8], 10) : 0
+  if (out.line && endLine >= out.line) out.endLine = endLine
+  return out
 }
 
 const _WIDE_CH_RE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/
@@ -223,6 +229,25 @@ export function isTerminalLinkModifier(event: { metaKey: boolean; ctrlKey: boole
 
 export function isTerminalLinkModifierKey(key: string): boolean {
   return key === 'Meta' || (!isMacPlatform() && key === 'Control')
+}
+
+export interface TerminalFilePick {
+  query: string
+  candidates: string[]
+  line?: number
+}
+
+/** A clicked file goes to the embedding plugin first, when it asks to see one,
+ * and to the Host picker unless the plugin handled it. */
+export async function openTerminalFileLink(
+  resources: {
+    resolveFileLink?(request: TerminalFilePick): Promise<boolean>
+    openFilePicker?(request: TerminalFilePick): Promise<void>
+  },
+  request: TerminalFilePick,
+): Promise<void> {
+  if (await resources.resolveFileLink?.(request)) return
+  await resources.openFilePicker?.(request)
 }
 
 export interface InstalledTerminalLinks {

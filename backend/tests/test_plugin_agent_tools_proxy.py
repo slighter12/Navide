@@ -42,6 +42,18 @@ from agent_team_backend.plugins.agent_tools_contract import (
 # parses a whole result on the loop costs hundreds of milliseconds, so both
 # budgets still catch it.
 LOOP_SLICE_BUDGET_S = 0.047 if sys.platform == "win32" else 0.02
+#: For a 10 MiB result the budget also scales with this run's speed: a step
+#: may take up to this fraction of the CPU time the same run spent wrapping
+#: the whole value in process. A slow VM writing fresh pages stretches every
+#: step it runs (one read 20.018 ms on the macOS runner), and it stretches the
+#: whole-value wrap the same way. Reading the whole result in one step costs
+#: at least that wrap, forty times the bound, so the check still catches it.
+LOOP_SLICE_RELATIVE = 1 / 40
+
+
+def _loop_slice_bound(whole_cpu_s: float) -> float:
+    """The most CPU one loop step may take, for a result whose in-process wrap took ``whole_cpu_s`` in this run."""
+    return max(LOOP_SLICE_BUDGET_S, whole_cpu_s * LOOP_SLICE_RELATIVE)
 
 
 pytestmark = pytest.mark.asyncio
@@ -68,7 +80,80 @@ pytestmark = pytest.mark.asyncio
 #: and where a hook turn end's text comes from. No other tool changed (the
 #: core-tools snapshot, tests/data/mcp_core_tools_main.json, differs from
 #: main in those three descriptions only).
-MAIN_TOOLS_LIST_SHA256 = "11c38bd53bce39512b72d3895dd1caac29822c1dca9f600eb6ea07bccb241b5d"
+#: Re-pinned for 0.2.32 C8 (previous pin 11c38bd5…): the cli_extensions_list
+#: description documents `enabled_error` and the `unreadable` list. No other
+#: tool changed.
+#: Re-pinned for 0.2.32 Gemini CLI extensions (previous pin f4395697…): the
+#: cli_extensions_list description names Gemini CLI. No other tool changed.
+#: Re-pinned for #659 on top of both (main pin ba95cc9a…): the mcp_list
+#: description documents `tools_error` and masking by value. No other tool
+#: changed.
+#: Re-pinned for 0.2.32 page names (previous pin 2dc3e751…): the
+#: cli_extensions_list and credentials_list descriptions name their Settings
+#: pages as the sidebar does (Extensions, Credentials & Keys). No other tool
+#: changed.
+#: Re-pinned for the 0.2.33 messaging doc fixes (previous pin e59a1099…): the
+#: cli_check_message description lists the `composer` and `pty-blocked` holds,
+#: and it and cli_inbox_summary state the 500-send bound. No other tool changed.
+#: Re-pinned for the 0.2.33 pipeline doc sync (previous pin cb0297f4…): the
+#: pipeline_reset description says the stored run only moves to idle and its
+#: task, stages, log and run directory stay as history. No other tool changed.
+#: Re-pinned for 0.2.34 P1 (previous pin a5d72f41…): the cli_usage description
+#: says it is cache-only, points at each snapshot's `fetchedAt`, and that a
+#: connection error is the link to the backend. No other tool changed.
+#: Re-pinned for 0.2.34 P2 (previous pin 742078e6…): the cli_get_status
+#: description documents the new `account` block and that `profileId` is
+#: bookkeeping only for a pane on the live login. No other tool changed.
+#: Re-pinned for 0.2.34 P3 (previous pin c9430be9…): cli_open_agent's new
+#: `account` parameter and its description (default: the caller's account).
+#: No other tool changed.
+#: Re-pinned for 0.2.34 p2-schema on top of P3 (previous pin 8e8801c0…): the
+#: pipeline_graph description documents branch and error edges, `when`, the
+#: ---BRANCH--- / ---NODE-FAILED--- / ---OUTPUT--- signals, untaken skips and
+#: {{node.<id>.output}}. No other tool changed.
+#: Re-pinned for 0.2.34 p2-triggers on top of p2-schema (previous pin
+#: f50fb86a…): scheduler_upsert documents the pipeline_start action,
+#: pipeline_status the interrupted state and pipeline_graph the set_retry op.
+#: No other tool changed.
+#: Re-pinned for the pipeline signal-spoofing fix (previous pin 879e4cb6…):
+#: the pipeline_graph description documents the per-kickoff signal code in
+#: ---BRANCH--- / ---OUTPUT--- / ---NODE-FAILED--- and that claude / codex
+#: signals come from turn text only. No other tool changed.
+#: Re-pinned for 0.2.34 n8n import on top of the signal-spoofing fix
+#: (previous pin 421fe173…, #752): adds the core tool pipeline_import_n8n.
+#: No other tool changed.
+#: Re-pinned for 0.2.34 sub-pipelines on top of the n8n import (previous pin
+#: 39886aa6…, #741): pipeline_graph documents subpipeline nodes,
+#: pipeline_status the run_stack / parent / depth of a child run, and
+#: pipeline_start the refusal while a parent run waits. No other tool changed.
+#: Re-pinned for 0.2.34 n8n native flow on top of sub-pipelines (previous pin
+#: 3be2ca9d…, #754): pipeline_import_n8n documents a list of workflows,
+#: sub-pipeline nodes for Execute Workflow, report.subworkflows and that large
+#: branches are native. No other tool changed.
+#: Re-pinned for 0.2.34 scheduler workspace scope on top of the n8n native
+#: flow (previous pin bffa7b33…, #755): scheduler_list documents that a pane
+#: sees another workspace's job redacted, scheduler_runs that it is refused
+#: with SCHEDULER_CROSS_WORKSPACE. No other tool changed.
+#: Re-pinned for 0.2.34 n8n import fixes on top of the scheduler workspace
+#: scope (previous pin 8134eb17…, #757): pipeline_import_n8n documents that a
+#: resend within 10 minutes answers with the pipeline it made (`reused`), the
+#: 5 MB limit and the error codes too_large and refused. No other tool changed.
+#: Re-pinned for 0.2.34 UX PR-E on top of the n8n import fixes (previous pin
+#: a1735e0d…): pipeline_list, pipeline_status, pipeline_start and
+#: pipeline_define describe what they actually do (default pipeline,
+#: has_graph / imported_from, pipeline_already_running, suspended, the
+#: evolve-landing seed); stage_define takes `discard_graph`; pipeline_graph
+#: documents `op_index`; ui_diagnostics `frame_drops`; scheduler_upsert the
+#: save-time pipeline check and last_error_code; scheduler_run_now the
+#: no_window refusal; stage_define says an empty pipeline_id is the default
+#: pipeline. No other tool changed.
+#: Re-pinned again for PR-E's window error codes (previous pin 703c1dbf…):
+#: ui_invoke and pipeline_start say a window refusal that names its reason
+#: carries `error_code` and `params` next to `error`. No other tool changed.
+#: Re-pinned for the absent windows (previous pin 65ad36fe…): cli_usage says what
+#: `absentWindows` means, so an agent can tell no limit from no data. No other
+#: tool changed.
+MAIN_TOOLS_LIST_SHA256 = "94228b18a612e6bee9a7839c4a7d96a4fba2392dcef6f8b32d57b814cb5f1637"
 #: Core tools added after that digest (B2-c); every other tool must still hash to it.
 B2C_CORE_TOOLS = frozenset({
     "marketplace_request_install", "marketplace_request_update", "marketplace_request_rollback",
@@ -96,9 +181,15 @@ W1_CORE_TOOLS = frozenset({
 })
 #: Core tools added after that digest by DESIGN-C S3 (mcp_server/window_tools.py).
 DESIGN_C_CORE_TOOLS = frozenset({"window_list", "window_focus", "window_close", "workspace_close", "window_move_pane"})
+#: Self-evolution S5b: the reclaim retrospective tool.
+EVOLVE_RETRO_CORE_TOOLS = frozenset({"evolve_retro"})
 #: The same for the plan_* and skills_* tools the built-in Plans and Skills
-#: packages install (computed on a probe server).
-MAIN_PLAN_SKILLS_TOOLS_SHA256 = "ea364efb2386fbbfb1b46ef5899b921ec97798b24ef82a21a0e8db92b3a8d954"
+#: packages install (computed on a probe server). Re-pinned in 0.2.32 when
+#: skills_set_delivery's description gained the approval for widening.
+#: Re-pinned in 0.2.32 (previous pin 4c9bc609…) when skills_prepare_install's
+#: description gained the navide:<name> source for skills shipped with Navide.
+#: No other plan_* or skills_* tool changed.
+MAIN_PLAN_SKILLS_TOOLS_SHA256 = "2db42581d9594d109e5d31d6458a050cf6d1005e2efe6f098e16c526d794b4d7"
 
 PERMISSIONS = {
     "system": ["fs", "ui"],
@@ -267,7 +358,8 @@ async def test_tools_list_is_byte_identical_to_main_while_the_switch_is_off() ->
     pristine = await _tools_list_text()
     builtin = await _builtin_package_tool_names()
     module_only = [t for t in json.loads(pristine) if t["name"] not in builtin]
-    added = B2C_CORE_TOOLS | ACCOUNT_CORE_TOOLS | FORM_CORE_TOOLS | TESTPLACE_CORE_TOOLS | W1_CORE_TOOLS | DESIGN_C_CORE_TOOLS
+    added = (B2C_CORE_TOOLS | ACCOUNT_CORE_TOOLS | FORM_CORE_TOOLS | TESTPLACE_CORE_TOOLS | W1_CORE_TOOLS
+             | DESIGN_C_CORE_TOOLS | EVOLVE_RETRO_CORE_TOOLS)
     assert added <= {t["name"] for t in module_only}
     existing = [t for t in module_only if t["name"] not in added]
     module_text = json.dumps(existing, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -1300,8 +1392,10 @@ def _assert_only_the_join_is_excused(measured: _Measured) -> None:
         pytest.param(lambda: {"rows": [{"k": i, "v": "abcdefgh中"} for i in range(345_000)]}, id="10 MiB of small values"),
     ],
 )
+@pytest.mark.serial
 async def test_a_10_mib_result_in_pieces_reads_as_before_and_never_holds_the_loop(monkeypatch, shape) -> None:
     import gc
+    import time
 
     value = shape()
     entry = _devmap_tool(monkeypatch)
@@ -1311,7 +1405,10 @@ async def test_a_10_mib_result_in_pieces_reads_as_before_and_never_holds_the_loo
     assert (await proxy.call("devmap_read", {}, None)).isError is False
     # The backend never holds the parsed value (the helper does): neither
     # does the test while it measures, or collecting it would be counted.
+    # Timed as the baseline: the same wrap in process, in this run.
+    started = time.thread_time()
     expected = proxy.wrap_result(entry, value)
+    bound = _loop_slice_bound(time.thread_time() - started)
     _pieces_host(monkeypatch, agent_tool_payload_text(value))
     del value
     gc.collect()
@@ -1323,8 +1420,8 @@ async def test_a_10_mib_result_in_pieces_reads_as_before_and_never_holds_the_loo
     _assert_only_the_join_is_excused(measured)
     # ... and no other step held the loop.
     longest = max(measured.steps)
-    assert longest < LOOP_SLICE_BUDGET_S, (
-        f"the loop ran {longest * 1000:.1f} ms of CPU without handing back, besides joining the"
+    assert longest < bound, (
+        f"the loop ran {longest * 1000:.1f} ms of CPU (bound {bound * 1000:.1f} ms) without handing back, besides joining the"
         f" text ({measured.excused[0] * 1000:.1f} ms, a copy of the whole result the loop must make:"
         " 1-2 ms on bare metal, 18-29 ms on a VM writing fresh pages)"
     )
@@ -1338,9 +1435,16 @@ async def test_the_loop_check_still_catches_a_result_parsed_whole_on_the_loop(mo
     from agent_team_backend.agent_tool_result_worker import strict_loads
 
     import gc
+    import time
 
     entry = _devmap_tool(monkeypatch)
-    _pieces_host(monkeypatch, agent_tool_payload_text({"rows": [{"k": i, "v": "abcdefgh中"} for i in range(34_500)]}))
+    value = {"rows": [{"k": i, "v": "abcdefgh中"} for i in range(34_500)]}
+    # The bound the 10 MiB check uses, from this value's own in-process wrap.
+    started = time.thread_time()
+    proxy.wrap_result(entry, value)
+    bound = _loop_slice_bound(time.thread_time() - started)
+    _pieces_host(monkeypatch, agent_tool_payload_text(value))
+    del value
 
     async def on_the_loop(entry: dict[str, Any], pieces: list[str]) -> str:
         return proxy.wrap_result(entry, strict_loads("".join(pieces)))
@@ -1350,8 +1454,8 @@ async def test_the_loop_check_still_catches_a_result_parsed_whole_on_the_loop(mo
     measured = await _measured_pieces_call(monkeypatch)
     assert measured.result.isError is False
     assert measured.excused == []
-    assert max(measured.steps) >= LOOP_SLICE_BUDGET_S, (
-        f"a whole-result parse on the loop read as {max(measured.steps) * 1000:.1f} ms"
+    assert max(measured.steps) >= bound, (
+        f"a whole-result parse on the loop read as {max(measured.steps) * 1000:.1f} ms (bound {bound * 1000:.1f} ms)"
     )
 
 
@@ -1894,14 +1998,22 @@ time.sleep(3600)
 async def test_a_helper_that_never_works_is_unavailable_and_results_main_handled_still_arrive(
     monkeypatch, behaviour: str
 ) -> None:
+    import asyncio
     import time
 
     from agent_team_backend import agent_tool_result_worker as worker
     from agent_team_backend import error_ledger
+    from agent_team_backend import osplat
 
     recorded: list[tuple[str, ...]] = []
     monkeypatch.setattr(error_ledger, "record", lambda *args: recorded.append(args))
     monkeypatch.setattr(worker, "READY_S", 0.5)
+    # The failed helper's tree is killed when the grace runs out: inside this
+    # test, not during a later one that may have replaced the kill.
+    monkeypatch.setattr(worker, "STOP_GRACE_S", 0.2)
+    helpers: list[int] = []
+    contain = osplat.process_tree.contain
+    monkeypatch.setattr(osplat.process_tree, "contain", lambda pid: (helpers.append(pid), contain(pid))[1])
     states: list[str] = []
     monkeypatch.setattr(proxy._result_worker, "on_state", lambda state: states.append(state["state"]))  # noqa: SLF001
     entry = _devmap_tool(monkeypatch)
@@ -1921,6 +2033,13 @@ async def test_a_helper_that_never_works_is_unavailable_and_results_main_handled
     assert "about a minute" in body["error"]
     assert longest < LOOP_SLICE_BUDGET_S, f"the loop ran {longest * 1000:.1f} ms of CPU without handing back"
     assert len(recorded) == 1
+    # The one helper started was ended, whichever way it failed.
+    assert len(helpers) == 1
+    for _ in range(50):
+        if not osplat.process_tree.is_alive(helpers[0]):
+            break
+        await asyncio.sleep(0.1)
+    assert not osplat.process_tree.is_alive(helpers[0])
 
 
 async def test_a_result_that_breaks_a_ready_helper_fails_alone_and_the_next_large_result_arrives(monkeypatch, tmp_path) -> None:

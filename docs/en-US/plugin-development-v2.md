@@ -286,7 +286,7 @@ protocol.
 | Stage | Python backend | Host-visible contract |
 |---|---|---|
 | Source development | Authors may use `.py` files, a virtual environment, and any Python build/test layout. | None. Source layout is not an installed interface. |
-| Local testing | Turn on Developer Mode (Settings → Navide Plugins) and **Load from folder…**: the view opens with its declared grant and the backend runs in the same sandbox, after the same native backend consent, as an installed one. `navide-plugin dev-backend <directory>` still runs the executable alone, with every Host bridge request answered `CAPABILITY_DENIED`. | A developer folder's consent is bound to the folder and its manifest `permissions` and `backend`; editing files never asks again, changing either declaration does. A loaded folder also reloads by itself when a file in it changes (on by default, per folder in Settings → Navide Plugins; `.git/` is ignored): the same checks as **Reload** run, a folder that cannot be read mid-edit keeps the running version, and a changed `permissions` or `backend` unloads it and waits for the user's consent — an automatic reload never applies a changed declaration. The whole folder is checked before the running version is unloaded, and manual and automatic reloads of a folder run one at a time; a reload while a build or save is still writing files can still load an incomplete mix of old and new files (not prevented, disclosed on the card). When the new version fails to load after the old one was unloaded, the card says that no version is running. Settings → Navide Plugins also says who had each folder loaded (you, or an agent's request you approved in the main window) and when it last loaded; that record (`.navide-plugin-developer-folders-meta.json`) only discloses. Who loaded a folder is signed with the Developer Mode settings key (secure storage): a loader another program rewrote, or one recorded without a signature, reads as unknown and says the record may have been changed, and so does every loader while the signature file is missing; one signed under an earlier key says the key was replaced. An earlier signed record of the same plugin and folder copied back over a newer one still verifies (there is no counter, as for the Developer Mode settings). The folder loads either way. Without secure storage there is no key: the record reads as written and says it is not signed. Its source badge reads "Local folder" in the plugin list and the view's title strip; it opens an info card (Host chrome) with the folder path, the time and trigger of the last load, who loaded it, and a content fingerprint (SHA-256 over each file's relative path, size and SHA-256, `.git/` left out, symbolic links recorded by target and not followed) taken after each load. The fingerprint is disclosed only: Navide never compares it or refuses a load over it, and it has no file count or size bound. |
+| Local testing | Turn on Developer Mode (Settings → Navide Plugins) and **Load from folder…**: the view opens with its declared grant and the backend runs in the same sandbox, after the same native backend consent, as an installed one. `navide-plugin dev-backend <directory>` still runs the executable alone, with every Host bridge request answered `CAPABILITY_DENIED`. | A developer folder's consent is bound to the folder and its manifest `permissions` and `backend`; editing files, the backend executable included, never asks again (unlike an installed package, whose consent binds to its exact content); changing either declaration does. A loaded folder also reloads by itself when a file in it changes (on by default, per folder in Settings → Navide Plugins; `.git/` is ignored): the same checks as **Reload** run, a folder that cannot be read mid-edit keeps the running version, and a changed `permissions` or `backend` unloads it and waits for the user's consent — an automatic reload never applies a changed declaration. The whole folder is checked before the running version is unloaded, and so are its views: each view of the new version is opened hidden, with no capability access, and must call `ready()` within 10 seconds, the same check an install or update makes. A folder or view that fails keeps the running version and says why on the card; the backend is not started for this check, so two versions of one backend never run at once (it stops and starts with the switch). Manual and automatic reloads of a folder run one at a time. A save or build that is still writing files can load an incomplete mix of old and new files; a build avoids that by writing the file `.navide-build-complete` into the folder last: once the folder has that file, a change reloads it only when a newer copy of that file is written, and a folder without it reloads on any change. When the new version fails to load after the old one was unloaded, the card says that no version is running. Settings → Navide Plugins also says who had each folder loaded (you, or an agent's request you approved in the main window) and when it last loaded; that record (`.navide-plugin-developer-folders-meta.json`) only discloses. Who loaded a folder is signed with the Developer Mode settings key (secure storage): a loader another program rewrote, or one recorded without a signature, reads as unknown and says the record may have been changed, and so does every loader while the signature file is missing; one signed under an earlier key says the key was replaced. An earlier signed record of the same plugin and folder copied back over a newer one still verifies (there is no counter, as for the Developer Mode settings). The folder loads either way. Without secure storage there is no key: the record reads as written and says it is not signed. Its source badge reads "Local folder" in the plugin list and the view's title strip; it opens an info card (Host chrome) with the folder path, the time and trigger of the last load, who loaded it, and a content fingerprint (SHA-256 over each file's relative path, size and SHA-256, `.git/` left out, symbolic links recorded by target and not followed) taken after each load. The fingerprint is disclosed only: Navide never compares it or refuses a load over it, and it has no file count or size bound. |
 | `navide-plugin package` | Python, its required modules, and the plugin code are bundled into a target-specific executable by an author-selected tool such as PyInstaller or Nuitka. | `backend.entry` names the resulting executable inside the archive. |
 | Install and runtime target | No Python installation, `pip`, virtual environment, source checkout, or author build tool may be required on the user's machine. | The Electron main process supervises the executable over Backend Wire v1 without a shell. The first-party Plans backend runs directly; a third-party backend runs only under the conditions in [Third-party backends](#third-party-backends-sandbox-consent-and-publishing). |
 
@@ -345,16 +345,46 @@ third-party native code. The Host never runs it directly; it starts only when
 all of these hold, and they are checked again before every restart:
 
 - Settings → Navide Plugins → "Allow third-party Navide plugins to run native backends"
-  is on. It is off by default and can only be turned on there: while it is
-  off, opening a plugin never prompts and never turns it on.
+  is on. It is on by default for a new profile (since 0.2.31) and the user
+  can turn it off there: while it is off, opening a plugin never prompts and
+  never turns it on. A profile an earlier version already saved keeps the
+  switch as it was saved, so an earlier "off" stays off.
 - The user has not disabled the plugin's backend.
 - The user allowed this exact package content with this exact permission set
   (`permissions`, `backend.methods`, `backend.events`, and - only when the
   package declares any - `backend.agentTools`). The digest covers every
   file in the package (relative path and content), because a backend can read
-  any package file and turn it into code at run time. Any new version that
-  changes any file - frontend files included - is staged but not started until
-  the user allows it again.
+  any package file and turn it into code at run time. Installing is that
+  consent: every install path discloses the native backend and its shell
+  allowlist before it commits and records the version it installed, so that
+  version's first start records the consent without another dialog. Since
+  0.2.32 a package installed before 0.2.31 is treated the same way: the
+  first start of 0.2.32 (or later) on a profile looks once at the installed
+  third-party backends (the active version of each; Developer Mode folders
+  are left out), and each one with no consent, no install consent, no
+  revocation and no saved decline gets an install consent for its installed version, marked as
+  given by this migration. Its first start then records the consent without a
+  dialog, the consent keeps that mark, and Settings → Navide Plugins says on
+  its row that it was allowed without asking because it was installed before
+  0.2.31. Nothing on disk tells an install of 0.2.30 or earlier from a 0.2.31
+  install that recorded no install consent, so the migration counts both. It
+  runs once per profile and never again: a package installed later without an
+  install consent is asked, as before. It grants nothing while the global
+  switch is off (the user is then asked per package after turning it on), and
+  waits when the decision file cannot be read. A version no install dialog
+  showed (an agent's update, a rollback) and a package whose consent was
+  revoked or dropped to fail closed are still asked before they start. A
+  Developer Mode folder keeps its folder-bound consent. Since 0.2.32 a "Don't
+  allow" answer to the dialog shown before a backend starts (closing it or
+  pressing Esc counts the same; the button was "Not now" before 0.2.32) is saved for that exact content and
+  permission set: later starts of the same content are refused without
+  asking, Settings → Navide Plugins says on the row that it was declined and
+  stays off, and its Allow action runs it and clears the decline. New content
+  or a changed permission set asks again, and so does a new install dialog
+  for the version. A dialog that fails to open saves nothing. Re-enabling a
+  disabled plugin does not clear a saved decline. Any new version that changes any
+  file - frontend files included - is staged but not started until the user
+  allows it again, in the dialog shown before it starts.
 - The platform sandbox is available. There is no unsandboxed fallback.
 - The package does not declare `permissions.shell: "full"`. A backend package
   may declare `shell: "allowlist"`; see "Shell commands from a backend" below.
@@ -502,11 +532,15 @@ A package with any invalid tool is refused at install and at publish, exactly
 like a schema error. `agentTools` needs a native backend, so frontend-only
 packages cannot declare it.
 
-What the user sees and consents to: the install confirmation and the native
-backend consent dialog list every declared tool with its name, the method it
-calls, its full description, its declared read-only or changes-data claim (the
-package's own claim), its timeout and its whole input schema, plus the number
-of tools and their total size. There is no limit on the number of tools. The tools are part of
+What the user sees and consents to: the install confirmation lists every
+declared tool with its name, the method it calls, its full description, its
+declared read-only or changes-data claim (the package's own claim), its timeout
+and its whole input schema, plus the number of tools and their total size, and
+Settings → Navide Plugins shows the same. The native backend consent dialog is a
+message box that cannot scroll, so it shows the number of tools and their total
+size, the first eight tools with their method, claim and timeout, the names of
+the rest on one line with how many of them are declared as changing data, and points to Settings → Navide Plugins for the full
+descriptions and input schemas. There is no limit on the number of tools. The tools are part of
 the consent: any change to any tool (name, method, risk, text, schema, timeout)
 asks again. A package that declares no tools keeps exactly the consent it had
 before this field existed.
@@ -533,6 +567,12 @@ labelled with the package, and the calling pane is marked tainted, like any
 other external input. Methods that no tool names are never callable by
 agents. See [plugin-agent-tools-contract.md](plugin-agent-tools-contract.md)
 section 4.
+
+First-party Navide plugins (Navide Browser) have a switch of their own above
+those two, **Let agents call tools from first-party Navide plugins**, on by
+default. While it is on their tools are served without per-version consent;
+every other rule above applies to them, and turning it off takes all of them
+offline at once. The third-party switch does not reach them.
 
 `backend.methods` and `backend.events` declare the package-local names the
 Host forwards (1–64 methods, 1–32 events, dotted lower-camel names such as
@@ -705,7 +745,18 @@ or the person behind it); `caller-kind` means only that the caller was an
 external MCP client or the Host, which share one credential each. Use it for
 display and your own records, not as an authorization decision; the Host has
 already made that one. `caller` is additive and optional, and only packages
-that declare agent tools ever receive it. `initiator`
+that declare agent tools ever receive it. An agent initiator may also carry
+`initiator.pane`: the calling pane's name, or its id when it has none or its
+name would not pass, resolved the same way from the pane's own MCP token. The
+Host accepts a string of at most 200 UTF-16 code units (JavaScript `length`)
+that is not empty after JavaScript `trim()` (which also removes U+FEFF and
+Unicode spaces); anything else refuses the request, so the core checks a name
+the same way and sends the id, or no `pane`, instead. It is never a credential, token or profile. Like
+`caller` it is for display and records (Plans 1.1.0 stores it as the author
+of a version), not for authorization; it is additive and optional, absent for
+external clients and the Host, and the Host sends it only to Plans 1.1.0 and
+later, so an older package receives exactly the three agent keys it always
+did. `initiator`
 was added after Backend Wire v1 shipped, so the v1 schema keeps it an additive
 optional field: the Host always sends it, and a v1 backend must accept a
 `runtime` both with and without it. Optional view/workspace fields are `null`
@@ -815,11 +866,26 @@ rejected. A manifest may declare at most 16 views.
 | `bottom` | Bottom workbench region |
 | `right` | Right workbench region |
 | `left` | Left workbench region; use this when migrating a legacy sidebar contribution |
-| `main` | Primary workbench content region |
+| `main` | A tab of its own in the stage tab bar, after the run-group tabs; the view fills the pane area while its tab is active (see below) |
 | `detail` | Detail region filled by a composed receiver; never opens on its own |
 | `window` | Separate top-level window |
 
 `sidebar` is not a v2 location value. Unknown locations fail schema validation.
+
+A `main` view never covers the stage. The Host adds one stage tab per `main`
+view, labelled with the view's `title`, and no tab is active on install: the
+pane grid stays on screen until the user picks the plugin's tab. While it is
+active the view fills the area under the tab bar, and the tab bar stays
+visible so the user can switch back. Any move to a run-group tab leaves it: a
+tab click, the New Run Group button, a pane opened from the sidebar, or MCP
+`ui.tab.switch`. Switching away hides the view without destroying it, so the
+guest keeps running in the background.
+
+The tab carries a Host-drawn Navide plugin mark, and its tooltip and
+accessible name give the plugin id, the publisher and, when the package has
+one, its source, so a view's `title` cannot make its tab pass for a run group.
+A package that is not a reviewed Marketplace release or built into Navide also
+gets the same source dot as its title-bar button.
 
 A package that contains both frontend and backend contributions uses one
 manifest. `contributes` and `backend` are sibling top-level fields; the backend
@@ -918,7 +984,7 @@ matches.
 | `contributes` | no | Object with a required views array (1–16 views) | At least one of `contributes`, `backend` or `extensionPack` |
 | `backend` | no | Object | See [Backend source, development, and publish contract](#backend-source-development-and-publish-contract) |
 | `extensionPack` | no | 1–20 member plugin ids | See [Extension Packs](#extension-packs) |
-| `permissions.system` | no | `fs`, `ui`, `aiCli`, `web` | 1–4 unique entries |
+| `permissions.system` | no | `fs`, `ui`, `aiCli`, `web`, `agents`, `agentMessages` | 1–6 unique entries; `agentMessages` requires `agents` |
 | `permissions.shell` | no | `allowlist`, `full` | Omission denies `shell.run` |
 | `permissions.scopes` | no | Object with a required fs entry | Disclosure only, see below |
 | `contributes.views[].id` | yes | Lowercase view id | |
@@ -1025,10 +1091,10 @@ startup:
 }
 ```
 
-Manifest v2 rejects `requires`, `activationEvents`, and
-`contributes.commands`. The migration adapter maps legacy `onStartup` to
-backend startup and `onView:*` to view contributions. Commands and
-`onCommand:*` are not public until a separate command contract is specified.
+Manifest v2 rejects `requires` and `activationEvents`. The migration adapter
+maps legacy `onStartup` to backend startup and `onView:*` to view
+contributions. `onCommand:*` stays private; commands are declared as described
+in [Commands](#commands).
 
 All entries are package-relative regular files. Absolute paths, empty, `.`, or
 `..` segments, Windows backslashes, symlink escapes, and shell command strings
@@ -1259,7 +1325,7 @@ Manifest permissions, the capability catalog, the explicit package-version
 Grant, publisher eligibility, request schemas, workspace binding, and runtime
 state remain mandatory for both initiators. `full` mode bypasses only the
 agent-specific namespace and executable filters. `allowlist` and `denylist`
-operate on first-level `fs`, `ui`, `aiCli`, and `web` namespaces and on every resolved
+operate on first-level `fs`, `ui`, `aiCli`, `web`, `agents`, and `agentMessages` namespaces and on every resolved
 top-level executable in a shell pipeline or command chain. Policy v1 does not
 express subcommands, arguments, path patterns, or wrappers. The v1 shell parser
 fails closed on unquoted grouping or negation syntax (`(`, `)`, `{`, `}`, `!`)
@@ -1267,9 +1333,10 @@ and assignment-prefixed commands (`NAME=value`); this applies to both direct
 user and agent shell execution, so quote these characters or assignment-shaped
 arguments when they are intended as command data. For the private Backend
 Bridge, the `filesystem` port maps to the `fs` Execution Policy namespace, the
-`shell` port is judged on its command, and the `web` port maps to `web`. `web`
-is never admitted by omission: a `denylist` does not admit it, only `full` or
-an `allowlist` that names it. All other current Bridge ports fail closed for agent Initiators until
+`shell` port is judged on its command, the `web` port maps to `web`, the
+`agents` port to `agents` and the `agent-message-bodies` port to
+`agentMessages`. `web`, `agents` and `agentMessages` are never admitted by omission: a
+`denylist` does not admit them, only `full` or an `allowlist` that names them. All other current Bridge ports fail closed for agent Initiators until
 an explicit namespace mapping is assigned; user Initiators continue through
 their existing checks.
 
@@ -1364,6 +1431,42 @@ unchanged:
 
 The receiver, detail and close methods exist only on the client.
 
+A view loses what it holds in memory whenever it reloads: a Developer Mode
+reload, an update, or **Restart Plugin**. `createPluginViewState(key,
+fallback)` keeps view state across those reloads in Host-managed storage
+(see [Host-managed storage partitions](#host-managed-storage-partitions)),
+under the key `view-state:<key>`, so it needs no permission:
+
+```ts
+import { createPluginViewState, viewReady } from '@navide/plugin-sdk'
+
+type Filters = { query: string; open: boolean }
+declare function mountApp(): void // your view's own render code
+declare function applyFilters(filters: Filters): void
+declare function onFiltersChange(listener: (filters: Filters) => void): void
+
+const filters = createPluginViewState<Filters>('filters', { query: '', open: true })
+
+mountApp()
+viewReady() // do not wait for restore()
+applyFilters(await filters.restore())
+onFiltersChange((next) => filters.save(next))
+```
+
+`restore()` never rejects: it returns the fallback when nothing was saved or
+storage cannot be read, which is the case while the Host checks a new version
+in a hidden view. `save(value)` writes in the background, one write at a time,
+and only the newest value waiting is written; `flush()` resolves when they are
+done. The default `scope` is `plugin`; pass `{ scope: 'workspace' }` for state
+per workspace. Storage is per package version, with one exception: when the
+Host switches between two Navide Marketplace versions of the plugin (an update
+taking effect, **Restart Plugin**, **Back to**), it copies the `view-state:`
+keys of the version that ran into the one that runs next, before the views
+remount, so `restore()` returns what the previous version saved. No other key
+is copied, and nothing is carried for a local file version or when the source
+changes (a local file replacing a Navide Marketplace version, or the reverse);
+there a new `version` starts from the fallback.
+
 Every view must call `ready()` once it has mounted. The Host waits 10 seconds
 after the entry document finishes loading. During install and update preflight
 a view that has not reported ready fails the package; in a running view the
@@ -1402,7 +1505,7 @@ Manifest v2 uses one coarse system namespace array and one shell mode:
 }
 ```
 
-`system` accepts only `fs`, `ui`, `aiCli`, and `web`. It is not a map of methods or
+`system` accepts only `fs`, `ui`, `aiCli`, `web`, `agents`, and `agentMessages`. It is not a map of methods or
 read/write accesses: declaring `fs` allows catalog validation to consider the
 filesystem methods, but does not bypass method schemas, scope checks, or Host
 policy. `shell` accepts only `allowlist` or `full`; omission denies
@@ -1411,11 +1514,13 @@ are not Manifest v2 permissions.
 
 | Namespace/address | Catalog methods/events | Scope |
 |---|---|---|
-| `system:fs` | `fs.readFile`, `fs.listDirectory`, `fs.glob`, `fs.stat`, `workspace.filesChanged` | `workspace` |
+| `system:fs` | `fs.readFile`, `fs.listDirectory`, `fs.glob`, `fs.queryFiles`, `fs.stat`, `workspace.filesChanged` | `workspace` |
 | `system:ui` | `ui.openInEditor` | `workspace` |
 | `system:ui` | `ui.openExternal` | `plugin` (HTTP/HTTPS web links; Host user-gesture gate) |
 | `system:aiCli` | `aiCli.listProfiles`, `startSession`, `resumeSession`, `cancelStart`, `reattachSession`, `sendInput`, `resizeSession`, `redrawSession`, `interruptSession`, `stopSession`, `output`, `exited` | `workspace` |
 | `system:web` | `web.list`, `create`, `attach`, `detach`, `navigate`, `setOwner`, `takeControl`, `returnControl`, `close`, `capture`, `clearData`, `changed` | `plugin` (see [Plugin browser views](#plugin-browser-views-web)) |
+| `system:agents` | `agents.listPanes`, `lineage`, `listMessages`, `listSessions` | `workspace` (see [Agent data and privacy](#agent-data-and-privacy-agents-agentmessages)) |
+| `system:agentMessages` | `agentMessages.read` | `workspace` |
 | `shell` | `shell.run` | `workspace` |
 
 **`shell.run` output size.** The Host shell broker returns at most 8000
@@ -1498,8 +1603,8 @@ agent or a backend can never perform them.
 | Address | Request → result | Rule |
 |---|---|---|
 | `web.list` | `{}` → `{views: WebViewInfo[]}` | Every view of this package |
-| `web.create` | `{space, url?}` → `{viewId}` | User gesture. `owner` and `control` start as `user` |
-| `web.attach` | `{viewId, rect: {x, y, width, height}}` → `{ok}` | Draws the view over the caller's own view at `rect`, in coordinates relative to that view; one attached view per caller at a time |
+| `web.create` | `{space, url?}` → `{viewId}` | User gesture. `owner` and `control` start as `user`. A package has at most 32 live views; past that it is `RESOURCE_LIMIT` |
+| `web.attach` | `{viewId, rect: {x, y, width, height}}` → `{ok}` | Draws the view over the caller's own view at `rect`, in coordinates relative to that view and clamped inside it. Several views may be attached at once, each at its own `rect` (a tiled grid), up to 9 per package; attaching a tenth is `RESOURCE_LIMIT`. Calling it again for an attached view moves it; a view attached to another of the package's views moves there |
 | `web.detach` | `{viewId}` → `{ok}` | Takes the view off screen; it keeps running |
 | `web.navigate` | `{viewId, url?, action?}` → `{ok}` | Exactly one of `url` or `action` (`back`, `forward`, `reload`, `stop`). A user action: on an agent-owned view, `control` passes to `user` |
 | `web.setOwner` | `{viewId, owner: "agent" \| "user"}` → `{ok}` | User gesture; hands a space to an agent or takes it back |
@@ -1520,6 +1625,10 @@ and `y` at least 0, `width` and `height` from 1 to 16384. Unknown fields are
 The `web.changed` event carries `{views: WebViewInfo[]}` whenever any view of
 the package changes. It is delivered only to views of the same package.
 
+The Host's own code for both caps is `LIMIT_REACHED`. The view-side contract
+has no such code, so `web.*` answers `RESOURCE_LIMIT`; the Bridge port answers
+`LIMIT_REACHED`.
+
 <!-- docs-typecheck: skip (shape reference; the SDK does not export WebViewInfo yet) -->
 ```ts
 interface WebViewInfo {
@@ -1535,6 +1644,12 @@ interface WebViewInfo {
   attached: boolean
   agentScriptSinceLoad: boolean // the agent ran Runtime.evaluate or callFunctionOn
                                 // since the main frame last loaded a document
+  openerViewId?: string        // the view whose window.open created this one
+  dialog?: {                   // a JS dialog open in the page (see below)
+    type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+    message: string            // at most 500 characters
+    defaultPrompt?: string     // prompt only, at most 500 characters
+  }
 }
 ```
 
@@ -1554,8 +1669,8 @@ belongs to no pane: every pane sees it, and may drive it while `owner` and
 
 | Operation | Arguments → result | Rule |
 |---|---|---|
-| `list` | `{}` → `{views}` | A view whose `owner` is `user` is listed with `url` and `title` empty and no `note`: the agent learns that the user's Space exists and who controls it, not what is open in it. `web.list` in the package UI is unredacted |
-| `create` | `{space, url?}` → `{viewId}` | `owner` and `control` are `agent`, `state` is `running`; the view runs in the background, unattached and without background throttling |
+| `list` | `{}` → `{views}` | A view whose `owner` is `user` is listed with `url` and `title` empty and no `note` or `dialog`: the agent learns that the user's Space exists and who controls it, not what is open in it. `web.list` in the package UI is unredacted |
+| `create` | `{space, url?}` → `{viewId}` | `owner` and `control` are `agent`, `state` is `running`; the view runs in the background, unattached and without background throttling. `LIMIT_REACHED` once the package has 32 live views |
 | `close` | `{viewId}` | Only a view whose `owner` is `agent` |
 | `cdp` | `{viewId, method, params?}` → `{result}` | One Chrome DevTools Protocol command (`Domain.method`, at most 128 characters; `params` a plain object) from the Host allowlist (see [Host-enforced boundaries](#host-enforced-boundaries)); any other method is `CAPABILITY_DENIED`. The debugger attaches to that one view only. Refused with `USER_IN_CONTROL` while `owner` or `control` is `user`, with `reason` `user-owned`, `manual_takeover` or `permission` |
 | `setState` | `{viewId, state, note?}` | `note` at most 500 characters; `need-action` also sets `control` to `user`, and reloads the page first when `agentScriptSinceLoad` is set |
@@ -1573,14 +1688,19 @@ someone it is not.
 - **The page is only a page.** Guests run sandboxed with context isolation, no
   preload and no Node.js. Only `http(s)` and `about:blank` load; that keeps
   `file:` and Host-internal pages out of a view an agent can read.
-  `window.open` loads in the same view instead of opening a new window.
+  `window.open` never opens a window. An allowed URL becomes a new view of
+  the same package, in the same `space`, with the opener's `owner`, its pane
+  and `control` set to that owner, created through the same rules as
+  `create`; its `openerViewId` names the opener. At the 32-view cap the URL
+  loads in the opener instead. Any other URL does nothing.
 - **CDP is a per-method allowlist.** The Bridge `cdp` operation accepts only
   these methods, which are what the Navide Browser backend uses to read and
   drive a page: `Accessibility.getFullAXTree`, `DOM.focus`, `DOM.getBoxModel`,
   `DOM.resolveNode`, `DOM.scrollIntoViewIfNeeded`,
   `DOMSnapshot.captureSnapshot`, `Input.dispatchKeyEvent`,
   `Input.dispatchMouseEvent`, `Input.insertText`, `Page.captureScreenshot`,
-  `Page.getNavigationHistory`, `Page.navigate` (its `url` follows the same
+  `Page.getNavigationHistory`, `Page.handleJavaScriptDialog`,
+  `DOM.setFileInputFiles` (see below), `Page.navigate` (its `url` follows the same
   `http(s)` rule as `web.create`), `Page.navigateToHistoryEntry`,
   `Runtime.callFunctionOn` and `Runtime.evaluate`. Every other method is
   `CAPABILITY_DENIED`. That keeps out the cookie jar (`Network.getCookies`,
@@ -1588,9 +1708,35 @@ someone it is not.
   agent the HttpOnly session tokens of sites the user signed in to), the cache,
   request interception (`Fetch.*`, `Network.setRequestInterception`), scripts
   and bindings that outlive a page (`Page.addScriptToEvaluateOnNewDocument`,
-  `Runtime.addBinding`), `DOMStorage`, file chooser paths, the download
-  directory and other targets. Script run with `Runtime.evaluate` still acts
-  inside the page with the page's own sign-in, as the disclosure says.
+  `Runtime.addBinding`), `DOMStorage`, the download directory and other
+  targets. `Page.enable` is the Host's own and refused from the package.
+  Script run with `Runtime.evaluate` still acts inside the page with the
+  page's own sign-in, as the disclosure says.
+- **File uploads stay inside the workspace.** `DOM.setFileInputFiles` is
+  passed on only when `params.files` is 1 to 16 absolute paths and each one,
+  with symbolic links resolved, is an existing regular file strictly inside
+  the workspace of the pane behind the call (also resolved; a workspace at
+  the file system root contains nothing). Each file is then opened without
+  following a final link, must still be the same file and at most 64 MiB,
+  and is copied owner-only into a Host-private directory; the page receives
+  the copy (deleted when the view closes), and the other params pass
+  unchanged. No pane, no workspace, a relative path, a missing file, a
+  directory or any path outside is `CAPABILITY_DENIED`.
+- **Uploads are disclosed, not restricted.** Every upload is recorded on the
+  view as `uploads` (newest 20: the path relative to the workspace, the
+  origin of the page it went to, the time, and `sensitive` when the file
+  name looks like a secret: `.env`, `*.pem`, `id_*`, or a name containing
+  `credentials`, `secret` or `token`). The `cdp` result carries the same
+  `uploaded` list, and a `warning` naming any secret-looking file. The
+  plugin shows them on the Space; nothing is refused for its name.
+- **Dialogs are visible.** When the Host attaches the debugger for an agent
+  `cdp` call it enables the Page domain once and records an
+  `alert`/`confirm`/`prompt`/`beforeunload` dialog the page opens as
+  `dialog` on the view (message cut to 500 characters). The agent answers it
+  with `Page.handleJavaScriptDialog`. `dialog` is cleared when the dialog
+  closes, when the main frame navigates and whenever the debugger is
+  detached (every takeover), so it is only ever seen while the agent drives
+  the view.
 - **Permission requests are denied.** Camera, microphone, location,
   notifications and other permission prompts are denied in this first
   version; on an agent-controlled view the `state` becomes `need-action` with
@@ -1621,6 +1767,103 @@ someone it is not.
 - **Views follow the package.** Disabling or removing the package destroys all
   its views. Closing the package's window does not: views keep running in the
   background until the package closes them.
+
+### Agent data and privacy (`agents`, `agentMessages`)
+
+Declaring `agents` lets a package read what only Navide knows about the agent
+panes of its workspace: which panes exist, which pane opened which, when
+messages between them were sent and whether they arrived, and the session
+list. Declaring `agentMessages` as well adds the text of those messages. Both
+are read-only; nothing in either namespace sends, opens, closes or changes a
+pane. The request contract lives in `src/main/plugins/agentsCapability.ts`
+and the types in `@navide/plugin-contracts` (`agents.ts`); the backend
+projection is `backend/agent_team_backend/agents_host_api.py`.
+
+**Disclosure.** The two namespaces are disclosed separately, so a user can
+tell metadata from content before installing:
+
+| Declaration | Risk (reason) | Summary clause | Sensitive |
+|---|---|---|---|
+| `agents` | **medium** (`system.agents`) | `agents`: sees the agent panes of the project, which pane opened which, message delivery records (not what was said) and the session list (no conversation content) | no |
+| `agentMessages` | **high** (`system.agentMessages`) | `agentMessages`: reads the full text of messages between the agents of the project, which can contain code, file contents or secrets | yes: installing asks for the second confirmation |
+
+`agentMessages` requires `agents` in the same manifest; declaring it alone is
+refused at validation and at publish. A version that adds either namespace
+asks again, like any other added permission.
+
+**What is never exposed.** Every answer is a fixed list of fields; nothing is
+copied through from an internal record. In particular:
+
+- **Session transcripts are not exposed** under any declaration: no vendor
+  session file, no pane output log, no conversation content. `listSessions`
+  returns metadata only, and no session id: an id is what a CLI's `--resume`
+  takes, so handing it out would let a plugin that can also run a CLI or a
+  shell reopen the conversation. `resumable` says only whether it could be.
+- Message text and excerpts are not part of `agents`. `listMessages` gives
+  `bodyLength`; only `agentMessages.read` returns `body`.
+- Account, sign-in, profile, usage and quota data, device identity, working
+  directories and log file paths never appear.
+- Panes that are a CLI sign-in are left out everywhere.
+- Scope is the plugin's bound workspace on this machine. Panes and messages of
+  other workspaces and of other devices are not visible, and no request field
+  can choose a workspace.
+
+**Agent Execution Policy.** `agents` and `agentMessages`, like `web`, are
+never admitted by omission, because a `denylist` written before they existed
+never names them: an agent-initiated call (a view capability, or the `agents` /
+`agent-message-bodies` Bridge port) is admitted only in `full` mode or by an
+`allowlist` that names the namespace. An existing denylist policy therefore
+behaves exactly as before. The Host default allowlist includes `agents` but not
+`agentMessages`, so a user has to add it before any agent reads message text.
+Direct user actions are not filtered.
+
+#### Capabilities
+
+All addresses are `workspace`-scoped. Unknown fields are `INVALID_ARGUMENT`;
+`limit` is an integer from 1 to 200 (default 50).
+
+| Address | Request → result | Rule |
+|---|---|---|
+| `agents.listPanes` | `{}` → `{panes: AgentPaneInfo[]}` | Registered panes of the workspace, including ones whose window is offline (`offline: true`) or not yet opened (`realized: false`) |
+| `agents.lineage` | `{includeRemoved?}` → `{nodes: AgentLineageNode[]}` | Parent links from the workspace's saved pane records; closed panes only with `includeRemoved: true`, so a tree survives its middle pane closing |
+| `agents.listMessages` | `{paneId?, since?, limit?}` → `{messages, oldestCreatedAt, truncated}` | Messages whose sender or recipient was stamped as this workspace when the row was written, newest last; `since` is epoch milliseconds (exclusive); `paneId` narrows to one pane |
+| `agents.listSessions` | `{limit?}` → `{sessions: AgentSessionInfo[]}` | The same rows as `cli_list_sessions`, newest first; no conversation content |
+| `agentMessages.read` | `{id}` → `{message}` | One message of `listMessages` plus its `body`; an id outside the workspace is `INVALID_ARGUMENT` |
+
+Limits a plugin must plan for:
+
+- The message log keeps only a bounded window of recent rows for the whole
+  machine. Compare `oldestCreatedAt` with your last `since`: when it is newer,
+  rows you never saw were pruned.
+- A messaging name alone cannot say which workspace it belongs to: a bare name
+  is unique only inside one window, and a qualified `<folder>/<pane>` name only
+  while no other workspace has the same folder name. So the backend stamps
+  each log row, as it is written, with the workspace path of its sender and of
+  its recipient, resolved while those panes are registered; a name it cannot
+  tie to exactly one workspace stays unstamped. `agents.listMessages` and
+  `agentMessages.read` return a row only when one side's stamp equals this
+  workspace's path exactly. Rows written before the stamp existed (Navide
+  0.2.30 and earlier) belong to no workspace and are never returned.
+- The window writing a row vouches only for its own panes: a side is stamped
+  only when its pane belongs to that window, whether the name is bare or
+  qualified. A message routed to or from another workspace window or another
+  device (`remote` set on the row) is not returned at all. Two workspaces open
+  in one window exchange unrouted messages; such a row has both sides stamped
+  and is listed for either workspace, with `sender` / `recipient` showing the
+  other workspace's folder and pane name and `agentMessages.read` returning
+  the text that pane wrote.
+- There is no change event yet; poll.
+
+#### Backend Bridge ports `agents` and `agent-message-bodies`
+
+A third-party native backend reaches the same data through two Bridge ports,
+each projected only when the manifest declares its namespace: `agents`
+(operations `list_panes`, `lineage`, `list_messages`, `list_sessions`) maps to
+the `agents` Execution Policy namespace, and `agent-message-bodies`
+(operation `read_message`) maps to `agentMessages`. Arguments and results are
+those of the matching capability above. Both run at the bound workspace root
+only. An agent reaches them only inside an admitted agent-tool call of the same
+package at that workspace; Plans and first-party packages do not get them.
 
 ### Declared filesystem scopes (disclosure only)
 
@@ -1759,7 +2002,10 @@ silently retargeting it. Plugin code never sees tier, version, or storage
 identity.
 
 Package-version upgrades do not automatically carry data forward for ordinary
-public packages: a new version starts with its own empty snapshot. The
+public packages: a new version starts with its own empty snapshot. The one
+exception is SDK view state (`view-state:` keys) on a switch between two Navide
+Marketplace versions, described under `createPluginViewState`; it is never
+carried across a change of source. The
 first-party `navide.git` migration is an explicit Host-owned exception: before
 its current package version is promoted, the Host may clone the prior active
 Git snapshot into the current candidate, then retain the prior snapshot for
@@ -1842,6 +2088,32 @@ trigger the legacy path. An invalid installed package is also not hidden by the
 factory or legacy copy. `NAVIDE_GIT_RECOVERY=legacy` remains the explicit operator override.
 Issue 19 does not remove the legacy implementation or implement later Skills
 migration or marketplace lifecycle work.
+
+The bundled first-party plugins (`navide.git`, `navide.mini-ide`,
+`navide.plans`) version independently of the App: each keeps the version in
+its own `manifest.json`, which changes only when that plugin changes, and the
+App records the versions it bundles in `src/main/plugins/officialPluginVersions.ts`
+to look the copies up at `official-artifacts/<id>/<version>/<target>`. When a
+verified Marketplace copy of the same id is also installed, the newer version
+by SemVer is loaded and the installed copy wins a tie; an opted-out bundled
+copy and a forced legacy recovery (`NAVIDE_GIT_RECOVERY=legacy`,
+`NAVIDE_PLANS_RECOVERY=legacy`) leave the installed copy in charge. An older installed copy
+is left on disk with its lifecycle record untouched and is reconsidered on the
+next start, so a later App that bundles an older version hands the id back to
+it.
+
+Because the installed copy wins a tie, content must never change under a
+released version. `plugins/official-plugin-fingerprints.json` is the release
+baseline: each plugin's version and a fingerprint of the tracked sources its
+package is built from (its directory, the `packages/plugin-*` workspace packages
+and, for Plans, the core modules its backend bundles; tests and Markdown
+excluded) as of the last App release tag. When a plugin's content differs from
+that baseline, its version must be higher than the baseline version: bump it
+once in the plugin's `manifest.json`, its `package.json` and
+`officialPluginVersions.ts`, and later changes in the same release cycle need
+no further bump. A version below the baseline is always refused.
+`tests/infrastructure/officialPluginFingerprints.test.ts` checks this on every
+PR; only `release.sh` rewrites the baseline (see `RELEASING.md`).
 
 ### First-party production Plans package
 
@@ -1995,6 +2267,42 @@ the authenticated plugin, package version, workspace, view instance, and
 audience.
 Directed output and exit events are delivered only to the authenticated
 audience that created or reattached the session.
+
+Every v2 package that declares `system: ["aiCli"]` receives them, not only the
+bundled Navide plugins. `aiCli.output` is `{ sessionId, data }` (the PTY text,
+decoded as UTF-8) and `aiCli.exited` is `{ sessionId, exitCode }` (a number,
+or `null`); nothing else is in either, and a v2 view is never sent the raw
+`terminal.*` stream. Ownership is the Host's, recorded when the session is
+started or resumed: the view instance, package, package version, workspace and
+audience. Another package never sees a session, and neither does another view
+of the same package while the session is attached to its view; input, resize,
+stop and reattach calls for a session the calling view does not own are
+refused. When the view closes the session is detached, and a new view of the
+same package and package version with the same audience and workspace can take
+it over with `aiCli.resumeSession`. A detached session that is not taken over
+within 60 seconds is ended (the bundled Navide plugins end theirs through their
+own surfaces), unless the view started it with `persistView: true` and the
+Host stored it in terminal storage: such a session keeps running until a view
+resumes it, the package is disabled or removed, or Navide quits. Asking for
+`persistView` when the storage write fails does not keep it. A stored session
+is found again through terminal storage, which is keyed by package, package
+version, contribution and workspace, so only the same version of the same
+package can resume it there (the bundled Navide plugins keep one key across
+their versions). Storage written by Navide 0.2.31 or earlier has no version in
+its key and is not read; the session it names ended when that Navide quit.
+Updating a package ends the sessions of the version it replaces and clears
+them from terminal storage. Disabling or removing the package ends its
+sessions at once, and clears them from terminal storage too.
+
+The plugin's entry in Settings → Navide Plugins lists each session kept
+running this way (its CLI, package version and since when), with an End button
+that ends it as disabling the package would. A session that exits by itself
+leaves the list. Nothing is ended unless the user asks.
+
+Declaring `aiCli` lets a package start the AI CLI agents set up in Navide, send
+them input and read everything they print, and keep an AI CLI running in the
+background after its window closes; the install and update dialogs say so, and
+an update that adds it is shown as added.
 `shell.run`, raw command/executable/arguments/environment/working-directory
 parameters, and PID control have no `aiCli` mapping and must fail closed.
 The Host executor also enforces the catalog's `requiresUserGesture` flag for
@@ -2033,6 +2341,21 @@ migration: that gesture belongs to the separate Host TerminalPane surface.
 through a Host-owned picker-only view. Its request contains `query`, untrusted
 `candidates`, optional `line`, and an optional owned `sessionId`. A candidate or
 a renderer's user Initiator classification does not authorize an external file.
+
+The Host owns resolution, authorization and opening; matching belongs to the
+caller. A caller that parses locations itself sends `targets`
+(`{ path, line? }`), which replace `candidates` and are just as untrusted, and
+`search`, the `fs.queryFiles` strategy (`matchOn`, `mode`, `exclude`,
+`respectGitignore`, `includeHidden`) the picker uses when the user types. Its
+`exclude` has the `fs.queryFiles` limits, and a picker search shares that
+method's one-at-a-time slot: it waits for the plugin's own query, and while it
+runs the plugin's `fs.queryFiles` answers `busy`. Rows keep the order the search
+returned. Without these fields the Host reads a
+`path:line` suffix from each candidate and searches as `fs.listFilesFlat` does;
+that string form is deprecated. A package inside its workspace does not need
+this picker at all: `system:fs` already lets it find a file and
+`ui.openInEditor` open it.
+
 The Host performs lookup internally; the isolated picker returns an opaque row
 identifier on actual selection. The public result is only `{ opened: boolean }`.
 Neither filesystem lookup results nor a selected-file grant are returned to
@@ -2112,6 +2435,81 @@ The legacy `git.changed` event is unusually authorized by `fs`. The v2 public
 replacement is `workspace.filesChanged`; third-party code must not subscribe to
 the legacy address.
 
+### Commands
+
+`contributes.commands` names what a user can bind to a key and an agent can
+list. It grants nothing: a command does only what the plugin could already do,
+so it adds no permission and no disclosure row.
+
+```json
+{
+  "engines": { "navide": ">=0.2.36" },
+  "contributes": {
+    "views": [{ "id": "main", "kind": "custom", "location": "main", "title": "Runner", "entry": "frontend/main/index.html" }],
+    "commands": [
+      {
+        "id": "acme.runner.runTests",
+        "title": "Run tests",
+        "run": { "view": "main", "target": { "tab": "tests" } },
+        "suggestedKey": "cmd+alt+t"
+      }
+    ]
+  }
+}
+```
+
+**A package declaring commands must set `engines.navide` to `>=0.2.36`.** An
+older Navide refuses the field as unknown and the package does not load.
+
+Two limits apply in 0.2.36:
+
+- Neither the App nor the Registry checks this requirement. A package that
+  declares commands with a lower `engines.navide` passes validation, and an
+  older Navide then offers it and fails to load it. Set the value yourself.
+- A Registry that has not been updated to the 0.2.36 manifest rules rejects a
+  package declaring commands at publish, whatever its `engines.navide`. Until
+  the production Registry has them, such a package can be loaded from a local
+  file or a developer folder but cannot be published.
+
+| Field | Required | Rule |
+|---|---|---|
+| `id` | yes | The plugin id, a dot, then letters and digits starting with a lower-case letter. Unique in the manifest |
+| `title` | yes | Display text, 1-80 characters, the same rule as a view title |
+| `run` | yes | Either `{view, target?}` or `{method}` |
+| `run.view` | | A view this manifest declares. `target` is 1-16 string values, delivered through `onOpenTarget` |
+| `run.method` | | A name listed in `backend.methods` |
+| `suggestedKey` | no | A suggestion the user can accept in Settings. It is never bound on its own, and a key already taken is shown as a conflict, not taken over |
+
+A manifest holds at most 32 commands. A plugin whose publisher is `workbench`,
+`ui`, `editor`, `git` or `navide` cannot declare commands: those are the first
+segments of Navide's own command ids, and a command must not read as Navide's.
+This is protection against deception, not restriction: the same plugin can do
+the same work from its view.
+
+A command appears in Settings → Shortcuts under the plugin's name, in
+`ui_list_actions` as a plain id like every other action, and in
+`ui.actions.describe`, marked `humanOnly`. It runs when the user presses a key
+bound to it:
+
+- A `window` view opens, with `target` delivered.
+- A view already on screen, or a `main` tab already opened, is shown and gets
+  `target`.
+- A view the user has not opened, or one that is not enabled, stays closed. The
+  command fails and the user sees why. `detail` views cannot be a command's
+  target.
+- `run.method` calls the backend through one of the plugin's open views, with
+  that view's identity and an empty `args` object, under the same checks as a
+  call from the view. With no view open the command fails: a key does not start
+  a backend. The result is discarded; a failure tells the user.
+
+**Agents do not run commands.** `ui_invoke` refuses a plugin command with
+`ui_human_only`, and this applies to `run.method` too. Opening a view with a
+target would otherwise let an agent act through a view's user-initiated
+capabilities, outside the [Agent Execution Policy](#agent-execution-policy). To
+give an agent the same action, declare it in
+[`backend.agentTools`](#agent-tools-backendagenttools), which the user consents
+to.
+
 ## Errors
 
 All SDK failures reject with `PluginError` containing a stable `code`, a safe
@@ -2182,7 +2580,13 @@ activated as soon as it is approved. An approved update, and an agent's
 automatic update whose disclosure is identical to the running version's
 (O1), switches right away through the same per-plugin switch as
 **Restart Plugin**: the consent dialog says beforehand that the plugin's open
-views reload and lose what is not saved in them. Navide drains only that plugin,
+views reload, that a view saving its state through the SDK comes back where it
+was, and that anything else not saved in them is lost. Right before the switch,
+and before going **Back to** a version, the version about to run is checked
+again in hidden views that must report ready; if one does not, nothing is
+drained, the running version keeps running and an update stays staged. While
+the switch drains and remounts, each in-window region of the plugin says it is
+switching to the new version. Navide drains only that plugin,
 atomically selects one complete frontend/backend package version and its
 matching storage selection, then restores native view placements from fresh
 Host-owned descriptor and Grant data. Navide itself and unrelated plugins do
@@ -2190,7 +2594,7 @@ not restart. In-window views come back on the new version in place. Every
 switch is recorded in the main window's announcements with a one-click way
 back to the version it replaced; a failed switch keeps the previous version
 running and leaves the update staged. For an update the user approved, the
-Extensions page shows the reason at once, its row keeps Restart and Discard,
+Navide Plugins page shows the reason at once, its row keeps Restart and Discard,
 and the main window lists it with **Apply now** on the next launch; for an
 agent's automatic update the main window shows the reason with **Apply now**
 at once. A first install or update that is still staged when Navide starts
@@ -2210,6 +2614,16 @@ an ordinary child process: process isolation limits crash impact but does not
 restrict filesystem, network, subprocess, or OS access. A third-party backend
 runs only inside the OS sandbox described in
 [Third-party backends](#third-party-backends-sandbox-consent-and-publishing).
+
+The first-party Navide Browser backend (`navide.browser`) ships with the App
+as a built-in, like Plans, Git and Mini-IDE, built per platform, and is
+enabled by default. It also runs outside the third-party gate, with only the
+`web` bridge port, but only for the package the Host loads from the App's
+factory resources (`factory-bundled`) or one the Official Registry installed
+(`official-registry`), which takes precedence. The same id from a developer
+folder or a local file never gets that treatment. The user disables it in
+Settings → Navide Plugins like the other built-ins, which stops its backend
+and agent tools; it cannot be removed.
 
 - Normal mode will run only complete artifacts covered by a Registry envelope
   signature that chains to a Host-pinned Registry root; publisher keys are not
@@ -2474,6 +2888,27 @@ previous public API major; the previous major remains supported for at least 12
 months. Public deprecations are announced for at least 6 months and span at
 least two Navide minor releases before removal.
 
+The Host provides one API version, `PLUGIN_API_VERSION` in
+`@navide/plugin-contracts`, and a plugin reads it at run time with
+`hostApiVersion()` from `@navide/plugin-sdk` (`null` on a Host too old to report
+one). Install and load both compare a package's `apiVersion` major with it: a
+package on a newer major is refused at install, and one already installed stays
+in Settings with the reason and contributes no view and no backend. `engines.navide`
+is refused at install too; an installed package that no longer meets it keeps
+running, and Settings marks it incompatible.
+
+Every entry in `capabilities-v1.json` carries `since`, the API version it
+arrived in. A deprecated entry also carries
+`deprecated: { since, removeAfter, replacement? }`, where `removeAfter` is the
+earliest removal date (`YYYY-MM-DD`). The Host keeps serving it and writes one
+notice per plugin and address to its log.
+
+Package code runs at the version it was built with: Vue, `@navide/plugin-ui`,
+`@navide/plugin-sdk` and `@navide/plugin-contracts` are bundled into each
+package, so a Host update does not change them. What a Host update can change is
+what runs behind a capability, so the behavior a plugin may rely on is stated
+in the catalog entry's `description`.
+
 The migration plan's one-minor compatibility window applies only to Navide's
 internal v1 loader/adapter. It is not the third-party API support policy.
 
@@ -2493,6 +2928,13 @@ Issue 06 supports the following external frontend workflow:
 Scaffolding, per-target backend packaging, signing, sign-in and publishing
 to the Navide Marketplace are covered step by step in
 [Publishing to the Navide Marketplace](marketplace-publishing.md).
+
+An agent learns this workflow from the skill that ships with Navide: it calls
+`skills_prepare_install` with the source `navide:plugin-authoring`, and the
+user approves the install in the main window like any other skill. The skill
+lives at `backend/agent_team_backend/bundled_skills/plugin-authoring/SKILL.md`
+and summarises this document; change it in the same pull request as any change
+here that it describes.
 
 There is no `navide-plugin dev` command and no in-app hot-reload loop. Test a
 backend with `navide-plugin dev-backend`, whose Host bridge refuses every

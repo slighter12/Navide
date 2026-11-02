@@ -355,6 +355,12 @@ function runtimeCapabilityBridge(): RuntimeCapabilityBridge {
   return bridge as RuntimeCapabilityBridge
 }
 
+/** The plugin API the running Host provides, or null on a Host too old to say. */
+export function hostApiVersion(): string | null {
+  const version = (globalThis as unknown as { nav?: { apiVersion?: unknown } }).nav?.apiVersion
+  return typeof version === 'string' ? version : null
+}
+
 function isJsonValue(value: unknown): value is JsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
   if (typeof value === 'number') return Number.isFinite(value)
@@ -1035,6 +1041,66 @@ export function createPluginSettingsStore(
     },
     delete(key: string) {
       return context.capabilities.invoke('storage.delete', { scope, key })
+    },
+  })
+}
+
+export interface PluginViewState<T extends JsonValue> {
+  /** The last saved value, or the fallback when there is none or it cannot be read. Never rejects. */
+  restore(): Promise<T>
+  /** Remember `value`. Writes run one at a time; only the newest pending value is written. */
+  save(value: T): void
+  /** Resolves once every saved value has been written (or failed to). */
+  flush(): Promise<void>
+}
+
+/** View state that survives a reload of the view: a Developer Mode reload, an
+ *  update, or Restart Plugin. It lives in Host-managed storage under
+ *  `view-state:<key>`, so it needs no permission. Call `ready()` without
+ *  waiting for `restore()`; a reload is prepared in a view with no storage
+ *  access, where `restore()` returns the fallback. */
+export function createPluginViewState<T extends JsonValue>(
+  key: string,
+  fallback: T,
+  options: {
+    scope?: StoragePartitionScope
+    context?: Pick<PluginContext, 'capabilities'>
+  } = {},
+): PluginViewState<T> {
+  if (typeof key !== 'string' || key.length === 0) throw new TypeError('view state key must be a non-empty string')
+  const scope = options.scope ?? 'plugin'
+  const storageKey = `view-state:${key}`
+  let context = options.context
+  const capabilities = () => (context ??= createPluginCapabilityClient()).capabilities
+  let pending: { value: T } | null = null
+  let writing: Promise<void> | null = null
+  const drain = async (): Promise<void> => {
+    while (pending) {
+      const { value } = pending
+      pending = null
+      try {
+        await capabilities().invoke('storage.set', { scope, key: storageKey, value })
+      } catch {
+        // State is a convenience: a failed write leaves the previous value.
+      }
+    }
+    writing = null
+  }
+  return Object.freeze({
+    async restore() {
+      try {
+        const result = await capabilities().invoke('storage.get', { scope, key: storageKey })
+        return result.found ? (result.value as T) : fallback
+      } catch {
+        return fallback
+      }
+    },
+    save(value: T) {
+      pending = { value }
+      writing ??= drain()
+    },
+    async flush() {
+      await writing
     },
   })
 }

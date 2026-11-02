@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { usePipelineDag } from '../usePipelineDag'
+import { usePipelineDag, type AwaitingGate } from '../usePipelineDag'
+import { applyGraphOps, deriveGraphFromStages } from '../../lib/pipelineGraph'
 import type { Stage } from '../../data/stages'
 
 const STAGES = [{
@@ -56,5 +57,71 @@ describe('usePipelineDag node-state reporting', () => {
     // A sibling stopped with the run says why, instead of looking broken itself.
     expect(last['n-01-1']).toMatchObject({ status: 'failed', error: 'run stopped: slot "a" failed' })
     expect(dag.nodeStates.value['n-01-0'].error).toBe('kickoff never reached the agent')
+  })
+})
+
+describe('usePipelineDag gate notice', () => {
+  const TWO_STAGES = [
+    { id: '01', title: '01', shortTitle: '01', sentinel: '', slots: [{ agentKey: 'claude', roleKey: '', label: 'a', kickoffBody: '' }] },
+    { id: '02', title: '02', shortTitle: '02', sentinel: '', slots: [{ agentKey: 'claude', roleKey: '', label: 'b', kickoffBody: '' }] },
+  ] as unknown as Stage[]
+
+  it('tells onGate once when the run starts waiting, not again while it keeps waiting', async () => {
+    const graph = applyGraphOps(deriveGraphFromStages(TWO_STAGES), [
+      { op: 'add_node', node: { id: 'gate', kind: 'gate', label: 'OK?', position: { x: 0, y: 0 } }, after: ['n-01-0'], before: ['n-02-0'] },
+    ])
+    const gates: AwaitingGate[] = []
+    const dag = usePipelineDag({
+      send: async (type) => (type === 'pipelines.graph.get' ? { derived: false, graph } : {}),
+      log: () => {},
+      workspacePath: () => '/ws',
+      onGate: (gate) => gates.push(gate),
+    })
+    expect(await dag.begin('p1', TWO_STAGES)).toBe(0)
+    expect(dag.holdBeforeStage(1)).toBe(true)
+    expect(dag.holdBeforeStage(1)).toBe(true)
+    expect(gates).toEqual([{ gateId: 'gate', label: 'OK?', prompt: '', nextIndex: 1 }])
+    expect(dag.approve('gate')).toBe(true)
+    expect(dag.holdBeforeStage(1)).toBe(false)
+    expect(gates).toHaveLength(1)
+  })
+})
+
+describe('usePipelineDag kickoff hints', () => {
+  const TWO = [
+    { ...STAGES[0], id: '01', slots: [{ agentKey: 'claude', roleKey: '', label: 'a', kickoffBody: '' }] },
+    { ...STAGES[0], id: '02', slots: [{ agentKey: 'claude', roleKey: '', label: 'b', kickoffBody: '' }] },
+  ] as unknown as Stage[]
+
+  async function branching() {
+    const graph = deriveGraphFromStages(TWO)
+    graph.edges = graph.edges.map((e) => (e.from === 'n-01-0' ? { ...e, kind: 'branch', when: 'yes' } : e))
+    const dag = usePipelineDag({
+      send: async (type) => (type === 'pipelines.graph.get' ? { graph } : {}),
+      log: () => {},
+      workspacePath: () => '/ws',
+    })
+    await dag.begin('p1', TWO)
+    await new Promise((r) => setTimeout(r, 0))
+    return dag
+  }
+
+  it('an ordinary kickoff keeps its hints at the end', async () => {
+    const out = (await branching()).expandKickoff('do the work', 0, 'a')
+    expect(out.startsWith('do the work')).toBe(true)
+    expect(out).toContain('[分支回報]')
+  })
+
+  it('a webhook kickoff has them ahead of the data', async () => {
+    const data = 'Webhook trigger "x" started this run.\n<<<NAVIDE-WEBHOOK-DATA-abc\npayload\nNAVIDE-WEBHOOK-DATA-abc>>>\n'
+    const out = (await branching()).expandKickoff(data, 0, 'a')
+    expect(out.indexOf('[分支回報]')).toBe(0)
+    expect(out.indexOf('[分支回報]')).toBeLessThan(out.indexOf('<<<NAVIDE-WEBHOOK-DATA-'))
+    expect(out.endsWith('NAVIDE-WEBHOOK-DATA-abc>>>\n')).toBe(true)
+  })
+
+  it('a webhook kickoff of a node with no hints is the text alone', async () => {
+    const data = '<<<NAVIDE-WEBHOOK-DATA-abc\npayload'
+    expect((await branching()).expandKickoff(data, 1, 'b')).toBe(data)
   })
 })

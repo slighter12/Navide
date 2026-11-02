@@ -259,6 +259,14 @@ function capabilityHint(cap: string): string {
           </span>
         </p>
       </div>
+      <!-- The approval failed: said here, since this dialog covers the pane's
+           own error line. A used-up file is not offered again. Keyed by the
+           failure count, so a repeated failure is announced again. -->
+      <div v-if="pending.commitError" :key="pending.commitFailures" class="ext-trust-error" role="alert">
+        <p>{{ pending.commitError }}</p>
+        <p v-if="pending.commitNextStep">{{ pending.commitNextStep }}</p>
+        <p v-else-if="pending.needsFileAgain">{{ $t('settings.extensions.localInstall.chooseAgain') }}</p>
+      </div>
       <div class="ext-trust-actions nv-dialog-actions">
         <button ref="cancelButton" class="ext-cancel nv-btn" @click="$emit('cancel')">
           {{ $t('settings.extensions.trust.cancel') }}
@@ -266,6 +274,7 @@ function capabilityHint(cap: string): string {
         <button
           v-if="step === 'replace'"
           class="ext-confirm-replace nv-btn nv-btn--primary"
+          :disabled="pending.needsFileAgain"
           @click="$emit('confirmReplace', reattach)"
         >
           {{ $t('settings.extensions.localInstall.confirmReplace') }}
@@ -273,6 +282,7 @@ function capabilityHint(cap: string): string {
         <button
           v-else-if="step === 'publisher'"
           class="ext-confirm-publisher nv-btn nv-btn--primary"
+          :disabled="pending.needsFileAgain"
           @click="$emit('confirmPublisher')"
         >
           {{ $t('settings.extensions.trust.confirmPublisher') }}
@@ -280,7 +290,7 @@ function capabilityHint(cap: string): string {
         <button
           v-else
           class="ext-confirm-risk nv-btn nv-btn--primary"
-          :disabled="local && !acknowledged"
+          :disabled="(local && !acknowledged) || pending.needsFileAgain"
           @click="$emit('confirmRisk')"
         >
           {{ $t('settings.extensions.trust.confirmInstall') }}
@@ -291,6 +301,14 @@ function capabilityHint(cap: string): string {
 </template>
 
 <style scoped>
+.ext-trust-error {
+  margin: 0 0 8px;
+  color: var(--danger-fg);
+  font-size: var(--font-xs);
+}
+.ext-trust-error p {
+  margin: 0;
+}
 .ext-trust-dialog {
   position: fixed;
   inset: 0;

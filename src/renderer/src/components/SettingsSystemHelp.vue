@@ -42,19 +42,21 @@ interface StageRow {
   stageSpan?: number
 }
 
-// ── 1 · The twenty-four tabs ───────────────────────────────────────────────
+// ── 1 · The twenty-six tabs ───────────────────────────────────────────────
 const tabs: TabRow[] = [
-  { key: 'general', groupKey: 'settings.nav.group.general', groupSpan: 7, navKey: 'settings.nav.general' },
+  { key: 'general', groupKey: 'settings.nav.group.general', groupSpan: 8, navKey: 'settings.nav.general' },
   { key: 'appearance', navKey: 'settings.nav.appearance' },
   { key: 'language', navKey: 'settings.nav.language' },
   { key: 'statusBadges', navKey: 'settings.nav.statusBadges' },
   { key: 'layout', navKey: 'settings.nav.layout' },
   { key: 'notifications', navKey: 'settings.nav.notifications' },
   { key: 'voice', navKey: 'settings.nav.voice' },
-  { key: 'accounts', groupKey: 'settings.nav.group.accountsAgents', groupSpan: 5, navKey: 'settings.nav.accounts' },
+  { key: 'appLock', navKey: 'settings.nav.appLock' },
+  { key: 'accounts', groupKey: 'settings.nav.group.accountsAgents', groupSpan: 6, navKey: 'settings.nav.accounts' },
   { key: 'cliAgents', navKey: 'settings.nav.cliAgents' },
   { key: 'analyzer', navKey: 'settings.nav.analyzer' },
   { key: 'security', navKey: 'guard.nav' },
+  { key: 'webhooks', navKey: 'webhooks.nav' },
   { key: 'channels', navKey: 'channels.nav' },
   { key: 'mcp', groupKey: 'settings.nav.group.integration', groupSpan: 6, navKey: 'settings.nav.mcp' },
   { key: 'skills', navKey: 'settings.nav.skills' },
@@ -296,7 +298,7 @@ const navLegend = computed(() => mockLegend('nav', ['search', 'groups', 'active'
 const resourceLegend = computed(() => mockLegend('resource', ['totals', 'rows', 'actions']))
 
 // The nav exactly as SettingsModal.vue renders it: five groups,
-// twenty-four pages, in this order. Labels come from the same `settings.nav.*`
+// twenty-six pages, in this order. Labels come from the same `settings.nav.*`
 // keys the real nav reads, so renaming a page renames it here.
 //
 // Drawing this is what caught the prose claiming four groups and sixteen
@@ -313,6 +315,7 @@ const settingsGroups = computed(() => [
       { label: t('settings.nav.layout') },
       { label: t('settings.nav.notifications') },
       { label: t('settings.nav.voice') },
+      { label: t('settings.nav.appLock') },
     ],
   },
   {
@@ -322,6 +325,7 @@ const settingsGroups = computed(() => [
       { label: t('settings.nav.cliAgents') },
       { label: t('settings.nav.analyzer') },
       { label: t('guard.nav') },
+      { label: t('webhooks.nav') },
       { label: t('channels.nav') },
     ],
   },
@@ -1045,7 +1049,7 @@ const resourceRows = computed(() => [
   flex-direction: column;
   gap: 26px;
   color: var(--text-primary);
-  max-width: 78ch;
+  max-width: var(--settings-page-max);
 }
 
 .syh-intro {

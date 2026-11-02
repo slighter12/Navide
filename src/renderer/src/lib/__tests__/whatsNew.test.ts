@@ -165,8 +165,8 @@ describe('0.2.26 — wake, Auto resume, file and folder installs', () => {
     expect(pickWhatsNew('0.2.26', '0.2.25')?.version).toBe('0.2.26')
     expect(pickWhatsNew('0.2.26', '0.2.26')).toBeNull()
     expect(pickWhatsNewOnDemand('0.2.26', false)?.version).toBe('0.2.26')
-    expect(WHATS_NEW[3].version).toBe('0.2.26')
-    expect(WHATS_NEW[4].version).toBe('0.2.25')
+    expect(WHATS_NEW[10].version).toBe('0.2.26')
+    expect(WHATS_NEW[11].version).toBe('0.2.25')
   })
 })
 
@@ -192,7 +192,7 @@ describe('0.2.27 — Navide Browser and blocked local installs', () => {
   it('shows once to someone updating from 0.2.26, and not to a build still running 0.2.26', () => {
     expect(pickWhatsNew('0.2.27', '0.2.26')?.version).toBe('0.2.27')
     expect(pickWhatsNew('0.2.27', '0.2.27')).toBeNull()
-    expect(WHATS_NEW[2].version).toBe('0.2.27')
+    expect(WHATS_NEW[9].version).toBe('0.2.27')
     expect(pickWhatsNew('0.2.26', '0.2.25')?.version).toBe('0.2.26')
   })
 })
@@ -238,11 +238,290 @@ describe('0.2.29 — six more languages', () => {
     expect(entry!.note!['en-US']).toContain('https://nodejs.org/en/blog/vulnerability/october-2026-security-releases')
   })
 
-  it('shows once to someone updating from 0.2.28, as the newest entry, and not to a build still running 0.2.28', () => {
+  it('shows once to someone updating from 0.2.28, and not to a build still running 0.2.28', () => {
     expect(pickWhatsNew('0.2.29', '0.2.28')?.version).toBe('0.2.29')
     expect(pickWhatsNew('0.2.29', '0.2.29')).toBeNull()
-    expect(WHATS_NEW[0].version).toBe('0.2.29')
+    expect(WHATS_NEW[7].version).toBe('0.2.29')
     expect(pickWhatsNew('0.2.28', '0.2.27')?.version).toBe('0.2.28')
+  })
+})
+
+// The 0.2.30 entry: pipeline and MCP start-up fixes, the Navide Plugins page
+// scrolling again, and the Electron certificate advisory.
+describe('0.2.30 — pipelines no longer stall silently', () => {
+  const entry = whatsNewFor('0.2.30')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('names the 180-second Manager fallback, the Electron advisory and the Node.js fixes still pending', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('180 seconds')
+    expect(all).toContain('44.9.1')
+    expect(all).toContain('GHSA-jr5w-w6x2-84p9')
+    expect(all).toContain('still 24.22.0')
+    expect(all).toContain('⚠ N')
+    expect(all).toContain('cannot be collapsed')
+  })
+
+  it('shows once to someone updating from 0.2.29, and not to a build still running 0.2.29', () => {
+    expect(pickWhatsNew('0.2.30', '0.2.29')?.version).toBe('0.2.30')
+    expect(pickWhatsNew('0.2.30', '0.2.30')).toBeNull()
+    expect(WHATS_NEW[6].version).toBe('0.2.30')
+    expect(pickWhatsNew('0.2.29', '0.2.28')?.version).toBe('0.2.29')
+  })
+})
+
+// The 0.2.31 entry: the Linux memory growth from #622, Navide Plugins settings
+// as four pages, agent data for plugins, the clock message and the Anthropic
+// commit-message fix.
+describe('0.2.36 — API key accounts, workbench and plugin commands', () => {
+  const entry = whatsNewFor('0.2.36')
+  const all = () => entry!.highlights.map((text) => text['en-US']).join('\n')
+
+  it('is authored in every UI language', () => {
+    expect(entry).toBeDefined()
+    const locales = ['zh-TW', 'en-US', 'ja-JP', 'zh-CN', 'ko-KR', 'es-ES', 'fr-FR', 'de-DE', 'pt-BR', 'ru-RU', 'vi-VN'] as const
+    for (const text of [entry!.title, ...entry!.highlights]) {
+      for (const locale of locales) expect(text[locale], `${locale}: ${text['en-US']}`).toBeTruthy()
+    }
+  })
+
+  it('states the limits of API key accounts', () => {
+    expect(all()).toContain('does not go through Navide Cloud')
+    expect(all()).toContain('do not support Windows')
+    expect(all()).toContain('have not been tested with a real key yet')
+    expect(all()).toContain('follow that default')
+    expect(all()).toContain('not a hard limit')
+    expect(all()).toContain('it does not track spending or alert you')
+    expect(all()).toContain('clears the current login')
+    expect(all()).toContain('does not count as a candidate')
+  })
+
+  it('shows once to someone updating from 0.2.35, as the newest entry, and not to a build still running 0.2.35', () => {
+    expect(pickWhatsNew('0.2.36', '0.2.35')?.version).toBe('0.2.36')
+    expect(pickWhatsNew('0.2.36', '0.2.36')).toBeNull()
+    expect(WHATS_NEW[0].version).toBe('0.2.36')
+    expect(pickWhatsNew('0.2.35', '0.2.34')?.version).toBe('0.2.35')
+  })
+
+  it('claims nothing the feature does not establish', () => {
+    expect(all()).not.toMatch(/complian|officially allowed|not shown to agents|never shown to/i)
+  })
+})
+
+describe('0.2.31 — Linux memory growth and Navide Plugins settings pages', () => {
+  const entry = whatsNewFor('0.2.31')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights, entry!.note!]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('says credentials stay on this machine and links the announcement', () => {
+    const last = entry!.highlights.at(-1)!['en-US']
+    expect(last).toMatch(/^Navide does not store your CLI account credentials/)
+    expect(last).toContain('always disabled in the interface and could never be turned on')
+    expect(last).toContain('encrypted on your device before they sync; the server cannot decrypt them')
+    expect(last).not.toMatch(/never been|has never|never stored|from the start/i)
+    expect(entry!.note!['en-US']).toContain('https://navide.dev/posts/credentials-stay-on-your-machine/')
+  })
+
+  it('names the Linux leak and its reporter, the four pages and their markers, and agent message text kept apart', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(entry!.highlights[0]['en-US']).toMatch(/^Linux:/)
+    expect(all).toContain('90 MB a minute')
+    expect(all).toContain('@emissionspectrum-creator')
+    expect(all).toContain('#622')
+    expect(all).toContain('four pages')
+    expect(all).toContain('Developer and native code shows On')
+    expect(all).toContain('separate high-risk permission')
+    expect(all).toContain('behind or ahead')
+    expect(all).toContain('stage tab')
+    expect(all).toContain('since 0.1.93')
+    expect(all).toContain('first character of the plugin\'s title')
+    expect(all).toContain('Mini-IDE has its own icon')
+    expect(all).toContain('Installing a third-party plugin now allows its native backend to run')
+    expect(all).toContain('asks again only when the program or its permissions change')
+    expect(all).toContain('if you never changed native-backend settings in 0.2.30')
+    expect(all).toContain('a value you saved earlier is kept')
+    expect(all).toContain('no network of their own')
+    expect(all).toContain('including Windows for now')
+    expect(all).not.toMatch(/\d+(\.\d+)?\s*\/\s*10\b/)
+  })
+
+  it('shows once to someone updating from 0.2.30, and not to a build still running 0.2.30', () => {
+    expect(pickWhatsNew('0.2.31', '0.2.30')?.version).toBe('0.2.31')
+    expect(pickWhatsNew('0.2.31', '0.2.31')).toBeNull()
+    expect(WHATS_NEW[5].version).toBe('0.2.31')
+    expect(pickWhatsNew('0.2.30', '0.2.29')?.version).toBe('0.2.30')
+  })
+})
+
+// The 0.2.32 entry: MCP sync install-only, the removal of Paste Credential and
+// what it means for the sign-in and quota new Claude panes use, and the Agent
+// Assets, Navide plugin and reliability fixes.
+describe('0.2.32 — secrets stay on this machine, Paste Credential removed', () => {
+  const entry = whatsNewFor('0.2.32')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('says new Claude panes use Claude’s own sign-in and quota, and that unused devices are untouched', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('Claude’s own sign-in')
+    expect(all).toContain('draws on that account’s quota')
+    expect(all).toContain('a device that never used it is not touched')
+    expect(all).toContain('until they are closed or restarted')
+  })
+
+  it('says MCP sync carries only what is installed and old values are not deleted', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('MCP sync now carries only which servers are installed')
+    expect(all).toContain('Their values never leave this machine')
+    expect(all).toContain('Needs setup')
+    expect(all).toContain('are not deleted by this release')
+    expect(all).toContain('only if it still runs the same command and arguments, or the same URL')
+  })
+
+  it('names the Agent Assets safeguards and the background AI CLI sessions', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('Restore Previous Version')
+    expect(all).toContain('clearing a prompt’s text no longer deletes the prompt')
+    expect(all).toContain('you now approve it in the main window')
+    expect(all).toContain('each with an End button')
+  })
+
+  it('shows once to someone updating from 0.2.31, and not to a build still running 0.2.31', () => {
+    expect(pickWhatsNew('0.2.32', '0.2.31')?.version).toBe('0.2.32')
+    expect(pickWhatsNew('0.2.32', '0.2.32')).toBeNull()
+    expect(WHATS_NEW[4].version).toBe('0.2.32')
+    expect(pickWhatsNew('0.2.31', '0.2.30')?.version).toBe('0.2.31')
+  })
+})
+
+// The 0.2.33 entry: chat wake reopening the conversation, chat text in every
+// UI language, the permission relay fixes, onboarding, pipelines, accounts
+// and the file picker.
+describe('0.2.33 — chat wake brings back the conversation, in all 11 languages', () => {
+  const entry = whatsNewFor('0.2.33')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('names the chat wake, the 11 languages and the permission relay fixes', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('opens the pane onto its conversation')
+    expect(all).toContain('in all 11 languages')
+    expect(all).toContain('auto-deny countdown')
+    expect(all).toContain('offers only 拒絕 (Deny)')
+  })
+
+  it('names the onboarding, pipeline, account and file picker changes with their UI labels', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('no longer has its Environment step')
+    expect(all).toContain('Settings → Analyzer')
+    expect(all).toContain('Approve and Continue')
+    expect(all).toContain('▶ Run Pipeline')
+    expect(all).toContain('Original login')
+    expect(all).toContain('Switch to This Account')
+    expect(all).toContain(':137-158')
+  })
+
+  it('shows once to someone updating from 0.2.32, and not to a build still running 0.2.32', () => {
+    expect(pickWhatsNew('0.2.33', '0.2.32')?.version).toBe('0.2.33')
+    expect(pickWhatsNew('0.2.33', '0.2.33')).toBeNull()
+    expect(WHATS_NEW[3].version).toBe('0.2.33')
+    expect(pickWhatsNew('0.2.32', '0.2.31')?.version).toBe('0.2.32')
+  })
+})
+
+describe('0.2.34 — App Lock and Import from n8n', () => {
+  const entry = whatsNewFor('0.2.34')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('says App Lock only covers the screen and names where to find it', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('Settings → App Lock')
+    expect(all).toContain('It only covers the screen and stops nothing')
+    expect(all).toContain('Lock Now (⌘⌥L)')
+    expect(all).toContain('locking at start is off by default')
+  })
+
+  it('names the n8n import, the pipeline, account, evolve, pane and Guard changes with their UI labels', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('Import from n8n')
+    expect(all).toContain('stay on this machine')
+    expect(all).toContain('Recover menu')
+    expect(all).toContain('same account as the pane that opened it')
+    expect(all).toContain('Retrospective at reclaim')
+    expect(all).toContain('Settings changed')
+    expect(all).toContain('Settings → MCP')
+  })
+
+  it('shows once to someone updating from 0.2.33, and not to a build still running 0.2.33', () => {
+    expect(pickWhatsNew('0.2.34', '0.2.33')?.version).toBe('0.2.34')
+    expect(pickWhatsNew('0.2.34', '0.2.34')).toBeNull()
+    expect(WHATS_NEW[2].version).toBe('0.2.34')
+    expect(pickWhatsNew('0.2.33', '0.2.32')?.version).toBe('0.2.33')
+  })
+})
+
+describe('0.2.35 — Navide Browser built in, Plans editing, Windows Hello and Telegram', () => {
+  const entry = whatsNewFor('0.2.35')
+
+  it('is authored and carries ja-JP for every line', () => {
+    expect(entry).toBeDefined()
+    for (const text of [entry!.title, ...entry!.highlights]) expect(text['ja-JP'], text['en-US']).toBeTruthy()
+  })
+
+  it('names the Plans edit and history labels, and that Restore keeps the plan state', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('Edit document')
+    expect(all).toContain('History')
+    expect(all).toContain('Diff and Restore')
+    expect(all).toContain('keeps the stage, approval, todos and review notes')
+    expect(all).toContain('Changed since approval')
+  })
+
+  it('names Navide Browser, its view labels and the switch for its agent tools', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('ships with the App and is on by default')
+    expect(all).toContain('Side by Side')
+    expect(all).toContain('One at a Time')
+    expect(all).toContain('Let agents call tools from first-party Navide plugins')
+    expect(entry!.highlights[0]['zh-TW']).toContain('允許 agent 呼叫官方 Navide 外掛的工具')
+  })
+
+  it('says which systems App Lock unlocks with, and that it stops nothing', () => {
+    const all = entry!.highlights.map((text) => text['en-US']).join('\n')
+    expect(all).toContain('Windows 11 now unlocks with Windows Hello')
+    expect(all).toContain('Windows 10 and Linux unlock with the PIN only')
+    expect(all).toContain('Agents, terminals and schedules keep running')
+  })
+
+  it('says a link code needs approval, under the Channels label each language uses', () => {
+    const telegram = entry!.highlights.find((text) => text['en-US'].startsWith('Telegram:'))!
+    expect(telegram['en-US']).toContain('waits for your approval in Settings → Channels')
+    expect(telegram['zh-TW']).toContain('設定 → 聊天室')
+    expect(telegram['ja-JP']).toContain('設定 → チャット連携')
+  })
+
+  it('shows once to someone updating from 0.2.34, and not to a build still running 0.2.34', () => {
+    expect(pickWhatsNew('0.2.35', '0.2.34')?.version).toBe('0.2.35')
+    expect(pickWhatsNew('0.2.35', '0.2.35')).toBeNull()
+    expect(WHATS_NEW[1].version).toBe('0.2.35')
+    expect(pickWhatsNew('0.2.34', '0.2.33')?.version).toBe('0.2.34')
   })
 })
 

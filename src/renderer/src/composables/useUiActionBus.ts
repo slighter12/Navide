@@ -82,6 +82,10 @@ export interface UseUiActionBusOptions {
    *  one. A focus re-announces with focused true, so the backend prefers the
    *  window the user touched last. */
   focusTarget?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
+  /** Commands only a person may run, however they are registered: this bus
+   *  serves agents, so it refuses them with ui_human_only. A keystroke does
+   *  not come through here. Absent: nothing extra is refused. */
+  isHumanOnlyCommand?: (action: string) => boolean
   /** The window's account actions (ui.accounts.*), reached from MCP through
    *  their dedicated tools only. They are deliberately NOT in the command
    *  registry: a keybinding or anything else that runs registered commands
@@ -111,7 +115,7 @@ function errorMessage(err: unknown): string {
  *  is either read-only (snapshot, list_actions, ui.pane.getStatus,
  *  ui.diagnostics.read — they describe the window as it is), window-scoped
  *  (settings), or keyed by pane id, and stays on the wider rule. */
-const WORKSPACE_SCOPED_ACTIONS = new Set([
+export const WORKSPACE_SCOPED_ACTIONS = new Set([
   'ui.pane.create',
   'ui.window.openGit',
   'ui.preview.show',
@@ -272,6 +276,9 @@ export async function handleUiInvokeRequest(
   let ok = true
   let result: unknown
   let error: string | undefined
+  // A handler's coded refusal (code/params on the Error it threw), handed on
+  // so an MCP caller gets an error_code next to the sentence.
+  let coded: { code?: string; params?: Record<string, unknown> } = {}
   try {
     if (wrongProject) {
       ok = false
@@ -292,6 +299,10 @@ export async function handleUiInvokeRequest(
       if (!req.action) {
         ok = false
         error = 'action is required for op "invoke"'
+      } else if (opts.isHumanOnlyCommand?.(req.action)) {
+        ok = false
+        error = `${req.action} is a Navide plugin command; only the user can run it. An agent reaches a plugin through the agent tools it declares.`
+        coded = { code: 'ui_human_only' }
       } else if (req.action.startsWith(ACCOUNT_ACTION_PREFIX)) {
         const handler = req.action === 'ui.accounts.signIn'
           ? opts.accountActions?.signIn
@@ -317,6 +328,7 @@ export async function handleUiInvokeRequest(
           const outcome = await invokeCommand(req.action, { ...(req.args ?? {}), paneId: rest })
           ok = outcome.ok
           error = outcome.error
+          coded = { code: outcome.code, params: outcome.params }
           const answer = outcome.result as { reclaimed?: unknown[]; refused?: unknown[] } | undefined
           // Kept on a failure too: the caller must still learn its own id was taken out.
           const base = ok && answer ? answer : { reclaimed: [] }
@@ -327,6 +339,7 @@ export async function handleUiInvokeRequest(
         ok = outcome.ok
         result = outcome.result
         error = outcome.error
+        coded = { code: outcome.code, params: outcome.params }
       }
     } else if (req.op === 'snapshot') {
       result = await opts.buildSnapshot()
@@ -343,6 +356,8 @@ export async function handleUiInvokeRequest(
 
   const diagnostics = takeDiagnosticsSince(diagnosticSeq)
   const payload: Record<string, unknown> = { request_id: req.request_id, ok, result, error: error ?? null }
+  if (!ok && coded.code) payload.code = coded.code
+  if (!ok && coded.params) payload.params = coded.params
   if (diagnostics.length > 0) {
     payload.warnings = diagnostics.map((d) => `[${d.code}] ${d.message}`)
   }

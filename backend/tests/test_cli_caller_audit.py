@@ -61,6 +61,18 @@ def test_a_launch_bypass_is_found_outside_the_seam_but_not_inside(tmp_path: Path
     assert "launch-bypass" in found[0]
 
 
+def test_a_class_calling_its_own_spawn_method_is_not_a_launch(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    target = root / "src" / "main" / "views.ts"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "class Views {\n  create(owner: string) {\n"
+        "    return this.spawn(owner === 'zedcli' ? 1 : 0)\n  }\n}\n",
+        encoding="utf-8",
+    )
+    assert audit_mod.audit(root) == []
+
+
 def test_generated_facts_and_strategies_are_exempt(tmp_path: Path) -> None:
     root = _tree(tmp_path)
     vendors = root / "backend" / "agent_team_backend" / "cli_vendors"

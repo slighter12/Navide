@@ -5,6 +5,7 @@
 // `frontendPluginManager.ts`.
 
 import { eventNamespace, resolveWsType } from './capabilityMap'
+import { warnDeprecatedCapability } from './pluginCapabilityDeprecation'
 import { EDITOR_AI_EVENTS, validateEditorAiEvent } from './editorAiCapability'
 import { isPreferenceJsonValue, validateEditorPreferencesEvent } from './editorPreferenceCapability'
 import { validateWebChangedEvent } from './webCapability'
@@ -112,7 +113,18 @@ export interface HostCapabilityContext {
  * never accepted from a Plugin request or exposed through the preload API. */
 export type AuthenticatedInitiator =
   | Readonly<{ kind: 'user'; id: string }>
-  | Readonly<{ kind: 'agent'; source: 'mcp'; id: string; caller?: AgentInitiatorCaller }>
+  | Readonly<{ kind: 'agent'; source: 'mcp'; id: string; caller?: AgentInitiatorCaller; pane?: string }>
+
+/** Longest `initiator.pane` the Host forwards, in UTF-16 code units
+ * (`String.length`); the core's `_pane_label_accepted` matches this check. */
+export const INITIATOR_PANE_MAX_LENGTH = 200
+
+/** The calling pane's name or id (never a credential, token or profile), as
+ * the core MCP server resolved it from the pane's own MCP token. For a
+ * plugin's display and records only, not an authorization decision. */
+export function isInitiatorPane(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= INITIATOR_PANE_MAX_LENGTH
+}
 
 /** Who called a third-party agent tool, as the core MCP server resolved it
  * from its credential (never from tool arguments). `verifiedTo` says how far
@@ -168,10 +180,13 @@ export function isAuthenticatedInitiator(value: unknown): value is Authenticated
     )
   }
   const keys = Object.keys(record)
+  const optional = keys.filter((key) => key === 'caller' || key === 'pane')
   return (
     record.kind === 'agent' &&
-    (keys.length === 3 || (keys.length === 4 && isAgentInitiatorCaller(record.caller))) &&
-    keys.every((key) => key === 'kind' || key === 'source' || key === 'id' || key === 'caller') &&
+    keys.length === 3 + optional.length &&
+    (!keys.includes('caller') || isAgentInitiatorCaller(record.caller)) &&
+    (!keys.includes('pane') || isInitiatorPane(record.pane)) &&
+    keys.every((key) => key === 'kind' || key === 'source' || key === 'id' || key === 'caller' || key === 'pane') &&
     record.source === 'mcp' &&
     typeof record.id === 'string' &&
     record.id.length > 0
@@ -783,6 +798,12 @@ export function executionPolicyAllows(
   // and a denylist written before the namespace existed never mentions it. So
   // it is never allowed by omission: only full mode or an allowlist naming it.
   if (namespace === 'web') return policy.mode === 'allowlist' && policy.system.includes('web')
+  // Agent data and message text: like `web`, a denylist written before the
+  // namespace existed never mentions it, so an agent gets either only from an
+  // allowlist naming it.
+  if (namespace === 'agents' || namespace === 'agentMessages') {
+    return policy.mode === 'allowlist' && policy.system.includes(namespace)
+  }
   return policy.mode === 'allowlist'
     ? policy.system.includes(namespace)
     : !policy.system.includes(namespace)
@@ -1191,6 +1212,7 @@ export function planCapabilityCall(
       }
     }
     const decision = planPublicCapabilityCall(call, policy, authorization)
+    if (decision.kind === 'allow') warnDeprecatedCapability(call.pluginId, `${call.ns}.${call.method}`)
     return decision.kind === 'allow'
       ? decision.plan
       : { kind: 'respond', response: undispatched(decision.response) }

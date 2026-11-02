@@ -8,6 +8,7 @@ import { parseManifestV2 } from '../../../src/main/plugins/pluginManifestV2'
 const sourceDir = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const stagedDir = resolve(fileURLToPath(new URL('../../../dist-plugins/navide-mini-ide/', import.meta.url)))
 const expectedMarketplace = {
+  icon: 'assets/mini-ide.png',
   description: 'Edit workspace files, review changes and run AI CLI sessions in an independent IDE window.',
   license: 'MIT',
   repository: 'https://github.com/Navide-dev/Navide',
@@ -39,7 +40,7 @@ function expectMiniIdeManifest(directory: string, version?: string): void {
 
 describe('navide.mini-ide manifest', () => {
   it('validates the checked-in source manifest through the production parser and loader', () => {
-    expectMiniIdeManifest(sourceDir, '0.1.0')
+    expectMiniIdeManifest(sourceDir, '1.0.2')
   })
 
   it('validates the actual staged v2 build manifest through the production loader', () => {

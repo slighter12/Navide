@@ -102,8 +102,8 @@ const channelLabels = computed(() => ({
   botAdd: t('channels.bot.add'),
   quickAdd: t('channels.quick.add'),
   linkAccount: t('channels.link.link-account'),
-  pairing: t('channels.pairing.title'),
-  allow: t('channels.allow.title'),
+  pairing: t('channels.bot.section-pending'),
+  allow: t('channels.bot.section-people'),
   connect: t('channels.pane.connect'),
   replies: t('channels.pane.verbosity-replies'),
   minimal: t('channels.pane.verbosity-minimal'),
@@ -505,7 +505,7 @@ const logRows = computed(() => [
   flex-direction: column;
   gap: 22px;
   color: var(--text-primary);
-  max-width: 78ch;
+  max-width: var(--settings-page-max);
 }
 
 .cmh-intro {

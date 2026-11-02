@@ -86,7 +86,7 @@ Unknown fields are refused at every level, and so is an explicit `null`.
 | `engines` | object | no | `{ "navide": "<range>" }`, the lowest Navide release the version supports; see [`engines.navide`](#enginesnavide). |
 | `permissions` | object | yes | `{}` or the grants below. |
 | `marketplace` | object | yes | Listing metadata, below. |
-| `contributes` | object | one of | `{ "views": [...] }`, 1-16 views. |
+| `contributes` | object | one of | `{ "views": [...], "commands"?: [...] }`, 1-16 views, 1-32 commands. Commands follow `docs/en-US/plugin-development-v2.md`, "Commands". |
 | `backend` | object | one of | The native backend, below. |
 | `extensionPack` | string[] | one of | An [Extension Pack](#extension-packs): 1-20 member ids. |
 
@@ -97,7 +97,7 @@ Extension Pack and declares neither.
 
 | Field | Type | Notes |
 |---|---|---|
-| `system` | string[] | 1-4 unique namespaces from `fs`, `ui`, `aiCli`, `web`. |
+| `system` | string[] | 1-6 unique namespaces from `fs`, `ui`, `aiCli`, `web`, `agents`, `agentMessages`; `agentMessages` requires `agents`. |
 | `shell` | string | `allowlist` or `full`. |
 | `scopes` | object | Optional. `{"fs": {"root": ..., "read": [...], "write": [...]}}`: path patterns the package declares it reads or writes. `root` is `workspace` (default) or `repository` (the nearest enclosing Git root). At least one of `read`/`write`, each 1-16 unique safe relative patterns; `*` matches within one segment, a whole-segment `**` matches zero or more segments, and a pattern covers only what it matches. Shown to the user as a disclosure; it grants and restricts nothing. |
 

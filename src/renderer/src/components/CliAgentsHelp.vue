@@ -616,10 +616,11 @@ const installChain = computed(() => [sample('chain1'), sample('chain2'), sample(
         <div class="cah-callout-text" v-html="$t('settings.help.cliAgents.s5.callout1.text')"></div>
       </div>
 
-      <h3 class="cah-h3">{{ $t('settings.help.cliAgents.s5.hPortable') }}</h3>
-      <p class="cah-p" v-html="$t('settings.help.cliAgents.s5.portable1')"></p>
-      <p class="cah-p" v-html="$t('settings.help.cliAgents.s5.portable2')"></p>
-      <p class="cah-note" v-html="$t('settings.help.cliAgents.s5.portableNote')"></p>
+      <h3 class="cah-h3">{{ $t('settings.help.cliAgents.s5.apiKeys.title') }}</h3>
+      <p class="cah-p" v-html="$t('settings.help.cliAgents.s5.apiKeys.p1')"></p>
+      <p class="cah-p" v-html="$t('settings.help.cliAgents.s5.apiKeys.p2')"></p>
+      <p class="cah-p" v-html="$t('settings.help.cliAgents.s5.apiKeys.p3')"></p>
+      <p class="cah-p" v-html="$t('settings.help.cliAgents.s5.apiKeys.p4')"></p>
 
       <h3 class="cah-h3">{{ $t('settings.help.cliAgents.s5.h2') }}</h3>
       <p class="cah-p" v-html="$t('settings.help.cliAgents.s5.p8')"></p>
@@ -779,7 +780,7 @@ const installChain = computed(() => [sample('chain1'), sample('chain2'), sample(
   flex-direction: column;
   gap: 22px;
   color: var(--text-primary);
-  max-width: 78ch;
+  max-width: var(--settings-page-max);
 }
 
 .cah-intro {

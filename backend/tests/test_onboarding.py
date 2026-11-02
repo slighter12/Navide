@@ -166,9 +166,11 @@ def test_gate_analyzer_is_optional() -> None:
     assert g["analyzer_ready"] is False and g["all_required_ready"] is True
 
 
-def test_gate_blocks_without_foundation() -> None:
+def test_gate_does_not_require_foundation() -> None:
+    """Missing foundation tools must not block first use: the packaged app
+    never runs them, and Linux has no in-app install for node/python."""
     g = ob.compute_gate(_deps(False, True, True), models=["m"])
-    assert g["foundation_ready"] is False and g["all_required_ready"] is False
+    assert g["foundation_ready"] is False and g["all_required_ready"] is True
 
 
 # ── install whitelist ─────────────────────────────────────────────────────────
@@ -1253,3 +1255,15 @@ def test_the_stuck_credential_message_does_not_name_a_macos_dialog_on_linux(
 
     monkeypatch.setattr(server_link.osplat, "platform_id", "darwin")
     assert "Keychain" in link.keychain_wait_reason()
+
+
+@pytest.mark.parametrize("dep_id", ["copilot", "droid"])
+def test_a_homebrew_cask_is_not_offered_on_linux(dep_id):
+    """Casks are macOS-only, and Homebrew itself is not listed on Linux."""
+    dep = ob.DEPS_BY_ID[dep_id]
+    install = dep.install_for("linux")
+    assert install.command == ""
+    assert install.requires_binaries == ()
+    assert dep.docs_url
+    assert dep.install_for("darwin").command.startswith("brew install --cask")
+

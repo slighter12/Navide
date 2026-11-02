@@ -12,7 +12,8 @@ import { makeZip } from './zipFixture'
 import { sha256Hex } from './pluginVerify'
 import { canonicalTrustJson, type RegistryPackageEnvelope, type RegistryTrustMetadata } from './pluginRegistryTrust'
 import type { InstallerTrustConfig } from './pluginInstaller'
-import { PluginActivationSelector } from './pluginActivationSelector'
+import { PluginActivationSelector, immutablePluginPackageDir } from './pluginActivationSelector'
+import { currentPluginHostTarget } from './pluginTarget'
 import { NativeBackendStore } from './pluginNativeBackendStore'
 import { localSourceConsentLine, nativeBackendConsentDialog } from './pluginLocalInstall'
 import { pluginStorageDirName } from './pluginStorage'
@@ -106,7 +107,8 @@ function register(): void {
     nativeBackendDataRoot: dataRoot,
     pluginStorageRoot: storageRoot,
     // The production wiring (index.ts), on a real store.
-    forgetBackendConsent: (pluginId) => store.forgetGrants(pluginId),
+    forgetBackendConsent: (pluginId, keepInstallConsentFor) => store.forgetGrants(pluginId, keepInstallConsentFor),
+    noteInstallConsent: (pluginId, packageVersion) => store.noteInstallConsent(pluginId, packageVersion),
   })
 }
 const call = (channel: string, args?: unknown) => handlers.get(channel)!(null, args)
@@ -176,6 +178,28 @@ afterEach(() => {
   rmSync(base, { recursive: true, force: true })
 })
 
+describe('0.2.31: a confirmed install dialog is the first backend consent', () => {
+  it('records the installed version for a Navide Marketplace install and a file install, and nothing before the confirmation', async () => {
+    expect(store.record('acme.todo')).not.toHaveProperty('installConsent')
+    await marketplaceInstall('acme.todo', '1.0.0')
+    expect(store.record('acme.todo').installConsent).toEqual({ packageVersion: '1.0.0' })
+
+    writeFileSync(picked, vsix('acme.files', '2.0.0'))
+    await call('plugins:installFromFile')
+    await expect(call('plugins:commitLocalInstall', { id: 'acme.files' })).rejects.toThrow(/consent is required/)
+    expect(store.record('acme.files')).not.toHaveProperty('installConsent')
+    await call('plugins:commitLocalInstall', { id: 'acme.files', riskConfirmed: true })
+    // A file install's promotion forgets the replaced package's grants, not this.
+    expect(store.record('acme.files')).toEqual({ installConsent: { packageVersion: '2.0.0' } })
+  })
+
+  it('a failed restart of a source-changing candidate still fails closed', () => {
+    store.noteInstallConsent('acme.todo', '1.1.0')
+    store.forgetGrants('acme.todo')
+    expect(store.record('acme.todo')).toEqual({ consentRevoked: true })
+  })
+})
+
 describe('HIGH-1: a replacement inherits no permission', () => {
   it('clears every native backend permission of the replaced package on the real store, keeping only Disabled', async () => {
     await marketplaceInstall('acme.todo', '1.0.0')
@@ -183,7 +207,9 @@ describe('HIGH-1: a replacement inherits no permission', () => {
     expect(grantsOf('acme.todo')).toEqual({ consent: true, workspaceWrite: true, agentToolWrite: true, agentToolsSince: true, disabled: true })
     await fileInstall('acme.todo', '1.1.0', { replaceConfirmed: true })
     expect(grantsOf('acme.todo')).toEqual({ consent: false, workspaceWrite: false, agentToolWrite: false, agentToolsSince: false, disabled: true })
-    expect(store.record('acme.todo')).toEqual({ disabled: true })
+    // Nothing of 1.0.0 carries over; 1.1.0's own install dialog stays its
+    // first backend consent (0.2.31).
+    expect(store.record('acme.todo')).toEqual({ disabled: true, installConsent: { packageVersion: '1.1.0' } })
   })
 
   it('keeps every permission of an update within the Marketplace exactly as on main', async () => {
@@ -302,11 +328,61 @@ describe('HIGH-2: view storage when the source changes', () => {
     await marketplaceInstall('acme.todo', '1.0.0')
     const stored = writeStorage('acme.todo', '1.0.0')
     writeFileSync(picked, vsix('acme.todo', '1.0.0'))
-    await call('plugins:installFromFile')
+    // Refused when the file is prepared, before any consent dialog, in the
+    // words staging uses; nothing is held for a commit.
+    await expect(call('plugins:installFromFile')).rejects.toThrow(/immutable candidate already exists for acme\.todo@1\.0\.0/)
     await expect(call('plugins:commitLocalInstall', { id: 'acme.todo', riskConfirmed: true, replaceConfirmed: true }))
-      .rejects.toThrow(/immutable candidate already exists/)
+      .rejects.toThrow(/no prepared local install/)
     expect(existsSync(stored)).toBe(true)
     expect(call('plugins:listInstalled')).toMatchObject([{ id: 'acme.todo', source: 'marketplace' }])
+  })
+
+  it('refuses a local file of the version a local file already installed, at prepare', async () => {
+    // The user's case: the same version number packaged again.
+    await fileInstall('acme.todo', '1.0.0')
+    writeFileSync(picked, vsix('acme.todo', '1.0.0'))
+    await expect(call('plugins:installFromFile')).rejects.toThrow(/immutable candidate already exists for acme\.todo@1\.0\.0/)
+    // A bumped version prepares as before.
+    writeFileSync(picked, vsix('acme.todo', '1.0.1'))
+    await expect(call('plugins:installFromFile')).resolves.toMatchObject({ id: 'acme.todo', version: '1.0.1' })
+  })
+
+  // #643 M1: the check at prepare only says earlier what staging would refuse
+  // at commit; it must never refuse what main installs.
+  it('installs over a leftover directory of the version that nothing references, as on main', async () => {
+    // An interrupted earlier install: the directory is there, no lifecycle
+    // record points at it. Staging sets it aside and installs.
+    const leftover = immutablePluginPackageDir(pluginsRoot, 'acme.todo', '1.0.0', 'universal')
+    mkdirSync(leftover, { recursive: true })
+    writeFileSync(join(leftover, 'manifest.json'), '{}')
+    writeFileSync(picked, vsix('acme.todo', '1.0.0'))
+    await expect(call('plugins:installFromFile')).resolves.toMatchObject({ id: 'acme.todo', version: '1.0.0' })
+    await call('plugins:commitLocalInstall', { id: 'acme.todo', riskConfirmed: true })
+    expect(call('plugins:listInstalled')).toMatchObject([{ id: 'acme.todo', source: 'local-unsigned' }])
+  })
+
+  it('prepares the installed version for another target, even with a leftover there', async () => {
+    // 1.0.0 is installed for one target only; the same version for the
+    // host's own target (a package with a backend) is another directory.
+    await fileInstall('acme.todo', '1.0.0')
+    const otherTarget = currentPluginHostTarget()
+    expect(otherTarget).not.toBe('universal')
+    mkdirSync(immutablePluginPackageDir(pluginsRoot, 'acme.todo', '1.0.0', otherTarget), { recursive: true })
+    writeFileSync(picked, vsix('acme.todo', '1.0.0', true))
+    await expect(call('plugins:installFromFile')).resolves.toMatchObject({ id: 'acme.todo', version: '1.0.0' })
+  })
+
+  it('says whether the file copy the dialog showed is still held after a failed approval (#643 L1)', async () => {
+    writeFileSync(picked, vsix('acme.todo', '1.0.0'))
+    const prepared = await call('plugins:installFromFile') as { digest: string }
+    // Refused before the copy is used: it is still there, for that digest only.
+    await expect(call('plugins:commitLocalInstall', { id: 'acme.todo' })).rejects.toThrow(/consent is required/)
+    expect(await call('plugins:preparedLocalInstall', { id: 'acme.todo', digest: prepared.digest })).toEqual({ present: true })
+    expect(await call('plugins:preparedLocalInstall', { id: 'acme.todo', digest: 'b'.repeat(64) })).toEqual({ present: false })
+    expect(await call('plugins:preparedLocalInstall', { id: 'acme.todo' })).toEqual({ present: false })
+    // Used by an approval (here a successful one): gone.
+    await call('plugins:commitLocalInstall', { id: 'acme.todo', riskConfirmed: true })
+    expect(await call('plugins:preparedLocalInstall', { id: 'acme.todo', digest: prepared.digest })).toEqual({ present: false })
   })
 
   it('keeps the storage of an update within the Marketplace exactly as on main', async () => {

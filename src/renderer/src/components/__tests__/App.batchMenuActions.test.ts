@@ -5,6 +5,7 @@ import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { idsWithoutClosing } from '../../lib/paneRetirement'
 import { reclaimBlockedBy, namedReclaimBlockedBy, RECLAIM_NOW_THRESHOLD_MS, type ReclaimCandidate } from '../../lib/idleReclaim'
+import { retroBeforeReclaim } from '../../composables/useEvolve'
 
 const source = readFileSync(resolve(process.cwd(), 'src/renderer/src/App.vue'), 'utf8')
 
@@ -54,6 +55,9 @@ function harness(initial: TestPane[], selected: string[], muted: string[] = []) 
     listedPanes: computed(() => panes.value), closingPaneIds: ref(new Set<string>()), idsWithoutClosing,
     reclaimBlockedBy, namedReclaimBlockedBy, RECLAIM_NOW_THRESHOLD_MS,
     reclaimCandidate: (p: TestPane) => p,
+    // The real helper; a menu reclaim passes no source, so it never asks.
+    retroBeforeReclaim,
+    backend: { send: vi.fn() },
     closePaneCtxMenu: () => { paneCtxMenu.value = null },
     notifyRestore: { toast },
     i18n: { global: { t: (key: string, args?: unknown) => ({ key, args }) } },

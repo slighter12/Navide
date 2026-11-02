@@ -1,30 +1,66 @@
 <script setup lang="ts">
-// Third-party native backends: the global switch (off by default), and per
+// Third-party native backends: the global switch (on by default), and per
 // plugin the current state, consent, disable, and workspace write grants.
 // The Host owns every decision; this panel only shows it and forwards the
-// user's choices. First-time and changed-binary consent is asked by the Host
-// in a native dialog when the plugin's backend is first needed.
-import { onMounted, ref, watch } from 'vue'
+// user's choices. Installing is the first consent; changed-binary consent is
+// asked by the Host in a native dialog when the plugin's backend is next needed.
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ipcErrorMessage } from '../composables/usePluginInstallFlow'
 import { usePluginInventory } from '../composables/usePluginInventory'
 import MarketplaceIcon from './MarketplaceIcon.vue'
 import PluginAgentToolsList from './PluginAgentToolsList.vue'
+import SettingsCard from './settings/SettingsCard.vue'
+import SettingRow from './settings/SettingRow.vue'
+import SettingsNotice from './settings/SettingsNotice.vue'
+import SettingsEmptyState from './settings/SettingsEmptyState.vue'
+import ToggleSwitch from './settings/ToggleSwitch.vue'
+import { leadSentence } from '../lib/leadSentence'
 
 const { t } = useI18n()
+// The warning leads with its first sentence in bold; every word stays.
+const nativeWarning = computed(() => leadSentence(t('settings.extensions.nativeBackends.description')))
 const overview = ref<NativeBackendOverview | null>(null)
+// The switches that are on, by their titles, for the Settings sidebar's "On" mark.
+const emit = defineEmits<{ on: [switches: string[]] }>()
+const switchesOn = computed<string[]>(() => {
+  const o = overview.value
+  if (!o) return []
+  const out: string[] = []
+  if (o.enabled) out.push(t('settings.extensions.nativeBackends.enable'))
+  if (o.agentTools && o.agentTools.firstParty !== false) out.push(t('settings.extensions.nativeBackends.agentTools.firstParty'))
+  if (o.agentTools?.enabled) out.push(t('settings.extensions.nativeBackends.agentTools.enable'))
+  if (o.agentTools?.enabled && o.agentTools.externalCallers) out.push(t('settings.extensions.nativeBackends.agentTools.externalCallers'))
+  return out
+})
+watch(switchesOn, (switches) => emit('on', switches), { immediate: true })
 const busy = ref(false)
 const error = ref('')
+const noAnswer = ref(false)
 
 function api() {
   return window.agentTeam?.plugins?.nativeBackends
 }
 
+/** #642 review L2: a failed "off" save still holds "off" for this run, so
+ *  the page reloads the real state, which carries the unsaved notice. */
+async function setMasterSwitch(on: boolean): Promise<void> {
+  await run(() => api()!.setEnabled(on))
+  if (!error.value || on) return
+  const failure = error.value
+  await run(() => api()!.list())
+  error.value ||= failure
+}
+
 async function run(action: () => Promise<NativeBackendOverview>): Promise<void> {
   busy.value = true
   error.value = ''
+  noAnswer.value = false
   try {
-    overview.value = await action()
+    const next = await action()
+    // No answer is a failed read: keep the last state the page showed.
+    if (next && Array.isArray(next.plugins)) overview.value = next
+    else noAnswer.value = true
   } catch (err) {
     error.value = ipcErrorMessage(err)
   } finally {
@@ -50,6 +86,7 @@ function statusText(row: NativeBackendStatusRow): string {
 function refresh(): void {
   const backends = api()
   if (backends) void run(() => backends.list())
+  else noAnswer.value = true
 }
 
 onMounted(refresh)
@@ -59,56 +96,105 @@ watch(installed, refresh)
 </script>
 
 <template>
-  <section v-if="overview" class="ext-section native-backends" aria-labelledby="native-backends-title">
+  <!-- Before the first answer the section says it is loading, or why it is
+       not there, with Retry: never an empty page. -->
+  <section v-if="!overview" class="ext-section native-backends" aria-labelledby="native-backends-title" data-settings-section="extensions-native-backends">
     <h3 id="native-backends-title" class="native-backends-title">{{ $t('settings.extensions.nativeBackends.title') }}</h3>
-    <div class="native-backends-callout">
-      <svg class="native-backends-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M7.1 2.6 1.9 12a1 1 0 0 0 .9 1.5h10.4a1 1 0 0 0 .9-1.5L8.9 2.6a1 1 0 0 0-1.8 0Z" />
-        <path d="M8 6.2v3M8 11.3v.1" />
-      </svg>
-      <p class="native-backends-description">{{ $t('settings.extensions.nativeBackends.description') }}</p>
+    <p v-if="!error && !noAnswer" class="native-backends-state nv-loading" role="status">{{ $t('label.loading') }}</p>
+    <div v-else class="native-backends-state nv-empty" role="alert">
+      <p class="native-backends-state-text">{{ $t('settings.extensions.nativeBackends.loadFailed') }}</p>
+      <code v-if="error" class="native-backends-state-detail">{{ error }}</code>
+      <button type="button" class="native-backends-retry nv-btn nv-btn--sm" :disabled="busy" @click="refresh">
+        {{ $t('settings.extensions.marketplace.retry') }}
+      </button>
     </div>
+  </section>
+  <section v-else class="ext-section native-backends" aria-labelledby="native-backends-title" data-settings-section="extensions-native-backends">
+    <h3 id="native-backends-title" class="native-backends-title">{{ $t('settings.extensions.nativeBackends.title') }}</h3>
     <p v-if="error" class="ext-error" role="alert">{{ error }}</p>
-    <label class="native-backends-switch">
-      <input
-        type="checkbox"
-        class="nv-check"
-        :checked="overview.enabled"
-        :disabled="busy"
-        @change="run(() => api()!.setEnabled(($event.target as HTMLInputElement).checked))"
-      />
-      {{ $t('settings.extensions.nativeBackends.enable') }}
-    </label>
-    <template v-if="overview.agentTools && api()?.setAgentTools">
-      <label class="native-backends-switch">
-        <input
-          type="checkbox"
-          class="nv-check"
-          data-agent-tools-switch="enabled"
-          :checked="overview.agentTools.enabled"
+    <!-- One card: the warning about native code sits right above the switch it
+         governs, and the external-callers switch is indented under the switch
+         it depends on. -->
+    <SettingsCard class="native-backends-card">
+      <SettingsNotice class="native-backends-callout" tone="warning">
+        <!-- The risk in one sentence; the whole account folds under Learn more. -->
+        <p class="native-backends-description"><strong class="native-backends-lead">{{ $t('settings.extensions.nativeBackends.summary') }}</strong></p>
+        <details class="native-backends-more settings-more">
+          <summary>{{ $t('action.learn-more') }}</summary>
+          <p>{{ nativeWarning.lead }}{{ nativeWarning.separator }}{{ nativeWarning.rest }}</p>
+        </details>
+      </SettingsNotice>
+      <SettingRow :title="$t('settings.extensions.nativeBackends.enable')">
+        <template #control>
+          <ToggleSwitch
+            data-native-backends-switch="enabled"
+            :model-value="overview.enabled"
+            :disabled="busy"
+            :aria-label="$t('settings.extensions.nativeBackends.enable')"
+            @update:model-value="setMasterSwitch"
+          />
+        </template>
+      </SettingRow>
+      <div v-if="overview.offUnsaved" class="native-backends-unsaved" role="status">
+        <p>{{ $t('settings.extensions.nativeBackends.offUnsaved') }}</p>
+        <button
+          type="button"
+          class="native-backends-unsaved-retry nv-btn nv-btn--sm"
           :disabled="busy"
-          @change="run(() => api()!.setAgentTools!({ enabled: ($event.target as HTMLInputElement).checked }))"
-        />
-        {{ $t('settings.extensions.nativeBackends.agentTools.enable') }}
-      </label>
-      <p class="native-backends-description">{{ $t('settings.extensions.nativeBackends.agentTools.description') }}</p>
-      <label class="native-backends-switch">
-        <input
-          type="checkbox"
-          class="nv-check"
-          data-agent-tools-switch="externalCallers"
-          :checked="overview.agentTools.externalCallers"
-          :disabled="busy || !overview.agentTools.enabled"
-          @change="run(() => api()!.setAgentTools!({ externalCallers: ($event.target as HTMLInputElement).checked }))"
-        />
-        {{ $t('settings.extensions.nativeBackends.agentTools.externalCallers') }}
-      </label>
-      <p class="native-backends-description">{{ $t('settings.extensions.nativeBackends.agentTools.externalCallersDisclosure') }}</p>
-    </template>
-    <p v-if="overview.plugins.length === 0" class="native-backends-empty">
-      {{ $t('settings.extensions.nativeBackends.empty') }}
-    </p>
-    <ul v-else class="ext-list">
+          @click="setMasterSwitch(false)"
+        >
+          {{ $t('settings.extensions.nativeBackends.offUnsavedRetry') }}
+        </button>
+      </div>
+      <template v-if="overview.agentTools && api()?.setAgentTools">
+        <SettingRow
+          :title="$t('settings.extensions.nativeBackends.agentTools.firstParty')"
+          :description="$t('settings.extensions.nativeBackends.agentTools.firstPartyDescription')"
+        >
+          <template #control>
+            <ToggleSwitch
+              data-agent-tools-switch="firstParty"
+              :model-value="overview.agentTools.firstParty !== false"
+              :disabled="busy"
+              :aria-label="$t('settings.extensions.nativeBackends.agentTools.firstParty')"
+              @update:model-value="(on: boolean) => run(() => api()!.setAgentTools!({ firstParty: on }))"
+            />
+          </template>
+        </SettingRow>
+        <SettingRow
+          :title="$t('settings.extensions.nativeBackends.agentTools.enable')"
+          :description="$t('settings.extensions.nativeBackends.agentTools.description')"
+        >
+          <template #control>
+            <ToggleSwitch
+              data-agent-tools-switch="enabled"
+              :model-value="overview.agentTools.enabled"
+              :disabled="busy"
+              :aria-label="$t('settings.extensions.nativeBackends.agentTools.enable')"
+              @update:model-value="(on: boolean) => run(() => api()!.setAgentTools!({ enabled: on }))"
+            />
+          </template>
+        </SettingRow>
+        <SettingRow
+          class="native-backends-dependent"
+          :title="$t('settings.extensions.nativeBackends.agentTools.externalCallers')"
+          :description="$t('settings.extensions.nativeBackends.agentTools.externalCallersDisclosure')"
+        >
+          <template #control>
+            <ToggleSwitch
+              data-agent-tools-switch="externalCallers"
+              :model-value="overview.agentTools.externalCallers"
+              :disabled="busy || !overview.agentTools.enabled"
+              :aria-label="$t('settings.extensions.nativeBackends.agentTools.externalCallers')"
+              @update:model-value="(on: boolean) => run(() => api()!.setAgentTools!({ externalCallers: on }))"
+            />
+          </template>
+        </SettingRow>
+      </template>
+    </SettingsCard>
+    <!-- Below the switches: what they currently govern, not a precondition read before the warning. -->
+    <SettingsEmptyState v-if="overview.plugins.length === 0" class="native-backends-empty" :message="$t('settings.extensions.nativeBackends.empty')" />
+    <ul v-if="overview.plugins.length" class="ext-list">
       <li
         v-for="row in overview.plugins"
         :key="row.pluginId"
@@ -156,6 +242,12 @@ watch(installed, refresh)
             {{ $t('settings.extensions.nativeBackends.shellRiskDetail') }}
           </span>
           <span v-if="row.changedSinceConsent">{{ $t('settings.extensions.nativeBackends.changed') }}</span>
+          <span v-if="row.allowedBy === 'pre-0.2.31-install'" class="native-backend-pre-install">
+            {{ $t('settings.extensions.nativeBackends.allowedPreInstall') }}
+          </span>
+          <span v-if="row.declined" class="native-backend-declined">
+            {{ $t('settings.extensions.nativeBackends.declined') }}
+          </span>
           <span v-if="row.reason && row.status !== 'needs-consent'">{{ row.reason }}</span>
           <span v-if="row.lastViolation">
             {{
@@ -187,64 +279,63 @@ watch(installed, refresh)
   /* Native controls (checkboxes, scrollbars) follow the theme. */
   color-scheme: var(--nv-color-scheme);
 }
+/* The section heading is SettingsSection's label. */
 .native-backends-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-3);
-  color: var(--text-bright);
-  font-size: var(--font-md);
-  font-weight: 650;
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--font-row-desc);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
-/* This panel lets third-party code run natively: the warning leads. */
-.native-backends-title::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 1.5px;
-  background: var(--risk-fg);
-  transform: rotate(45deg);
-}
+/* The warning is the first row of the switch card: SettingsNotice, flush
+   with the card's edges. */
 .native-backends-callout {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--risk-muted);
-  border-left: 3px solid var(--risk-fg);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  background: var(--risk-subtle);
-  color: var(--text-primary);
-}
-.native-backends-icon {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  color: var(--risk-fg);
+  margin: 0;
+  padding-block: var(--space-3);
+  border-radius: 0;
+  background: transparent;
 }
 .native-backends-description {
   margin: 0;
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   line-height: var(--lh-base);
 }
-.native-backends-switch {
+.native-backends-more { margin-top: 4px; }
+/* External callers only apply once agent tools are on: indented under that switch. */
+.native-backends-dependent {
+  padding-left: calc(var(--space-row-x) + 24px);
+}
+.native-backends-card {
+  margin-bottom: var(--space-3);
+}
+/* Nothing installed has a native backend: said in a line, not a box. */
+.native-backends-empty {
+  margin: var(--space-2) 0 0;
+}
+.native-backends-unsaved {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin: var(--space-3) 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-md);
-  background: var(--bg-subtle);
-  color: var(--text-bright);
-  font-weight: 600;
-  cursor: pointer;
+  margin: var(--space-2) 0;
+  color: var(--warning-fg);
 }
-.native-backends-empty {
+.native-backends-unsaved p {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--font-xs);
+  flex: 1;
+}
+.native-backends-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.native-backends-state-text {
+  margin: 0;
+}
+.native-backends-state-detail {
+  font-size: var(--font-2xs);
+  overflow-wrap: anywhere;
 }
 .ext-error {
   margin: var(--space-3) 0;
@@ -333,5 +424,18 @@ watch(installed, refresh)
   align-items: center;
   gap: var(--space-2);
   overflow-wrap: anywhere;
+}
+/* Long setting descriptions keep a readable line length. */
+:deep(.setting-row-desc) {
+  max-width: 72ch;
+  line-height: var(--lh-base);
+}
+/* A switch that waits on the one above stays legible while unavailable. */
+:deep(.toggle-switch:disabled) {
+  opacity: 0.6;
+}
+.native-backends-lead {
+  color: var(--text-bright);
+  font-weight: 600;
 }
 </style>

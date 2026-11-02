@@ -28,7 +28,9 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta
+from itertools import islice
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -41,11 +43,9 @@ from .base import (
     McpServerConfig,
     McpValue,
     McpWiring,
-    PortableCredential,
     PushChannel,
     ShutdownSpec,
     SkillsWiring,
-    SlotKind,
     VendorSpec,
     command_text,
 )
@@ -245,6 +245,11 @@ def claude_projects_root() -> Path | None:
     return None
 
 
+#: A transcript's first lines carry its cwd; anything past these never will.
+SESSION_CWD_SCAN_LINES = 50
+_session_cwds: dict[tuple[str, int], str] = {}
+
+
 class ClaudeLogReader(LogReader):
     vendor: str = "claude"
 
@@ -304,6 +309,52 @@ class ClaudeLogReader(LogReader):
             except OSError as err:
                 log.debug("enumerate %s failed: %s", d, err)
         return out
+
+    def own_session_files(self, workspace_path: str) -> list[Path]:
+        """session_files_for_workspace without a neighbour's sessions: the folder can
+        be shared (see session_in_workspace). The folder-wide list stays what pane
+        baselines and replays use; this one is for showing a workspace its own."""
+        return [
+            p for p in self.session_files_for_workspace(workspace_path)
+            if self.session_in_workspace(str(p), workspace_path) is not False
+        ]
+
+    def session_in_workspace(self, file_path: str, workspace_path: str) -> bool | None:
+        """Claude's folder name is lossy: every non-alphanumeric character becomes
+        "-", so two Chinese folder names of the same length share one folder. The
+        transcript's own cwd is what tells them apart."""
+        cwd = unicodedata.normalize("NFC", self._session_cwd(Path(file_path)))
+        if not cwd:
+            return None
+        root = unicodedata.normalize("NFC", workspace_path.rstrip("/\\"))
+        return cwd == root or cwd.startswith((root + "/", root + "\\"))
+
+    def _session_cwd(self, path: Path) -> str:
+        """The cwd a transcript started in. The inode is in the key because a session
+        id can come back as a new file at the same path, from another workspace."""
+        try:
+            key = (str(path), path.stat().st_ino)
+        except OSError:
+            return ""
+        cwd = _session_cwds.get(key) or self._read_session_cwd(path)
+        if cwd:
+            _session_cwds[key] = cwd
+        return cwd
+
+    def _read_session_cwd(self, path: Path) -> str:
+        try:
+            with path.open(encoding="utf-8", errors="replace") as fh:
+                for raw in islice(fh, SESSION_CWD_SCAN_LINES):
+                    try:
+                        rec = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    cwd = rec.get("cwd") if isinstance(rec, dict) else None
+                    if cwd and isinstance(cwd, str):
+                        return cwd
+        except OSError as err:
+            log.debug("read cwd of %s failed: %s", path, err)
+        return ""
 
     def cwd_from_file(self, path: Path) -> str:
         """Reverse cwd-hash: project-dir-name `-foo-bar-baz` → `/foo/bar/baz`.
@@ -677,9 +728,12 @@ class ClaudeLogReader(LogReader):
 
 def _pane_cwd_match(self, usage, pane_cwd, pane_id):
     # Claude names its per-project dir after the encoded cwd; the file path
-    # carries it.
+    # carries it. The encoding is lossy, so a neighbour's folder can match too:
+    # the transcript's own cwd rules it out. One with no cwd yet stays a match.
     expected_dir = encode_claude_cwd(pane_cwd)
-    return expected_dir in Path(usage.file_path).parts
+    if expected_dir not in Path(usage.file_path).parts:
+        return False
+    return self.session_in_workspace(usage.file_path, pane_cwd) is not False
 
 
 ClaudeLogReader.pane_cwd_match = _pane_cwd_match
@@ -806,6 +860,9 @@ _SESSION_LINE = re.compile(r"^Current session\s*:\s*(.*)$", re.I)
 _WEEK_LINE = re.compile(r"^Current week\s*\((.+?)\)\s*:\s*(.*)$", re.I)
 _PERCENT = re.compile(r"(\d+(?:\.\d+)?)%\s+used", re.I)
 _RESETS = re.compile(r"\bresets\s+(.+?)\s*$", re.I)
+# Both wordings of the report's first line: "...your subscription to power..."
+# and "...your overages to power...".
+_REPORT_HEADER = "You are currently using your"
 
 
 def _parse_reset(phrase: str, now: datetime) -> str | None:
@@ -892,6 +949,33 @@ def parse_usage_panel(text: str, *, now: datetime | None = None) -> list[dict]:
 
     order = {"session": 0, "weekly": 1}
     return [found[k] for k in sorted(found, key=lambda k: (order.get(k, 2), k))]
+
+
+def usage_panel_absent_windows(text: str) -> list[str]:
+    """``["session"]`` when the report proves this account has no session
+    window, else ``[]``.
+
+    A verified Ultra account has no 5-hour limit, and Claude Code prints no
+    session row for it. That has to be told apart from a row we failed to read,
+    so the proof is a report that is whole and leaves nothing unaccounted for:
+    the header above the weekly rows, the all-models figure, something after
+    the weekly rows, no session row in any form, and no percentage in a row we
+    do not recognise (the shape a renamed session row would take). Anything less
+    says nothing, which leaves the window unknown, as a reading missing it
+    always has been."""
+    lines = [line.strip() for line in text.splitlines()]
+    week_rows = [i for i, line in enumerate(lines) if _WEEK_LINE.match(line)]
+    if not week_rows or "current session" in text.lower():
+        return []
+    if not any(line.startswith(_REPORT_HEADER) for line in lines[:week_rows[0]]):
+        return []
+    if not any(lines[week_rows[-1] + 1:]):
+        return []
+    if any(_PERCENT.search(line) and not _WEEK_LINE.match(line) for line in lines):
+        return []
+    if not any(window["kind"] == "weekly" for window in parse_usage_panel(text)):
+        return []
+    return ["session"]
 
 
 def _panel_probe_env(config_dir: str | None = None) -> dict[str, str]:
@@ -1044,7 +1128,11 @@ async def fetch_claude_usage_via_cli(
     if not windows:
         log.info("claude /usage produced no readable windows")
         return _costly("claude -p /usage printed no usage windows")
-    return _snapshot("claude", "ok", windows=windows)
+    snap = _snapshot("claude", "ok", windows=windows)
+    absent = usage_panel_absent_windows(raw)
+    if absent:
+        snap["absentWindows"] = absent
+    return snap
 
 
 # ---- delegated OAuth refresh (merged from claude_delegated_refresh.py) -----
@@ -1350,55 +1438,6 @@ def _install_hooks(port_file: str, *, skip: frozenset[str] = frozenset()) -> Any
     return install_hooks(port_file, skip=skip)
 
 
-def classify_secret(secret: str) -> SlotKind:
-    """A parked ``.credentials.json`` is a ``/login`` OAuth credential when it
-    carries ``claudeAiOauth.accessToken``. Nothing else is claimed: a
-    Console login keeps its API key elsewhere, and a shape this does not
-    recognise is left UNKNOWN for the shared side to refuse."""
-    try:
-        data = json.loads(secret)
-    except ValueError:
-        return SlotKind.UNKNOWN
-    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
-    if isinstance(oauth, dict) and oauth.get("accessToken"):
-        return SlotKind.OAUTH
-    return SlotKind.UNKNOWN
-
-
-# Auth-precedence keys as documented (code.claude.com/docs/en/authentication,
-# "Authentication precedence", read 2026-09-16): cloud provider selection,
-# then ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, apiKeyHelper all rank ABOVE
-# CLAUDE_CODE_OAUTH_TOKEN. A settings ``env`` block sets the same variables,
-# and ANTHROPIC_BASE_URL would send the token to another endpoint. Each is
-# checked in every settings file the CLI merges, and in the managed policy
-# — which is reported as blocking, never overridden.
-_PORTABLE_SHADOW_KEYS: tuple[tuple[str, ...], ...] = (
-    ("apiKeyHelper",),
-    ("env", "ANTHROPIC_AUTH_TOKEN"),
-    ("env", "ANTHROPIC_API_KEY"),
-    ("env", "ANTHROPIC_BASE_URL"),
-    ("env", "CLAUDE_CODE_USE_BEDROCK"),
-    ("env", "CLAUDE_CODE_USE_VERTEX"),
-    ("env", "CLAUDE_CODE_USE_FOUNDRY"),
-    ("env", "CLAUDE_CODE_USE_MANTLE"),
-)
-_PORTABLE_SETTINGS_FILES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("home", (".claude", "settings.json")),
-    ("cwd", (".claude", "settings.json")),
-    ("cwd", (".claude", "settings.local.json")),
-    ("managed", ("managed-settings.json",)),
-)
-_PORTABLE_SHADOWING_SETTINGS = tuple(
-    (root, parts, key)
-    for root, parts in _PORTABLE_SETTINGS_FILES
-    for key in _PORTABLE_SHADOW_KEYS
-) + (
-    # An administrator forcing a sign-in method decides the credential; a
-    # pasted token must not be the thing that quietly contradicts it.
-    ("managed", ("managed-settings.json",), ("forceLoginMethod",)),
-)
-
-
 # Where this CLI keeps the extensions it installed for itself (read-only
 # inventory, cli_extensions). Verified 2026-10-10 against the installed
 # binary's --help and the files on disk.
@@ -1497,37 +1536,6 @@ SPEC = VendorSpec(
     quota_exhausted_patterns=(
         r"hit your .{0,40}limit.{0,80}?resets\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*\([^)]+\)",
     ),
-    classify_secret=classify_secret,
-    # `claude setup-token` mints a one-year OAuth token that "authenticates
-    # with your Claude subscription" and is documented for exactly this use:
-    # copy it and set CLAUDE_CODE_OAUTH_TOKEN "wherever you want to
-    # authenticate" (docs/en/authentication, read 2026-09-16). env_remove is
-    # everything the precedence list ranks above it, plus the endpoint
-    # override; the managed root is the documented policy directory per
-    # platform (docs/en/managed-settings — Windows is Program Files, not the
-    # legacy ProgramData path).
-    portable_credential=PortableCredential(
-        env="CLAUDE_CODE_OAUTH_TOKEN",
-        kind="oauth",
-        env_remove=(
-            "CLAUDE_CODE_USE_BEDROCK",
-            "CLAUDE_CODE_USE_VERTEX",
-            "CLAUDE_CODE_USE_FOUNDRY",
-            "CLAUDE_CODE_USE_MANTLE",
-            "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_BASE_URL",
-        ),
-        shadowing_settings=_PORTABLE_SHADOWING_SETTINGS,
-        managed_roots=(
-            ("darwin", "/Library/Application Support/ClaudeCode"),
-            ("linux", "/etc/claude-code"),
-            ("win32", r"C:\Program Files\ClaudeCode"),
-        ),
-        obtain_command="claude setup-token",
-        docs_url="https://code.claude.com/docs/en/authentication",
-        quota_verified=True,
-    ),
     live_file=(".claude", ".credentials.json"),
     slot_file=".credentials.json",
     profile_home_secret_file=(".credentials.json",),
@@ -1546,9 +1554,21 @@ SPEC = VendorSpec(
         evidence="source",
         verified_version="2.1.278",
         keychain_items=(("Claude Code-credentials", ""),),
-        # An API key / auth token in the environment, or Navide's own
-        # portable long-lived token, replaces the OAuth login entirely.
+        # An API key, auth token or long-lived OAuth token in the
+        # environment replaces the OAuth login entirely.
         shadowing_env=("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
+        # The OAuth token variable, then everything the documented precedence
+        # list ranks above it, plus the endpoint override.
+        credential_env_vars=(
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_USE_MANTLE",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_BASE_URL",
+        ),
         resume="native",
         todo="hot swap shipped and used on real accounts; record an A -> B -> A round-trip against 2.1.278",
     ),

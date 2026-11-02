@@ -115,6 +115,18 @@ def _register_shutdown_diag(environ=None) -> bool:
     return True
 
 
+def _hold_free_port(host: str) -> socket.socket:
+    """A socket bound to a free port, kept open for uvicorn to serve on.
+
+    Choosing a port and closing the socket leaves a gap until uvicorn binds it,
+    long enough here for startup to run: another process can take the port, and
+    the backend then exits with the port file already naming that process.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind((host, 0))
+    return sock
+
+
 def _watch_stdin_for_shutdown(server: "uvicorn.Server", stream=None) -> None:
     """Turn a `shutdown` line on stdin into uvicorn's cooperative exit.
 
@@ -211,10 +223,10 @@ def main() -> int:
     # we can write the port file (Claude hooks rely on it being available
     # before the server starts accepting).
     resolved_port = args.port
+    held_socket: socket.socket | None = None
     if resolved_port == 0:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((args.host, 0))
-            resolved_port = s.getsockname()[1]
+        held_socket = _hold_free_port(args.host)
+        resolved_port = held_socket.getsockname()[1]
         log.info("resolved free port: %d", resolved_port)
     # The CLI risk observer must not flag a CLI's calls back to this backend.
     cli_risk_service.bound_port = resolved_port
@@ -288,6 +300,12 @@ def main() -> int:
         # 20s/20s. Under heavy PTY output a send can stall for seconds, and a
         # tight server-side timeout closes connections that are busy, not dead.
         ws_ping_interval=20.0,
+        # Every MCP tool call a CLI pane makes is an HTTP POST to /plan-mcp on
+        # loopback. With uvicorn's 5s default an agent pausing between calls
+        # reconnects every time, and each closed connection holds a local port
+        # in TIME_WAIT for ~30s; across many panes during a busy stretch that
+        # surfaced as EADDRNOTAVAIL on connect. Keep idle connections for reuse.
+        timeout_keep_alive=75,
         ws_ping_timeout=60.0,
         # Every idle Claude pane parks a rewake long-poll here (curl -m 1860).
         # Unbounded, shutdown closes the listener and then waits on all of them,
@@ -313,7 +331,7 @@ def main() -> int:
     log.info("listening on http://%s:%s", args.host, resolved_port)
     print(f"AGENT_TEAM_BACKEND_LISTEN host={args.host} port={resolved_port}", flush=True)
 
-    server.run()
+    server.run(sockets=[held_socket] if held_socket else None)
     log.info("shutdown: server stopped")
     return 0
 
