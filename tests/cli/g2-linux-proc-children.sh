@@ -6,7 +6,10 @@
 # The sidecar reads its own pid's file; for a process's main thread pid and tid are equal, so this shell's $$ stands in for it.
 set -euo pipefail
 
-file="${G2_PROC_CHILDREN_FILE_FOR_TEST:-/proc/$$/task/$$/children}"
+# The file to check is an argument, only so the test can point the script at a stand-in. Not an environment variable: one
+# inherited from the runner's environment would replace the real check and let a build pass on a kernel without the file.
+# g2-linux-build.sh passes no argument.
+file="${1:-/proc/$$/task/$$/children}"
 kernel="$(uname -r)"
 
 if [ ! -r "$file" ]; then

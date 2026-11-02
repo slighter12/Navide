@@ -24,7 +24,12 @@ async def settle_lost_runtime(service, runtime, *, cleanup_may_fail: bool = Fals
 
     `cleanup_may_fail` is for a test that itself provokes an incomplete cleanup (a torn journal, a surviving root) and
     says so on the fixture; the loss must still start and finish in bound and must not raise."""
-    expected = service._ready_ok or service._invalidation is not None  # a sidecar that was never ready causes no loss
+    # A loss belongs to the generation whose sidecar was killed: `_retire_generation` records that generation in
+    # `_retired` the moment its loss begins and the service keeps `_runtime_generation` after a clean loss. A finished
+    # `_invalidation` task alone is not evidence: it may be an older generation's, and `_lose` replaces it with the
+    # new generation's task in the same synchronous call that retires the generation.
+    generation = service._runtime_generation
+    expected = service._ready_ok or generation in service._retired  # a sidecar that was never ready causes no loss
     try:
         await asyncio.wait_for(runtime.wait(), SIDECAR_GONE_S)
     except TimeoutError:
@@ -32,10 +37,10 @@ async def settle_lost_runtime(service, runtime, *, cleanup_may_fail: bool = Fals
     if not expected:
         return
     deadline = time.monotonic() + LOSS_START_S
-    while service._invalidation is None and time.monotonic() < deadline:
+    while generation not in service._retired and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
     invalidation = service._invalidation
-    if invalidation is None:
+    if generation not in service._retired or invalidation is None:
         raise AssertionError(f"the sidecar is gone but no loss started within {LOSS_START_S:.0f}s")
     _done, pending = await asyncio.wait({invalidation}, timeout=LOSS_FINISH_S)
     if pending:
