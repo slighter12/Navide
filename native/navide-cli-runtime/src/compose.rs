@@ -558,11 +558,11 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
     let composition = match vendor_facts::find(agent_key) {
         Some(facts) => facts.composition,
         None if vendor_facts::SUBJECT_ALIASES.contains(&agent_key) => vendor_facts::SUBJECT_COMPOSITION,
-        // Harness build only: the one test declaration the declarations do not know (adapters.rs
-        // `FAULT_GRACEFUL`) is composed in Rust, so the graceful-shutdown fault test can launch it.
-        // Every other unknown subject stays refused in both builds.
+        // Harness build only: the one test declaration the vendor table does not know
+        // (`vendor_facts::FAULT_GRACEFUL`) is composed in Rust, so the graceful-shutdown fault test
+        // can launch it. Every other unknown subject stays refused in both builds.
         #[cfg(feature = "fault-hooks")]
-        None if agent_key == "fault-graceful" => vendor_facts::SUBJECT_COMPOSITION,
+        None if vendor_facts::is_fault_declaration(agent_key) => vendor_facts::SUBJECT_COMPOSITION,
         None => return Err(ComposeError::Composition(format!("unknown subject {agent_key:?}"))),
     };
     let allowed = match composition {
