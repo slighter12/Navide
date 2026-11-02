@@ -17,6 +17,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -62,6 +63,47 @@ def test_a_client_that_connects_before_uvicorn_serves_is_accepted(tmp_path, expl
         _wait_healthy(port)  # the control: the same port serves once uvicorn runs
         assert isinstance(early, socket.socket), f"early connect to port {port} failed: {early!r}"
         early.close()
+    finally:
+        if backend.poll() is None:
+            backend.kill()
+            backend.wait(timeout=10)
+
+
+def test_the_token_file_is_this_runs_before_the_port_file_names_a_listening_socket(tmp_path) -> None:
+    """A data dir reused by a second backend still holds the first run's token. The port file now names a socket that
+    already accepts, so a client that reads both files as soon as the port appears must not find the old token."""
+    stale = "stale-token-from-the-previous-run"
+    token_file = tmp_path / "backend-ws-token"
+    token_file.write_text(stale, encoding="utf-8")
+    backend = subprocess.Popen(
+        [sys.executable, "-m", "agent_team_backend", "--port", "0", "--log-level", "info"],
+        env=_isolated_backend_env(tmp_path),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    try:
+        assert backend.stdin is not None
+        port_file = tmp_path / "backend-port"
+        assert backend.stdout is not None
+        log_path = None
+        while line := backend.stdout.readline():
+            if line.startswith("AGENT_TEAM_BACKEND_LOG path="):
+                log_path = Path(line.strip().split("path=", 1)[1])
+                break
+        assert log_path is not None, "the backend never printed its log path"
+        backend.stdin.write("\n")
+        backend.stdin.flush()
+        _read_listen_port(backend)
+        # The window itself is microseconds wide, so the order is read from what the backend recorded rather than raced.
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        assert "wrote the ws token to" in log_text and "wrote backend port to" in log_text
+        assert log_text.index("wrote the ws token to") < log_text.index("wrote backend port to"), (
+            "the backend logged the port file before the token file"
+        )
+        # Second check, on the files themselves; limited by the file system's timestamp resolution.
+        assert token_file.read_text(encoding="utf-8").strip() != stale
+        assert token_file.stat().st_mtime_ns <= port_file.stat().st_mtime_ns, (
+            "the port file named a listening socket before the token file held this run's token"
+        )
     finally:
         if backend.poll() is None:
             backend.kill()
