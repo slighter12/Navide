@@ -5,6 +5,9 @@
 # The harness sits at <parent of target>/target-harness/release, where runtime_recovery_driver.py looks.
 set -euo pipefail
 
+# The scoped ownership mode needs /proc/<pid>/task/<tid>/children; name it in the log and stop here if the runner's kernel lacks it.
+bash "$(dirname "${BASH_SOURCE[0]}")/g2-linux-proc-children.sh"
+
 base="$RUNNER_TEMP/g2"
 manifest=native/navide-cli-runtime/Cargo.toml
 release_bin="$base/target/release/navide-cli-runtime"

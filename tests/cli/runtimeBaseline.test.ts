@@ -305,7 +305,7 @@ it.runIf(runtimeStudyEnabled(process.env))('runs the frozen isolated workload th
         expect([...dead].sort()).toEqual([...ids].sort())
         record('kill_reap_ms', killStart)
         if (matched) {
-          // Rust keeps its lazily started sidecar resident after sessions end; method 6 has no phase that shows that cost.
+          // Rust keeps its sidecar, started in the background when a Session connects, resident after sessions end; method 6 has no phase that shows that cost.
           mark('empty_started_idle')
           await delay(workload.idleMs)
         }
