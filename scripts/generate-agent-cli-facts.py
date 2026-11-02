@@ -27,6 +27,23 @@ FIELDS = (
     "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
     "session_id_flag", "login_args", "supports_session_resume", "shutdown", "capabilities",
 )
+# The harness-only test declaration. It is not a vendor, so no shared/agent-cli file carries it; the Rust output
+# emits it behind the `fault-hooks` feature so `adapters::shutdown` and `compose::admit` reach it through the one
+# declaration module that the shared-code rule exempts (the product build gains no symbol).
+RUST_FAULT_DECLARATION = (
+    "",
+    "/// Harness build only: a test declaration (not a vendor name) that declares a graceful shutdown",
+    "/// with a deferred master close, so declaration-driven policy is proven without a vendor key (S3).",
+    "/// `adapters::shutdown` gives it its shutdown; `compose::admit` asks `is_fault_declaration` so that",
+    "/// shared code never spells the key.",
+    '#[cfg(feature = "fault-hooks")]',
+    'pub const FAULT_GRACEFUL: &str = "fault-graceful";',
+    "",
+    '#[cfg(feature = "fault-hooks")]',
+    "pub fn is_fault_declaration(key: &str) -> bool {",
+    "    key == FAULT_GRACEFUL",
+    "}",
+)
 TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilities", "supports_session_resume", "composition"})
 
 
@@ -219,6 +236,7 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
         "/// Non-vendor subjects (the ordinary shell): how their launch is composed.",
         f"pub const SUBJECT_ALIASES: &[&str] = &[{aliases}];",
         f"pub const SUBJECT_COMPOSITION: Composition = Composition::{subjects['composition'].capitalize()};",
+        *RUST_FAULT_DECLARATION,
     ]
     return "\n".join(lines) + "\n"
 
