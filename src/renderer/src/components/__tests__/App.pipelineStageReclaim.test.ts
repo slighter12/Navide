@@ -211,6 +211,7 @@ async function load(opts: Options = {}) {
     'backend',
     // The real helper: with no evolve badge (the switch off) it sends nothing.
     'retroBeforeReclaim',
+    'routerDeliveries',
     code,
   )
   const api = factory(
@@ -271,6 +272,7 @@ async function load(opts: Options = {}) {
       }),
     },
     retroBeforeReclaim,
+    { clear: vi.fn() },
   )
   const paneById = (id: string): TestPane | undefined => panes.value.find((p) => p.id === id)
   const histFor = (id: string): HistEntry | undefined =>

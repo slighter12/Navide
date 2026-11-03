@@ -1648,7 +1648,9 @@ async def _on_log_activity(event: ActivityEvent) -> None:
             "event_type": event.event_type,
             "superseded": superseded,
             "workspace_path": attributed.workspace_path,
-            "pane_id": pane_id,
+            # The window knows a pane by the id it answers to now, and every
+            # map a turn end lands in is keyed by it.
+            "pane_id": _current_pane_id(pane_id),
             "stage_id": attributed.stage_id or "",
             "session_id": event.session_id,
             "cwd": event.cwd,
@@ -2670,7 +2672,12 @@ async def _start_log_watcher() -> None:
         # Before the server starts: its session manager snapshots the tool
         # registry, so a tool installed afterwards is missing from the list
         # clients see, with no error anywhere.
-        contributed = plugin_wiring.apply_mcp_tools(plugin_host, mcp_server.server)
+        # Off the loop: each tool builds a pydantic model, ~2.4 s apiece on a
+        # first Windows boot. Nothing reads the registry until the server
+        # starts below.
+        contributed = await asyncio.to_thread(
+            plugin_wiring.apply_mcp_tools, plugin_host, mcp_server.server
+        )
         if contributed:
             log.info("plugins contributing MCP tools: %s", contributed)
         plugin_wiring.apply_routes(plugin_host, app.router)
@@ -2684,7 +2691,11 @@ async def _start_log_watcher() -> None:
     from . import copilot_hooks
 
     convenience_wiring.register_pane_carrier("copilot", copilot_hooks.prepare_pane_hooks)
-    convenience_wiring.install_cli_hooks(str(backend_port_file()))
+    # Awaited, so it still ends before the MCP server comes up; off the loop,
+    # because the settings files it reads and writes held it 29 s on a first
+    # Windows boot. Same writes in the same order — the gate is thread-safe
+    # and the version probe already runs this from a thread.
+    await asyncio.to_thread(convenience_wiring.install_cli_hooks, str(backend_port_file()))
 
     # Navide's own MCP server. Deliberately outside the guard above: this is
     # the endpoint every CLI pane is wired to, and it must come up even if
@@ -3282,7 +3293,7 @@ async def cli_hook(vendor: str, request: Request) -> Any:
         "vendor": vendor,
         "event_type": event_type,
         "workspace_path": ws_path or cwd,
-        "pane_id": pane_id or "",
+        "pane_id": _current_pane_id(pane_id) if pane_id else "",
         "stage_id": stage_id or "",
         "session_id": session_id,
         "cwd": cwd,

@@ -7953,13 +7953,18 @@ async def onboarding_status(session: "Session", msg_id: str, msg_type: str, payl
 async def onboarding_status_quick(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     """PATH-presence-only pass for the UI's first paint (see quick_status).
 
-    Runs inline: pure filesystem stats, no subprocesses — and it must NOT go
-    through _ONBOARDING_EXECUTOR, whose single worker would queue it behind a
-    multi-second full get_status and defeat the point."""
+    Pure filesystem stats, no subprocesses — and it must NOT go through
+    _ONBOARDING_EXECUTOR, whose single worker would queue it behind a
+    multi-second full get_status and defeat the point. Still off the loop:
+    on a first Windows boot those PATH stats held it 2–7 s per call."""
     from . import app
 
-    status = app.onboarding_deps.quick_status()
-    status["complete"] = app.onboarding_deps.is_complete()
+    def quick() -> dict:
+        status = app.onboarding_deps.quick_status()
+        status["complete"] = app.onboarding_deps.is_complete()
+        return status
+
+    status = await asyncio.to_thread(quick)
     await session.send_json(make_response(msg_id, msg_type, status))
 
 
@@ -8726,6 +8731,10 @@ async def _terminal_create_impl(
     elif webhook_service.unavailable():
         payload["command"] = webhook_service.without_bypass(agent_key, payload.get("command"))
     bypass_dropped_command = webhook_service.bypass_dropped_from(requested_command, payload.get("command"))
+    # For a window that reattaches and so never sees this create's event.
+    metadata.pop(BYPASS_DROPPED_METADATA_KEY, None)
+    if bypass_dropped_command:
+        metadata[BYPASS_DROPPED_METADATA_KEY] = bypass_dropped_command
     try:
         startup_probe = await asyncio.get_running_loop().run_in_executor(
             _CLI_PROBE_EXECUTOR,
@@ -10298,6 +10307,9 @@ async def terminal_config_status(session: "Session", msg_id: str, msg_type: str,
     await session.send_json(make_response(msg_id, msg_type, {"stale": stale}))
 
 
+BYPASS_DROPPED_METADATA_KEY = "bypass_dropped_command"
+
+
 @handler("terminal.reattach")
 async def terminal_reattach(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
     from . import app
@@ -10408,6 +10420,15 @@ async def terminal_reattach(session: "Session", msg_id: str, msg_type: str, payl
         }
         if session.host_authenticated:
             response_payload["sessions"] = sessions
+        # Not Host-gated: the window reloading is who needs it, and a window's own
+        # connection is never Host-authenticated. It is what the create's
+        # cli.bypass_dropped event already told the window that asked.
+        bypass_dropped = {}
+        for tid in alive:
+            metadata = getattr(stored_sessions.get(tid), "metadata", None) or {}
+            if BYPASS_DROPPED_METADATA_KEY in metadata:
+                bypass_dropped[tid] = metadata[BYPASS_DROPPED_METADATA_KEY]
+        response_payload["bypass_dropped"] = bypass_dropped
         await session.send_json(make_response(msg_id, msg_type, response_payload))
 
 
