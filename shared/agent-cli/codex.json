@@ -18,5 +18,54 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "unknown",
     "login": "integrated"
+  },
+  "observer": {
+    "parser": "codex",
+    "parser_id": "rust-codex-jsonl-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "jsonl",
+      "usage": "cumulative",
+      "store_file": null,
+      "usage_fields": {
+        "select": [{"pointer": "/type", "equals": "event_msg"}, {"pointer": "/payload/type", "equals": "token_count"}],
+        "object": "/payload/info/total_token_usage",
+        "input": ["/payload/info/total_token_usage/input_tokens", "/payload/info/total_token_usage/cached_input_tokens"],
+        "output": ["/payload/info/total_token_usage/output_tokens", "/payload/info/total_token_usage/reasoning_output_tokens"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": null,
+        "version": null,
+        "timestamp": "/timestamp",
+        "number": "strict",
+        "text": "string"
+      },
+      "store": null,
+      "rules": {
+        "missing_identity_rotates": false,
+        "invalid_utf8_fails": false,
+        "non_object_fails": false,
+        "activity_non_object_fails": true,
+        "totals_never_decrease": false,
+        "water_survives_replacement": true
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity", "identify"],
+      "messages": {"unsupported_mode": "Codex observation mode not integrated", "non_object": "Codex record is not an object"},
+      "legacy_state": [
+        {"prefix": "act_hw::", "field": "water", "kind": "int"},
+        {"prefix": "__lasttext__:", "field": "last_text", "kind": "text"},
+        {"prefix": "__cum__:", "field": "totals", "kind": "pair"}
+      ],
+      "python": {"prompt_detail": "user_message", "pane_scope": "home_dir", "attribution": "none", "identity_source": "header"},
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": true,
+        "store_error_reported": false
+      }
+    }
   }
 }

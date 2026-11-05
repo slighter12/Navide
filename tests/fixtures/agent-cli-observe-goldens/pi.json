@@ -1,0 +1,1530 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_pi_golden -- --ignored",
+  "legacy_source": {
+    "blob": "5e8a522b7ae7927098ad423f9cabe94fefca81d3",
+    "path": "native/navide-cli-runtime/src/observe_pi.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 2,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 492,
+          "recent_keys": [
+            "a1",
+            "c1"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "credited_count": 1,
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 392,
+              "recent_keys": [
+                "a1"
+              ],
+              "session_id": "s1"
+            },
+            "cwd": "/w",
+            "dedup_key": "a1",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 15,
+            "model": "pi-model",
+            "output_tokens": 5,
+            "session_id": "s1",
+            "timestamp": "t2",
+            "vendor": "pi"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "credited_count": 2,
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 492,
+              "recent_keys": [
+                "a1",
+                "c1"
+              ],
+              "session_id": "s1"
+            },
+            "cwd": "/w",
+            "dedup_key": "c1",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 7,
+            "model": "compactor",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "t3",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "first: usage",
+      "mode": "usage",
+      "raw_anchor": "7b22637764223a222f77222c226964223a227331222c2274696d657374616d70223a22323032362d30372d32375431303a30303a30302e3030305a222c2274797065223a2273657373696f6e222c2276657273696f6e223a337d0a7b226964223a227531222c226d657373616765223a7b22636f6e74656e74223a2272656e616d6520746869732070616e65222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227431222c2274797065223a226d657373616765227d0a7b226964223a226131222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226669727374222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a332c2263616368655772697465223a322c22696e707574223a31302c226f7574707574223a357d7d2c2274696d657374616d70223a227432222c2274797065223a226d657373616765227d0a7b226964223a226331222c226d6f64656c223a22636f6d706163746f72222c2274696d657374616d70223a227433222c2274797065223a22636f6d70616374696f6e222c227573616765223a7b22696e707574223a372c226f7574707574223a327d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "a1",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 15,
+            "model": "pi-model",
+            "output_tokens": 5,
+            "session_id": "s1",
+            "timestamp": "t2",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "c1",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 7,
+            "model": "compactor",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "t3",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "first: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:2",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "rename this pane",
+            "timestamp": "t1",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:3",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t2",
+            "vendor": "pi"
+          }
+        ],
+        "high_water": 4,
+        "identity": "",
+        "last_text": "first",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 0,
+          "ts": "t2"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "first: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 3,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1496,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "credited_count": 3,
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1473,
+              "recent_keys": [
+                "a1",
+                "c1",
+                "a3"
+              ],
+              "session_id": "s1"
+            },
+            "cwd": "/w",
+            "dedup_key": "a3",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 5,
+            "model": "pi-model",
+            "output_tokens": 0,
+            "session_id": "s1",
+            "timestamp": "t6",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "more: usage",
+      "mode": "usage",
+      "raw_anchor": "74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a312c226f7574707574223a317d7d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a226e31222c226d657373616765223a7b22636f6e74656e74223a226e6f207573616765222c22726f6c65223a22617373697374616e74227d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a227532222c226d657373616765223a7b22636f6e74656e74223a226e657874222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227435222c2274797065223a226d657373616765227d0a7b226964223a226133222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a2220207365636f6e6420222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a312c22696e707574223a342c226f7574707574223a307d7d2c2274696d657374616d70223a227436222c2274797065223a226d657373616765227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "a3",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 5,
+            "model": "pi-model",
+            "output_tokens": 0,
+            "session_id": "s1",
+            "timestamp": "t6",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "c1",
+          "a3"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "more: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:5",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t4",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:6",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t4",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:7",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t4",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:8",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t4",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:0",
+            "detail": "boundary",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "no usage",
+            "timestamp": "t4",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:9",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "next",
+            "timestamp": "t5",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:10",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t6",
+            "vendor": "pi"
+          }
+        ],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "second",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 1,
+          "ts": "t6"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "more: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 3,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1496,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "nothing new: usage",
+      "mode": "usage",
+      "raw_anchor": "74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a312c226f7574707574223a317d7d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a226e31222c226d657373616765223a7b22636f6e74656e74223a226e6f207573616765222c22726f6c65223a22617373697374616e74227d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a227532222c226d657373616765223a7b22636f6e74656e74223a226e657874222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227435222c2274797065223a226d657373616765227d0a7b226964223a226133222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a2220207365636f6e6420222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a312c22696e707574223a342c226f7574707574223a307d7d2c2274696d657374616d70223a227436222c2274797065223a226d657373616765227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "nothing new: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "second",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 1,
+          "ts": "t6"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "nothing new: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 3,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1496,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle: usage",
+      "mode": "usage",
+      "raw_anchor": "74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a312c226f7574707574223a317d7d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a226e31222c226d657373616765223a7b22636f6e74656e74223a226e6f207573616765222c22726f6c65223a22617373697374616e74227d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a227532222c226d657373616765223a7b22636f6e74656e74223a226e657874222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227435222c2274797065223a226d657373616765227d0a7b226964223a226133222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a2220207365636f6e6420222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a312c22696e707574223a342c226f7574707574223a307d7d2c2274696d657374616d70223a227436222c2274797065223a226d657373616765227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:1",
+            "detail": "idle",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "second",
+            "timestamp": "t6",
+            "vendor": "pi"
+          }
+        ],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": true,
+          "idx": 1,
+          "ts": "t6"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 3,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1496,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle once: usage",
+      "mode": "usage",
+      "raw_anchor": "74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a312c226f7574707574223a317d7d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a226e31222c226d657373616765223a7b22636f6e74656e74223a226e6f207573616765222c22726f6c65223a22617373697374616e74227d2c2274696d657374616d70223a227434222c2274797065223a226d657373616765227d0a7b226964223a227532222c226d657373616765223a7b22636f6e74656e74223a226e657874222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227435222c2274797065223a226d657373616765227d0a7b226964223a226133222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a2220207365636f6e6420222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a312c22696e707574223a342c226f7574707574223a307d7d2c2274696d657374616d70223a227436222c2274797065223a226d657373616765227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle once: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": true,
+          "idx": 1,
+          "ts": "t6"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle once: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 4,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1783,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3",
+            "a4"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "credited_count": 4,
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1695,
+              "recent_keys": [
+                "a1",
+                "c1",
+                "a3",
+                "a4"
+              ],
+              "session_id": "s1"
+            },
+            "cwd": "/w",
+            "dedup_key": "a4",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 2,
+            "model": "pi-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "t7",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "boundary: usage",
+      "mode": "usage",
+      "raw_anchor": "226964223a226133222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a2220207365636f6e6420222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a312c22696e707574223a342c226f7574707574223a307d7d2c2274696d657374616d70223a227436222c2274797065223a226d657373616765227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b226964223a226134222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a227265706c79222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a322c226f7574707574223a327d7d2c2274696d657374616d70223a227437222c2274797065223a226d657373616765227d0a7b226964223a227533222c226d657373616765223a7b22636f6e74656e74223a22627965222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227438222c2274797065223a226d657373616765227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "a4",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 2,
+            "model": "pi-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "t7",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "c1",
+          "a4"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "boundary: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:13",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t7",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:2",
+            "detail": "boundary",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "reply",
+            "timestamp": "t7",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:14",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "bye",
+            "timestamp": "t8",
+            "vendor": "pi"
+          }
+        ],
+        "high_water": 14,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t8"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "boundary: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 4,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1783,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3",
+            "a4",
+            "a1",
+            "c1",
+            "a1",
+            "a3"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "replaced: usage",
+      "mode": "usage",
+      "raw_anchor": "226964223a226133222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a2220207365636f6e6420222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a312c22696e707574223a342c226f7574707574223a307d7d2c2274696d657374616d70223a227436222c2274797065223a226d657373616765227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b226964223a226134222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a227265706c79222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a322c226f7574707574223a327d7d2c2274696d657374616d70223a227437222c2274797065223a226d657373616765227d0a7b226964223a227533222c226d657373616765223a7b22636f6e74656e74223a22627965222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227438222c2274797065223a226d657373616765227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "replaced: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 14,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t8"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "replaced: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 5,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1982,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3",
+            "a4",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a5"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "credited_count": 5,
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1982,
+              "recent_keys": [
+                "a1",
+                "c1",
+                "a3",
+                "a4",
+                "a1",
+                "c1",
+                "a1",
+                "a3",
+                "a5"
+              ],
+              "session_id": "s1"
+            },
+            "cwd": "/w",
+            "dedup_key": "a5",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 3,
+            "model": "pi-model",
+            "output_tokens": 3,
+            "session_id": "s1",
+            "timestamp": "t9",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "new entry: usage",
+      "mode": "usage",
+      "raw_anchor": "227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b226964223a226134222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a227265706c79222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a322c226f7574707574223a327d7d2c2274696d657374616d70223a227437222c2274797065223a226d657373616765227d0a7b226964223a227533222c226d657373616765223a7b22636f6e74656e74223a22627965222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227438222c2274797065223a226d657373616765227d0a7b226964223a226135222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a332c226f7574707574223a337d7d2c2274696d657374616d70223a227439222c2274797065223a226d657373616765227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "a5",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 3,
+            "model": "pi-model",
+            "output_tokens": 3,
+            "session_id": "s1",
+            "timestamp": "t9",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4",
+          "c1",
+          "a5"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "new entry: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:15",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t9",
+            "vendor": "pi"
+          }
+        ],
+        "high_water": 15,
+        "identity": "",
+        "last_text": "after",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t9"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "new entry: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 7,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2181,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3",
+            "a4",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a5",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a4",
+            "a5",
+            "a6"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "no count: usage",
+      "mode": "usage",
+      "raw_anchor": "70223a227437222c2274797065223a226d657373616765227d0a7b226964223a227533222c226d657373616765223a7b22636f6e74656e74223a22627965222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227438222c2274797065223a226d657373616765227d0a7b226964223a226135222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a332c226f7574707574223a337d7d2c2274696d657374616d70223a227439222c2274797065223a226d657373616765227d0a7b226964223a226136222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226c617374222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a392c226f7574707574223a397d7d2c2274696d657374616d70223a22743130222c2274797065223a226d657373616765227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "a6",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "input_tokens": 9,
+            "model": "pi-model",
+            "output_tokens": 9,
+            "session_id": "s1",
+            "timestamp": "t10",
+            "vendor": "pi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4",
+          "a5",
+          "c1",
+          "a6"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "no count: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:16",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t10",
+            "vendor": "pi"
+          }
+        ],
+        "high_water": 16,
+        "identity": "",
+        "last_text": "last",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t10"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "no count: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 7,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2181,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3",
+            "a4",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a5",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a4",
+            "a5",
+            "a6"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "half: usage",
+      "mode": "usage",
+      "raw_anchor": "70223a227437222c2274797065223a226d657373616765227d0a7b226964223a227533222c226d657373616765223a7b22636f6e74656e74223a22627965222c22726f6c65223a2275736572227d2c2274696d657374616d70223a227438222c2274797065223a226d657373616765227d0a7b226964223a226135222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a332c226f7574707574223a337d7d2c2274696d657374616d70223a227439222c2274797065223a226d657373616765227d0a7b226964223a226136222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226c617374222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a392c226f7574707574223a397d7d2c2274696d657374616d70223a22743130222c2274797065223a226d657373616765227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4",
+          "a5",
+          "a6",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "half: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 16,
+        "identity": "",
+        "last_text": "last",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t10"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "half: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 7,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2272,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3",
+            "a4",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a5",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a4",
+            "a5",
+            "a6"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "whole: usage",
+      "mode": "usage",
+      "raw_anchor": "227438222c2274797065223a226d657373616765227d0a7b226964223a226135222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a332c226f7574707574223a337d7d2c2274696d657374616d70223a227439222c2274797065223a226d657373616765227d0a7b226964223a226136222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226c617374222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a392c226f7574707574223a397d7d2c2274696d657374616d70223a22743130222c2274797065223a226d657373616765227d0a7b2274797065223a226d657373616765222c226964223a227534222c2274696d657374616d70223a22743131222c226d657373616765223a7b22726f6c65223a2275736572222c22636f6e74656e74223a22706c61696e227d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4",
+          "a5",
+          "a6",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "whole: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:3",
+            "detail": "boundary",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "last",
+            "timestamp": "t10",
+            "vendor": "pi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:17",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+            "session_id": "s1",
+            "text": "plain",
+            "timestamp": "t11",
+            "vendor": "pi"
+          }
+        ],
+        "high_water": 17,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 4,
+          "ts": "t11"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "whole: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "credited_count": 7,
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2279,
+          "recent_keys": [
+            "a1",
+            "c1",
+            "a3",
+            "a4",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a5",
+            "a1",
+            "c1",
+            "a1",
+            "a3",
+            "a4",
+            "a5",
+            "a6"
+          ],
+          "session_id": "s1"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "not an object: usage",
+      "mode": "usage",
+      "raw_anchor": "797065223a226d657373616765227d0a7b226964223a226135222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a332c226f7574707574223a337d7d2c2274696d657374616d70223a227439222c2274797065223a226d657373616765227d0a7b226964223a226136222c226d657373616765223a7b22636f6e74656e74223a5b7b2274657874223a226c617374222c2274797065223a2274657874227d5d2c226d6f64656c223a2270692d6d6f64656c222c22726f6c65223a22617373697374616e74222c227573616765223a7b22636163686552656164223a302c2263616368655772697465223a302c22696e707574223a392c226f7574707574223a397d7d2c2274696d657374616d70223a22743130222c2274797065223a226d657373616765227d0a7b2274797065223a226d657373616765222c226964223a227534222c2274696d657374616d70223a22743131222c226d657373616765223a7b22726f6c65223a2275736572222c22636f6e74656e74223a22706c61696e227d7d0a5b312c20325d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4",
+          "a5",
+          "a6",
+          "c1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "not an object: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 18,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-pi-jsonl-v1",
+        "path": "$ROOT/sessions/--w--/2026_s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 4,
+          "ts": "t11"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "not an object: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "pi"
+}

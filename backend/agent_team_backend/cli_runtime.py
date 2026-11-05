@@ -1267,10 +1267,7 @@ class RustTerminalService(TerminalService):
                     parts = self._observations.get(request_id, [])
                     if result["observation_parts"] != len(parts):
                         raise RuntimeError("PROTOCOL_ERROR: incomplete observation")
-                    document = json.loads(b"".join(parts))
-                    if result.get("raw_anchor"):
-                        document["anchor_blob"] = frame.blob
-                    return document
+                    return json.loads(b"".join(parts))
                 return result
             except TimeoutError as error:
                 if op not in ("ping", "create"):  # a create is governed by the single rule of E1 10.1
@@ -1321,16 +1318,13 @@ class RustTerminalService(TerminalService):
         result["error"] = f"{error['code']} at {error['stage']}: {error['message']}"
         return result
 
-    async def observe(self, vendor: str, parser: str, args: dict, *, match, expected: bytes = b"",
-                      validate=None, receipt=None) -> dict:
+    async def observe(self, vendor: str, parser: str, args: dict, *, match, validate=None, receipt=None) -> dict:
         """One vendor-generic observation (E1 14). Everything vendor-specific is supplied by the
         adapter module: `match(sessions) -> session | None` attributes it to a live session,
-        `validate(result, session)` checks vendor invariants, `receipt(result)` adds vendor fields.
-        The expected anchor travels as raw bytes (`expected`); a returned raw anchor is left in
-        `result["anchor_blob"]` (present only when the parser returns one)."""
+        `validate(result, session)` checks vendor invariants, `receipt(result)` adds vendor fields."""
         await self._ensure_started()
         session = match(tuple(self._retained.values()))
-        result = await self._request("observe", {"vendor": vendor, **args}, session, blob=expected)
+        result = await self._request("observe", {"vendor": vendor, **args}, session)
         if (result.get("parser") != parser or result.get("path") != args["path"]
                 or result.get("mode") != args["mode"]):
             raise RuntimeError("PROTOCOL_ERROR: wrong observation parser/path/mode")

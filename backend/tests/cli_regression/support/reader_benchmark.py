@@ -59,7 +59,7 @@ def _run_rust(fixture: str, path: Path, sidecar: Path, workdir: Path):
         sidecar_process = psutil.Process(peer.process.pid)
         cpu0 = sum(sidecar_process.cpu_times()[:2])
         args = {"checkpoint": {}} if fixture == "claude" else {"checkpoint": {}, "seen": []}
-        document, _anchor, _final = peer.observe(fixture, path, "usage", **args)
+        document, _final = peer.observe(fixture, path, "usage", **args)
         events = _normalise(document["events"])
         return events, sum(sidecar_process.cpu_times()[:2]) - cpu0, sidecar_process.memory_info().rss
     finally:

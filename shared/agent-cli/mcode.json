@@ -18,5 +18,6 @@
     "resume_by_id": "not-yet-integrated",
     "session_id_at_launch": "unknown",
     "login": "integrated"
-  }
+  },
+  "observer": null
 }

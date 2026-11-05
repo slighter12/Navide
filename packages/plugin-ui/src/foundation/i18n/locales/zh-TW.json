@@ -957,6 +957,8 @@
       "backend-reconnecting": "後端已中斷 — 重新連線中，暫停輸入。",
       "backend-restarting": "後端已崩潰 — 重新啟動中（{attempt}/{max}），暫停輸入。",
       "backend-unavailable": "後端無法使用 — 重新啟動前暫停輸入。",
+      "runtime-session-resumed": "CLI 執行環境中止後已接回 {count} 個工作階段",
+      "runtime-session-resume-failed": "CLI 執行環境中止後有 {count} 個工作階段無法接回 — 可用「重建」重試",
       "session-resumed": "後端重啟後已接回 {count} 個工作階段",
       "session-resume-failed": "後端重啟後有 {count} 個工作階段無法接回 — 可用「重建」重試",
       "option-select-hint": "此 CLI 接管了滑鼠 — 按住 {key} 再拖曳即可劃選文字",
@@ -985,6 +987,9 @@
       "rebuild-in-progress": "重建已在進行中",
       "rebuild-not-resumable": "找不到工作階段檔案，無法接續重建",
       "rebuild-probe-failed": "無法確認工作階段狀態，服務沒有回應，請稍後再試",
+      "close-offline": "後端已中斷連線，暫時無法關閉此 pane，請等重新連線後再試",
+      "close-workspace-offline": "後端已中斷連線，暫時無法關閉此工作區，請等重新連線後再試",
+      "close-unverified": "無法確認工作階段已停止，因此保留了此 pane，請再試一次關閉",
       "rebuild-running-confirm-title": "CLI 正在執行中",
       "rebuild-running-confirm-body": "重建會中斷進行中的回合並重印對話。確定要重建嗎？",
       "rebuild-running-confirm-body-batch": "{count} 個 CLI 正在執行中，重建會中斷進行中的回合並重印對話。確定要重建嗎？",
@@ -9432,6 +9437,10 @@
         "no-session": "{name}：未接回，因為沒有可接續的對話",
         "failed": "{name}：接回失敗"
       }
+    },
+    "runtime-lost": {
+      "title": "CLI 執行環境在 {time} 中止",
+      "note": "接回的 pane 會停在提示字元，不會自己繼續；已結束的 pane 維持原狀，要你按「重建」才會重開。"
     },
     "scheduler-disabled": "排程「{name}」已停用：目標 pane 不存在",
     "scheduler-disabled-note": "連續 {n} 次到點都找不到目標 pane，所以自動停用。到排程面板按「重新綁定」指向現有的 pane，再重新啟用。",

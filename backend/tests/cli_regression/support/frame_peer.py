@@ -151,24 +151,21 @@ class FramePeer:
         self.result(self.send(code.CREATE, meta))
         return sid, generation
 
-    def observe(self, vendor: str, path, mode: str, *, expected: bytes = b"", session=None,
-                allow_error: bool = False, **args):
-        """One observation. Returns (document, raw_anchor_or_None, final_frame)."""
+    def observe(self, vendor: str, path, mode: str, *, session=None, allow_error: bool = False, **args):
+        """One observation. Returns (document, final_frame)."""
         meta = {"vendor": vendor, "path": str(path), "mode": mode, **args}
         if session:
             meta.update(session_id=session[0], session_generation=session[1])
-        request = self.send(code.OBSERVE, meta, expected)
+        request = self.send(code.OBSERVE, meta)
         final = self.result(request, allow_error=True)
         if final.frame_type is FrameType.ERROR and not final.meta.get("observation_parts"):
             if allow_error:
-                return None, None, final
+                return None, final
             raise AssertionError(final.meta)
         parts = self.parts.pop(request, [])
         self.last_part_count, self.last_part_frame_sizes = len(parts), self._sizes.pop(request, [])
         assert len(parts) == final.meta["observation_parts"], (len(parts), final.meta)
-        document = json.loads(b"".join(parts))
-        anchor = final.blob if final.meta.get("raw_anchor") else None
-        return document, anchor, final
+        return json.loads(b"".join(parts)), final
 
     def part_sizes(self, request: int) -> list[int]:
         return [len(blob) for blob in self.parts.get(request, [])]

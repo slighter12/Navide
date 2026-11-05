@@ -1,37 +1,4 @@
-//! Finite native observer registration; vendor strategies stay in their modules.
-#[cfg(unix)]
-use serde_json::Value;
-#[cfg(unix)]
-use std::io;
-
-#[cfg_attr(windows, allow(dead_code))] // observation is POSIX-only; launch admission is `compose::admit`
-pub fn integrated(key: &str) -> bool {
-    #[cfg(feature = "fault-hooks")]
-    if key == FAULT_GRACEFUL {
-        return true;
-    }
-    // Vendor observers read POSIX session files; none is integrated on Windows yet (E5 scope: shells).
-    cfg!(unix)
-        && matches!(
-            key,
-            "aider"
-                | "antigravity"
-                | "claude"
-                | "codex"
-                | "copilot"
-                | "cursor"
-                | "droid"
-                | "goose"
-                | "grok"
-                | "kilo"
-                | "kimi"
-                | "muse"
-                | "opencode"
-                | "pi"
-                | "qwen"
-        )
-}
-
+//! Declared shutdown behaviour. Observation lives in `observe` (the roster is generated from the declarations).
 /// Harness build only: the test declaration of a graceful shutdown (owned by `vendor_facts`).
 #[cfg(feature = "fault-hooks")]
 pub const FAULT_GRACEFUL: &str = super::vendor_facts::FAULT_GRACEFUL;
@@ -75,28 +42,4 @@ pub fn max_grace_ms() -> u64 {
         .map(|spec| spec.grace_ms)
         .max()
         .unwrap_or(0)
-}
-
-/// One observation: the result document and, for parsers whose checkpoint anchors a byte range,
-/// the raw anchor bytes (E1 14: bytes on the wire, never text-encoded). `expected` is the
-/// request blob (the anchor Python read from the file; empty when there is none).
-#[cfg(unix)]
-pub fn observe(args: &Value, expected: &[u8]) -> io::Result<(Value, Option<Vec<u8>>)> {
-    match args["vendor"].as_str() {
-        Some("aider") => super::observe_aider::observe(args, expected),
-        Some("claude") => super::claude::observe(args, expected),
-        Some("codex") => super::codex::observe(args, expected),
-        Some("antigravity") => super::observe_antigravity::observe(args).map(|document| (document, None)),
-        Some("copilot") => super::observe_copilot::observe(args, expected),
-        Some("cursor") => super::observe_cursor::observe(args).map(|document| (document, None)),
-        Some("droid") => super::observe_droid::observe(args, expected),
-        Some("goose") => super::observe_goose::observe(args).map(|document| (document, None)),
-        Some("grok") => super::observe_grok::observe(args, expected),
-        Some("kilo" | "opencode") => super::opencode::observe(args).map(|document| (document, None)),
-        Some("kimi") => super::observe_kimi::observe(args, expected),
-        Some("muse") => super::observe_muse::observe(args, expected),
-        Some("pi") => super::observe_pi::observe(args, expected),
-        Some("qwen") => super::observe_qwen::observe(args, expected),
-        _ => Err(io::Error::other("observer not integrated")),
-    }
 }

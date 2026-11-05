@@ -422,6 +422,10 @@ class MuseLogReader(LogReader):
         that ``muse resume`` would reject."""
         return path.parent.name if _is_main_session_file(path) else ""
 
+    def observes_file(self, path: Path) -> bool:
+        """A subagent log is not observed (its parent already attributes its tokens): the sidecar is never asked about one."""
+        return _is_main_session_file(path)
+
     def has_session(self, session_id: str) -> bool:
         """True when some day directory holds ``<session_id>/session.jsonl``.
 

@@ -109,7 +109,7 @@ vi.mock('@xterm/addon-serialize', () => ({
 import { useTerminal } from '../useTerminal'
 
 /** A pane with a live PTY, spawned through the normal create path. */
-async function spawnedPane(opts?: { onPtyLostWhileDisconnected?: () => void }) {
+async function spawnedPane(opts?: { onPtyLost?: () => void }) {
   const mock = createMockBackend()
   mock.setResponse('terminal.create', { terminal_session_id: 'sess-1', pid: 42 })
   mock.setResponse('terminal.reattach', { alive: ['sess-1'], dead: [] })
@@ -331,8 +331,8 @@ describe('useTerminal — reattach after the backend comes back', () => {
   })
 
   it('reattaches to a PTY that survived, and reports no loss', async () => {
-    const onPtyLostWhileDisconnected = vi.fn()
-    const { mock, scope } = await spawnedPane({ onPtyLostWhileDisconnected })
+    const onPtyLost = vi.fn()
+    const { mock, scope } = await spawnedPane({ onPtyLost })
 
     mock.status.value = 'disconnected'
     await nextTick()
@@ -341,7 +341,7 @@ describe('useTerminal — reattach after the backend comes back', () => {
     await flush()
 
     expect(mock.sent.some((s) => s.type === 'terminal.reattach')).toBe(true)
-    expect(onPtyLostWhileDisconnected).not.toHaveBeenCalled()
+    expect(onPtyLost).not.toHaveBeenCalled()
     scope.stop()
   })
 
@@ -349,8 +349,8 @@ describe('useTerminal — reattach after the backend comes back', () => {
   // them. The pane cannot resume itself (only App knows the agent and how to
   // build the vendor's resume command), so it reports the loss upward.
   it('reports a PTY that died, so the owner can resume the CLI session', async () => {
-    const onPtyLostWhileDisconnected = vi.fn()
-    const { mock, result, scope } = await spawnedPane({ onPtyLostWhileDisconnected })
+    const onPtyLost = vi.fn()
+    const { mock, result, scope } = await spawnedPane({ onPtyLost })
     mock.setResponse('terminal.reattach', { alive: [], dead: ['sess-1'] })
 
     mock.status.value = 'disconnected'
@@ -359,7 +359,7 @@ describe('useTerminal — reattach after the backend comes back', () => {
     await nextTick()
     await flush()
 
-    expect(onPtyLostWhileDisconnected).toHaveBeenCalledTimes(1)
+    expect(onPtyLost).toHaveBeenCalledTimes(1)
     expect(result.status.value).toBe('exited')
     scope.stop()
   })
@@ -368,8 +368,8 @@ describe('useTerminal — reattach after the backend comes back', () => {
   // A rejected probe must leave the pane alone — declaring the PTY dead on a
   // failed question would kill a session that is still perfectly alive.
   it('leaves the pane alone when the reattach probe itself fails', async () => {
-    const onPtyLostWhileDisconnected = vi.fn()
-    const { mock, result, scope } = await spawnedPane({ onPtyLostWhileDisconnected })
+    const onPtyLost = vi.fn()
+    const { mock, result, scope } = await spawnedPane({ onPtyLost })
     mock.setRejection('terminal.reattach')
 
     mock.status.value = 'disconnected'
@@ -378,7 +378,7 @@ describe('useTerminal — reattach after the backend comes back', () => {
     await nextTick()
     await flush()
 
-    expect(onPtyLostWhileDisconnected).not.toHaveBeenCalled()
+    expect(onPtyLost).not.toHaveBeenCalled()
     expect(result.status.value).toBe('running')
     scope.stop()
   })
@@ -387,8 +387,8 @@ describe('useTerminal — reattach after the backend comes back', () => {
   // but not ready to look, and the session may well be alive. Only an explicit
   // reply that leaves the session out means it died.
   it('leaves the pane alone on WS drop + reattach error reply', async () => {
-    const onPtyLostWhileDisconnected = vi.fn()
-    const { mock, result, scope } = await spawnedPane({ onPtyLostWhileDisconnected })
+    const onPtyLost = vi.fn()
+    const { mock, result, scope } = await spawnedPane({ onPtyLost })
     mock.setResponse('terminal.reattach', null, { ok: false, error: { code: 'internal', message: 'not ready' } })
 
     mock.status.value = 'disconnected'
@@ -397,7 +397,7 @@ describe('useTerminal — reattach after the backend comes back', () => {
     await nextTick()
     await flush()
 
-    expect(onPtyLostWhileDisconnected).not.toHaveBeenCalled()
+    expect(onPtyLost).not.toHaveBeenCalled()
     expect(result.status.value).not.toBe('exited')
     expect(writes.some((w) => w.includes('session ended while disconnected'))).toBe(false)
     expect(mock.sent.some((s) => s.type === 'terminal.kill' || s.type === 'terminal.close')).toBe(false)

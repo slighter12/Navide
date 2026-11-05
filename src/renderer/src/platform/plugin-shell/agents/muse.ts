@@ -24,7 +24,7 @@
  */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from './_vendorFacts'
+import { VENDOR_FACTS, fillId } from '../../../../../shared/vendorFacts'
 
 const FACT = VENDOR_FACTS.muse
 

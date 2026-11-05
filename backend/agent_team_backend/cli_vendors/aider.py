@@ -341,6 +341,11 @@ class AiderLogReader(LogReader):
         """The history file sits at the session's git root (aider's cwd)."""
         return str(path.parent)
 
+    def namespace_from_file(self, path: Path) -> str:
+        """What makes a session slug unique per history file (`history_namespace`); the observation request carries it so the
+        native reader builds the same slugs."""
+        return history_namespace(path)
+
     def session_id_from_path(self, path: Path) -> str:
         """The LAST section's started-at slug — the only 'current session'
         an append-only history file can name. '' for other files."""

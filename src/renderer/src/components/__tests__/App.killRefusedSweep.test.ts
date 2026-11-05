@@ -29,8 +29,8 @@ function body(source: string, name: string): string {
 describe('onKill when the terminal kill is refused', () => {
   const fn = body(appSource, 'onKill')
 
-  // Review-9: the backend settlement is no longer a fallback of a failed kill — it always follows
-  // the pane's own kill and is the proof (lib/paneRetirement.ts; App.retirementRule.test.ts).
+  // The backend settlement is not a fallback of a failed kill — it always follows the pane's own
+  // kill and is the proof (lib/paneRetirement.ts; App.retirementRule.test.ts).
   it('records the refused kill and still has the backend settle (a release when no unspawn will follow)', () => {
     expect(fn).toContain("onKillFailed: (err) => recordDiagnostic({")
     expect(fn).toContain("code: 'pane.killFailed'")

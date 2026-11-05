@@ -3,13 +3,14 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-// Ticket 05 review-9: ONE rule for every pane-retirement path — a pane's terminal owner (ref /
-// term id) and its persisted record are retired only after the backend proved settlement; any
-// refusal, timeout or `null` from sendQuiet keeps the pane, its ref and its record, and starts no
-// replacement. The decision itself is `settlePaneTerminals` (lib/paneRetirement.ts, executed in
-// its own unit test and against the real sidecar in tests/cli/retirementRule.test.ts). App.vue
-// cannot be mounted by this suite, so its call-site wiring is asserted against the source, as the
-// other App.*.test.ts files do — a supplement, not the proof.
+// ONE rule for every pane-retirement path — a pane's terminal owner (ref / term id), its persisted
+// record and its pane-local effects (stage watcher, pending question, injection timer, ACP kill)
+// are retired only after the backend proved settlement; any refusal, timeout or `null` from
+// sendQuiet keeps the pane, its ref and its record, and starts no replacement. The decision itself
+// is `settlePaneTerminals` (lib/paneRetirement.ts), driven behaviourally in
+// lib/__tests__/paneRetirement.test.ts. App.vue cannot be mounted by this suite, so what is
+// asserted here is only the call-site wiring that nothing behavioural reaches: which surfaces read
+// the listed panes, and that each caller starts its replacement only after a proven onKill.
 const appSource = readFileSync(resolve(process.cwd(), 'src/renderer/src/App.vue'), 'utf8')
 
 function fn(name: string): string {
@@ -22,15 +23,25 @@ function fn(name: string): string {
 
 describe('onKill: settlement first, retirement only on proof', () => {
   const body = fn('onKill')
-  it('answers whether the pane was retired', () => {
-    expect(appSource).toMatch(/async function onKill\([^)]*\): Promise<boolean> \{/)
+  it('hands the irreversible pane-local effects to onProven, not to the code before the settlement', () => {
+    // The behaviour (the listed effects run, in order, only after a proven answer, and none on a
+    // refusal) is in paneRetirement.test.ts; this pins that onKill passes the watcher, question,
+    // timer and ACP kill, and the caller's extension, as those effects.
+    const proven = body.indexOf('onProven: [')
+    const settledAt = body.indexOf('await settlePaneTerminals({')
+    expect(settledAt).toBeGreaterThan(-1)
+    expect(proven).toBeGreaterThan(settledAt)
+    for (const effect of ['window.clearTimeout(pane.injectionTimer)', 'cancelWatcher(paneId)', 'activeQuestion.value = null', 'await acp.kill(paneId, { force })', '...(opts.onProven ? [opts.onProven] : [])']) {
+      expect(body.indexOf(effect), effect).toBeGreaterThan(proven)
+    }
+    // The only other place these run is the proven branch: nothing before the settlement call.
+    for (const effect of ['cancelWatcher(paneId)', 'activeQuestion.value = null', 'acp.kill(']) {
+      expect(body.slice(0, settledAt), effect).not.toContain(effect)
+    }
   })
-  it('decides through settlePaneTerminals, for both the known-id and the no-id pane', () => {
-    expect(body).toContain('await settlePaneTerminals({')
-    expect(body).toContain('killOwn: ref?.sessionId ? () => ref.kill({ force }) : undefined')
-  })
-  it('never swallows a release answer', () => {
-    expect(body).not.toMatch(/await sendQuiet<\{ ok: boolean \}>\('manual_pane\.release_pty'[^\n]*\)\n/)
+  it('refuses at once while the backend is disconnected', () => {
+    expect(body).toContain("connected: () => backend.status.value === 'connected'")
+    expect(body).toContain("'pane.terminal.close-offline'")
   })
   it('returns false before touching the ref, the list, the history or the record', () => {
     const refusal = body.indexOf('if (!settled) {')
@@ -90,8 +101,40 @@ describe('callers that start a replacement (or retire more) only after a proven 
     expect(body.slice(kill - 40, next)).toMatch(/(!\(await onKill\(|retired\.includes\(false\))[\s\S]*return/)
   })
 
+  it('a rebuild passes the stored-scrollback and account-follow drops through onKill\'s onProven', () => {
+    // That onProven runs only after a proven settlement is behaviour-tested in paneRetirement.test.ts.
+    const body = fn('rebuildPaneViaResume')
+    const kill = body.indexOf('await onKill(paneId')
+    const extension = body.indexOf('onProven: () => {', kill)
+    expect(kill).toBeGreaterThan(-1)
+    expect(extension).toBeGreaterThan(kill)
+    const callEnd = body.indexOf("}))) return 'probe-failed'", kill)
+    expect(callEnd).toBeGreaterThan(extension)
+    const drops = ['localStorage.removeItem(`terminal-scroll:${sessionId}`)', 'if (explicitPin) accountFollow.remove(paneId)']
+    for (const drop of drops) {
+      expect(body.indexOf(drop), drop).toBeGreaterThan(extension)
+      expect(body.indexOf(drop), drop).toBeLessThan(callEnd)
+      // And nowhere else in the rebuild.
+      expect(body.split(drop)).toHaveLength(2)
+    }
+  })
+
   it('reclaimIdlePane keeps the pane when its terminal was not proven settled', () => {
     expect(fn('reclaimIdlePane')).toMatch(/if \(!\(await onKill\(paneId, \{ markRemoved: false, keepInList: true, force: false \}\)\)\) return false/)
+  })
+
+  it('closeWorkspace reads who it would retire, then refuses offline before it aborts the run or switches away', () => {
+    // Which closes are refused offline (an empty workspace is not) is behaviour-tested in
+    // lib/__tests__/workspaceCloseRun.test.ts; this pins the call site and its order.
+    const body = fn('closeWorkspace')
+    const members = body.indexOf('const doomed = panes.value.filter(')
+    const offline = body.indexOf('closeRefusedOffline({ connected: backend.status.value === \'connected\', panesToRetire: doomed.length })')
+    expect(members).toBeGreaterThan(-1)
+    expect(offline).toBeGreaterThan(members)
+    expect(body.indexOf("'pane.terminal.close-workspace-offline'")).toBeGreaterThan(offline)
+    expect(body.indexOf('await switchToWorkspace(land)')).toBeGreaterThan(offline)
+    expect(body.indexOf("'pipeline.abort'")).toBeGreaterThan(offline)
+    expect(body.split('const doomed = ')).toHaveLength(2)
   })
 
   it('closeWorkspace stops on the first unproven pane and checks the by-pane retirement', () => {
@@ -111,7 +154,7 @@ describe('a closing pane is listed on no surface until its close is refused', ()
     expect(start, name).toBeGreaterThan(-1)
     const open = appSource.indexOf('(', start)
     let depth = 0
-    // Brackets inside comments and string/template literals do not count (review-5 NB1).
+    // Brackets inside comments and string/template literals do not count.
     for (let i = open; i < appSource.length; i++) {
       const c = appSource[i]
       const pair = appSource.slice(i, i + 2)
@@ -174,19 +217,19 @@ describe('a closing pane is listed on no surface until its close is refused', ()
     expect(computedBody('ctxTargetIds')).toContain('idsWithoutClosing(')
     expect(fn('batchKill')).toContain('idsWithoutClosing(ids, closingPaneIds.value)')
   })
-  it('review-5 B4: every user close goes through the one-close-per-pane guard and checks the record at action time', () => {
+  it('every user close goes through the one-close-per-pane guard and checks the record at action time', () => {
     const body = fn('onUserClosePane')
     expect(body).toContain('closePaneHidden(')
     expect(body).toContain('panes.value.some((p) => p.id === paneId)')
   })
-  it('review-5 B1: resource count, rows and the Resource Manager leave out a closing pane', () => {
+  it('resource count, rows and the Resource Manager leave out a closing pane', () => {
     expect(computedBody('realizedPaneCount')).toContain('listedPanes.value')
     expect(computedBody('realizedPaneCount')).not.toMatch(raw('panes'))
     expect(computedBody('resourceRows')).toContain('listedPanes.value.map')
     expect(computedBody('resourceRows')).not.toMatch(raw('panes'))
     expect(tag('ResourceManagerModal')).toContain(':hidden-keys="closingResourceKeys"')
   })
-  it('review-5 B2: the empty state, status bar controls, close-all and history leave out a closing pane', () => {
+  it('the empty state, status bar controls, close-all and history leave out a closing pane', () => {
     expect(appSource).toContain('<div v-if="listedPanes.length === 0" class="empty">')
     expect(appSource).toContain('v-if="!isDetachedWindow && listedPanes.length > 0"')
     expect(appSource).toContain(':pane-count="listedPanesInView.length"')
@@ -195,29 +238,29 @@ describe('a closing pane is listed on no surface until its close is refused', ()
     expect(computedBody('activeHistoryPaneKey')).toContain('listedPaneViews.value')
     expect(computedBody('activeHistoryPaneKey')).not.toMatch(raw('paneViews'))
   })
-  it('round 9 B1: kill-all agrees with the visible count and joins the guarded user close', () => {
+  it('kill-all agrees with the visible count and joins the guarded user close', () => {
     const body = fn('onKillAll')
     expect(body).toContain('paneIds ?? listedPanesInView.value.map((p) => p.id)')
     expect(body).toContain('await onUserClosePane(id, { markRemoved: false })')
     expect(body).toContain('await onKill(id, { markRemoved: false })')
     expect(appSource).toContain(':pane-count="listedPanesInView.length"')
   })
-  it('round 9 B2: closing the last visible pane dismisses the resource popover', () => {
+  it('closing the last visible pane dismisses the resource popover', () => {
     expect(appSource).toMatch(/watch\(\s*\(\) => listedPanes\.value\.length,\s*\(count\) => \{\s*if \(count === 0 && openPopover\.value === 'resource'\) closePopover\(\)/)
   })
-  it('round 9 B3: a group with only a closing pane waits for settlement before deletion', () => {
+  it('a group with only a closing pane waits for settlement before deletion', () => {
     const body = fn('closeRunGroup')
     expect(body).toContain('pendingPaneClose(closingPaneIds.value, p.id)')
     expect(body).toContain('await Promise.all(pendingCloses)')
     expect(body).toContain('if (panesInView.value.some((p) => p.runGroupId === id)) return')
   })
-  it('round 9 B3: mixed visible and closing members share the deletion gate', () => {
+  it('mixed visible and closing members share the deletion gate', () => {
     const body = fn('closeRunGroup')
     expect(body).toContain('for (const p of [...affected]) await onUserClosePane(p.id)')
     expect(body).toContain('await Promise.all(pendingCloses)')
     expect(body.indexOf('await Promise.all(pendingCloses)')).toBeLessThan(body.indexOf('runGroups.value = runGroups.value.filter((g) => g.id !== id)'))
   })
-  it('review-5 B3: rebuild availability and the run-group menu counts and targets leave out a closing pane', () => {
+  it('rebuild availability and the run-group menu counts and targets leave out a closing pane', () => {
     expect(computedBody('listedPanesInView')).toContain('withoutClosing(panesInView.value, closingPaneIds.value)')
     expect(computedBody('rebuildableAllPaneCount')).toContain('listedPanesInView.value')
     expect(computedBody('rebuildableByWorkspace')).toContain('listedPanes.value')
@@ -226,7 +269,7 @@ describe('a closing pane is listed on no surface until its close is refused', ()
     expect(fn('runGroupPanes')).not.toMatch(raw('panes'))
     expect(fn('closeRunGroup')).toContain('listedPanesInView.value.filter((p) => p.runGroupId === id)')
   })
-  it('round 8 inventory: user-facing batches, dialogs and counts read the listed panes', () => {
+  it('user-facing batches, dialogs and counts read the listed panes', () => {
     expect(fn('restartAgentPanes')).toContain('listedPanes.value.filter')
     expect(fn('restartAgentPanes')).not.toMatch(raw('panes'))
     expect(fn('descendantPaneIds')).toContain('listedPanes.value')

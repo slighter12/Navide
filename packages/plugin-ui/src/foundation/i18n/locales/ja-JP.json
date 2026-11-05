@@ -957,6 +957,8 @@
       "backend-reconnecting": "バックエンドとの接続が切れました。再接続中です。入力は一時停止されています。",
       "backend-restarting": "バックエンドが異常終了しました。再起動中です（{attempt}/{max}）。入力は一時停止されています。",
       "backend-unavailable": "バックエンドを利用できません。再起動するまで入力は一時停止されます。",
+      "runtime-session-resumed": "CLI ランタイムの停止後、{count} 件のセッションを再開しました",
+      "runtime-session-resume-failed": "CLI ランタイムの停止後、{count} 件のセッションを再開できませんでした。「再構築」で再試行してください",
       "session-resumed": "バックエンドの再起動後、{count} 件のセッションを再開しました",
       "session-resume-failed": "バックエンドの再起動後、{count} 件のセッションを再開できませんでした。「再構築」で再試行してください",
       "option-select-hint": "この CLI はマウス入力を処理します。{key} を押しながらドラッグするとテキストを選択できます",
@@ -985,6 +987,9 @@
       "rebuild-in-progress": "再構築はすでに進行中です",
       "rebuild-not-resumable": "ディスクにセッションが見つからないため、再開による再構築はできません",
       "rebuild-probe-failed": "セッションを確認できませんでした。サービスが応答していません。もう一度お試しください",
+      "close-offline": "バックエンドが切断されているため、このペインを閉じられません。再接続後にもう一度お試しください",
+      "close-workspace-offline": "バックエンドが切断されているため、このワークスペースを閉じられません。再接続後にもう一度お試しください",
+      "close-unverified": "セッションの停止を確認できなかったため、ペインを残しました。もう一度閉じてみてください",
       "rebuild-running-confirm-title": "CLI は実行中です",
       "rebuild-running-confirm-body": "再構築すると処理中のターンが中断され、会話が再表示されます。それでも再構築しますか？",
       "rebuild-running-confirm-body-batch": "{count} 個の CLI が実行中です。再構築すると処理中のターンが中断され、会話が再表示されます。それでも再構築しますか？",
@@ -9432,6 +9437,10 @@
         "no-session": "{name}：再開できる会話がないため再開していません",
         "failed": "{name}：再開できませんでした"
       }
+    },
+    "runtime-lost": {
+      "title": "{time} に CLI ランタイムが停止しました",
+      "note": "再開した pane はプロンプトで止まり、自動では続行しません。終了した pane は再構築するまでそのままです。"
     },
     "scheduler-disabled": "スケジュール「{name}」を停止しました：対象ペインが存在しません",
     "scheduler-disabled-note": "対象ペインが {n} 回続けて見つからなかったため、自動的に停止しました。スケジュールパネルの「再バインド」で既存のペインを指定してから、再度有効にしてください。",

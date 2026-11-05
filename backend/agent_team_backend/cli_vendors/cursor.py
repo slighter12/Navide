@@ -70,7 +70,9 @@ import base64
 import json
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
+from ..cli_runtime_state import StateError, pack, unpack
 from ..log_readers.base import (
     ActivityEvent,
     IncrementalParseResult,
@@ -97,7 +99,6 @@ from .base import (
 from ..usage_common import (
     HTTP_TIMEOUT,
     _KEYCHAIN_COOLDOWN_S,
-    _epoch_to_iso,
     _num,
     _snapshot,
     _window,
@@ -128,6 +129,34 @@ _UUID_RE = re.compile(
 # Sentinel prefix persisted inside the watcher-owned per-file seen_keys set
 # (same trick as Kimi's turn state): the last scanned blobs.rowid.
 _ACTIVITY_PREFIX = "cursor_blob::"
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _shared_walk(seen_keys: set[str]) -> tuple[list[str], dict] | None:
+    """The dedup keys and typed state the bag holds, whichever reader (this one or the native one) wrote it last; None for a state
+    entry that cannot be read (the native reader refuses such a bag too, and this reader leaves it as it is).
+
+    The native reader keeps `marks.blobs.last` (the position) and `marks.blobs.stamped` (the last stamp it gave, in microseconds) in
+    its one `native_state::` entry; this reader keeps the position as `cursor_blob::N`. Reading both through the one codec gives the
+    newer position (a legacy key overrides the entry's, as the native reader's own migration does), so a bag the other reader left is
+    continued, not planted again."""
+    observer = FACTS["cursor"].observer
+    try:
+        return unpack(seen_keys, observer.parser_id, observer.core.legacy_state)
+    except StateError:
+        return None
+
+
+def _record_stamp(seen_keys: set[str], micros: int) -> None:
+    """Leave the last stamp this pass gave where the native reader reads it (`marks.blobs.stamped`); the position key stays."""
+    shared = _shared_walk(seen_keys)
+    if shared is None:
+        return
+    keys, state = shared
+    position = {key for key in seen_keys if key.startswith(_ACTIVITY_PREFIX)}
+    state.setdefault("marks", {}).setdefault("blobs", {})["stamped"] = micros
+    seen_keys.clear()
+    seen_keys.update(pack(keys, state, FACTS["cursor"].observer.parser_id), position)
 
 # rowid is monotonic per INSERT; a content-addressed row re-inserted under an
 # existing id lands on a NEW, higher rowid, so the watermark only moves
@@ -413,6 +442,11 @@ class CursorLogReader(LogReader):
             ),
             None,
         )
+        shared = _shared_walk(seen_keys)
+        walk = shared[1].get("marks", {}).get("blobs", {}) if shared else {}
+        if prev is None and walk.get("last") is not None:
+            prev = str(walk["last"])  # the native reader's position: its bag is continued, not planted again
+        floor = walk.get("stamped")
 
         def remember(row_id: int) -> None:
             seen_keys.difference_update(
@@ -452,7 +486,12 @@ class CursorLogReader(LogReader):
             # sharing an identical stamp would lose the second one's
             # ---MSG--- block. Still plain ISO-8601 — an unparseable stamp
             # reads as always-fresh and resends a delivered turn.
-            return _epoch_to_iso(base + len(out) * 0.001) or ""
+            # The nudge also holds across passes and readers: the bag keeps the last stamp given (microseconds, where the
+            # native reader keeps its own), and a stamp is never at or before it (t36b W1).
+            nonlocal floor
+            micros = round(base * 1_000_000)
+            floor = micros if floor is None else max(micros, floor + 1000)
+            return (_EPOCH + timedelta(microseconds=floor)).isoformat()
 
         for _row_id, blob_id, data in rows:
             message = _json_message(data)
@@ -496,6 +535,8 @@ class CursorLogReader(LogReader):
                     text=user_prompt_text(typed),
                 ))
             # role=system (the prompt preamble) is not activity.
+        if out:
+            _record_stamp(seen_keys, floor)
         return out
 
     # ── marker binding ──────────────────────────────────────────────────────

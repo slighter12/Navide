@@ -58,7 +58,16 @@ def _descriptor(root, interpreter, commands):
         raise PermissionError('changed OpenCode credential declaration')
     names = tuple(dict.fromkeys(name for _, values in
         ast.literal_eval(switch['uncertain_env_by_scope']) for name in values))
-    key = ast.literal_eval(fields['key'])
+    if isinstance(fields['key'], ast.Attribute):
+        # eddddb7: `key=FACT.key` with a module-level `FACT = FACTS["opencode"]`; the key is the subscript literal.
+        fact = next((n.value for n in trees['vendor'].body if isinstance(n, ast.Assign)
+                     and any(isinstance(t, ast.Name) and t.id == 'FACT' for t in n.targets)), None)
+        if not (isinstance(fields['key'].value, ast.Name) and fields['key'].value.id == 'FACT' and fields['key'].attr == 'key'
+                and isinstance(fact, ast.Subscript) and isinstance(fact.value, ast.Name) and fact.value.id == 'FACTS'):
+            raise PermissionError('changed managed vendor key declaration')
+        key = ast.literal_eval(fact.slice)
+    else:
+        key = ast.literal_eval(fields['key'])
     if key != 'opencode':
         raise PermissionError('changed managed vendor')
     scope = {'Path': Path, 'sys': SimpleNamespace(executable=str(interpreter), frozen=False),
@@ -70,7 +79,7 @@ def _descriptor(root, interpreter, commands):
         if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name) and n.targets[0].id in {
                 'HELPER_FLAG', 'PORT_ENV', 'TOKEN_ENV'}:
             scope[n.targets[0].id] = ast.literal_eval(n.value)
-    definitions('builder', ('helper_argv', 'wrap_command'), scope)
+    definitions('builder', ('_script_words', 'helper_argv', 'wrap_command'), scope)
     start = next(n for n in ast.walk(trees['builder'])
                  if isinstance(n, ast.AsyncFunctionDef) and n.name == 'start')
     actor = SimpleNamespace(_timeout=ast.literal_eval(start.args.kw_defaults[0]),

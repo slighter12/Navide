@@ -170,10 +170,15 @@ export function checkReceipts({ dirs, release, harness, expectations, stubHashes
   return { ready, problems }
 }
 
+// `join` yields backslashes on Windows; the test directory is the receipt file's parent either way.
+export function receiptDirName(file) {
+  return file.split(/[\\/]/).slice(-2)[0]
+}
+
 function receipts(args) {
   const dirs = new Map()
   for (const file of findReceipts(args.root)) {
-    const dir = file.split('/').slice(-2)[0]
+    const dir = receiptDirName(file)
     const hashes = dirs.get(dir) ?? new Set()
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       if (!line.includes('"ready"')) continue

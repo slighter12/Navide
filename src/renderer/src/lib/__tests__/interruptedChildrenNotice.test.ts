@@ -49,3 +49,17 @@ describe('renderInterruptedChildrenNotice after a backend restart (H3)', () => {
     expect(renderInterruptedChildrenNotice(children)).toMatch(/worker-2[^\n]*仍是還原佔位/)
   })
 })
+
+describe('renderInterruptedChildrenNotice after an Agent CLI Runtime loss', () => {
+  it('names the runtime loss as the cause, never a backend restart or a crash loop', () => {
+    const children = [{ name: 'worker-1', resumed: true }, { name: 'worker-2', resumed: false }]
+    const out = renderInterruptedChildrenNotice(children, 'runtime-lost')
+    expect(out.startsWith(MSG_INTERRUPTED_PREFIX)).toBe(true)
+    expect(out).toContain('Navide 的 CLI runtime 中止時')
+    expect(out).not.toContain('後端')
+    expect(out).toMatch(/worker-1[^\n]*已接回/)
+    expect(out).toMatch(/worker-2[^\n]*未接回[^\n]*已結束/)
+    expect(out).not.toMatch(/worker-2[^\n]*反覆崩潰/)
+    expect(out).toContain('沒有自動續跑')
+  })
+})

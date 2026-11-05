@@ -1,0 +1,340 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_cursor_golden -- --ignored",
+  "legacy_source": {
+    "blob": "521db9b7df39446ebd18775c1657ee415e6045c9",
+    "path": "native/navide-cli-runtime/src/observe_cursor.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT/store.db",
+        "seen": [
+          "cursor_blob::2"
+        ]
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "activity: first sight of a store with history",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/c",
+            "dedup_key": "blob:a",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/store.db",
+            "session_id": "chat-1",
+            "text": "line one\nline two",
+            "timestamp": "2026-10-20T16:26:40+00:00",
+            "vendor": "cursor"
+          },
+          {
+            "cwd": "/work/c",
+            "dedup_key": "blob:b",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/store.db",
+            "session_id": "chat-1",
+            "text": "Reply ok",
+            "timestamp": "2026-10-20T16:26:40.001000+00:00",
+            "vendor": "cursor"
+          },
+          {
+            "cwd": "/work/c",
+            "dedup_key": "blob:c3",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/store.db",
+            "session_id": "chat-1",
+            "text": "at-pane:abcd1234-1111-4111-8111-111111111111 then work",
+            "timestamp": "2026-10-20T16:26:40.002000+00:00",
+            "vendor": "cursor"
+          },
+          {
+            "cwd": "/work/c",
+            "dedup_key": "blob:None",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/store.db",
+            "session_id": "chat-1",
+            "text": "null id",
+            "timestamp": "2026-10-20T16:26:40.003000+00:00",
+            "vendor": "cursor"
+          },
+          {
+            "cwd": "/work/c",
+            "dedup_key": "blob:g",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/store.db",
+            "session_id": "chat-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:40.004000+00:00",
+            "vendor": "cursor"
+          },
+          {
+            "cwd": "/work/c",
+            "dedup_key": "blob:f",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/store.db",
+            "session_id": "chat-1",
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n…\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "timestamp": "2026-10-20T16:26:40.005000+00:00",
+            "vendor": "cursor"
+          }
+        ],
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT/store.db",
+        "seen": [
+          "cursor_blob::14"
+        ]
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "activity: a pass of every kind of blob",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT/store.db",
+        "seen": [
+          "cursor_blob::14"
+        ]
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "activity: nothing new",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT/store.db",
+        "seen": [
+          "cursor_blob::1"
+        ]
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "activity: a shrunken store",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/c",
+            "dedup_key": "blob:next",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/store.db",
+            "session_id": "chat-1",
+            "text": "two",
+            "timestamp": "2026-10-20T16:26:40+00:00",
+            "vendor": "cursor"
+          }
+        ],
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT/store.db",
+        "seen": [
+          "cursor_blob::2"
+        ]
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "activity: one reply after the shrink",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {},
+        "mode": "usage",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT/store.db",
+        "seen": [
+          "kept"
+        ]
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "usage answers nothing",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {},
+        "mode": "session_usage",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT/store.db",
+        "seen": [
+          "kept"
+        ]
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "session_usage answers nothing",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "refused": "Cursor observation mode not integrated"
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "session": "chat-1"
+      },
+      "label": "has_session is refused",
+      "mode": "has_session",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {
+          "at-pane:one-marker": true,
+          "at-pane:two-marker": true
+        },
+        "mode": "identify",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT1/store.db",
+        "seen": []
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "markers": [
+          "at-pane:one-marker",
+          "at-pane:two-marker",
+          "at-pane:none",
+          ""
+        ],
+        "session": "chat-1"
+      },
+      "label": "identify: markers in a message and in raw bytes",
+      "mode": "identify",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {},
+        "mode": "identify",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT1/store.db",
+        "seen": []
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "markers": [],
+        "session": "chat-1"
+      },
+      "label": "identify: no markers",
+      "mode": "identify",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "markers": {},
+        "mode": "identify",
+        "parser": "rust-cursor-sqlite-v1",
+        "path": "$ROOT2/store.db",
+        "seen": []
+      },
+      "extra": {
+        "base_epoch": 1792513600.0,
+        "cwd": "/work/c",
+        "markers": [
+          "at-pane:beyond-the-bytes",
+          "at-pane:beyond-the-rows"
+        ],
+        "session": "chat-1"
+      },
+      "label": "identify: markers beyond the bounds",
+      "mode": "identify",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "cursor"
+}

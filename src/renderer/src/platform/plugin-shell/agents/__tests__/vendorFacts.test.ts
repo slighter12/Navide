@@ -1,6 +1,6 @@
 /**
  * The vendor specs read their launch facts from the generated declaration data
- * (`../_vendorFacts.ts`, generated from `shared/agent-cli/<key>.json`). These
+ * (`src/shared/vendorFacts.ts`, generated from `shared/agent-cli/<key>.json`). These
  * tests pin that every real CLI spec has a declaration and produces exactly the
  * arguments that declaration states, so a hand-written second copy cannot drift.
  */
@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CLI_AGENT_SPECS } from '../index'
-import { VENDOR_FACTS } from '../_vendorFacts'
+import { VENDOR_FACTS } from '../../../../../../shared/vendorFacts'
 
 describe('vendor declarations', () => {
   it('declares every real CLI spec and nothing else', () => {

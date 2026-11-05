@@ -18,5 +18,34 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "unknown",
     "login": "unknown"
+  },
+  "observer": {
+    "parser": "cursor",
+    "parser_id": "rust-cursor-sqlite-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "sqlite",
+      "usage": "none",
+      "store_file": "store.db",
+      "request": ["cwd", "session", "base_epoch"],
+      "usage_fields": null,
+      "store": {
+        "parent": null,
+        "marks": [{"table": "blobs", "id": "rowid", "key": "id", "payload": "data", "prefix": "blob:",
+                   "page": 512, "text_cap": 8000, "start": "newest_or_zero", "shrink": "newest"}],
+        "marker": {"text": "at-pane:", "on": "blobs", "within": {"rows": 512, "bytes": 262144}, "binding": "path_session"}
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity", "identify"],
+      "messages": {"unsupported_mode": "Cursor observation mode not integrated", "non_object": null},
+      "legacy_state": [{"prefix": "cursor_blob::", "field": "marks.blobs.last", "kind": "int"}],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "store"},
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

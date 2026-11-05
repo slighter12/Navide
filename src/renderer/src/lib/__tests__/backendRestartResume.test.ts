@@ -1,8 +1,45 @@
 import { describe, expect, it } from 'vitest'
-import { isRepeatCrash, planBackendRestartResume, type LostPane } from '../backendRestartResume'
+import { isRepeatCrash, planBackendRestartResume, planRuntimeLossResume, type LostPane } from '../backendRestartResume'
 
 const pane = (id: string, over: Partial<LostPane> = {}): LostPane =>
   ({ id, onScreen: false, working: false, canResume: true, ...over })
+
+describe('planRuntimeLossResume (Agent CLI Runtime died under a live backend)', () => {
+  const report = (id: string, over: Partial<Parameters<typeof planRuntimeLossResume>[0][number]> = {}) =>
+    ({ id, onScreen: false, wasWorking: false, canResume: true, ...over })
+
+  it('resumes an off-screen pane that was working when the runtime died', () => {
+    const plan = planRuntimeLossResume([report('w', { wasWorking: true })])
+    expect(plan).toEqual({ resume: ['w'], notResumed: [] })
+  })
+
+  it('leaves an idle off-screen pane ended and says why', () => {
+    const plan = planRuntimeLossResume([report('i')])
+    expect(plan).toEqual({ resume: [], notResumed: [{ id: 'i', reason: 'idle-off-screen' }] })
+  })
+
+  it('resumes every on-screen pane, working or not', () => {
+    const plan = planRuntimeLossResume([report('a', { onScreen: true }), report('b', { onScreen: true, wasWorking: true })])
+    expect(plan.resume).toEqual(['a', 'b'])
+  })
+
+  it('never calls it a crash loop: the backend restart counters do not apply', () => {
+    // The same panes in a backend crash loop resume nothing; a runtime loss has no such rule.
+    const lost = [report('v', { onScreen: true }), report('w', { wasWorking: true })]
+    expect(planRuntimeLossResume(lost).resume).toEqual(['v', 'w'])
+    expect(planRuntimeLossResume(lost).notResumed.some((row) => row.reason === 'crash-loop')).toBe(false)
+  })
+
+  it('keeps the off-screen cap and the no-conversation rule of the restart plan', () => {
+    const plan = planRuntimeLossResume([
+      ...Array.from({ length: 8 }, (_, i) => report(`w${i}`, { wasWorking: true })),
+      report('x', { wasWorking: true, canResume: false }),
+    ])
+    expect(plan.resume).toHaveLength(6)
+    expect(plan.notResumed).toContainEqual({ id: 'x', reason: 'no-session' })
+    expect(plan.notResumed.filter((row) => row.reason === 'over-limit')).toHaveLength(2)
+  })
+})
 
 describe('planBackendRestartResume (H3)', () => {
   it('resumes every on-screen pane, uncapped, exactly as before', () => {

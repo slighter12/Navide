@@ -1,5 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { closeDialogBodyKey, closeEndsTheRun, restoreBlockedByRun } from '../workspaceCloseRun'
+import { closeDialogBodyKey, closeEndsTheRun, closeRefusedOffline, restoreBlockedByRun } from '../workspaceCloseRun'
+
+describe('closeRefusedOffline', () => {
+  it('refuses a workspace that holds panes to retire while the backend is down', () => {
+    expect(closeRefusedOffline({ connected: false, panesToRetire: 1 })).toBe(true)
+    expect(closeRefusedOffline({ connected: false, panesToRetire: 4 })).toBe(true)
+  })
+
+  it('lets an empty workspace close while offline: there is no terminal to prove', () => {
+    expect(closeRefusedOffline({ connected: false, panesToRetire: 0 })).toBe(false)
+  })
+
+  it('never refuses a close while the backend is connected', () => {
+    expect(closeRefusedOffline({ connected: true, panesToRetire: 3 })).toBe(false)
+    expect(closeRefusedOffline({ connected: true, panesToRetire: 0 })).toBe(false)
+  })
+})
 
 const A = '/Users/x/projects/alpha'
 const B = '/Users/x/projects/beta'

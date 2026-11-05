@@ -95,7 +95,7 @@ def test_rust_observer_roster_equals_registry_minus_preservation(tmp_path, peer)
     path.write_text("{}\n", encoding="utf-8")
     observed = set()
     for key in VENDORS:
-        document, _anchor, final = peer.observe(key, path, "usage", checkpoint={}, allow_error=True)
+        document, final = peer.observe(key, path, "usage", checkpoint={}, allow_error=True)
         if document is not None or "observer not integrated" not in str(final.meta):
             observed.add(key)
     assert observed == {key for key, spec in VENDORS.items() if spec.make_log_reader}
@@ -105,7 +105,7 @@ def test_rust_observer_roster_equals_registry_minus_preservation(tmp_path, peer)
 def test_mcode_answers_observer_not_integrated(tmp_path, peer):
     path = tmp_path / "session.jsonl"
     path.write_text("{}\n", encoding="utf-8")
-    document, _anchor, final = peer.observe("mcode", path, "usage", checkpoint={}, allow_error=True)
+    document, final = peer.observe("mcode", path, "usage", checkpoint={}, allow_error=True)
     assert document is None and "observer not integrated" in str(final.meta)
 
 
@@ -113,15 +113,19 @@ def test_mcode_answers_observer_not_integrated(tmp_path, peer):
 @pytest.mark.parametrize("vendor", PORTED)
 def test_sidecar_observes_each_ported_vendor(vendor, tmp_path, monkeypatch, set_home, peer):
     """At the base commit this is the answer `observer not integrated`; after the port, the vendor's own parser."""
+    # A vendor on the core answers the modes its declaration lists; Droid's usage is the replay of its totals (`session_usage`), with the
+    # base reader's legacy cursor, so it lists no `usage` mode (t36b).
+    core = facts.FACTS[vendor].observer.core
+    mode = "session_usage" if "usage" not in {str(m.value) for m in core.modes} else "usage"
     data = VendorData(vendor, tmp_path / "data", monkeypatch, set_home)
     try:
         data.apply("initial")
-        document, _anchor, final = peer.observe(vendor, data.path, "usage", checkpoint={}, allow_error=True)
+        document, final = peer.observe(vendor, data.path, mode, checkpoint={}, allow_error=True)
     finally:
         data.close()
     assert document is not None, final.meta
     assert document["parser"].startswith(f"rust-{vendor}-") and document["parser"].endswith("-v1"), document["parser"]
-    assert document["mode"] == "usage" and "checkpoint" in document
+    assert document["mode"] == mode and "checkpoint" in document
 
 
 # --------------------------------------------------------------------------------- the principal seam
@@ -218,7 +222,131 @@ async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: Vendor
     return backend.events
 
 
-def _durable(root: Path, workspace: Path, path: Path) -> dict:
+def _legacy_form(keys: list[str], vendor: str) -> list[str]:
+    """The Python reader keeps its state as sentinel keys; the native one keeps the same state as one typed entry. Both
+    are compared in the sentinel spelling, which the vendor's own declaration (`core.legacy_state`, the table the native
+    codec reads old bags with) maps the typed fields back to."""
+    core = facts.FACTS[vendor].observer.core
+    out: list[str] = []
+    for key in keys:
+        if not key.startswith("native_state::"):
+            # A flat object the baseline spelled in its insertion order is compared with its members sorted, as the typed state spells it.
+            rule = next((rule for rule in core.legacy_state if rule.kind == "json" and key.startswith(rule.prefix)), None)
+            out.append(f"{rule.prefix}{json.dumps(json.loads(key[len(rule.prefix):]), separators=(',', ':'), sort_keys=True)}" if rule else key)
+            continue
+        state = json.loads(key.split("::", 2)[2])
+        before = len(out)
+        mapped: list[str] = []
+        for rule in core.legacy_state:
+            mapped.append(rule.field)
+            value = state
+            for name in rule.field.split("."):
+                value = value.get(name) if isinstance(value, dict) else None
+            if value is None or (rule.kind != "signed" and not value):  # a signed mark's 0 is a position, not an absence
+                continue
+            if rule.kind == "pair":
+                out.append(f"{rule.prefix}in={value['input']},out={value['output']}")
+            elif rule.kind == "colon_pair":
+                out.append(f"{rule.prefix}{value['input']}:{value['output']}")
+            elif rule.kind == "json":  # a flat object in Python's compact spelling; the members sorted (the core's order)
+                out.append(f"{rule.prefix}{json.dumps(value, separators=(',', ':'), sort_keys=True)}")
+            elif rule.kind == "json_text":  # a text spelled as a JSON string literal
+                out.append(f"{rule.prefix}{json.dumps(value)}")
+            elif rule.kind == "byte_cursor":  # the Python tail reader's cursor in its own spelling
+                out.append(f"{rule.prefix}{json.dumps({**value, 'kind': 'jsonl'}, sort_keys=True)}")
+            elif rule.kind == "set":  # the baseline's spelling of a set of ids: a JSON list, `", "`-separated
+                out.append(f"{rule.prefix}[{', '.join(str(item) for item in sorted(value))}]")
+            else:  # `int`, `signed` and `text` are the value's own spelling
+                out.append(f"{rule.prefix}{value}")
+        stamp_floors = _stamp_floors(vendor)
+        unmapped = [leaf for leaf in _non_default_leaves(state)
+                    if leaf.split(".")[0] not in _native_only(vendor) and leaf not in stamp_floors and not any(leaf == field or leaf.startswith(f"{field}.") for field in mapped)]
+        assert not unmapped, f"{vendor}: native state fields with no legacy spelling would be compared as nothing: {unmapped}"
+        if vendor == "cursor":
+            # The one duplicate W1 creates (`cursor.py` `_record_stamp`): the Python reader leaves its position as `cursor_blob::N` AND inside
+            # the entry that carries the stamp floor. The entry's expansion equal to a literal sibling key of the same bag is that one mark.
+            out[before:] = [item for item in out[before:] if not (item.startswith("cursor_blob::") and item in keys)]
+    return out
+
+
+#: The state the native reader keeps and the Python reader has no key for at all (it re-reads from a byte offset instead).
+NATIVE_ONLY = {"position"}
+
+
+def _native_only(vendor: str) -> set[str]:
+    """Grok's activity cursor was a byte offset in a `grok_act::` key of the bag (Python-only, dropped from both sides below); the core
+    keeps a position and a high-water mark instead, so the mark has no legacy spelling (a named difference of t36b). Aider's walk is
+    spelled `aider_walk::` and dropped from the native side alongside `grok_act::` (the baseline recomputed it from the first line at every
+    pass)."""
+    return NATIVE_ONLY | ({"water"} if vendor == "grok" else set())
+
+
+def _stamp_floors(vendor: str) -> set[str]:
+    """`marks.<table>.stamped`: the last stamp a walk gave an event, for a store that holds no time (Cursor's blobs). The baseline restarted
+    its 1 ms offset at every call (`cursor.py:447-455`); the core keeps a floor so a stamp is never at or before one already given (t36k V1,
+    a named difference), and the Python reader now does the same (t36b W1). Only the walks of a layout that asks for the store's clock
+    (`request` has `base_epoch`) have one; the walk is the table of a declared position (`marks.<table>.last`). Its strict increase is proven
+    in `test_cli_runtime_drain.py`, not here."""
+    observer = facts.FACTS[vendor].observer
+    if not any("base_epoch" in layout.request for layout in observer.layouts):
+        return set()
+    return {f"{rule.field.removesuffix('.last')}.stamped" for rule in observer.core.legacy_state if rule.field.startswith("marks.") and rule.field.endswith(".last")}
+
+
+def _non_default_leaves(node, path: tuple[str, ...] = ()):
+    """The dotted paths of every value in a typed state that is not its type's default."""
+    if isinstance(node, dict) and node:
+        for name, child in node.items():
+            yield from _non_default_leaves(child, (*path, name))
+    elif node not in (0, "", None, [], {}) and path:
+        yield ".".join(path)
+
+
+def _entry(state: dict) -> str:
+    return "native_state::p::" + json.dumps(state)
+
+
+def test_the_sentinel_spelling_maps_every_declared_kind_and_refuses_a_field_it_cannot_spell():
+    state = {"water": 3, "last_text": "hello", "totals": {"input": 5, "output": 2}, "position": {"line": 9}}
+    assert _legacy_form([_entry(state), "k"], "codex") == ["act_hw::3", "__lasttext__:hello", "__cum__:in=5,out=2", "k"]
+    assert _legacy_form([_entry({"water": 0, "last_text": "", "totals": None})], "codex") == []
+    assert _legacy_form([_entry({"marks": {"part": {"last": 7, "pending": []}}})], "opencode") == ["opencode_part::7"]
+    steps = {"marks": {"steps": {"last": 0, "pending": [5, 2]}}}
+    assert _legacy_form([_entry(steps)], "antigravity") == ["agy_idx::0", "agy_pending::[2, 5]"], "a signed 0 is spelled, a set is sorted"
+    with pytest.raises(AssertionError, match="no legacy spelling"):
+        _legacy_form([_entry({"water": 3, "marks": {"part": {"last": 1}}})], "codex")
+    assert _legacy_form([_entry({"last_text": 'say "hi"'})], "grok") == ['grok_text::"say \\"hi\\""'], "a text spelled as a JSON string literal"
+    assert _legacy_form([_entry({"legacy_cursor": {"offset": 8, "identity": "1:2", "anchor": "ab"}})], "grok") == [
+        'grok_act::{"anchor": "ab", "identity": "1:2", "kind": "jsonl", "offset": 8}'], "the Python tail reader's byte cursor in its own spelling"
+    assert _legacy_form([_entry({"marks": {"blobs": {"last": 4, "pending": [], "stamped": 1786844146562000}}})], "cursor") == ["cursor_blob::4"], (
+        "the stamp floor is native-only state: named, and the legacy spelling of the walk's position is unchanged")
+
+
+def test_only_the_one_duplicate_the_cursor_reader_creates_is_collapsed():
+    """The Cursor bag spells its position twice by W1's design (the entry's `marks.blobs.last` and the literal `cursor_blob::N`): one mark.
+    Any other duplicate stays a duplicate and fails the comparison: another position, another vendor, the literal twice."""
+    entry = _entry({"marks": {"blobs": {"last": 4, "stamped": 1786844146562000}}})
+    assert _legacy_form([entry, "cursor_blob::4"], "cursor") == ["cursor_blob::4"]
+    assert _legacy_form([entry, "cursor_blob::5"], "cursor") == ["cursor_blob::4", "cursor_blob::5"], "a different position is not the same mark"
+    assert _legacy_form(["cursor_blob::4", "cursor_blob::4"], "cursor") == ["cursor_blob::4", "cursor_blob::4"], "the literal key twice is a defect"
+    assert _legacy_form([_entry({"water": 3}), "act_hw::3"], "codex") == ["act_hw::3", "act_hw::3"], "no other vendor collapses"
+
+
+def test_the_stamp_floor_is_exempt_only_where_the_layout_declares_a_stamp_clock():
+    """W2 (t36b, A2 and B2 of the t36k checkpoint): only `marks.<table>.stamped` of a walk whose layout asks for the store's clock
+    (`request` has `base_epoch`: Cursor's `marks.blobs`) is native-only state. A `stamped` leaf anywhere else is a field with no
+    legacy spelling, like any other."""
+    stamped = {"marks": {"blobs": {"last": 4, "stamped": 1786844146562000}}}
+    assert _legacy_form([_entry(stamped)], "cursor") == ["cursor_blob::4"]
+    for vendor, state in (("cursor", {"marks": {"blobs": {"last": 4}, "other": {"stamped": 5}}}),
+                          ("cursor", {"marks": {"blobs": {"last": 4}}, "adapter": {"stamped": 5}}),
+                          ("opencode", {"marks": {"part": {"last": 1, "stamped": 5}}}),
+                          ("codex", {"water": 3, "adapter": {"stamped": 5}})):
+        with pytest.raises(AssertionError, match="no legacy spelling"):
+            _legacy_form([_entry(state)], vendor)
+
+
+def _durable(root: Path, workspace: Path, path: Path, vendor: str) -> dict:
     from agent_team_backend.db import Database
     from agent_team_backend.tokens_store import TokensStore
     database = Database(root / "data" / "navide.db")
@@ -233,8 +361,17 @@ def _durable(root: Path, workspace: Path, path: Path) -> dict:
         """Drop `dev:ino`, which differs between the two runs' files: the `identity` key of a checkpoint and the
         `"identity": "<dev>:<ino>"` a vendor embeds in a sentinel string of the activity bag."""
         masked = {key: value for key, value in (mark or {}).items() if key != "identity"}
+        if "legacy_seen" in masked:
+            # Droid's named difference (t36b): the baseline kept every event key (`usage::<session>::<in>::<out>`) for good next to its
+            # `droid_tok::` mark; the core keeps the total the mark holds (a typed `totals`), and an event key only ever guarded a total
+            # already marked. The keys of the typed entry are compared in the sentinel spelling like the activity bag's.
+            masked["legacy_seen"] = sorted(key for key in _legacy_form(masked["legacy_seen"], vendor)
+                                           if not (vendor == "droid" and key.startswith("usage::")))
         if "keys" in masked:
-            masked["keys"] = [re.sub(r'"identity": "\d+:\d+"', '"identity": "-"', key) for key in masked["keys"]]
+            # Grok's named difference (t36b): the baseline's activity cursor was the `grok_act::` key; the core keeps a position instead.
+            masked["keys"] = [re.sub(r'"identity": "\d+:\d+"', '"identity": "-"', key)
+                              for key in _legacy_form(masked["keys"], vendor)
+                              if not (vendor == "grok" and key.startswith("grok_act::")) and not (vendor == "aider" and key.startswith("aider_walk::"))]
         return masked
     return {"usage_checkpoint": strip(usage), "activity_checkpoint": strip(activity),
             "totals": {key: totals[key] for key in ("input", "output") if key in totals}}
@@ -261,7 +398,7 @@ async def _scenario(root: Path, runtime: str, vendor: str, monkeypatch, set_home
         window = ((marks["marker_start"], marks["marker_end"]) if "marker_start" in marks
                   else (first_stage_rows + second["marker_start"], first_stage_rows + second["marker_end"]))
         path = data.path.resolve()
-        return {"stream": _stream(events), "marker_window": window, "durable": _durable(root, data.workspace, path),
+        return {"stream": _stream(events), "marker_window": window, "durable": _durable(root, data.workspace, path, vendor),
                 "receipts": _receipts(root), "path": path, "expected": data.fixture["expected"]}
     finally:
         data.close()
@@ -334,7 +471,39 @@ async def test_rust_selected_run_equals_python_selected_run(vendor, tmp_path, mo
         foreign = [(index, row["pane_id"]) for index, (kind, row) in enumerate(run["stream"])
                    if index < first and kind == "agent.activity" and row["pane_id"] not in (None, "", PANE)]
         assert not foreign, f"{name}: activity before the session binding with another pane: {foreign}"
-    assert rust["durable"] == python["durable"], "persisted totals or checkpoints differ after the restart"
+    assert _keys_as_a_set(_compat_exception_without_core_cursor_extras(rust["durable"], python["durable"])) == _keys_as_a_set(python["durable"]), \
+        "persisted totals or checkpoints differ after the restart"
+
+
+def _keys_as_a_set(durable: dict) -> dict:
+    """The activity checkpoint's sentinel keys are independent marks (a set), so both sides are compared with the keys sorted.
+    Both runs persist a sorted list: the order difference is not in what the readers write. It comes from this file's own
+    `_legacy_form`, which expands the native run's single `native_state::` entry in the order the declaration lists its
+    `legacy_state` rules (Copilot: the line mark, the usage mark, the turn mark), while the Python run's keys sit where the
+    reader sorted them."""
+    mark = dict(durable["activity_checkpoint"] or {})
+    if "keys" in mark:
+        mark["keys"] = sorted(mark["keys"])
+    return {**durable, "activity_checkpoint": mark}
+
+
+def _compat_exception_without_core_cursor_extras(rust: dict, python: dict) -> dict:
+    """COMPAT EXCEPTION (the one mask on the Python sink; the Rust side compares complete documents against goldens).
+    The core's row cursor also keeps the fingerprint of the row it stopped at (`anchor`, which re-anchors a replaced
+    store) and the ids it is still waiting on (`pending`); a Python reader whose baseline kept neither (Goose) has no key to
+    compare them with. That is a documented difference; the position and everything else stay compared exactly, and a
+    non-empty `pending` is never dropped."""
+    mine, theirs = dict(rust["usage_checkpoint"]), python["usage_checkpoint"]
+    if mine.get("kind") in ("jsonl", "aider-md") and "recent_keys" not in theirs:
+        # A log whose usage records name themselves by their place (Kimi's offsets) is never seen twice: the baseline kept no window of
+        # recent keys, and the core's cursor keeps its own (t36b, a named difference of the per-turn scan).
+        mine.pop("recent_keys", None)
+    if mine.get("kind") == "sqlite":
+        if "anchor" not in theirs:
+            mine.pop("anchor", None)
+        if "pending" not in theirs and mine.get("pending") == []:
+            mine.pop("pending")
+    return {**rust, "usage_checkpoint": mine}
 
 
 # ---------------------------------------- re-wake / message, interrupt and login exclusion, per ported vendor
@@ -463,7 +632,7 @@ def test_copilot_events_cwd_is_resolved_by_python_and_agrees_in_rust(tmp_path, m
     baseline = reader.parse_session_file(events, set())
     assert [(usage.input_tokens, usage.output_tokens, usage.cwd) for usage in baseline] == [(12, 3, COPILOT_CWD)]
 
-    document, _anchor, final = peer.observe("copilot", events, "usage", checkpoint={}, cwd=resolved, allow_error=True)
+    document, final = peer.observe("copilot", events, "usage", checkpoint={}, cwd=resolved, allow_error=True)
     assert document is not None, final.meta
     assert [(event["input_tokens"], event["output_tokens"], event["cwd"]) for event in document["events"]] == [
         (12, 3, COPILOT_CWD)]
@@ -498,24 +667,24 @@ def test_copilot_unreadable_store_warns_once_in_python_and_in_the_native_path(tm
 
     documents = {}
     for mode in ("usage", "activity"):
-        document, _anchor, final = peer.observe("copilot", db, mode, checkpoint={}, seen=[], allow_error=True)
+        document, final = peer.observe("copilot", db, mode, checkpoint={}, seen=[], allow_error=True)
         assert document is not None, final.meta
         assert document["events"] == [] and document["error"], document
         documents[mode] = document
 
-    from agent_team_backend import cli_runtime_sqlite
-    from agent_team_backend.cli_runtime_sqlite import NativeCopilotReader
+    from agent_team_backend import cli_runtime_native
 
-    def answer(_vendor, _parser, _path, mode, **_kwargs):
+    def answer(_vendor, _path, mode, **_kwargs):
         return documents[mode]
 
-    monkeypatch.setattr(cli_runtime_sqlite, "observe", answer)
+    monkeypatch.setattr(cli_runtime_native, "observe_core", answer)
+    native = cli_runtime_native.native_reader(CopilotLogReader, "copilot")
     _reset_db_warning()
     with caplog.at_level(logging.WARNING, logger="agent_team_backend.log_readers.copilot"):
-        cycles(NativeCopilotReader(), 3)
+        cycles(native(), 3)
         assert len(warnings()) == 1 and "session-store" in warnings()[0].getMessage()
         _reset_db_warning()
-        cycles(NativeCopilotReader(), 1)
+        cycles(native(), 1)
     assert len(warnings()) == 2
 
 
@@ -530,6 +699,6 @@ def test_a_half_built_copilot_store_is_reported_as_an_error(mode, tmp_path, peer
     with sqlite3.connect(db) as connection:
         connection.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY)")
     connection.close()
-    document, _anchor, final = peer.observe("copilot", db, mode, checkpoint={}, seen=[], allow_error=True)
+    document, final = peer.observe("copilot", db, mode, checkpoint={}, seen=[], allow_error=True)
     assert document is not None, final.meta
     assert document["events"] == [] and "sqlite error 1" in document["error"], document

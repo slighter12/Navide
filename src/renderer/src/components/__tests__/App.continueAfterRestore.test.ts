@@ -75,7 +75,7 @@ describe('the flag lifecycle', () => {
   it('is lit for a pane the backend outage rebuilt behind the user', () => {
     // Same interruption, different cause: the PTY died mid-work and the pane was
     // resumed without anyone asking, so it too comes back parked.
-    const body = fn('flushPtyLostResumes')
+    const body = fn('resumeLostPanes')
     expect(body).toContain('offerContinue: true')
   })
 
@@ -92,7 +92,7 @@ describe('the flag lifecycle', () => {
     )
     expect(calls.length).toBeGreaterThan(2)
     expect(calls.filter((c) => c.includes('offerContinue'))).toHaveLength(3)
-    expect(fn('flushPtyLostResumes')).toContain('offerContinue: true')
+    expect(fn('resumeLostPanes')).toContain('offerContinue: true')
     expect(fn('quotaRestartPane')).toContain('offerContinue: true')
   })
 

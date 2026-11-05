@@ -19,7 +19,7 @@ esac
   exit 1
 }
 
-for command in node pnpm uv; do
+for command in node pnpm uv cargo; do
   command -v "$command" >/dev/null || {
     echo "ERROR: required command not found: $command" >&2
     exit 1
@@ -55,6 +55,10 @@ CSC_IDENTITY_AUTO_DISCOVERY=false \
 }
 [[ -x "$APP_PATH/Contents/Resources/bin/agent_team_backend" ]] || {
   echo "ERROR: packaged backend executable not found" >&2
+  exit 1
+}
+[[ -x "$APP_PATH/Contents/Resources/bin/navide-cli-runtime" ]] || {
+  echo "ERROR: packaged CLI runtime executable not found" >&2
   exit 1
 }
 

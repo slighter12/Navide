@@ -957,6 +957,8 @@
       "backend-reconnecting": "Backend getrennt – Verbindung wird wiederhergestellt. Die Eingabe ist pausiert.",
       "backend-restarting": "Backend abgestürzt – Neustart ({attempt}/{max}). Die Eingabe ist pausiert.",
       "backend-unavailable": "Backend nicht verfügbar – die Eingabe ist pausiert, bis es neu gestartet wird.",
+      "runtime-session-resumed": "{count} Session nach dem Ausfall der CLI-Runtime fortgesetzt | {count} Sessions nach dem Ausfall der CLI-Runtime fortgesetzt",
+      "runtime-session-resume-failed": "{count} Session konnte nach dem Ausfall der CLI-Runtime nicht fortgesetzt werden – verwenden Sie „Neu aufbauen“ für einen erneuten Versuch | {count} Sessions konnten nach dem Ausfall der CLI-Runtime nicht fortgesetzt werden – verwenden Sie „Neu aufbauen“ für einen erneuten Versuch",
       "session-resumed": "{count} Session nach dem Backend-Neustart fortgesetzt | {count} Sessions nach dem Backend-Neustart fortgesetzt",
       "session-resume-failed": "{count} Session konnte nach dem Backend-Neustart nicht fortgesetzt werden – verwenden Sie „Neu aufbauen“ für einen erneuten Versuch | {count} Sessions konnten nach dem Backend-Neustart nicht fortgesetzt werden – verwenden Sie „Neu aufbauen“ für einen erneuten Versuch",
       "option-select-hint": "Diese CLI fängt die Maus ab – halten Sie beim Ziehen {key} gedrückt, um Text auszuwählen",
@@ -985,6 +987,9 @@
       "rebuild-in-progress": "Neuaufbau läuft bereits",
       "rebuild-not-resumable": "Session auf dem Datenträger nicht gefunden – Neuaufbau per Fortsetzen nicht möglich",
       "rebuild-probe-failed": "Die Session konnte nicht überprüft werden – der Dienst antwortet nicht, versuchen Sie es erneut",
+      "close-offline": "Dieser Bereich kann nicht geschlossen werden, solange das Backend getrennt ist – versuchen Sie es nach der Wiederverbindung erneut",
+      "close-workspace-offline": "Dieser Arbeitsbereich kann nicht geschlossen werden, solange das Backend getrennt ist – versuchen Sie es nach der Wiederverbindung erneut",
+      "close-unverified": "Es konnte nicht bestätigt werden, dass die Session beendet wurde, daher bleibt der Bereich erhalten – versuchen Sie, ihn erneut zu schließen",
       "rebuild-running-confirm-title": "CLI läuft",
       "rebuild-running-confirm-body": "Der Neuaufbau unterbricht die laufende Runde und gibt die Unterhaltung neu aus. Trotzdem neu aufbauen?",
       "rebuild-running-confirm-body-batch": "{count} CLI läuft – der Neuaufbau unterbricht ihre laufende Runde und gibt die Unterhaltung neu aus. Trotzdem neu aufbauen? | {count} CLIs laufen – der Neuaufbau unterbricht ihre laufenden Runden und gibt die Unterhaltungen neu aus. Trotzdem neu aufbauen?",
@@ -9432,6 +9437,10 @@
         "no-session": "{name}: nicht wiederaufgenommen, weil es keine gespeicherte Unterhaltung zum Fortsetzen gibt",
         "failed": "{name}: konnte nicht wiederaufgenommen werden"
       }
+    },
+    "runtime-lost": {
+      "title": "CLI-Runtime um {time} ausgefallen",
+      "note": "Wiederaufgenommene Bereiche halten an der Eingabeaufforderung und machen nicht von selbst weiter; beendete Bereiche bleiben, wie sie sind, bis Sie sie neu aufbauen."
     },
     "scheduler-disabled": "Geplanter Auftrag „{name}“ wurde deaktiviert: Sein Zielbereich existiert nicht mehr",
     "scheduler-disabled-note": "Sein Zielbereich wurde {n}-mal hintereinander nicht gefunden, daher wurde der Auftrag deaktiviert. Verwenden Sie im Zeitplan-Panel „Neu binden“, um ihn auf einen aktiven Bereich zu richten, und aktivieren Sie ihn dann wieder.",

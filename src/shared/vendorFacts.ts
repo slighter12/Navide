@@ -213,5 +213,2007 @@ export const VENDOR_FACTS = {
   }
 } as const
 
+/** How each vendor's session log is observed (null where none is). */
+export const OBSERVER_FACTS = {
+  "aider": {
+    "parser": "aider",
+    "parser_id": "rust-aider-md-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "text",
+        "usage": "per_turn",
+        "store_file": null,
+        "request": [
+          "cwd",
+          "namespace"
+        ],
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/kind",
+              "equals": "tokens"
+            }
+          ],
+          "object": null,
+          "input": [
+            "/input"
+          ],
+          "output": [
+            "/output"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": null,
+          "version": null,
+          "timestamp": "/timestamp",
+          "number": "lenient",
+          "text": "string",
+          "session": "/session",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": false,
+          "non_object_fails": false,
+          "activity_non_object_fails": false,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Aider observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "aider_text::",
+          "field": "last_text",
+          "kind": "text"
+        },
+        {
+          "prefix": "aider_walk::",
+          "field": "adapter",
+          "kind": "json"
+        }
+      ],
+      "python": {
+        "prompt_detail": "prompt",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "antigravity": {
+    "parser": "antigravity",
+    "parser_id": "rust-antigravity-sqlite-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "sqlite",
+        "usage": "none",
+        "store_file": null,
+        "request": [
+          "cwd",
+          "session"
+        ],
+        "usage_fields": null,
+        "store": {
+          "parent": null,
+          "marks": [
+            {
+              "table": "steps",
+              "id": "idx",
+              "key": "idx",
+              "payload": "step_payload",
+              "columns": [
+                "step_type",
+                "status",
+                "metadata"
+              ],
+              "prefix": "step:",
+              "key_scope": "session",
+              "start": "newest",
+              "pending_max_age": {
+                "pointer": null,
+                "unit": "seconds",
+                "seconds": 86400
+              },
+              "shrink": "keep",
+              "page": 256,
+              "text_cap": null,
+              "reply_from": null,
+              "after": null,
+              "group": null,
+              "owner": null,
+              "stamp": null
+            }
+          ],
+          "marker": null,
+          "rows": null,
+          "row_prefix": null
+        },
+        "rules": null,
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Antigravity observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "agy_idx::",
+          "field": "marks.steps.last",
+          "kind": "signed"
+        },
+        {
+          "prefix": "agy_pending::",
+          "field": "marks.steps.pending",
+          "kind": "set"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "claude": {
+    "parser": "claude",
+    "parser_id": "rust-claude-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "per_turn",
+        "store_file": null,
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/type",
+              "equals": "assistant"
+            }
+          ],
+          "object": "/message/usage",
+          "input": [
+            "/message/usage/input_tokens"
+          ],
+          "output": [
+            "/message/usage/output_tokens"
+          ],
+          "cache_read": [
+            "/message/usage/cache_read_input_tokens"
+          ],
+          "cache_creation": [
+            "/message/usage/cache_creation_input_tokens"
+          ],
+          "key": [
+            "/message/id",
+            "/requestId"
+          ],
+          "key_join": "::",
+          "model": "/message/model",
+          "version": "/version",
+          "timestamp": "/timestamp",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": true,
+          "non_object_fails": true,
+          "activity_non_object_fails": true,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "request": [],
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity",
+        "turns"
+      ],
+      "messages": {
+        "unsupported_mode": "invalid observation mode",
+        "non_object": "Claude record is not an object"
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "file_stem",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "codex": {
+    "parser": "codex",
+    "parser_id": "rust-codex-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "cumulative",
+        "store_file": null,
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/type",
+              "equals": "event_msg"
+            },
+            {
+              "pointer": "/payload/type",
+              "equals": "token_count"
+            }
+          ],
+          "object": "/payload/info/total_token_usage",
+          "input": [
+            "/payload/info/total_token_usage/input_tokens",
+            "/payload/info/total_token_usage/cached_input_tokens"
+          ],
+          "output": [
+            "/payload/info/total_token_usage/output_tokens",
+            "/payload/info/total_token_usage/reasoning_output_tokens"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": null,
+          "version": null,
+          "timestamp": "/timestamp",
+          "number": "strict",
+          "text": "string",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": false,
+          "invalid_utf8_fails": false,
+          "non_object_fails": false,
+          "activity_non_object_fails": true,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "request": [],
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity",
+        "identify"
+      ],
+      "messages": {
+        "unsupported_mode": "Codex observation mode not integrated",
+        "non_object": "Codex record is not an object"
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "__lasttext__:",
+          "field": "last_text",
+          "kind": "text"
+        },
+        {
+          "prefix": "__cum__:",
+          "field": "totals",
+          "kind": "pair"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user_message",
+        "pane_scope": "home_dir",
+        "attribution": "none",
+        "identity_source": "header"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": true,
+        "store_error_reported": false
+      }
+    }
+  },
+  "copilot": {
+    "parser": "copilot",
+    "parser_id": "rust-copilot-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "sqlite",
+        "usage": "per_turn",
+        "store_file": "session-store.db",
+        "usage_fields": {
+          "select": [],
+          "object": null,
+          "input": [
+            "/input_tokens"
+          ],
+          "output": [
+            "/output_tokens"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/model",
+          "version": null,
+          "timestamp": "/created_at",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": {
+          "rows": {
+            "table": "assistant_usage_events",
+            "id": "id",
+            "key": "id",
+            "group": "session_id",
+            "columns": [
+              "model",
+              "input_tokens",
+              "output_tokens",
+              "created_at"
+            ],
+            "anchor": [
+              "session_id",
+              "model",
+              "input_tokens",
+              "output_tokens",
+              "created_at"
+            ],
+            "payload": null,
+            "pending_until": null,
+            "pending_max_age": null,
+            "cursor_tag": null,
+            "raw_id": null
+          },
+          "parent": {
+            "table": "sessions",
+            "key": "id",
+            "dir": "cwd",
+            "join": "left",
+            "up": null,
+            "version": null,
+            "columns": [],
+            "top": null,
+            "dir_form": "as_stored"
+          },
+          "marks": [
+            {
+              "table": "assistant_usage_events",
+              "id": "id",
+              "group": "session_id",
+              "columns": [
+                "created_at"
+              ],
+              "prefix": "db_act:usage:",
+              "start": "oldest",
+              "shrink": "oldest",
+              "key": null,
+              "pending_max_age": null,
+              "key_scope": "none",
+              "page": 256,
+              "text_cap": null,
+              "reply_from": null,
+              "after": null,
+              "owner": null,
+              "payload": null,
+              "stamp": null
+            },
+            {
+              "table": "turns",
+              "id": "id",
+              "group": "session_id",
+              "columns": [
+                "user_message",
+                "assistant_response",
+                "timestamp"
+              ],
+              "prefix": "db_act:turn:",
+              "start": "oldest",
+              "shrink": "oldest",
+              "after": "assistant_usage_events",
+              "key": null,
+              "pending_max_age": null,
+              "key_scope": "none",
+              "page": 256,
+              "text_cap": null,
+              "reply_from": null,
+              "owner": null,
+              "payload": null,
+              "stamp": null
+            }
+          ],
+          "row_prefix": "copilot_usage::",
+          "marker": null
+        },
+        "rules": null,
+        "defers_to": null,
+        "request": [],
+        "applies_when": []
+      },
+      {
+        "source": "jsonl",
+        "usage": "cumulative",
+        "store_file": "events.jsonl",
+        "request": [
+          "cwd",
+          "session"
+        ],
+        "usage_fields": {
+          "select": [],
+          "object": "/data/tokenDetails",
+          "input": [
+            "/data/tokenDetails/input/tokenCount",
+            "/data/tokenDetails/cache_read/tokenCount",
+            "/data/tokenDetails/cache_write/tokenCount"
+          ],
+          "output": [
+            "/data/tokenDetails/output/tokenCount"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": null,
+          "version": null,
+          "timestamp": "/timestamp",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": false,
+          "non_object_fails": false,
+          "activity_non_object_fails": false,
+          "totals_never_decrease": true,
+          "water_survives_replacement": true
+        },
+        "defers_to": {
+          "file": "session-store.db",
+          "up": 3
+        },
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Copilot observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "__lasttext__:",
+          "field": "last_text",
+          "kind": "text"
+        },
+        {
+          "prefix": "__cum__:",
+          "field": "totals",
+          "kind": "pair"
+        },
+        {
+          "prefix": "db_act_hw::usage:",
+          "field": "marks.assistant_usage_events.last",
+          "kind": "int"
+        },
+        {
+          "prefix": "db_act_hw::turn:",
+          "field": "marks.turns.last",
+          "kind": "int"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": true
+      }
+    }
+  },
+  "cursor": {
+    "parser": "cursor",
+    "parser_id": "rust-cursor-sqlite-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "sqlite",
+        "usage": "none",
+        "store_file": "store.db",
+        "request": [
+          "cwd",
+          "session",
+          "base_epoch"
+        ],
+        "usage_fields": null,
+        "store": {
+          "parent": null,
+          "marks": [
+            {
+              "table": "blobs",
+              "id": "rowid",
+              "key": "id",
+              "payload": "data",
+              "prefix": "blob:",
+              "page": 512,
+              "text_cap": 8000,
+              "start": "newest_or_zero",
+              "shrink": "newest",
+              "columns": [],
+              "pending_max_age": null,
+              "key_scope": "none",
+              "reply_from": null,
+              "after": null,
+              "group": null,
+              "owner": null,
+              "stamp": null
+            }
+          ],
+          "marker": {
+            "text": "at-pane:",
+            "on": "blobs",
+            "within": {
+              "rows": 512,
+              "bytes": 262144
+            },
+            "binding": "path_session",
+            "role": null,
+            "order_by_stamp": false,
+            "pointer": null
+          },
+          "rows": null,
+          "row_prefix": null
+        },
+        "rules": null,
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity",
+        "identify"
+      ],
+      "messages": {
+        "unsupported_mode": "Cursor observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "cursor_blob::",
+          "field": "marks.blobs.last",
+          "kind": "int"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "store"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "droid": {
+    "parser": "droid",
+    "parser_id": "rust-droid-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "cumulative",
+        "store_file": null,
+        "request": [
+          "cwd",
+          "session"
+        ],
+        "usage_fields": {
+          "select": [],
+          "object": "/tokenUsage",
+          "input": [
+            "/tokenUsage/inputTokens",
+            "/tokenUsage/cacheCreationTokens",
+            "/tokenUsage/cacheReadTokens"
+          ],
+          "output": [
+            "/tokenUsage/outputTokens"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/model",
+          "version": null,
+          "timestamp": null,
+          "number": "lenient",
+          "text": "any",
+          "document": ".settings.json",
+          "cache": "folded",
+          "time": "text",
+          "cwd": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": false,
+          "invalid_utf8_fails": true,
+          "non_object_fails": false,
+          "activity_non_object_fails": false,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Droid observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "droid_text::",
+          "field": "last_text",
+          "kind": "text"
+        },
+        {
+          "prefix": "droid_tok::",
+          "field": "totals",
+          "kind": "colon_pair"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "goose": {
+    "parser": "goose",
+    "parser_id": "rust-goose-sqlite-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "sqlite",
+        "usage": "per_turn",
+        "store_file": "sessions.db",
+        "usage_fields": {
+          "select": [],
+          "object": null,
+          "input": [
+            "/input_tokens"
+          ],
+          "output": [
+            "/output_tokens"
+          ],
+          "cache_read": [
+            "/cache_read_tokens"
+          ],
+          "cache_creation": [
+            "/cache_write_tokens"
+          ],
+          "key": [],
+          "key_join": "",
+          "model": "/model",
+          "version": null,
+          "timestamp": "/created_timestamp",
+          "number": "lenient",
+          "text": "any",
+          "cache": "separate",
+          "time": "epoch_seconds",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": {
+          "rows": {
+            "table": "usage_ledger",
+            "id": "id",
+            "key": "id",
+            "group": "session_id",
+            "columns": [
+              "model",
+              "created_timestamp",
+              "input_tokens",
+              "output_tokens",
+              "cache_read_tokens",
+              "cache_write_tokens"
+            ],
+            "raw_id": "row_id",
+            "payload": null,
+            "pending_until": null,
+            "pending_max_age": null,
+            "cursor_tag": null,
+            "anchor": [
+              "id",
+              "session_id"
+            ]
+          },
+          "parent": {
+            "table": "sessions",
+            "key": "id",
+            "dir": "working_dir",
+            "up": "parent_session_id",
+            "columns": [
+              "session_type"
+            ],
+            "top": {
+              "column": "session_type",
+              "equals": "user"
+            },
+            "version": null,
+            "join": "inner",
+            "dir_form": "as_stored"
+          },
+          "marks": [
+            {
+              "table": "messages",
+              "id": "id",
+              "group": "session_id",
+              "payload": "content_json",
+              "stamp": "created_timestamp",
+              "columns": [
+                "role",
+                "metadata_json"
+              ],
+              "prefix": "message:",
+              "start": "newest_or_zero",
+              "key": null,
+              "shrink": "keep",
+              "pending_max_age": null,
+              "key_scope": "none",
+              "page": 256,
+              "text_cap": null,
+              "reply_from": null,
+              "after": null,
+              "owner": null
+            }
+          ],
+          "row_prefix": "usage:",
+          "marker": {
+            "text": "at-pane:",
+            "role": {
+              "column": "role",
+              "equals": "user"
+            },
+            "on": "messages",
+            "order_by_stamp": false,
+            "within": null,
+            "binding": "store_rows",
+            "pointer": null
+          }
+        },
+        "rules": null,
+        "defers_to": null,
+        "request": [],
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity",
+        "has_session",
+        "identify"
+      ],
+      "messages": {
+        "unsupported_mode": "Goose observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "goose_message::",
+          "field": "marks.messages.last",
+          "kind": "int"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "store"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "grok": {
+    "parser": "grok",
+    "parser_id": "rust-grok-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "per_turn",
+        "store_file": null,
+        "request": [
+          "cwd"
+        ],
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/kind",
+              "equals": "turn_completed"
+            }
+          ],
+          "object": "/usage",
+          "input": [
+            "/usage/inputTokens"
+          ],
+          "output": [
+            "/usage/outputTokens"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/model",
+          "version": null,
+          "timestamp": "/timestamp",
+          "number": "lenient",
+          "text": "string",
+          "session": "/session",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": false,
+          "non_object_fails": false,
+          "activity_non_object_fails": false,
+          "totals_never_decrease": false,
+          "water_survives_replacement": false
+        },
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity",
+        "turns"
+      ],
+      "messages": {
+        "unsupported_mode": "Grok observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "grok_text::",
+          "field": "last_text",
+          "kind": "json_text"
+        },
+        {
+          "prefix": "grok_act::",
+          "field": "legacy_cursor",
+          "kind": "byte_cursor"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "kilo": {
+    "parser": "opencode",
+    "parser_id": "rust-kilo-sqlite-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "applies_when": [
+          "session_v2",
+          "session_message"
+        ],
+        "source": "sqlite",
+        "usage": "per_turn",
+        "store_file": "kilo.db",
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/type",
+              "equals": "assistant"
+            }
+          ],
+          "object": null,
+          "input": [
+            "/tokens/input",
+            "/tokens/cache/read",
+            "/tokens/cache/write"
+          ],
+          "output": [
+            "/tokens/output",
+            "/tokens/reasoning"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/model/id",
+          "version": null,
+          "timestamp": "/time/completed",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": {
+          "rows": {
+            "table": "session_message",
+            "id": "rowid",
+            "key": "id",
+            "group": "session_id",
+            "payload": "data",
+            "columns": [
+              "type"
+            ],
+            "pending_until": "/time/completed",
+            "pending_max_age": {
+              "pointer": "/time/created",
+              "unit": "millis",
+              "seconds": 86400
+            },
+            "cursor_tag": "v2",
+            "raw_id": null,
+            "anchor": [
+              "id",
+              "session_id"
+            ]
+          },
+          "parent": {
+            "table": "session_v2",
+            "key": "id",
+            "dir": "directory",
+            "up": "parent_id",
+            "version": "version",
+            "dir_form": "windows_native",
+            "columns": [],
+            "join": "inner",
+            "top": null
+          },
+          "marks": [
+            {
+              "table": "session_message",
+              "id": "rowid",
+              "group": "session_id",
+              "payload": "data",
+              "stamp": "time_created",
+              "columns": [
+                "type",
+                "seq"
+              ],
+              "prefix": "message:",
+              "start": "newest_or_zero",
+              "reply_from": {
+                "order": "seq",
+                "where": {
+                  "column": "type",
+                  "equals": "assistant"
+                },
+                "before": "seq"
+              },
+              "key": null,
+              "shrink": "keep",
+              "pending_max_age": null,
+              "key_scope": "none",
+              "page": 256,
+              "text_cap": null,
+              "after": null,
+              "owner": null
+            }
+          ],
+          "row_prefix": "msg:",
+          "marker": {
+            "text": "at-pane:",
+            "role": {
+              "column": "type",
+              "equals": "user"
+            },
+            "order_by_stamp": true,
+            "pointer": "/text",
+            "on": "session_message",
+            "within": null,
+            "binding": "store_rows"
+          }
+        },
+        "rules": null,
+        "defers_to": null,
+        "request": []
+      },
+      {
+        "source": "sqlite",
+        "usage": "per_turn",
+        "store_file": "kilo.db",
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/role",
+              "equals": "assistant"
+            }
+          ],
+          "object": null,
+          "input": [
+            "/tokens/input",
+            "/tokens/cache/read",
+            "/tokens/cache/write"
+          ],
+          "output": [
+            "/tokens/output",
+            "/tokens/reasoning"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/modelID",
+          "version": null,
+          "timestamp": "/time/completed",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": {
+          "rows": {
+            "table": "message",
+            "id": "rowid",
+            "key": "id",
+            "group": "session_id",
+            "payload": "data",
+            "pending_until": "/time/completed",
+            "pending_max_age": {
+              "pointer": "/time/created",
+              "unit": "millis",
+              "seconds": 86400
+            },
+            "columns": [],
+            "cursor_tag": null,
+            "raw_id": null,
+            "anchor": [
+              "id",
+              "session_id"
+            ]
+          },
+          "parent": {
+            "table": "session",
+            "key": "id",
+            "dir": "directory",
+            "up": "parent_id",
+            "version": "version",
+            "columns": [],
+            "join": "inner",
+            "top": null,
+            "dir_form": "as_stored"
+          },
+          "marks": [
+            {
+              "table": "part",
+              "id": "rowid",
+              "group": "session_id",
+              "owner": "message_id",
+              "payload": "data",
+              "stamp": "time_created",
+              "prefix": "part:",
+              "key": null,
+              "columns": [],
+              "start": "newest",
+              "shrink": "keep",
+              "pending_max_age": null,
+              "key_scope": "none",
+              "page": 256,
+              "text_cap": null,
+              "reply_from": null,
+              "after": null
+            }
+          ],
+          "row_prefix": "msg:",
+          "marker": {
+            "text": "at-pane:",
+            "role": {
+              "pointer": "/role",
+              "equals": "user"
+            },
+            "order_by_stamp": true,
+            "on": "part",
+            "within": null,
+            "binding": "store_rows",
+            "pointer": null
+          }
+        },
+        "rules": null,
+        "defers_to": null,
+        "request": [],
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "legacy",
+        "activity",
+        "has_session",
+        "identify"
+      ],
+      "messages": {
+        "unsupported_mode": "OpenCode observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "opencode_part::",
+          "field": "marks.part.last",
+          "kind": "int"
+        },
+        {
+          "prefix": "opencode_message::",
+          "field": "marks.session_message.last",
+          "kind": "int"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "store"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "kimi": {
+    "parser": "kimi",
+    "parser_id": "rust-kimi-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "per_turn",
+        "store_file": null,
+        "request": [
+          "cwd",
+          "session",
+          "now_ms"
+        ],
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/type",
+              "equals": "usage.record"
+            }
+          ],
+          "object": "/usage",
+          "input": [
+            "/usage/inputOther",
+            "/usage/inputCacheRead",
+            "/usage/inputCacheCreation"
+          ],
+          "output": [
+            "/usage/output"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/model",
+          "version": null,
+          "timestamp": "/time",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": true,
+          "non_object_fails": true,
+          "activity_non_object_fails": true,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Kimi observation mode not integrated",
+        "non_object": "Kimi record is not an object"
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "kimi_text::",
+          "field": "last_text",
+          "kind": "text"
+        },
+        {
+          "prefix": "kimi_turn::",
+          "field": "adapter",
+          "kind": "json"
+        }
+      ],
+      "python": {
+        "prompt_detail": "prompt",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "mcode": null,
+  "muse": {
+    "parser": "muse",
+    "parser_id": "rust-muse-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "per_turn",
+        "store_file": null,
+        "request": [
+          "cwd",
+          "session",
+          "cli_version"
+        ],
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/payload_type",
+              "equals": "runtime.session"
+            },
+            {
+              "pointer": "/payload/event/kind",
+              "equals": "goal_usage_attribution"
+            },
+            {
+              "pointer": "/payload/event/record/owner/requester_kind",
+              "equals": "main"
+            }
+          ],
+          "object": "/payload/event/record/quantity",
+          "input": [
+            "/payload/event/record/quantity/input_tokens"
+          ],
+          "output": [
+            "/payload/event/record/quantity/output_tokens"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [
+            "/payload/event/record/usage_id"
+          ],
+          "key_join": "",
+          "model": null,
+          "version": null,
+          "timestamp": "/recorded_at",
+          "number": "lenient",
+          "text": "string",
+          "time": "epoch_micros",
+          "cache": "folded",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": true,
+          "non_object_fails": false,
+          "activity_non_object_fails": false,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Muse observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "muse_text::",
+          "field": "last_text",
+          "kind": "text"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "opencode": {
+    "parser": "opencode",
+    "parser_id": "rust-opencode-sqlite-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "applies_when": [
+          "session_v2",
+          "session_message"
+        ],
+        "source": "sqlite",
+        "usage": "per_turn",
+        "store_file": "opencode.db",
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/type",
+              "equals": "assistant"
+            }
+          ],
+          "object": null,
+          "input": [
+            "/tokens/input",
+            "/tokens/cache/read",
+            "/tokens/cache/write"
+          ],
+          "output": [
+            "/tokens/output",
+            "/tokens/reasoning"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/model/id",
+          "version": null,
+          "timestamp": "/time/completed",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": {
+          "rows": {
+            "table": "session_message",
+            "id": "rowid",
+            "key": "id",
+            "group": "session_id",
+            "payload": "data",
+            "columns": [
+              "type"
+            ],
+            "pending_until": "/time/completed",
+            "pending_max_age": {
+              "pointer": "/time/created",
+              "unit": "millis",
+              "seconds": 86400
+            },
+            "cursor_tag": "v2",
+            "raw_id": null,
+            "anchor": [
+              "id",
+              "session_id"
+            ]
+          },
+          "parent": {
+            "table": "session_v2",
+            "key": "id",
+            "dir": "directory",
+            "up": "parent_id",
+            "version": "version",
+            "dir_form": "windows_native",
+            "columns": [],
+            "join": "inner",
+            "top": null
+          },
+          "marks": [
+            {
+              "table": "session_message",
+              "id": "rowid",
+              "group": "session_id",
+              "payload": "data",
+              "stamp": "time_created",
+              "columns": [
+                "type",
+                "seq"
+              ],
+              "prefix": "message:",
+              "start": "newest_or_zero",
+              "reply_from": {
+                "order": "seq",
+                "where": {
+                  "column": "type",
+                  "equals": "assistant"
+                },
+                "before": "seq"
+              },
+              "key": null,
+              "shrink": "keep",
+              "pending_max_age": null,
+              "key_scope": "none",
+              "page": 256,
+              "text_cap": null,
+              "after": null,
+              "owner": null
+            }
+          ],
+          "row_prefix": "msg:",
+          "marker": {
+            "text": "at-pane:",
+            "role": {
+              "column": "type",
+              "equals": "user"
+            },
+            "order_by_stamp": true,
+            "pointer": "/text",
+            "on": "session_message",
+            "within": null,
+            "binding": "store_rows"
+          }
+        },
+        "rules": null,
+        "defers_to": null,
+        "request": []
+      },
+      {
+        "source": "sqlite",
+        "usage": "per_turn",
+        "store_file": "opencode.db",
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/role",
+              "equals": "assistant"
+            }
+          ],
+          "object": null,
+          "input": [
+            "/tokens/input",
+            "/tokens/cache/read",
+            "/tokens/cache/write"
+          ],
+          "output": [
+            "/tokens/output",
+            "/tokens/reasoning"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [],
+          "key_join": "",
+          "model": "/modelID",
+          "version": null,
+          "timestamp": "/time/completed",
+          "number": "lenient",
+          "text": "any",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": {
+          "rows": {
+            "table": "message",
+            "id": "rowid",
+            "key": "id",
+            "group": "session_id",
+            "payload": "data",
+            "pending_until": "/time/completed",
+            "pending_max_age": {
+              "pointer": "/time/created",
+              "unit": "millis",
+              "seconds": 86400
+            },
+            "columns": [],
+            "cursor_tag": null,
+            "raw_id": null,
+            "anchor": [
+              "id",
+              "session_id"
+            ]
+          },
+          "parent": {
+            "table": "session",
+            "key": "id",
+            "dir": "directory",
+            "up": "parent_id",
+            "version": "version",
+            "columns": [],
+            "join": "inner",
+            "top": null,
+            "dir_form": "as_stored"
+          },
+          "marks": [
+            {
+              "table": "part",
+              "id": "rowid",
+              "group": "session_id",
+              "owner": "message_id",
+              "payload": "data",
+              "stamp": "time_created",
+              "prefix": "part:",
+              "key": null,
+              "columns": [],
+              "start": "newest",
+              "shrink": "keep",
+              "pending_max_age": null,
+              "key_scope": "none",
+              "page": 256,
+              "text_cap": null,
+              "reply_from": null,
+              "after": null
+            }
+          ],
+          "row_prefix": "msg:",
+          "marker": {
+            "text": "at-pane:",
+            "role": {
+              "pointer": "/role",
+              "equals": "user"
+            },
+            "order_by_stamp": true,
+            "on": "part",
+            "within": null,
+            "binding": "store_rows",
+            "pointer": null
+          }
+        },
+        "rules": null,
+        "defers_to": null,
+        "request": [],
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "legacy",
+        "activity",
+        "has_session",
+        "identify"
+      ],
+      "messages": {
+        "unsupported_mode": "OpenCode observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "opencode_part::",
+          "field": "marks.part.last",
+          "kind": "int"
+        },
+        {
+          "prefix": "opencode_message::",
+          "field": "marks.session_message.last",
+          "kind": "int"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "store"
+      },
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "pi": {
+    "parser": "pi",
+    "parser_id": "rust-pi-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "per_turn",
+        "store_file": null,
+        "request": [
+          "cwd",
+          "session",
+          "now_ms"
+        ],
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/kind",
+              "equals": "usage"
+            }
+          ],
+          "object": "/usage",
+          "input": [
+            "/usage/input",
+            "/usage/cacheRead",
+            "/usage/cacheWrite"
+          ],
+          "output": [
+            "/usage/output"
+          ],
+          "cache_read": [],
+          "cache_creation": [],
+          "key": [
+            "/id"
+          ],
+          "key_join": "",
+          "model": "/model",
+          "version": null,
+          "timestamp": "/timestamp",
+          "number": "lenient",
+          "text": "string",
+          "cache": "folded",
+          "time": "text",
+          "document": null,
+          "cwd": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": true,
+          "non_object_fails": false,
+          "activity_non_object_fails": false,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Pi observation mode not integrated",
+        "non_object": null
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "pi_text::",
+          "field": "last_text",
+          "kind": "text"
+        },
+        {
+          "prefix": "pi_turn::",
+          "field": "adapter",
+          "kind": "json"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  },
+  "qwen": {
+    "parser": "qwen",
+    "parser_id": "rust-qwen-jsonl-v1",
+    "platforms": [
+      "unix"
+    ],
+    "layouts": [
+      {
+        "source": "jsonl",
+        "usage": "per_turn",
+        "store_file": null,
+        "request": [
+          "cwd",
+          "session",
+          "now_ms"
+        ],
+        "usage_fields": {
+          "select": [
+            {
+              "pointer": "/type",
+              "equals": "assistant"
+            }
+          ],
+          "object": "/usageMetadata",
+          "input": [
+            "/usageMetadata/promptTokenCount"
+          ],
+          "output": [
+            "/usageMetadata/candidatesTokenCount",
+            "/usageMetadata/thoughtsTokenCount"
+          ],
+          "cache_read": [
+            "/usageMetadata/cachedContentTokenCount"
+          ],
+          "cache_creation": [],
+          "key": [
+            "/uuid"
+          ],
+          "key_join": "",
+          "model": "/model",
+          "version": "/version",
+          "timestamp": "/timestamp",
+          "number": "lenient",
+          "text": "any",
+          "cache": "separate",
+          "cwd": "/cwd",
+          "time": "text",
+          "document": null,
+          "session": null
+        },
+        "store": null,
+        "rules": {
+          "missing_identity_rotates": true,
+          "invalid_utf8_fails": true,
+          "non_object_fails": true,
+          "activity_non_object_fails": true,
+          "totals_never_decrease": false,
+          "water_survives_replacement": true
+        },
+        "defers_to": null,
+        "applies_when": []
+      }
+    ],
+    "core": {
+      "modes": [
+        "usage",
+        "session_usage",
+        "activity"
+      ],
+      "messages": {
+        "unsupported_mode": "Qwen observation mode not integrated",
+        "non_object": "Qwen record is not an object"
+      },
+      "legacy_state": [
+        {
+          "prefix": "act_hw::",
+          "field": "water",
+          "kind": "int"
+        },
+        {
+          "prefix": "qwen_text::",
+          "field": "last_text",
+          "kind": "text"
+        },
+        {
+          "prefix": "qwen_turn::",
+          "field": "adapter",
+          "kind": "json"
+        }
+      ],
+      "python": {
+        "prompt_detail": "user",
+        "pane_scope": "none",
+        "attribution": "none",
+        "identity_source": "file_stem"
+      },
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
+  }
+} as const
+
 /** Put a session id into a declared `resume_args` template. */
 export const fillId = (template: string, id: string): string => template.split('{id}').join(id)

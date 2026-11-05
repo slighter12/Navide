@@ -61,6 +61,30 @@ export function planBackendRestartResume(
   return { resume, notResumed }
 }
 
+/** A pane whose CLI the Agent CLI Runtime lost under a live backend. */
+export interface RuntimeLossReport {
+  id: string
+  /** On screen when the loss was seen. */
+  onScreen: boolean
+  /** Running or waiting on an answer at the moment the pane reported the loss. */
+  wasWorking: boolean
+  /** Has a conversation on disk a resume can pick up. */
+  canResume: boolean
+  /** The pane that spawned this one, when it is still in the window. */
+  spawnedBy?: string
+}
+
+/** Which panes a runtime loss brings back by itself: the restart plan's rules
+ *  (on-screen panes all, off-screen ones only when working and capped) with
+ *  the working state each pane reported when it was lost. The backend never
+ *  went away, so its auto-restart crash loop does not apply. */
+export function planRuntimeLossResume(reports: readonly RuntimeLossReport[]): BackendRestartPlan {
+  return planBackendRestartResume(
+    reports.map(({ wasWorking, ...rest }) => ({ ...rest, working: wasWorking })),
+    { crashLoop: false },
+  )
+}
+
 /** Whether the restart behind this reconnect repeats one this window already
  *  came back from, inside the same auto-restart budget.
  *

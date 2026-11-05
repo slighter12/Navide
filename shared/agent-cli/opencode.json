@@ -18,5 +18,75 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "unknown",
     "login": "integrated"
+  },
+  "observer": {
+    "parser": "opencode",
+    "parser_id": "rust-opencode-sqlite-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "applies_when": ["session_v2", "session_message"],
+      "source": "sqlite",
+      "usage": "per_turn",
+      "store_file": "opencode.db",
+      "usage_fields": {
+        "select": [{"pointer": "/type", "equals": "assistant"}],
+        "object": null,
+        "input": ["/tokens/input", "/tokens/cache/read", "/tokens/cache/write"],
+        "output": ["/tokens/output", "/tokens/reasoning"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": "/model/id",
+        "version": null,
+        "timestamp": "/time/completed",
+        "number": "lenient",
+        "text": "any"
+      },
+      "store": {
+        "rows": {"table": "session_message", "id": "rowid", "key": "id", "group": "session_id", "payload": "data", "columns": ["type"], "pending_until": "/time/completed", "pending_max_age": {"pointer": "/time/created", "unit": "millis", "seconds": 86400}, "cursor_tag": "v2"},
+        "parent": {"table": "session_v2", "key": "id", "dir": "directory", "up": "parent_id", "version": "version", "dir_form": "windows_native"},
+        "marks": {"table": "session_message", "id": "rowid", "group": "session_id", "payload": "data", "stamp": "time_created", "columns": ["type", "seq"], "prefix": "message:", "start": "newest_or_zero", "reply_from": {"order": "seq", "where": {"column": "type", "equals": "assistant"}, "before": "seq"}},
+        "row_prefix": "msg:",
+        "marker": {"text": "at-pane:", "role": {"column": "type", "equals": "user"}, "order_by_stamp": true, "pointer": "/text"}
+      }
+    }, {
+      "source": "sqlite",
+      "usage": "per_turn",
+      "store_file": "opencode.db",
+      "usage_fields": {
+        "select": [{"pointer": "/role", "equals": "assistant"}],
+        "object": null,
+        "input": ["/tokens/input", "/tokens/cache/read", "/tokens/cache/write"],
+        "output": ["/tokens/output", "/tokens/reasoning"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": "/modelID",
+        "version": null,
+        "timestamp": "/time/completed",
+        "number": "lenient",
+        "text": "any"
+      },
+      "store": {
+        "rows": {"table": "message", "id": "rowid", "key": "id", "group": "session_id", "payload": "data", "pending_until": "/time/completed", "pending_max_age": {"pointer": "/time/created", "unit": "millis", "seconds": 86400}},
+        "parent": {"table": "session", "key": "id", "dir": "directory", "up": "parent_id", "version": "version"},
+        "marks": {"table": "part", "id": "rowid", "group": "session_id", "owner": "message_id", "payload": "data", "stamp": "time_created", "prefix": "part:"},
+        "row_prefix": "msg:",
+        "marker": {"text": "at-pane:", "role": {"pointer": "/role", "equals": "user"}, "order_by_stamp": true}
+      }
+    }],
+    "core": {
+      "modes": ["usage", "legacy", "activity", "has_session", "identify"],
+      "messages": {"unsupported_mode": "OpenCode observation mode not integrated", "non_object": null},
+      "legacy_state": [{"prefix": "opencode_part::", "field": "marks.part.last", "kind": "int"}, {"prefix": "opencode_message::", "field": "marks.session_message.last", "kind": "int"}],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "store"},
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

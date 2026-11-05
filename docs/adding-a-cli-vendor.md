@@ -108,6 +108,36 @@ You never need to read or modify the shared orchestration code.
     becomes a vendor, move that declaration onto its spec (the vendor spec
     wins while both exist).
 
+## Native observation (only if the CLI's log is read by the Rust core)
+
+A JSONL log is read by `native/navide-cli-runtime/src/observe/`; the vendor adds a declaration and a thin adapter, not a reader.
+The test recipe, in the order that keeps each step falsifiable:
+
+1. Declare the vendor in `shared/agent-cli/<key>.json` (usage fields, modes, `legacy_state` for every key of the Python bag the
+   typed state replaces, `core.modes`) and run `uv --project backend run python scripts/generate-agent-cli-facts.py`, then
+   `... --check`. The generator writes `_vendor_facts.py`, `src/shared/vendorFacts.ts`, `vendor_facts.rs` and
+   `observe/adapters/mod.rs`; never edit them by hand.
+2. Write `observe/adapters/<key>.rs`: an `Observer` with a typed `State`, and a `JsonlObserver` with only the hooks the log needs
+   (`identify`, `activity`, `settle`, `position_key`, the consts). Name the Python source in the module doc with `file:line`.
+3. Add a `Log` scenario in the adapter's `tests` module (`observe/parity.rs`): `Log::new`, `append`, `passes`, `replaced`, a
+   half-written last line, a record that is no object. The record shapes cite the Python reader's own tests with `file:line`.
+   Each difference from the Python reader is a named flag on the scenario (`beyond_golden`, `legacy_lacks_activity_flags`,
+   `core_adds_to_events`, `legacy_kept_no_key_window`); an unnamed difference fails the pass.
+4. The oracle is the Python reader. A CLI that has a retired Rust observer is checked against its golden through
+   `parity::check_log_golden`; the golden is a frozen record (`tests/fixtures/agent-cli-observe-goldens/<key>.json`, re-recorded
+   only with `restore-legacy-observers.patch`) and its `legacy_source.blob` must equal the blob the adapter's module doc names
+   (`each_golden_records_the_blob_its_adapter_names_as_its_source`). A new CLI has no golden: compare the sidecar's answer with the
+   Python reader's field for field over the same log through `tests/native_reader_peer.py` `wire(monkeypatch, root)`, as
+   `backend/tests/test_cli_runtime_grok_turns.py` does. Rebuild the release binary (`cargo build --release --locked`) first.
+5. Add the vendor to `backend/tests/test_cli_runtime_bound_matrix.py`: one `Cell` per mode, with a log builder whose records
+   cite the Python fixtures. The matrix proves every mode stays inside the answer and state caps; a persisted key window is bounded
+   by its serialized bytes (`JsonlObserver::RECENT` is an upper bound: heavy keys keep fewer), so add a long-key axis if the vendor
+   keys on a record field, and make its ids escape-heavy (control characters weigh six bytes each) or the axis cannot reach the bound.
+6. Add the vendor's `State` to `every_adapter_state_at_its_worst_fits_the_state_share_beside_the_core_fields`, and the vendor to
+   `what_every_adapter_persists_at_its_worst_leaves_room_for_half_of_a_window_of_the_longest_keys` (both in `observe/jsonl_tests.rs`;
+   a vendor's `turns` rows are the core's `TurnRow`, filled by the adapter's builder), then run `cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml` and the
+   backend tests that name the vendor, bare, with a green exit code.
+
 ## Frontend
 
 1. Copy `src/renderer/src/platform/plugin-shell/agents/_template.ts` to `agents/<key>.ts` and

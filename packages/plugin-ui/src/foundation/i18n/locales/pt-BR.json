@@ -957,6 +957,8 @@
       "backend-reconnecting": "Back-end desconectado: reconectando. A digitação está pausada.",
       "backend-restarting": "O back-end falhou: reiniciando ({attempt}/{max}). A digitação está pausada.",
       "backend-unavailable": "Back-end indisponível: a digitação fica pausada até que ele seja reiniciado.",
+      "runtime-session-resumed": "{count} sessão retomada após a parada do runtime da CLI | {count} sessões retomadas após a parada do runtime da CLI",
+      "runtime-session-resume-failed": "Não foi possível retomar {count} sessão após a parada do runtime da CLI: use “Reconstruir” para tentar de novo | Não foi possível retomar {count} sessões após a parada do runtime da CLI: use “Reconstruir” para tentar de novo",
       "session-resumed": "{count} session retomada após a reinicialização do back-end | {count} sessions retomadas após a reinicialização do back-end",
       "session-resume-failed": "Não foi possível retomar {count} session após a reinicialização do back-end: use “Reconstruir” para tentar de novo | Não foi possível retomar {count} sessions após a reinicialização do back-end: use “Reconstruir” para tentar de novo",
       "option-select-hint": "Esta CLI captura o mouse: mantenha {key} pressionada enquanto arrasta para selecionar texto",
@@ -985,6 +987,9 @@
       "rebuild-in-progress": "Já há uma reconstrução em andamento",
       "rebuild-not-resumable": "Session não encontrada no disco: não é possível reconstruir via retomada",
       "rebuild-probe-failed": "Não foi possível verificar a session: o serviço não está respondendo, tente novamente",
+      "close-offline": "Não é possível fechar este pane enquanto o backend está desconectado; tente novamente após a reconexão",
+      "close-workspace-offline": "Não é possível fechar este workspace enquanto o backend está desconectado; tente novamente após a reconexão",
+      "close-unverified": "Não foi possível confirmar que a sessão parou, então o pane foi mantido; tente fechá-lo novamente",
       "rebuild-running-confirm-title": "A CLI está em execução",
       "rebuild-running-confirm-body": "Reconstruir vai interromper o turno em andamento e reimprimir a conversa. Reconstruir mesmo assim?",
       "rebuild-running-confirm-body-batch": "{count} CLI está em execução: reconstruir vai interromper o turno em andamento dela e reimprimir a conversa. Reconstruir mesmo assim? | {count} CLIs estão em execução: reconstruir vai interromper os turnos em andamento delas e reimprimir as conversas. Reconstruir mesmo assim?",
@@ -9432,6 +9437,10 @@
         "no-session": "{name}: não retomado, porque não tem uma conversa salva para retomar",
         "failed": "{name}: não foi possível retomar"
       }
+    },
+    "runtime-lost": {
+      "title": "Runtime da CLI parou às {time}",
+      "note": "Os painéis retomados param no prompt e não continuam sozinhos; os painéis encerrados ficam como estão até você reconstruí-los."
     },
     "scheduler-disabled": "A tarefa agendada “{name}” foi desativada: o pane de destino não existe mais",
     "scheduler-disabled-note": "O pane de destino não foi encontrado em {n} execuções seguidas; por isso, a tarefa foi desativada. No painel Agendamento, use “Reatribuir” para apontá-la para um pane ativo e depois ative-a novamente.",

@@ -127,7 +127,7 @@ describe('quota failover wiring: commit', () => {
     expect(appSource.match(/preserveScrollback: true/g)).toHaveLength(2)
     const rebuild = functionBody('rebuildPaneViaResume')
     const serialized = rebuild.indexOf('serializeScrollback')
-    const killed = rebuild.indexOf('await onKill(paneId, { markRemoved: false, force: true, keepInList: true })')
+    const killed = rebuild.indexOf('await onKill(paneId, {\n      markRemoved: false,\n      force: true,\n      keepInList: true,')
     const spawned = rebuild.indexOf('scrollbackHandoff: scrollbackHandoff || undefined')
     expect(serialized).toBeGreaterThan(-1)
     // Taken from the live xterm BEFORE the kill (the exit discards the stored
