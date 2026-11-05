@@ -1,0 +1,791 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_goose_golden -- --ignored",
+  "legacy_source": {
+    "blob": "f890b44f7551092abf9a7baaa311357469e23bfe",
+    "path": "native/navide-cli-runtime/src/observe_goose.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": [
+          "goose_message::2"
+        ]
+      },
+      "extra": {},
+      "label": "activity: first sight of a store with history",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:3",
+            "detail": "tool:shell",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:4",
+            "detail": "tool:unknown",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:44+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:5",
+            "detail": "assistant:action-required",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:45+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:6",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s1",
+            "text": "the answer",
+            "timestamp": "2026-10-20T16:26:46+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:7",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:47+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:8",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:48+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:9",
+            "detail": "subagent:done",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "sub",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:49+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:10",
+            "detail": "tool:result",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:50+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:11",
+            "detail": "user:action-response",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:51+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:12",
+            "detail": "user:context",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:52+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:13",
+            "detail": "user:context",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:53+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:14",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "first\nsecond",
+            "timestamp": "2026-10-20T16:26:54+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:15",
+            "detail": "system",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:55+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:16",
+            "detail": "message",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:56+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "message:17",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s2",
+            "text": "not json meta",
+            "timestamp": "2026-10-20T16:26:57+00:00",
+            "vendor": "goose"
+          }
+        ],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": [
+          "goose_message::17"
+        ]
+      },
+      "extra": {},
+      "label": "activity: one of each kind of message",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": [
+          "goose_message::17"
+        ]
+      },
+      "extra": {},
+      "label": "activity: nothing new",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "message:18",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions.db",
+            "session_id": "s1",
+            "text": "later",
+            "timestamp": "2026-10-20T16:28:20+00:00",
+            "vendor": "goose"
+          }
+        ],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "activity",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": [
+          "goose_message::18"
+        ]
+      },
+      "extra": {},
+      "label": "activity: one more reply",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 5
+        },
+        "error": null,
+        "events": [
+          {
+            "cache_creation_tokens": 7,
+            "cache_read_tokens": 5,
+            "checkpoint": {
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 1
+            },
+            "cwd": "/work/a",
+            "dedup_key": "usage:1",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 100,
+            "model": "m-1",
+            "output_tokens": 20,
+            "raw": {
+              "row_id": 1
+            },
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "checkpoint": {
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 2
+            },
+            "cwd": "/work/b",
+            "dedup_key": "usage:2",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 3,
+            "model": "",
+            "output_tokens": 4,
+            "raw": {
+              "row_id": 2
+            },
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "checkpoint": {
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 5
+            },
+            "cwd": "/work/a",
+            "dedup_key": "usage:5",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 0,
+            "model": "m-2",
+            "output_tokens": 6,
+            "raw": {
+              "row_id": 5
+            },
+            "session_id": "sub",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          }
+        ],
+        "found": false,
+        "identity": "$IDENTITY0",
+        "markers": {},
+        "mode": "usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {},
+      "label": "usage: first over the ledger",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 5
+        },
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "$IDENTITY0",
+        "markers": {},
+        "mode": "usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {},
+      "label": "usage: nothing new",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 6
+        },
+        "error": null,
+        "events": [
+          {
+            "cache_creation_tokens": 3,
+            "cache_read_tokens": 2,
+            "checkpoint": {
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 6
+            },
+            "cwd": "/work/b",
+            "dedup_key": "usage:6",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 8,
+            "model": "m-3",
+            "output_tokens": 9,
+            "raw": {
+              "row_id": 6
+            },
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          }
+        ],
+        "found": false,
+        "identity": "$IDENTITY0",
+        "markers": {},
+        "mode": "usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {},
+      "label": "usage: one new row",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "cwd": "/work/b",
+            "dedup_key": "usage:2",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 3,
+            "model": "",
+            "output_tokens": 4,
+            "raw": {
+              "row_id": 2
+            },
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "cwd": "/work/a",
+            "dedup_key": "usage:5",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 0,
+            "model": "m-2",
+            "output_tokens": 6,
+            "raw": {
+              "row_id": 5
+            },
+            "session_id": "sub",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          },
+          {
+            "cache_creation_tokens": 3,
+            "cache_read_tokens": 2,
+            "cwd": "/work/b",
+            "dedup_key": "usage:6",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 8,
+            "model": "m-3",
+            "output_tokens": 9,
+            "raw": {
+              "row_id": 6
+            },
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          }
+        ],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "session_usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": [
+          "usage:1",
+          "usage:2",
+          "usage:5",
+          "usage:6"
+        ]
+      },
+      "extra": {},
+      "label": "replay with one key already delivered",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "session_usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": [
+          "usage:1",
+          "usage:2",
+          "usage:5",
+          "usage:6"
+        ]
+      },
+      "extra": {},
+      "label": "replay again",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 7
+        },
+        "error": null,
+        "events": [
+          {
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "checkpoint": {
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 7
+            },
+            "cwd": "/work/a",
+            "dedup_key": "usage:7",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 10,
+            "model": "m-1",
+            "output_tokens": 2,
+            "raw": {
+              "row_id": 7
+            },
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          }
+        ],
+        "found": false,
+        "identity": "$IDENTITY0",
+        "markers": {},
+        "mode": "usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {},
+      "label": "usage: a last row that holds no tokens",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 7
+        },
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "$IDENTITY0",
+        "markers": {},
+        "mode": "usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {},
+      "label": "usage: nothing after the empty row",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "cwd": "/work/a",
+            "dedup_key": "usage:7",
+            "file_path": "$ROOT/sessions.db",
+            "input_tokens": 10,
+            "model": "m-1",
+            "output_tokens": 2,
+            "raw": {
+              "row_id": 7
+            },
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:43+00:00",
+            "vendor": "goose"
+          }
+        ],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "session_usage",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": [
+          "usage:1",
+          "usage:2",
+          "usage:5",
+          "usage:6",
+          "usage:7"
+        ]
+      },
+      "extra": {},
+      "label": "replay after the empty row",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": true,
+        "identity": "",
+        "markers": {},
+        "mode": "has_session",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {
+        "session_id": "s1",
+        "wanted_session": "s1"
+      },
+      "label": "has_session: a stored session",
+      "mode": "has_session",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": true,
+        "identity": "",
+        "markers": {},
+        "mode": "has_session",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {
+        "session_id": "sub",
+        "wanted_session": "sub"
+      },
+      "label": "has_session: a sub-agent session",
+      "mode": "has_session",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "has_session",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {
+        "session_id": "nope",
+        "wanted_session": "nope"
+      },
+      "label": "has_session: an absent session",
+      "mode": "has_session",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "has_session",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {
+        "session_id": "",
+        "wanted_session": ""
+      },
+      "label": "has_session: an empty id",
+      "mode": "has_session",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "has_session",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {},
+      "label": "has_session: no id",
+      "mode": "has_session",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {
+          "at-pane:first": [
+            "s2",
+            "/work/b"
+          ],
+          "at-pane:second": [
+            "s2",
+            "/work/b"
+          ]
+        },
+        "mode": "identify",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {
+        "markers": [
+          "at-pane:first",
+          "at-pane:second",
+          "at-pane:subagent",
+          "at-pane:child",
+          "at-pane:assistant",
+          "at-pane:context",
+          "at-pane:none",
+          ""
+        ]
+      },
+      "label": "identify: markers",
+      "mode": "identify",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "found": false,
+        "identity": "",
+        "markers": {},
+        "mode": "identify",
+        "parser": "rust-goose-sqlite-v1",
+        "path": "$ROOT/sessions.db",
+        "seen": []
+      },
+      "extra": {
+        "markers": []
+      },
+      "label": "identify: no markers",
+      "mode": "identify",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "refused": "Goose observation mode not integrated"
+      },
+      "extra": {},
+      "label": "a mode the vendor never had",
+      "mode": "plan",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "goose"
+}

@@ -4,7 +4,7 @@
 // the envelope: `{ok: true, payload: {cancelled: false}}` means the create COMMITTED and its
 // success (with the only terminal id) is on its way. The pane must adopt that id, close it through
 // the existing identity-verified kill, and only then let a replacement create go out. A create
-// whose response is lost must fence the pane instead of assuming cleanup (review-7 R7-1).
+// whose response is lost must fence the pane instead of assuming cleanup.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createMockBackend, withScope, flush } from './mockBackend'
 
@@ -130,7 +130,7 @@ function setStatus(h: { mock: ReturnType<typeof createMockBackend> }, value: 'co
   ;(h.mock.backend.status as unknown as { value: string }).value = value
 }
 
-describe('useTerminal — consuming the backend cancellation verdict (review-7 R7-1)', () => {
+describe('useTerminal — consuming the backend cancellation verdict', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.clearAllMocks()
@@ -301,7 +301,7 @@ describe('useTerminal — consuming the backend cancellation verdict (review-7 R
   })
 })
 
-describe('useTerminal — a cancel queued across a reconnect (review-7 R7-1)', () => {
+describe('useTerminal — a cancel queued across a reconnect', () => {
   it('a cancelled:true that was requested before the reconnect but answered after it is not proof', async () => {
     const h = harness()
     void h.result.spawn(spawnOpts)
@@ -321,6 +321,152 @@ describe('useTerminal — a cancel queued across a reconnect (review-7 R7-1)', (
     expect(h.result.error.value).toMatch(/unresolved/)
     h.result.status.value = 'idle'
     await expect(h.result.spawn(spawnOpts)).rejects.toThrow(/unresolved/)
+    expect(h.creates).toHaveLength(1)
+    h.scope.stop()
+  })
+})
+
+describe('useTerminal — a late kill failure for a cancelled create', () => {
+  it('fences further creates but does not mark the live replacement pane failed', async () => {
+    const h = harness()
+    void h.result.spawn(spawnOpts)
+    await flush()
+    const cancelling = h.result.cancelPendingCreate()
+    await flush()
+    h.cancels[0].d.resolve(verdict(true))
+    await cancelling
+    // The cancelled create's contradicting late success is closed through the verified kill ...
+    h.creates[0].d.resolve(created('late-5'))
+    await flush()
+    expect(h.kills.map((k) => k.id)).toEqual(['late-5'])
+    h.result.status.value = 'idle'
+    const respawn = h.result.spawn(spawnOpts)
+    await flush()
+    h.creates[1].d.resolve(created('fresh'))
+    await respawn
+    expect(h.result.status.value).toBe('running')
+    // ... and that close is refused after the replacement is already running.
+    h.kills[0].d.resolve(response('terminal.kill.result', false, null, { code: 'CLEANUP_FAILED', message: 'x' }))
+    await flush()
+    expect(h.result.status.value, 'a live pane was marked failed by a late kill').toBe('running')
+    expect(h.result.sessionId.value).toBe('fresh')
+    h.result.status.value = 'idle'
+    await expect(h.result.spawn(spawnOpts)).rejects.toThrow(/fenced|unresolved/i)
+    h.scope.stop()
+  })
+})
+
+describe('useTerminal — a fence on a pane whose earlier session has ended', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+    store.clear()
+    writes.length = 0
+  })
+
+  it('marks the pane failed and says why when the new create is lost, though the pane once ran a session', async () => {
+    const h = harness()
+    const first = h.result.spawn(spawnOpts)
+    await flush()
+    h.creates[0].d.resolve(created('sess-A'))
+    await first
+    expect(h.result.status.value).toBe('running')
+    h.mock.emit('terminal.exit', { terminal_session_id: 'sess-A', reason: 'exit', exit_code: 0, signal: null, uptime_ms: 60_000 })
+    await flush()
+    expect(h.result.status.value).toBe('exited')
+    // A new create whose response is then lost: no live session backs the pane.
+    h.result.status.value = 'idle'
+    void h.result.spawn(spawnOpts).catch(() => {})
+    await flush()
+    const cancelling = h.result.cancelPendingCreate()
+    cancelling.catch(() => {})
+    await flush()
+    setStatus(h, 'disconnected')
+    await flush()
+    h.creates[1].d.reject(new Error('WebSocket closed'))
+    h.cancels[0].d.reject(new Error('WebSocket closed'))
+    setStatus(h, 'connected')
+    await flush()
+    await expect(cancelling).rejects.toThrow()
+    expect(h.result.status.value).toBe('error')
+    expect(h.result.error.value).toMatch(/fenced/i)
+    expect(writes.join('')).toMatch(/fenced/i)
+    h.scope.stop()
+  })
+})
+
+// The release of a settled generation's bookkeeping changes no observable request: settled promises
+// answer instantly either way, so these tests pin what the pane does across many generations (every
+// start goes out, an earlier generation never fences a later one, a real fence stays) and not the
+// size of the private maps.
+describe('useTerminal — many create generations in one pane', () => {
+  const refusal = response('terminal.create.result', false, null, { code: 'SPAWN_FAILED', message: 'no such binary' })
+
+  it('repeated refused starts each send their own create and cancel, and a later start succeeds with no stale fence', async () => {
+    const h = harness()
+    for (let attempt = 0; attempt < 5; attempt++) {
+      void h.result.spawn(spawnOpts)
+      await flush()
+      h.creates[attempt].d.resolve(refusal)
+      await flush()
+      h.cancels[attempt].d.resolve(verdict(true))
+      await flush()
+      expect(h.result.status.value).toBe('error')
+      h.result.status.value = 'idle'
+    }
+    expect(h.creates).toHaveLength(5)
+    expect(h.cancels).toHaveLength(5)
+    const last = h.result.spawn(spawnOpts)
+    await flush()
+    h.creates[5].d.resolve(created('fresh'))
+    await last
+    expect(h.result.status.value).toBe('running')
+    expect(h.result.sessionId.value).toBe('fresh')
+    expect(h.kills).toHaveLength(0)
+    h.scope.stop()
+  })
+
+  it('repeated cancelled starts each send their own cancel, and a later start succeeds with no stale fence', async () => {
+    const h = harness()
+    for (let attempt = 0; attempt < 3; attempt++) {
+      void h.result.spawn(spawnOpts)
+      await flush()
+      const cancelling = h.result.cancelPendingCreate()
+      await flush()
+      h.cancels[attempt].d.resolve(verdict(true))
+      await cancelling
+      h.creates[attempt].d.resolve(response('terminal.create.result', false, null, { code: 'CREATE_CANCELLED', message: 'c' }))
+      await flush()
+      h.result.status.value = 'idle'
+    }
+    expect(h.creates).toHaveLength(3)
+    expect(h.cancels).toHaveLength(3)
+    const last = h.result.spawn(spawnOpts)
+    await flush()
+    h.creates[3].d.resolve(created('fresh'))
+    await last
+    expect(h.result.status.value).toBe('running')
+    expect(h.result.sessionId.value).toBe('fresh')
+    expect(h.kills).toHaveLength(0)
+    h.scope.stop()
+  })
+
+  it('a fenced pane stays fenced after its unresolved generation settles', async () => {
+    const h = harness()
+    void h.result.spawn(spawnOpts)
+    await flush()
+    const cancelling = h.result.cancelPendingCreate()
+    cancelling.catch(() => {})
+    await flush()
+    setStatus(h, 'disconnected')
+    await flush()
+    h.creates[0].d.reject(new Error('WebSocket closed'))
+    h.cancels[0].d.reject(new Error('WebSocket closed'))
+    setStatus(h, 'connected')
+    await flush()
+    await expect(cancelling).rejects.toThrow()
+    h.result.status.value = 'idle'
+    await expect(h.result.spawn(spawnOpts)).rejects.toThrow(/fenced|unresolved/i)
     expect(h.creates).toHaveLength(1)
     h.scope.stop()
   })

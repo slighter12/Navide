@@ -18,5 +18,56 @@
     "resume_by_id": "vendor-unsupported",
     "session_id_at_launch": "vendor-unsupported",
     "login": "unknown"
+  },
+  "observer": {
+    "parser": "aider",
+    "parser_id": "rust-aider-md-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "text",
+      "usage": "per_turn",
+      "store_file": null,
+      "request": ["cwd", "namespace"],
+      "usage_fields": {
+        "select": [{"pointer": "/kind", "equals": "tokens"}],
+        "object": null,
+        "input": ["/input"],
+        "output": ["/output"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": null,
+        "version": null,
+        "timestamp": "/timestamp",
+        "number": "lenient",
+        "text": "string",
+        "session": "/session"
+      },
+      "store": null,
+      "rules": {
+        "missing_identity_rotates": true,
+        "invalid_utf8_fails": false,
+        "non_object_fails": false,
+        "activity_non_object_fails": false,
+        "totals_never_decrease": false,
+        "water_survives_replacement": true
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity"],
+      "messages": {"unsupported_mode": "Aider observation mode not integrated", "non_object": null},
+      "legacy_state": [
+        {"prefix": "act_hw::", "field": "water", "kind": "int"},
+        {"prefix": "aider_text::", "field": "last_text", "kind": "text"},
+        {"prefix": "aider_walk::", "field": "adapter", "kind": "json"}
+      ],
+      "python": {"prompt_detail": "prompt", "pane_scope": "none", "attribution": "none", "identity_source": "file_stem"},
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

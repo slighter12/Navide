@@ -957,6 +957,8 @@
       "backend-reconnecting": "Backend bị ngắt kết nối — đang kết nối lại. Tạm dừng nhập liệu.",
       "backend-restarting": "Backend gặp sự cố — đang khởi động lại ({attempt}/{max}). Tạm dừng nhập liệu.",
       "backend-unavailable": "Backend không khả dụng — tạm dừng nhập liệu cho đến khi backend được khởi động lại.",
+      "runtime-session-resumed": "Đã tiếp tục {count} session sau khi runtime CLI dừng",
+      "runtime-session-resume-failed": "Không tiếp tục được {count} session sau khi runtime CLI dừng — hãy dùng Dựng lại để thử lại",
       "session-resumed": "Đã tiếp tục {count} session sau khi backend khởi động lại",
       "session-resume-failed": "Không tiếp tục được {count} session sau khi backend khởi động lại — hãy dùng Dựng lại để thử lại",
       "option-select-hint": "CLI này chiếm chuột — hãy giữ {key} trong lúc kéo để chọn văn bản",
@@ -985,6 +987,9 @@
       "rebuild-in-progress": "Đang dựng lại",
       "rebuild-not-resumable": "Không tìm thấy session trên đĩa — không dựng lại được bằng cách tiếp tục",
       "rebuild-probe-failed": "Không xác minh được session — dịch vụ không phản hồi, hãy thử lại",
+      "close-offline": "Không thể đóng pane này khi backend đang mất kết nối — hãy thử lại sau khi kết nối lại",
+      "close-workspace-offline": "Không thể đóng workspace này khi backend đang mất kết nối — hãy thử lại sau khi kết nối lại",
+      "close-unverified": "Không xác nhận được session đã dừng nên pane được giữ lại — hãy thử đóng lại",
       "rebuild-running-confirm-title": "CLI đang chạy",
       "rebuild-running-confirm-body": "Dựng lại sẽ ngắt lượt đang chạy và in lại cuộc hội thoại. Vẫn dựng lại?",
       "rebuild-running-confirm-body-batch": "{count} CLI đang chạy — dựng lại sẽ ngắt các lượt đang chạy và in lại các cuộc hội thoại. Vẫn dựng lại?",
@@ -9432,6 +9437,10 @@
         "no-session": "{name}: không nối lại, vì không có cuộc trò chuyện đã lưu để tiếp tục",
         "failed": "{name}: không nối lại được"
       }
+    },
+    "runtime-lost": {
+      "title": "Runtime CLI đã dừng lúc {time}",
+      "note": "Các pane được nối lại dừng ở dấu nhắc và không tự tiếp tục; các pane đã kết thúc giữ nguyên cho đến khi bạn dựng lại."
     },
     "scheduler-disabled": "Tác vụ theo lịch “{name}” đã bị tắt: pane đích không còn",
     "scheduler-disabled-note": "Không tìm thấy pane đích {n} lần chạy liên tiếp, nên tác vụ đã bị tắt. Trong bảng Lịch chạy, hãy dùng “Gắn lại” để trỏ nó tới một pane đang chạy, rồi bật lại.",

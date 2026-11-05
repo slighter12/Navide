@@ -69,7 +69,7 @@ describe('closing a workspace asks before it takes the panes', () => {
     expect(fn).toContain('closeDialogBodyKey({ count, pipelineCount })')
     expect(fn).toContain('{ name, count, pipelineCount }')
     expect(appSource).toContain(
-      "import { closeDialogBodyKey, closeEndsTheRun, restoreBlockedByRun } from './lib/workspaceCloseRun'"
+      "import { closeDialogBodyKey, closeEndsTheRun, closeRefusedOffline, restoreBlockedByRun } from './lib/workspaceCloseRun'"
     )
     const lib = read('src/renderer/src/lib/workspaceCloseRun.ts')
     const returned = [...lib.matchAll(/return '(confirm-close\.[a-z-]+)'/g)].map((m) => m[1])
@@ -148,8 +148,8 @@ describe('closing a workspace asks before it takes the panes', () => {
     // did not happen.
     // Sliced from the kill, so containment IS the ordering claim — the pipeline
     // branch above has a sweep of its own and indexOf would find that one.
-    // Review-9: onKill itself has the backend settle the pane (its release reaches a pane with no
-    // terminal ref, and a process a refused kill left up), and the close stops when it is not proven.
+    // onKill itself has the backend settle the pane (its release reaches a pane with no terminal
+    // ref, and a process a refused kill left up), and the close stops when it is not proven.
     expect(fn).toContain('if (!(await onKill(pane.id, { markRemoved: false, force: false }))) return')
     expect(body(appSource, 'onKill')).toContain("'manual_pane.release_pty'")
   })
@@ -198,7 +198,7 @@ describe('closing a workspace asks before it takes the panes', () => {
     // tests scan renderer source, and the backend's call the handler by name —
     // so a typo on either side ships as a silently dropped request.
     const handlers = read('backend/agent_team_backend/ws_handlers.py')
-    // manual_pane.release_pty is sent from onKill now (review-9), the by-pane retirement from here.
+    // manual_pane.release_pty is sent from onKill, the by-pane retirement from here.
     for (const [source, msg] of [[body(appSource, 'onKill'), 'manual_pane.release_pty'], [fn, 'pipeline.slot_unspawn_by_pane']] as const) {
       expect(source).toContain(`'${msg}'`)
       expect(handlers).toContain(`@handler("${msg}")`)

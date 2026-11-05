@@ -69,6 +69,37 @@ describe('useAnnouncements – backend restart (H3)', () => {
     expect(row?.highlights).toEqual([i18n.global.t('announce.backend-restart.not-resumed.crash-loop', { name: 'lead' })])
   })
 
+  it('names a runtime loss as one, never as a backend restart', async () => {
+    const { useAnnouncements, i18n } = await load()
+    i18n.global.locale.value = 'en-US'
+    const a = useAnnouncements()
+    a.noteRuntimeLoss({
+      resumed: ['lead'],
+      interrupted: ['lead', 'worker'],
+      notResumed: [{ paneId: 'p-w', name: 'worker', reason: 'idle-off-screen' }],
+    }, 1_800_000_000_000)
+    const rows = a.items.value.filter((i) => i.kind === 'backend-restart')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].title).toBe(i18n.global.t('announce.runtime-lost.title', { time: new Date(1_800_000_000_000).toLocaleTimeString() }))
+    expect(rows[0].title.toLowerCase()).not.toContain('backend')
+    expect(rows[0].note).toBe(i18n.global.t('announce.runtime-lost.note'))
+    expect(rows[0].highlights).toEqual([
+      i18n.global.t('announce.backend-restart.resumed', { names: 'lead' }),
+      i18n.global.t('announce.backend-restart.interrupted', { names: 'lead, worker' }),
+      i18n.global.t('announce.backend-restart.not-resumed.idle-off-screen', { name: 'worker' }),
+    ])
+    expect(rows[0].actions).toEqual([{ kind: 'pane-rebuild', paneId: 'p-w', name: 'worker' }])
+    a.dropBackendRestartPane('p-w')
+    expect(a.items.value.find((i) => i.kind === 'backend-restart')?.actions).toEqual([])
+  })
+
+  it('leaves no row for a runtime loss that touched no pane', async () => {
+    const { useAnnouncements } = await load()
+    const a = useAnnouncements()
+    a.noteRuntimeLoss({ resumed: [], interrupted: [], notResumed: [] })
+    expect(a.items.value.some((i) => i.kind === 'backend-restart')).toBe(false)
+  })
+
   it('leaves no row for a restart that touched no pane', async () => {
     const { useAnnouncements } = await load()
     const a = useAnnouncements()

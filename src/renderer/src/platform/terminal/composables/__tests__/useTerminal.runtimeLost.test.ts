@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 //
 // Agent CLI Runtime loss with the WebSocket still up arrives as a plain
-// `terminal.exit` whose reason is `runtime_lost`. The pane must hand that loss
-// to the existing conversation-recovery owner exactly like a PTY that did not
-// survive a reconnect, and must do nothing else on its own.
+// `terminal.exit` whose reason is `runtime_lost`. The pane reports that loss to
+// its own recovery entry (`onRuntimeLost`), together with whether the pane was
+// working at that moment, and must do nothing else on its own. It is not the
+// disconnect path (`onPtyLost`): the backend never went away.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createMockBackend, withScope, flush } from './mockBackend'
 
@@ -70,15 +71,24 @@ vi.mock('@xterm/addon-serialize', () => ({
 
 import { useTerminal } from '../useTerminal'
 
-async function spawnedPane(onPtyLostWhileDisconnected: () => void, agentKey = 'claude') {
+async function spawnedPane(onRuntimeLost: (wasWorking: boolean) => void, onPtyLost: () => void = () => {}, agentKey = 'claude') {
   const mock = createMockBackend()
   mock.setResponse('terminal.create', { terminal_session_id: 'sess-1', pid: 42 })
-  const { result, scope } = withScope(() => useTerminal('pane-1', mock.backend, { onPtyLostWhileDisconnected }))
+  const { result, scope } = withScope(() => useTerminal('pane-1', mock.backend, { onRuntimeLost, onPtyLost }))
   result.mount(document.createElement('div'))
   await result.spawn({ command: 'bash', cwd: '/tmp', skipReattach: true, agentKey })
   await flush()
   return { mock, result, scope }
 }
+
+// Output reaches the status clock after the pane's coalescing window (500 ms off screen).
+async function printPrompt(mock: ReturnType<typeof createMockBackend>): Promise<void> {
+  mock.emit('terminal.output', { terminal_session_id: 'sess-1', data: 'prompt\r\n' })
+  await new Promise((resolve) => setTimeout(resolve, 650))
+}
+
+const loseRuntime =(mock: ReturnType<typeof createMockBackend>) =>
+  mock.emit('terminal.exit', { terminal_session_id: 'sess-1', reason: 'runtime_lost', exit_code: null, signal: null })
 
 const sentRequests = (mock: ReturnType<typeof createMockBackend>) =>
   mock.sent.map((s) => s.type).filter((t) => t !== 'terminal.create')
@@ -91,13 +101,52 @@ describe('useTerminal — Agent CLI Runtime loss presented as terminal.exit(runt
     writes.length = 0
   })
 
-  it('reports the lost PTY to the recovery owner once and marks the pane exited', async () => {
+  it('reports the loss to the runtime-loss entry once, not the disconnect one, and marks the pane exited', async () => {
     const lost = vi.fn()
-    const { mock, result, scope } = await spawnedPane(lost)
-    mock.emit('terminal.exit', { terminal_session_id: 'sess-1', reason: 'runtime_lost', exit_code: null, signal: null })
+    const ptyLost = vi.fn()
+    const { mock, result, scope } = await spawnedPane(lost, ptyLost)
+    loseRuntime(mock)
     await flush()
     expect(lost).toHaveBeenCalledTimes(1)
+    expect(ptyLost).not.toHaveBeenCalled()
     expect(result.status.value).toBe('exited')
+    scope.stop()
+  })
+
+  it('says the pane was working when its turn was parked on the user at the loss', async () => {
+    const lost = vi.fn()
+    const { mock, result, scope } = await spawnedPane(lost)
+    await printPrompt(mock)
+    result.markNeedsInput()
+    expect(result.displayStatus.value).toBe('awaiting')
+    loseRuntime(mock)
+    await flush()
+    expect(lost).toHaveBeenCalledWith(true)
+    scope.stop()
+  })
+
+  it('says the pane was working when a delivered message was still unconsumed at the loss', async () => {
+    const lost = vi.fn()
+    const { mock, result, scope } = await spawnedPane(lost)
+    await printPrompt(mock)
+    result.markTurnComplete()
+    result.markDeliveredPending()
+    expect(result.displayStatus.value).toBe('running')
+    loseRuntime(mock)
+    await flush()
+    expect(lost).toHaveBeenCalledWith(true)
+    scope.stop()
+  })
+
+  it('says the pane was not working when it sat idle at the loss', async () => {
+    const lost = vi.fn()
+    const { mock, result, scope } = await spawnedPane(lost)
+    await printPrompt(mock)
+    result.markTurnComplete()
+    expect(result.displayStatus.value).toBe('idle')
+    loseRuntime(mock)
+    await flush()
+    expect(lost).toHaveBeenCalledWith(false)
     scope.stop()
   })
 
@@ -105,7 +154,7 @@ describe('useTerminal — Agent CLI Runtime loss presented as terminal.exit(runt
     const lost = vi.fn()
     const { mock, scope } = await spawnedPane(lost)
     const before = sentRequests(mock)
-    mock.emit('terminal.exit', { terminal_session_id: 'sess-1', reason: 'runtime_lost', exit_code: null, signal: null })
+    loseRuntime(mock)
     await flush()
     expect(sentRequests(mock)).toEqual(before)
     expect(mock.sent.filter((s) => s.type === 'terminal.create')).toHaveLength(1)

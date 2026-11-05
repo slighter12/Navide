@@ -404,6 +404,10 @@ class CopilotLogReader(LogReader):
             log.debug("sqlite read %s failed: %s", path, err)
             return None
 
+    def _warn_store_error(self, path: Path, err: object) -> None:
+        """compat.store_error_reported: the sidecar reports a store it could not read as an `error`; warn once, as `_query` does."""
+        _warn_db_once(path, err)
+
     def _workspace_meta(self, path: Path) -> dict:
         """The session's sibling workspace.yaml ({} when unreadable)."""
         meta = path.parent / "workspace.yaml"

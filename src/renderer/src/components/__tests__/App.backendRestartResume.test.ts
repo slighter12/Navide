@@ -46,7 +46,7 @@ describe('the wave', () => {
     const body = fn('flushPtyLostResumes')
     expect(body).toContain('isRepeatCrash(backendLossAutoRestartAttempt, lastReconnectedAutoRestartAttempt)')
     expect(body).toContain('planBackendRestartResume(lost, { crashLoop })')
-    expect(body).toContain('runWithConcurrency(plan.resume, ALL_SCOPE_RESTORE_CONCURRENCY')
+    expect(fn('resumeLostPanes')).toContain('runWithConcurrency(plan.resume, ALL_SCOPE_RESTORE_CONCURRENCY')
   })
 
   it('remembers the attempt this wave came back on, then resets the captured one', () => {
@@ -67,18 +67,18 @@ describe('the wave', () => {
   })
 
   it('keeps the two toasts and discloses the wave in the announcements centre', () => {
-    const body = fn('flushPtyLostResumes')
+    const body = fn('resumeLostPanes')
     expect(body).toContain("'pane.terminal.session-resumed'")
     expect(body).toContain("'pane.terminal.session-resume-failed'")
-    expect(body).toContain('announcements.noteBackendRestart({')
+    expect(body).toContain('announcements.noteBackendRestart({ ...notice, crashLoop })')
     expect(body).toContain("reason: 'failed' as const")
   })
 
   it('tells parents with the backend-restart wording', () => {
-    const body = fn('flushPtyLostResumes')
-    expect(body).toContain("notifyInterruptedParents(kids, 'backend-restart', resumedIds)")
+    const body = fn('resumeLostPanes')
+    expect(body).toContain("notifyInterruptedParents(kids, runtime ? 'runtime-lost' : 'backend-restart', resumedIds)")
     const notify = fn('notifyInterruptedParents')
-    expect(notify).toContain("cause: 'relaunch' | 'backend-restart' = 'relaunch'")
+    expect(notify).toContain("cause: 'relaunch' | 'backend-restart' | 'runtime-lost' = 'relaunch'")
     expect(notify).toContain('renderInterruptedChildrenNotice(children, cause)')
   })
 
@@ -87,7 +87,7 @@ describe('the wave', () => {
   })
 
   it('resumes through the existing rebuild path and injects nothing itself', () => {
-    const body = fn('flushPtyLostResumes')
+    const body = fn('resumeLostPanes')
     expect(body).toContain('rebuildPaneViaResume(')
     for (const injector of ['injectPane', 'continueRestoredPane', 'terminal.input', 'sendInput']) {
       expect(body).not.toContain(injector)
@@ -95,9 +95,38 @@ describe('the wave', () => {
   })
 
   it('re-arms the owed report on the rebuilt pane, only on this path', () => {
-    const body = fn('flushPtyLostResumes')
+    const body = fn('resumeLostPanes')
     expect(body).toMatch(/revived\.spawnedByName = debt\.parentName\s*\n\s*revived\.spawnReportPending = true[\s\S]*persistPaneReportDebt\(revived\)/)
     expect(fn('rebuildPaneViaResume')).not.toContain('spawnReportPending')
+  })
+})
+
+describe('an Agent CLI Runtime loss under a live backend', () => {
+  // The plan itself is behaviour-tested (lib/__tests__/backendRestartResume.test.ts,
+  // planRuntimeLossResume; the working state: useTerminal.runtimeLost.test.ts). These pins only say
+  // that App wires the runtime-loss entry and keeps the backend-outage state out of it.
+  it('is wired from the pane\'s lost event with its payload, apart from a PTY lost to an outage', () => {
+    expect(appSource).toContain(
+      '@pty-lost="(runtimeLoss) => runtimeLoss ? onPaneRuntimeLost(p.id, runtimeLoss.wasWorking) : onPanePtyLost(p.id)"',
+    )
+  })
+
+  it('plans from the working state the pane reported, with no backend-outage state', () => {
+    const entry = fn('onPaneRuntimeLost')
+    expect(entry).toContain('pendingRuntimeLoss.set(paneId, { onScreen: onScreenPaneIds.value.has(paneId), wasWorking })')
+    const flush = fn('flushRuntimeLossResumes')
+    expect(flush).toContain('planRuntimeLossResume(lost)')
+    for (const outageState of ['interruptedAtBackendLoss', 'isRepeatCrash', 'backendLossAutoRestartAttempt', 'lastReconnectedAutoRestartAttempt']) {
+      expect(entry).not.toContain(outageState)
+      expect(flush).not.toContain(outageState)
+    }
+  })
+
+  it('announces and words the wave as a runtime loss', () => {
+    const body = fn('resumeLostPanes')
+    expect(body).toContain("'pane.terminal.runtime-session-resumed'")
+    expect(body).toContain("'pane.terminal.runtime-session-resume-failed'")
+    expect(body).toContain('announcements.noteRuntimeLoss(notice)')
   })
 })
 

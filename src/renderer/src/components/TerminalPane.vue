@@ -180,9 +180,13 @@ const emit = defineEmits<{
    *  chosen addresses so the menu can offer them first next time. */
   (e: 'mention-pick', addresses: string[]): void
   (e: 'first-output'): void
-  /** This pane's PTY did not survive a backend outage — App.vue resumes the
-   *  CLI session so the conversation continues instead of leaving a dead pane. */
-  (e: 'pty-lost'): void
+  /** This pane's PTY is gone though its CLI session usually is not — App.vue resumes
+   *  the session so the conversation continues instead of leaving a dead pane. No
+   *  argument: the PTY did not survive a backend outage. With `runtimeLoss`: the
+   *  Agent CLI Runtime died under a live backend, and `wasWorking` is whether the
+   *  turn was running or waiting on the user at that moment. (One event, not two:
+   *  Vue's typed-emits overload extraction stops working past this many signatures.) */
+  (e: 'pty-lost', runtimeLoss?: { wasWorking: boolean }): void
   /** Flip accountFollow; App.vue owns the flag. */
   (e: 'toggle-account-follow'): void
 }>()
@@ -266,7 +270,8 @@ const terminal = useTerminal(props.paneId, props.terminalPort, {
   onFirstOutput: () => emit('first-output'),
   onClipboardFailure,
   onOpenFileFailure,
-  onPtyLostWhileDisconnected: () => emit('pty-lost'),
+  onPtyLost: () => emit('pty-lost'),
+  onRuntimeLost: (wasWorking) => emit('pty-lost', { wasWorking }),
   agentProfileFor,
 })
 // Reattached terminals can keep the backend's old pane id. Actions must use

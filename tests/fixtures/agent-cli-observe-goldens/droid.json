@@ -1,0 +1,554 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_droid_golden -- --ignored",
+  "legacy_source": {
+    "blob": "685159a819e0d1da2f99eafa87d8aa456c8ff358",
+    "path": "native/navide-cli-runtime/src/observe_droid.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "usage::a::22::3",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "input_tokens": 22,
+            "model": "claude-opus-5",
+            "output_tokens": 3,
+            "session_id": "a",
+            "vendor": "droid"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "usage::a::22::3",
+          "droid_tok::22:3"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "first: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:2",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "session_id": "a",
+            "text": "rename this pane",
+            "timestamp": "2026-08-26T17:58:46.446Z",
+            "vendor": "droid"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:3",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "session_id": "a",
+            "text": "",
+            "timestamp": "2026-08-26T17:58:46.446Z",
+            "vendor": "droid"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:4",
+            "detail": "completed",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "session_id": "a",
+            "text": "hi",
+            "timestamp": "",
+            "vendor": "droid"
+          }
+        ],
+        "high_water": 4,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "first: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "usage::a::25::8",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "input_tokens": 3,
+            "model": "claude-opus-5",
+            "output_tokens": 5,
+            "session_id": "a",
+            "vendor": "droid"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "usage::a::22::3",
+          "usage::a::25::8",
+          "droid_tok::25:8"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "again: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:5",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "session_id": "a",
+            "text": "",
+            "timestamp": "2026-08-26T17:58:46.446Z",
+            "vendor": "droid"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:6",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "session_id": "a",
+            "text": "",
+            "timestamp": "2026-08-26T17:58:46.446Z",
+            "vendor": "droid"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:9",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "session_id": "a",
+            "text": "",
+            "timestamp": "2026-08-26T17:58:46.446Z",
+            "vendor": "droid"
+          }
+        ],
+        "high_water": 9,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "again: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "droid_tok::22:3",
+          "droid_tok::25:8",
+          "usage::a::22::3",
+          "usage::a::25::8"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "nothing new: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 9,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "nothing new: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "usage::a::22::3",
+          "usage::a::25::8",
+          "droid_tok::10:5"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "shrunk: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 9,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "shrunk: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "usage::a::30::11",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "input_tokens": 20,
+            "model": "claude-opus-5",
+            "output_tokens": 6,
+            "session_id": "a",
+            "vendor": "droid"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "usage::a::22::3",
+          "usage::a::25::8",
+          "usage::a::30::11",
+          "droid_tok::30:11"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "grown again: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 9,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "grown again: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "droid_tok::10:5",
+          "droid_tok::22:3",
+          "droid_tok::25:8",
+          "droid_tok::30:11",
+          "usage::a::22::3",
+          "usage::a::25::8",
+          "usage::a::30::11"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "malformed: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 9,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "malformed: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "droid_tok::10:5",
+          "droid_tok::22:3",
+          "droid_tok::25:8",
+          "droid_tok::30:11",
+          "usage::a::22::3",
+          "usage::a::25::8",
+          "usage::a::30::11"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "half: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 9,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "half: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "droid_tok::10:5",
+          "droid_tok::22:3",
+          "droid_tok::25:8",
+          "droid_tok::30:11",
+          "usage::a::22::3",
+          "usage::a::25::8",
+          "usage::a::30::11"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "whole: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:10",
+            "detail": "completed",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/-w/a.jsonl",
+            "session_id": "a",
+            "text": "",
+            "timestamp": "",
+            "vendor": "droid"
+          }
+        ],
+        "high_water": 10,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "whole: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": [
+          "droid_tok::10:5",
+          "droid_tok::22:3",
+          "droid_tok::25:8",
+          "droid_tok::30:11",
+          "usage::a::22::3",
+          "usage::a::25::8",
+          "usage::a::30::11"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "replaced: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 10,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-droid-jsonl-v1",
+        "path": "$ROOT/sessions/-w/a.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "session": "a",
+        "settings_path": "$ROOT/sessions/-w/a.settings.json"
+      },
+      "label": "replaced: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "droid"
+}

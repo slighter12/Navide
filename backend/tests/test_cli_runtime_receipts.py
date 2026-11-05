@@ -121,7 +121,8 @@ async def test_the_proof_names_each_tampering(rig, name):
     service, created = await run_trial(rig)
     records = trial_proof.load(rig.root)
     ledger = service.control_ledger()
-    assert trial_proof.prove(copy.deepcopy(records), driver_sessions=created, ledger=ledger)["ok"], "control passes"
+    control = trial_proof.prove(copy.deepcopy(records), driver_sessions=created, ledger=ledger)
+    assert control["ok"], f"control passes: {control['failures']}"
     mutate, expected = BREAKERS[name]
     verdict = trial_proof.prove(mutate(copy.deepcopy(records)), driver_sessions=created, ledger=ledger)
     assert not verdict["ok"] and any(expected in f for f in verdict["failures"]), (name, verdict["failures"])

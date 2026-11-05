@@ -18,5 +18,56 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "unknown",
     "login": "unknown"
+  },
+  "observer": {
+    "parser": "droid",
+    "parser_id": "rust-droid-jsonl-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "jsonl",
+      "usage": "cumulative",
+      "store_file": null,
+      "request": ["cwd", "session"],
+      "usage_fields": {
+        "select": [],
+        "object": "/tokenUsage",
+        "input": ["/tokenUsage/inputTokens", "/tokenUsage/cacheCreationTokens", "/tokenUsage/cacheReadTokens"],
+        "output": ["/tokenUsage/outputTokens"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": "/model",
+        "version": null,
+        "timestamp": null,
+        "number": "lenient",
+        "text": "any",
+        "document": ".settings.json"
+      },
+      "store": null,
+      "rules": {
+        "missing_identity_rotates": false,
+        "invalid_utf8_fails": true,
+        "non_object_fails": false,
+        "activity_non_object_fails": false,
+        "totals_never_decrease": false,
+        "water_survives_replacement": true
+      }
+    }],
+    "core": {
+      "modes": ["session_usage", "activity"],
+      "messages": {"unsupported_mode": "Droid observation mode not integrated", "non_object": null},
+      "legacy_state": [
+        {"prefix": "act_hw::", "field": "water", "kind": "int"},
+        {"prefix": "droid_text::", "field": "last_text", "kind": "text"},
+        {"prefix": "droid_tok::", "field": "totals", "kind": "colon_pair"}
+      ],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "file_stem"},
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

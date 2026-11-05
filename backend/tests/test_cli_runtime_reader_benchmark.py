@@ -58,10 +58,14 @@ def test_the_reader_status_preconditions_follow_e2_section_10():
     assert rb.reader_status({**ok, "claude": {"python": True, "rust": False}}, 2, 10, 10) == "not_run"
 
 
+# The Rust arm on the Claude fixture is not in this single-pass table: the fixture's 2,400 usage events with their own cursors weigh
+# more than one answer's ledger (t36h S1), so the sidecar delivers them in passes (next test). The benchmark driver `rb` asks once.
+SINGLE_PASS = [(reader, fixture) for fixture in rb.FIXTURES for reader in rb.READERS if (reader, fixture) != ("rust", "claude")]
+
+
 @needs_evidence
 @needs_sidecar
-@pytest.mark.parametrize("fixture", rb.FIXTURES)
-@pytest.mark.parametrize("reader", rb.READERS)
+@pytest.mark.parametrize("reader,fixture", SINGLE_PASS)
 def test_smoke_both_readers_equal_the_golden_list_in_a_fresh_process(tmp_path, reader, fixture):
     run = rb.run_in_fresh_process(reader, fixture, FIXTURES, PRODUCT, tmp_path)
     assert run["m0"] is True, f"{reader} on {fixture} differs from the golden list"
@@ -69,6 +73,29 @@ def test_smoke_both_readers_equal_the_golden_list_in_a_fresh_process(tmp_path, r
     assert (run["m2_sidecar_cpu_s"] > 0) == (reader == "rust") or reader == "python"
     import os
     assert run["pid"] != os.getpid(), "a fresh process per run"
+
+
+@needs_evidence
+@needs_sidecar
+def test_the_rust_claude_smoke_equals_the_golden_list_over_the_passes_the_answer_ledger_allows(tmp_path):
+    """The same comparison as the single-pass smoke, for the one fixture whose events (each with its final cursor, charged to the
+    ledger) do not fit one answer: the passes together, each resumed from the checkpoint the last one left, are the golden list."""
+    from tests.cli_regression.support.frame_peer import FramePeer
+    path = Path(json.loads(FIXTURES.read_text())["claude"]["path"])
+    golden = json.loads(Path(json.loads(FIXTURES.read_text())["claude"]["golden"]).read_text())
+    peer = FramePeer(tmp_path, binary=PRODUCT)
+    try:
+        events, checkpoint, passes = [], {}, 0
+        while passes < 50:
+            document, _final = peer.observe("claude", path, "usage", checkpoint=checkpoint)
+            if not document["events"]:
+                break
+            events += rb._normalise(document["events"])
+            checkpoint, passes = document["checkpoint"], passes + 1
+    finally:
+        peer.close()
+    assert passes >= 2, "the fixture does not fit one answer"
+    assert events == golden
 
 
 @needs_evidence

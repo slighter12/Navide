@@ -147,7 +147,7 @@ import {
 import { deriveGlobalManager, type GlobalManagerRef } from './lib/globalManager'
 import { registerStage, completeSlot, releaseSlot, type StageSlotTracker } from './lib/stageTracker'
 import { evaluateManagerStage, fullAutoStallAction, type ManagerStageVerdict } from './lib/managerStageWatchdog'
-import { closeDialogBodyKey, closeEndsTheRun, restoreBlockedByRun } from './lib/workspaceCloseRun'
+import { closeDialogBodyKey, closeEndsTheRun, closeRefusedOffline, restoreBlockedByRun } from './lib/workspaceCloseRun'
 import { heldPaneKeys, isHeldRecord, readHeldPanes, writeHeldPanes } from './lib/windowHeldPanes'
 import { dockWindowLabelKey, historyEntryIsLive, workspaceHasPmPanel } from './lib/dockWindow'
 import { droppedPrefix, remapCursor, type BufferObservation } from './lib/bufferCursor'
@@ -299,8 +299,8 @@ import {
   type RestoreSessionTrigger,
   type WorkspaceRestoreSession,
 } from './lib/resumeBehavior'
-import { closePaneHidden, idsWithoutClosing, pendingPaneClose, retirePaneInPlace, settlePaneTerminals, withoutClosing } from './lib/paneRetirement'
-import { isRepeatCrash, planBackendRestartResume, type LostPane } from './lib/backendRestartResume'
+import { closePaneHidden, idsWithoutClosing, pendingPaneClose, retirePaneInPlace, settlePaneTerminals, withoutClosing, type RetirementRefusal } from './lib/paneRetirement'
+import { isRepeatCrash, planBackendRestartResume, planRuntimeLossResume, type BackendRestartPlan, type LostPane, type RuntimeLossReport } from './lib/backendRestartResume'
 import { WakeClaims, joinedRealizeOutcome, paneOpenAnswer, sessionHeldElsewhere, type SessionHolder } from './lib/paneOpenAnswer'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
 import { cliPermissionKey, parseCliPermissionMode, skipPermissionFlagFor } from '@navide/plugin-shell'
@@ -8406,33 +8406,55 @@ const paneRecordOpen = (paneId: string): boolean => panes.value.some((p) => p.id
 // The backend may wait for an in-flight create's own disposition (60 s) before answering.
 const PANE_RELEASE_TIMEOUT_MS = 90_000
 
-async function onKill(paneId: string, opts: { markRemoved?: boolean, force?: boolean, keepInList?: boolean } = {}): Promise<boolean> {
+interface KillOptions {
+  markRemoved?: boolean
+  force?: boolean
+  keepInList?: boolean
+  /** The caller's own irreversible effects, run after the pane's own ones and only once the
+   *  settlement is proven (a rebuild's scrollback and account-follow drops). */
+  onProven?: () => Promise<void> | void
+}
+
+async function onKill(paneId: string, opts: KillOptions = {}): Promise<boolean> {
   const markRemoved = opts.markRemoved ?? true
   const force = opts.force ?? true
   const keepInList = opts.keepInList ?? false
   const pane = panes.value.find((p) => p.id === paneId)
-  if (pane?.injectionTimer !== null && pane?.injectionTimer !== undefined) {
-    window.clearTimeout(pane.injectionTimer)
-  }
   let stageIndex = -1
+  let watchedStageIndex = -1
   if (pane) {
     const savedStageIndex = pane.deferredRestore?.saved.stage_index
     stageIndex = typeof savedStageIndex === 'number' && savedStageIndex >= 0
       ? savedStageIndex
       : stagesApi.stages.value.findIndex((s) => s.id === pane.stageId)
-    if (stageIndex >= 0) cancelWatcher(paneId)
+    watchedStageIndex = stageIndex
     if (isPriorRunPane(paneId)) stageIndex = -1
   }
-  if (activeQuestion.value?.paneId === paneId) activeQuestion.value = null
   const ref = paneRefs[paneId]
-  if (acp.owns(paneId)) await acp.kill(paneId, { force })
+  const refused: { reason?: RetirementRefusal } = {}
   // One rule for every retirement path (lib/paneRetirement.ts): the pane's own kill is a
   // best-effort first step; the backend's settlement answer — which settles in-flight creates and
   // published sessions for the pane, with verified cleanup, BEFORE it touches any record — is the
   // proof. Unspawn when the record goes away; the pipeline slot by its address; otherwise
-  // (a kept record, or nothing to address) a release.
+  // (a kept record, or nothing to address) a release. The effects that cannot be put back
+  // (injection timer, stage watcher, pending question, ACP kill, then the caller's own) wait for
+  // that proof, so a refused close leaves the pane's workflow state as it was. The pane's own
+  // terminal kill has already been sent by then (a best-effort first step); a retry settles it.
   const slotAddress = markRemoved && pane?.origin === 'pipeline' && pane.slotLabel && stageIndex >= 0
   const settled = await settlePaneTerminals({
+    connected: () => backend.status.value === 'connected',
+    onRefused: (reason) => { refused.reason = reason },
+    onProven: [
+      async () => {
+        if (pane?.injectionTimer !== null && pane?.injectionTimer !== undefined) {
+          window.clearTimeout(pane.injectionTimer)
+        }
+        if (watchedStageIndex >= 0) cancelWatcher(paneId)
+        if (activeQuestion.value?.paneId === paneId) activeQuestion.value = null
+        if (acp.owns(paneId)) await acp.kill(paneId, { force })
+      },
+      ...(opts.onProven ? [opts.onProven] : []),
+    ],
     killOwn: ref?.sessionId ? () => ref.kill({ force }) : undefined,
     onKillFailed: (err) => recordDiagnostic({
       level: 'warn',
@@ -8471,10 +8493,15 @@ async function onKill(paneId: string, opts: { markRemoved?: boolean, force?: boo
     recordDiagnostic({
       level: 'warn',
       code: 'pane.releaseUnresolved',
-      message: 'the backend could not prove this pane\'s terminal settled; the pane and its record are kept',
+      message: refused.reason === 'offline'
+        ? 'the backend is disconnected, so this pane\'s terminal could not be settled; the pane and its record are kept'
+        : 'the backend could not prove this pane\'s terminal settled; the pane and its record are kept',
       paneId,
     })
-    notifyRestore.toast(i18n.global.t('pane.terminal.rebuild-probe-failed'), { type: 'error' })
+    notifyRestore.toast(
+      i18n.global.t(refused.reason === 'offline' ? 'pane.terminal.close-offline' : 'pane.terminal.close-unverified'),
+      { type: 'error' },
+    )
     syncViews()
     return false
   }
@@ -8703,7 +8730,21 @@ async function flushPtyLostResumes(): Promise<void> {
       spawnedBy: pane?.spawnedBy,
     }
   })
-  const plan = planBackendRestartResume(lost, { crashLoop })
+  await resumeLostPanes(lost, planBackendRestartResume(lost, { crashLoop }), 'backend', crashLoop)
+}
+
+/**
+ * Run a resume wave for panes whose CLI did not survive, and disclose what it
+ * did. `cause` picks the wording only: 'backend' is the backend restart above,
+ * 'runtime' is an Agent CLI Runtime loss under a live backend (no crash loop,
+ * and nothing in the text says the backend restarted).
+ */
+async function resumeLostPanes(
+  lost: readonly { id: string, working: boolean }[],
+  plan: BackendRestartPlan,
+  cause: 'backend' | 'runtime',
+  crashLoop: boolean,
+): Promise<void> {
   // Read before the wave: a rebuild retires the old pane id.
   const names = new Map<string, string>()
   const debts = new Map<string, { parentName: string; cross: boolean }>()
@@ -8715,7 +8756,7 @@ async function flushPtyLostResumes(): Promise<void> {
       debts.set(id, { parentName: pane.spawnedByName, cross: !!pane.spawnedCrossWorkspace })
     }
   }
-  const kids = backendRestartInterruptedChildren(lost.map((p) => p.id))
+  const kids = lostInterruptedChildren(lost)
   const replacedIds = new Map<string, string>()
   const resumedIds = new Set<string>()
   const failedIds: string[] = []
@@ -8749,22 +8790,22 @@ async function flushPtyLostResumes(): Promise<void> {
       }
     }
   })
+  const runtime = cause === 'runtime'
   if (resumed > 0) {
     notifyRestore.toast(
-      i18n.global.t('pane.terminal.session-resumed', { count: resumed }),
+      i18n.global.t(runtime ? 'pane.terminal.runtime-session-resumed' : 'pane.terminal.session-resumed', { count: resumed }),
       { type: 'success' }
     )
   }
   if (failed > 0) {
     notifyRestore.toast(
-      i18n.global.t('pane.terminal.session-resume-failed', { count: failed }),
+      i18n.global.t(runtime ? 'pane.terminal.runtime-session-resume-failed' : 'pane.terminal.session-resume-failed', { count: failed }),
       { type: 'error', duration: 8000 }
     )
   }
-  if (kids.length > 0) notifyInterruptedParents(kids, 'backend-restart', resumedIds)
+  if (kids.length > 0) notifyInterruptedParents(kids, runtime ? 'runtime-lost' : 'backend-restart', resumedIds)
   const nameOf = (id: string): string => names.get(id) ?? id
-  announcements.noteBackendRestart({
-    crashLoop,
+  const notice = {
     resumed: [...resumedIds].map(nameOf),
     interrupted: lost.filter((p) => p.working).map((p) => nameOf(p.id)),
     // A row offers a Rebuild, so only for a pane that is still there.
@@ -8772,7 +8813,49 @@ async function flushPtyLostResumes(): Promise<void> {
       ...plan.notResumed.map(({ id, reason }) => ({ paneId: id, name: nameOf(id), reason })),
       ...failedIds.map((id) => ({ paneId: id, name: nameOf(id), reason: 'failed' as const })),
     ].filter((row) => panes.value.some((p) => p.id === row.paneId)),
+  }
+  if (runtime) announcements.noteRuntimeLoss(notice)
+  else announcements.noteBackendRestart({ ...notice, crashLoop })
+}
+
+/**
+ * The Agent CLI Runtime died under a live backend (TerminalPane `runtime-lost`).
+ * The backend never went away, so none of the backend-outage state applies:
+ * what each pane was doing comes from the working state it reported at the
+ * moment of the loss, and the auto-restart counters are not consulted. The
+ * conversation is picked up through the same rebuild as a lost PTY.
+ */
+const pendingRuntimeLoss = new Map<string, { onScreen: boolean, wasWorking: boolean }>()
+let runtimeLossFlushTimer: number | null = null
+function onPaneRuntimeLost(paneId: string, wasWorking: boolean): void {
+  if (!normalizeAutoResumeOnReconnect(settingsGet(AUTO_RESUME_ON_RECONNECT_SETTING_KEY, true))) return
+  // Visibility is decided now, like onPanePtyLost: the batch window is when people click around.
+  pendingRuntimeLoss.set(paneId, { onScreen: onScreenPaneIds.value.has(paneId), wasWorking })
+  if (runtimeLossFlushTimer !== null) window.clearTimeout(runtimeLossFlushTimer)
+  runtimeLossFlushTimer = window.setTimeout(() => { void flushRuntimeLossResumes() }, PTY_LOST_BATCH_MS)
+}
+
+async function flushRuntimeLossResumes(): Promise<void> {
+  runtimeLossFlushTimer = null
+  const reports = [...pendingRuntimeLoss]
+  pendingRuntimeLoss.clear()
+  if (!reports.length) return
+  const lost: RuntimeLossReport[] = reports.map(([id, { onScreen, wasWorking }]) => {
+    const pane = panes.value.find((p) => p.id === id)
+    return {
+      id,
+      onScreen,
+      wasWorking,
+      canResume: !!pane && paneCanRebuild(pane),
+      spawnedBy: pane?.spawnedBy,
+    }
   })
+  await resumeLostPanes(
+    lost.map(({ id, wasWorking }) => ({ id, working: wasWorking })),
+    planRuntimeLossResume(lost),
+    'runtime',
+    false,
+  )
 }
 
 /** H3: a backend-restart row's Rebuild — the same resume as ⌘R, on the
@@ -8964,7 +9047,6 @@ async function rebuildPaneViaResume(
     // A rebuild onto a named account (a quota move, fixing the pane) puts the
     // pane on that account: it no longer follows.
     const explicitPin = opts?.quotaCommit?.toSlotId ?? (opts?.profileId || undefined)
-    try { localStorage.removeItem(`terminal-scroll:${sessionId}`) } catch {}
     // Taken from the live xterm now, not from the stored snapshot: the exit
     // that follows the kill discards that snapshot, and its periodic save can
     // be a minute behind. A string in memory survives both. The capture waits
@@ -8979,9 +9061,18 @@ async function rebuildPaneViaResume(
     }
     // Preserve layout order: keep the old pane as a dummy to avoid layout
     // reflow, then swap the replacement pane into its slot.
-    if (explicitPin) accountFollow.remove(paneId)
     // No replacement unless the backend proved the old terminal settled (onKill surfaces why).
-    if (!(await onKill(paneId, { markRemoved: false, force: true, keepInList: true }))) return 'probe-failed'
+    // The stored scrollback and the account-follow pin are dropped only after that proof (they ride
+    // through onKill's onProven), so a refused rebuild leaves the original pane with both.
+    if (!(await onKill(paneId, {
+      markRemoved: false,
+      force: true,
+      keepInList: true,
+      onProven: () => {
+        try { localStorage.removeItem(`terminal-scroll:${sessionId}`) } catch {}
+        if (explicitPin) accountFollow.remove(paneId)
+      },
+    }))) return 'probe-failed'
     const newId = await spawnPane({
       agentKey: snap.agentKey,
       customName: snap.customName,
@@ -13887,13 +13978,13 @@ function interruptedChildren(workspacePath: string): InterruptedChild[] {
   return out
 }
 
-/** H3: the panes a backend restart interrupted (running or waiting when it
- *  went away) that have a parent to tell, captured BEFORE the wave — a rebuild
- *  gives each pane a new id, while the messaging names carry across. */
-function backendRestartInterruptedChildren(ids: readonly string[]): InterruptedChild[] {
+/** H3: the lost panes that were working (running or waiting) and have a
+ *  parent to tell, captured BEFORE the wave — a rebuild gives each pane a new
+ *  id, while the messaging names carry across. */
+function lostInterruptedChildren(lost: readonly { id: string, working: boolean }[]): InterruptedChild[] {
   const out: InterruptedChild[] = []
-  for (const id of ids) {
-    if (!interruptedAtBackendLoss.has(id)) continue
+  for (const { id, working } of lost) {
+    if (!working) continue
     const pane = panes.value.find((p) => p.id === id)
     if (!pane?.messagingName) continue
     const parentName = panes.value.find((p) => p.id === pane.spawnedBy)?.messagingName ?? pane.spawnedByName ?? ''
@@ -13908,8 +13999,8 @@ function backendRestartInterruptedChildren(ids: readonly string[]): InterruptedC
  *  placeholder is gone — a failed or over-the-cap one is still there. */
 function notifyInterruptedParents(
   kids: readonly InterruptedChild[],
-  cause: 'relaunch' | 'backend-restart' = 'relaunch',
-  /** Backend restart: the panes the wave rebuilt (a failed rebuild of a live
+  cause: 'relaunch' | 'backend-restart' | 'runtime-lost' = 'relaunch',
+  /** Backend restart or runtime loss: the panes the wave rebuilt (a failed rebuild of a live
    *  pane leaves no placeholder to look for). */
   resumedIds?: ReadonlySet<string>,
 ): void {
@@ -21605,12 +21696,29 @@ async function closeWorkspace(path: string, opts: { confirmed?: boolean } = {}):
     // Cancelling means "not this workspace", not "stop asking".
     if (notifyRestore.dialogCheckbox.value) confirmBeforeCloseWorkspace.value = false
   }
+  // Every pane below is retired through the backend. Offline none of them could be proven, and the
+  // run would already be aborted and the window switched away: refuse before anything is torn down.
+  // The membership is read here, before the switch and the abort; a workspace with no pane to
+  // retire has nothing to prove and still closes offline.
+  const doomed = panes.value.filter((p) => normWs(p.workspacePath) === normWs(path))
+  if (closeRefusedOffline({ connected: backend.status.value === 'connected', panesToRetire: doomed.length })) {
+    notifyRestore.toast(i18n.global.t('pane.terminal.close-workspace-offline'), { type: 'error' })
+    return
+  }
   // Closing the one on screen means landing somewhere first. Switching before
   // letting go — rather than after — is what puts the panes and the focus
   // somewhere valid: switchToWorkspace keeps the focused pane if it survives
   // the filter and otherwise leaves nothing selected. It can also decline (the
   // target turned out to be open in another window), and then nothing is
   // closed, rather than leaving this window on a project it no longer holds.
+  //
+  // The switch and the run abort below stay ahead of the retirements, on purpose: each retirement
+  // releases a pipeline slot, and a live run would advance a finished stage and respawn panes into
+  // this workspace (see closeEndsTheRun); the retirement loop also relies on this workspace being
+  // off screen (see the spawn-history note in it). Known limit: a retirement the backend then
+  // refuses leaves the window on the landing workspace with the run aborted and the panes retired
+  // so far gone; the remaining panes and every record stay, and closing the workspace again
+  // retires them.
   if (normWs(path) === normWs(currentWorkspace.value)) {
     const land = workspaceOrder.value.find((w) => normWs(w) !== normWs(path))
     // Nothing to land on. Going back to the Welcome picker is the titlebar's
@@ -21619,7 +21727,6 @@ async function closeWorkspace(path: string, opts: { confirmed?: boolean } = {}):
     await switchToWorkspace(land)
     if (normWs(currentWorkspace.value) !== normWs(land)) return
   }
-  const doomed = panes.value.filter((p) => normWs(p.workspacePath) === normWs(path))
   // Same reason closeRunGroup aborts first: every onKill below releases the
   // pane's stage slot, and a stage whose other slots already finished then
   // reads N/N and advances — activateStage spawning the next stage's panes
@@ -21704,7 +21811,7 @@ async function closeWorkspace(path: string, opts: { confirmed?: boolean } = {}):
         pane_id: pane.id,
       }, PANE_RELEASE_TIMEOUT_MS)
       if (!slotRetired) {
-        notifyRestore.toast(i18n.global.t('pane.terminal.rebuild-probe-failed'), { type: 'error' })
+        notifyRestore.toast(i18n.global.t('pane.terminal.close-unverified'), { type: 'error' })
         return
       }
       continue
@@ -24472,7 +24579,7 @@ function paneIsCommander(p: ActivePane): boolean {
           @toggle-readback="togglePaneReadback(p.id)"
           @continue-resume="continueRestoredPane(p.id)"
           @user-resume="persistPaneStopped(p.id, false)"
-          @pty-lost="onPanePtyLost(p.id)"
+          @pty-lost="(runtimeLoss) => runtimeLoss ? onPaneRuntimeLost(p.id, runtimeLoss.wasWorking) : onPanePtyLost(p.id)"
         />
         <RestoredPanePlaceholder
           v-else

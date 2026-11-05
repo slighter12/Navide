@@ -1,0 +1,858 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_aider_golden -- --ignored",
+  "legacy_source": {
+    "blob": "5d84bc4014fdaa1a64fc63ff3a1bd9322656c30a",
+    "path": "native/navide-cli-runtime/src/observe_aider.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "aider-md",
+          "offset": 272,
+          "section": "aider-ns-20240501-100000",
+          "section_ts": "2024-05-01T10:00:00"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 271,
+              "section": "aider-ns-20240501-100000",
+              "section_ts": "2024-05-01T10:00:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-100000::@271",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 12000,
+            "output_tokens": 1200,
+            "session_id": "aider-ns-20240501-100000",
+            "timestamp": "2024-05-01T10:00:00",
+            "vendor": "aider"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "first: usage",
+      "mode": "usage",
+      "raw_anchor": "3e20546f6b656e733a20392073656e742c20392072656365697665642e0a232061696465722063686174207374617274656420617420323032342d352d312031303a30303a30300a232061696465722063686174207374617274656420617420323032342d30352d30312031303a30303a30300a0a3e204d6f64656c3a206770742d340a23232323206669727374206c696e650a23232323207365636f6e64206c696e650a48656c6c6f0a776f726c640a3e204170706c696564206564697420746f20612e70790a3e20546f6b656e733a2031326b2073656e742c20312e326b2072656365697665642e20436f73743a2024302e3031206d6573736167652c2024302e30312073657373696f6e2e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-100000::L11",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 12000,
+            "output_tokens": 1200,
+            "session_id": "aider-ns-20240501-100000",
+            "timestamp": "2024-05-01T10:00:00",
+            "vendor": "aider"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": [
+          "aider::aider-ns-20240501-100000::L11"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "first: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:1",
+            "detail": "usage",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "",
+            "text": "",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:2",
+            "detail": "output",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "",
+            "text": "",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:6",
+            "detail": "prompt",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-100000",
+            "text": "first line",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:11",
+            "detail": "usage",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-100000",
+            "text": "Hello\nworld\n",
+            "vendor": "aider"
+          }
+        ],
+        "high_water": 12,
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "pending": "",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "first: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "aider-md",
+          "offset": 464,
+          "section": "aider-ns-20240501-113000",
+          "section_ts": "2024-05-01T11:30:00"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 346,
+              "section": "aider-ns-20240501-113000",
+              "section_ts": "2024-05-01T11:30:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::@346",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 5,
+            "output_tokens": 0,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 436,
+              "section": "aider-ns-20240501-113000",
+              "section_ts": "2024-05-01T11:30:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::@436",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 1234,
+            "output_tokens": 8500,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 464,
+              "section": "aider-ns-20240501-113000",
+              "section_ts": "2024-05-01T11:30:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::@464",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 7,
+            "output_tokens": 8,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "more: usage",
+      "mode": "usage",
+      "raw_anchor": "3e20546f6b656e733a20392073656e742c20392072656365697665642e0a232061696465722063686174207374617274656420617420323032342d352d312031303a30303a30300a232061696465722063686174207374617274656420617420323032342d30352d30312031303a30303a30300a0a3e204d6f64656c3a206770742d340a23232323206669727374206c696e650a23232323207365636f6e64206c696e650a48656c6c6f0a776f726c640a3e204170706c696564206564697420746f20612e70790a3e20546f6b656e733a2031326b2073656e742c20312e326b2072656365697665642e20436f73743a2024302e3031206d6573736167652c2024302e30312073657373696f6e2e0a0a232061696465722063686174207374617274656420617420323032342d30352d30312031313a33303a30300a3e20546f6b656e733a20352073656e742c20302072656365697665642e0a3e20546f6b656e733a20302073656e742c20302072656365697665642e0a2323232320616761696e0d0a616e20616e737765720d0a3e20546f6b656e733a20312c3233342073656e742c20382e354b2072656365697665642e0a3e746f6b656e733a2020372053454e542c382052656365697665640a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::L14",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 5,
+            "output_tokens": 0,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::L18",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 1234,
+            "output_tokens": 8500,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::L19",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 7,
+            "output_tokens": 8,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": [
+          "aider::aider-ns-20240501-100000::L11",
+          "aider::aider-ns-20240501-113000::L14",
+          "aider::aider-ns-20240501-113000::L18",
+          "aider::aider-ns-20240501-113000::L19"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "more: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:14",
+            "detail": "usage",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:15",
+            "detail": "usage",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:16",
+            "detail": "prompt",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "again",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:17",
+            "detail": "output",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:18",
+            "detail": "usage",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "an answer\n",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:19",
+            "detail": "usage",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "",
+            "vendor": "aider"
+          }
+        ],
+        "high_water": 19,
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "pending": "",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "more: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "aider-md",
+          "offset": 464,
+          "section": "aider-ns-20240501-113000",
+          "section_ts": "2024-05-01T11:30:00"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "nothing new: usage",
+      "mode": "usage",
+      "raw_anchor": "3e20546f6b656e733a20392073656e742c20392072656365697665642e0a232061696465722063686174207374617274656420617420323032342d352d312031303a30303a30300a232061696465722063686174207374617274656420617420323032342d30352d30312031303a30303a30300a0a3e204d6f64656c3a206770742d340a23232323206669727374206c696e650a23232323207365636f6e64206c696e650a48656c6c6f0a776f726c640a3e204170706c696564206564697420746f20612e70790a3e20546f6b656e733a2031326b2073656e742c20312e326b2072656365697665642e20436f73743a2024302e3031206d6573736167652c2024302e30312073657373696f6e2e0a0a232061696465722063686174207374617274656420617420323032342d30352d30312031313a33303a30300a3e20546f6b656e733a20352073656e742c20302072656365697665642e0a3e20546f6b656e733a20302073656e742c20302072656365697665642e0a2323232320616761696e0d0a616e20616e737765720d0a3e20546f6b656e733a20312c3233342073656e742c20382e354b2072656365697665642e0a3e746f6b656e733a2020372053454e542c382052656365697665640a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": [
+          "aider::aider-ns-20240501-100000::L11",
+          "aider::aider-ns-20240501-113000::L14",
+          "aider::aider-ns-20240501-113000::L18",
+          "aider::aider-ns-20240501-113000::L19"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "nothing new: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 19,
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "pending": "",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "nothing new: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "aider-md",
+          "offset": 501,
+          "section": "aider-ns-20240501-113000",
+          "section_ts": "2024-05-01T11:30:00"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "open reply: usage",
+      "mode": "usage",
+      "raw_anchor": "3e20546f6b656e733a20392073656e742c20392072656365697665642e0a232061696465722063686174207374617274656420617420323032342d352d312031303a30303a30300a232061696465722063686174207374617274656420617420323032342d30352d30312031303a30303a30300a0a3e204d6f64656c3a206770742d340a23232323206669727374206c696e650a23232323207365636f6e64206c696e650a48656c6c6f0a776f726c640a3e204170706c696564206564697420746f20612e70790a3e20546f6b656e733a2031326b2073656e742c20312e326b2072656365697665642e20436f73743a2024302e3031206d6573736167652c2024302e30312073657373696f6e2e0a0a232061696465722063686174207374617274656420617420323032342d30352d30312031313a33303a30300a3e20546f6b656e733a20352073656e742c20302072656365697665642e0a3e20546f6b656e733a20302073656e742c20302072656365697665642e0a2323232320616761696e0d0a616e20616e737765720d0a3e20546f6b656e733a20312c3233342073656e742c20382e354b2072656365697665642e0a3e746f6b656e733a2020372053454e542c382052656365697665640a23232323207175657374696f6e0a7374696c6c20747970696e670a6d6f726520746578740a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": [
+          "aider::aider-ns-20240501-100000::L11",
+          "aider::aider-ns-20240501-113000::L14",
+          "aider::aider-ns-20240501-113000::L18",
+          "aider::aider-ns-20240501-113000::L19"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "open reply: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:20",
+            "detail": "prompt",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "question",
+            "vendor": "aider"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:21",
+            "detail": "output",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "",
+            "vendor": "aider"
+          }
+        ],
+        "high_water": 22,
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "pending": "still typing\nmore text\n",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "open reply: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "aider-md",
+          "offset": 501,
+          "section": "aider-ns-20240501-113000",
+          "section_ts": "2024-05-01T11:30:00"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 271,
+              "section": "aider-ns-20240501-100000",
+              "section_ts": "2024-05-01T10:00:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-100000::@271",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 12000,
+            "output_tokens": 1200,
+            "session_id": "aider-ns-20240501-100000",
+            "timestamp": "2024-05-01T10:00:00",
+            "vendor": "aider"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 346,
+              "section": "aider-ns-20240501-113000",
+              "section_ts": "2024-05-01T11:30:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::@346",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 5,
+            "output_tokens": 0,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 436,
+              "section": "aider-ns-20240501-113000",
+              "section_ts": "2024-05-01T11:30:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::@436",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 1234,
+            "output_tokens": 8500,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 464,
+              "section": "aider-ns-20240501-113000",
+              "section_ts": "2024-05-01T11:30:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::@464",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 7,
+            "output_tokens": 8,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "replaced: usage",
+      "mode": "usage",
+      "raw_anchor": "3e20546f6b656e733a20392073656e742c20392072656365697665642e0a232061696465722063686174207374617274656420617420323032342d352d312031303a30303a30300a232061696465722063686174207374617274656420617420323032342d30352d30312031303a30303a30300a0a3e204d6f64656c3a206770742d340a23232323206669727374206c696e650a23232323207365636f6e64206c696e650a48656c6c6f0a776f726c640a3e204170706c696564206564697420746f20612e70790a3e20546f6b656e733a2031326b2073656e742c20312e326b2072656365697665642e20436f73743a2024302e3031206d6573736167652c2024302e30312073657373696f6e2e0a0a232061696465722063686174207374617274656420617420323032342d30352d30312031313a33303a30300a3e20546f6b656e733a20352073656e742c20302072656365697665642e0a3e20546f6b656e733a20302073656e742c20302072656365697665642e0a2323232320616761696e0d0a616e20616e737765720d0a3e20546f6b656e733a20312c3233342073656e742c20382e354b2072656365697665642e0a3e746f6b656e733a2020372053454e542c382052656365697665640a23232323207175657374696f6e0a7374696c6c20747970696e670a6d6f726520746578740a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": [
+          "aider::aider-ns-20240501-100000::L11",
+          "aider::aider-ns-20240501-113000::L14",
+          "aider::aider-ns-20240501-113000::L18",
+          "aider::aider-ns-20240501-113000::L19"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "replaced: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 22,
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "pending": "still typing\nmore text\n",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "replaced: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "aider-md",
+          "offset": 501,
+          "section": "aider-ns-20240501-113000",
+          "section_ts": "2024-05-01T11:30:00"
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "half: usage",
+      "mode": "usage",
+      "raw_anchor": "3e20546f6b656e733a20392073656e742c20392072656365697665642e0a232061696465722063686174207374617274656420617420323032342d352d312031303a30303a30300a232061696465722063686174207374617274656420617420323032342d30352d30312031303a30303a30300a0a3e204d6f64656c3a206770742d340a23232323206669727374206c696e650a23232323207365636f6e64206c696e650a48656c6c6f0a776f726c640a3e204170706c696564206564697420746f20612e70790a3e20546f6b656e733a2031326b2073656e742c20312e326b2072656365697665642e20436f73743a2024302e3031206d6573736167652c2024302e30312073657373696f6e2e0a0a232061696465722063686174207374617274656420617420323032342d30352d30312031313a33303a30300a3e20546f6b656e733a20352073656e742c20302072656365697665642e0a3e20546f6b656e733a20302073656e742c20302072656365697665642e0a2323232320616761696e0d0a616e20616e737765720d0a3e20546f6b656e733a20312c3233342073656e742c20382e354b2072656365697665642e0a3e746f6b656e733a2020372053454e542c382052656365697665640a23232323207175657374696f6e0a7374696c6c20747970696e670a6d6f726520746578740a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": [
+          "aider::aider-ns-20240501-100000::L11",
+          "aider::aider-ns-20240501-113000::L14",
+          "aider::aider-ns-20240501-113000::L18",
+          "aider::aider-ns-20240501-113000::L19"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "half: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 22,
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "pending": "still typing\nmore text\n",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "half: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "aider-md",
+          "offset": 531,
+          "section": "aider-ns-20240501-113000",
+          "section_ts": "2024-05-01T11:30:00"
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "aider-md",
+              "offset": 531,
+              "section": "aider-ns-20240501-113000",
+              "section_ts": "2024-05-01T11:30:00"
+            },
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::@531",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 3,
+            "output_tokens": 4,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "whole: usage",
+      "mode": "usage",
+      "raw_anchor": "2072656365697665642e0a232061696465722063686174207374617274656420617420323032342d352d312031303a30303a30300a232061696465722063686174207374617274656420617420323032342d30352d30312031303a30303a30300a0a3e204d6f64656c3a206770742d340a23232323206669727374206c696e650a23232323207365636f6e64206c696e650a48656c6c6f0a776f726c640a3e204170706c696564206564697420746f20612e70790a3e20546f6b656e733a2031326b2073656e742c20312e326b2072656365697665642e20436f73743a2024302e3031206d6573736167652c2024302e30312073657373696f6e2e0a0a232061696465722063686174207374617274656420617420323032342d30352d30312031313a33303a30300a3e20546f6b656e733a20352073656e742c20302072656365697665642e0a3e20546f6b656e733a20302073656e742c20302072656365697665642e0a2323232320616761696e0d0a616e20616e737765720d0a3e20546f6b656e733a20312c3233342073656e742c20382e354b2072656365697665642e0a3e746f6b656e733a2020372053454e542c382052656365697665640a23232323207175657374696f6e0a7374696c6c20747970696e670a6d6f726520746578740a3e20546f6b656e733a20332073656e742c20342072656365697665642e0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "aider::aider-ns-20240501-113000::L23",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "input_tokens": 3,
+            "output_tokens": 4,
+            "session_id": "aider-ns-20240501-113000",
+            "timestamp": "2024-05-01T11:30:00",
+            "vendor": "aider"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "seen": [
+          "aider::aider-ns-20240501-100000::L11",
+          "aider::aider-ns-20240501-113000::L14",
+          "aider::aider-ns-20240501-113000::L18",
+          "aider::aider-ns-20240501-113000::L19",
+          "aider::aider-ns-20240501-113000::L23"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "whole: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:23",
+            "detail": "usage",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/proj/.aider.chat.history.md",
+            "session_id": "aider-ns-20240501-113000",
+            "text": "still typing\nmore text\n",
+            "vendor": "aider"
+          }
+        ],
+        "high_water": 23,
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-aider-md-v1",
+        "path": "$ROOT/proj/.aider.chat.history.md",
+        "pending": "",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "namespace": "ns"
+      },
+      "label": "whole: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "aider"
+}

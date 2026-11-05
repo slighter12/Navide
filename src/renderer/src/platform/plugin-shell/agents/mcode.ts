@@ -1,7 +1,7 @@
 /** MiniMax Code (mcode) — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS } from './_vendorFacts'
+import { VENDOR_FACTS } from '../../../../../shared/vendorFacts'
 
 const FACT = VENDOR_FACTS.mcode
 

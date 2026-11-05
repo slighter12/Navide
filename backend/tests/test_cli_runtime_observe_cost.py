@@ -2,7 +2,7 @@
 
 One poll is what the watcher does for a file: `parse_incremental` with the saved checkpoint and `parse_activity` with
 the saved bag. The Python path is the baseline reader; the native path is the same vendor's `Native<Vendor>Reader`
-with its `observe` bridge replaced by a copy that talks to a real sidecar over a `FramePeer` frame socket. That is a
+with its `observe_core` replaced by a copy that talks to a real sidecar over a `FramePeer` frame socket. That is a
 PROXY for the production bridge: it counts the reader's own work, the request, the sidecar's read and the answer, and
 leaves out `RustTerminalService.observe`'s asyncio hop, its pane matching and its receipt work. Both paths read the
 same fixture file on the same host.
@@ -16,7 +16,6 @@ No speedup is claimed from these numbers.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -24,12 +23,10 @@ import sqlite3
 import statistics
 import sys
 import time
-from pathlib import Path
 
 import pytest
 
-from agent_team_backend import cli_runtime_aider, cli_runtime_blob, cli_runtime_droid, cli_runtime_jsonl
-from agent_team_backend import cli_runtime_observation, cli_runtime_opencode, cli_runtime_sqlite
+from agent_team_backend import cli_runtime_native
 from agent_team_backend.cli_runtime_frames import FrameType, code
 from agent_team_backend.cli_vendors.registry import VENDORS
 from tests.cli_regression.support.vendor_data import VendorData
@@ -41,56 +38,37 @@ pytestmark = [pytest.mark.cli_regression,
 POLLS = 200
 WARMUP = 20
 NATIVE = {
-    "aider": cli_runtime_aider.NativeAiderReader,
-    "antigravity": cli_runtime_blob.NativeAntigravityReader,
-    "copilot": cli_runtime_sqlite.NativeCopilotReader,
-    "cursor": cli_runtime_blob.NativeCursorReader,
-    "droid": cli_runtime_droid.NativeDroidReader,
-    "goose": cli_runtime_sqlite.NativeGooseReader,
-    "grok": cli_runtime_jsonl.NativeGrokReader,
-    "kilo": cli_runtime_sqlite.NativeKiloReader,
-    "kimi": cli_runtime_jsonl.NativeKimiReader,
-    "muse": cli_runtime_jsonl.NativeMuseReader,
-    "opencode": cli_runtime_opencode.NativeOpenCodeReader,
-    "pi": cli_runtime_jsonl.NativePiReader,
-    "qwen": cli_runtime_jsonl.NativeQwenReader,
+    "aider": cli_runtime_native.native_reader(VENDORS["aider"].make_log_reader, "aider"),
+    "antigravity": cli_runtime_native.native_reader(VENDORS["antigravity"].make_log_reader, "antigravity"),
+    "copilot": cli_runtime_native.native_reader(VENDORS["copilot"].make_log_reader, "copilot"),
+    "cursor": cli_runtime_native.native_reader(VENDORS["cursor"].make_log_reader, "cursor"),
+    "droid": cli_runtime_native.native_reader(VENDORS["droid"].make_log_reader, "droid"),
+    "goose": cli_runtime_native.native_reader(VENDORS["goose"].make_log_reader, "goose"),
+    "grok": cli_runtime_native.native_reader(VENDORS["grok"].make_log_reader, "grok"),
+    "kilo": cli_runtime_native.native_reader(VENDORS["kilo"].make_log_reader, "kilo"),
+    "kimi": cli_runtime_native.native_reader(VENDORS["kimi"].make_log_reader, "kimi"),
+    "muse": cli_runtime_native.native_reader(VENDORS["muse"].make_log_reader, "muse"),
+    "opencode": cli_runtime_native.native_reader(VENDORS["opencode"].make_log_reader, "opencode"),
+    "pi": cli_runtime_native.native_reader(VENDORS["pi"].make_log_reader, "pi"),
+    "qwen": cli_runtime_native.native_reader(VENDORS["qwen"].make_log_reader, "qwen"),
 }
 
 
-def _through(peer):
-    """`cli_runtime_observation.observe` with the sidecar's answer read straight off a `FramePeer`."""
-    def observe(vendor, parser, path, mode, *, checkpoint=None, seen=None, pane_id=None, **extra):
-        cursor = dict(checkpoint or {})
-        expected, invalid = b"", False
-        offset = int(cursor.get("offset") or 0)
-        if offset and cursor.get("anchor"):
-            with Path(path).open("rb") as stream:
-                if os.fstat(stream.fileno()).st_size < offset:
-                    invalid = True
-                else:
-                    start = max(0, offset - 512)
-                    stream.seek(start)
-                    expected = stream.read(offset - start)
-                    invalid = hashlib.blake2b(expected, digest_size=8).hexdigest() != cursor["anchor"]
-        # `FramePeer.observe` owns a `session` parameter, which readers also use as a request key.
-        meta = {"vendor": vendor, "path": str(path), "mode": mode, "checkpoint": cursor,
-                "seen": sorted(seen or set()), "anchor_invalid": invalid, **extra}
-        request = peer.send(code.OBSERVE, meta, expected)
+def _through_core(peer):
+    """`cli_runtime_observation.observe_core` with the sidecar's answer read straight off a `FramePeer`: the sidecar
+    verifies the checkpoint's anchor itself."""
+    def observe_core(vendor, path, mode, *, checkpoint=None, seen=None, pane_id=None, match=None, validate=None,
+                     receipt=None, **extra):
+        meta = {"vendor": vendor, "path": str(path), "mode": mode, "checkpoint": dict(checkpoint or {}),
+                "seen": sorted(seen or set()), **extra}
+        request = peer.send(code.OBSERVE, meta)
         final = peer.result(request, allow_error=True)
         if final.frame_type is FrameType.ERROR and not final.meta.get("observation_parts"):
             raise AssertionError(final.meta)
         parts = peer.parts.pop(request, [])
         peer._sizes.pop(request, None)
-        document = json.loads(b"".join(parts))
-        raw = final.blob if final.meta.get("raw_anchor") else None
-        if raw is not None and not document.get("error"):
-            anchor = hashlib.blake2b(raw, digest_size=8).hexdigest() if raw else ""
-            document["checkpoint"]["anchor"] = anchor
-            for event in document["events"]:
-                if "checkpoint" in event:
-                    event["checkpoint"]["anchor"] = anchor
-        return document
-    return observe
+        return json.loads(b"".join(parts))
+    return observe_core
 
 
 def _poll(reader, path, append=None):
@@ -166,10 +144,7 @@ def _series(vendor, root, monkeypatch, set_home, make_reader, appended):
 @pytest.mark.parametrize("vendor", PORTED)
 def test_per_poll_cost_through_a_framepeer_proxy_is_measured(vendor, tmp_path, monkeypatch, set_home, peer):
     assert type(VENDORS[vendor].make_log_reader()) is not NATIVE[vendor], "the baseline must be the Python reader"
-    for module in (cli_runtime_aider, cli_runtime_blob, cli_runtime_droid, cli_runtime_jsonl,
-                   cli_runtime_opencode, cli_runtime_sqlite):
-        monkeypatch.setattr(module, "observe", _through(peer))
-    monkeypatch.setattr(cli_runtime_observation, "observe", _through(peer))
+    monkeypatch.setattr(cli_runtime_native, "observe_core", _through_core(peer))
     row = {"vendor": vendor, "platform": sys.platform, "bridge": "FramePeer proxy", "warmup": WARMUP, "polls": POLLS}
     for series, appended in (("unchanged", False), ("appended", True)):
         python, python_state = _series(vendor, tmp_path / f"python-{series}", monkeypatch, set_home,

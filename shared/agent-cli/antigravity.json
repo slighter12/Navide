@@ -18,5 +18,38 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "unknown",
     "login": "unknown"
+  },
+  "observer": {
+    "parser": "antigravity",
+    "parser_id": "rust-antigravity-sqlite-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "sqlite",
+      "usage": "none",
+      "store_file": null,
+      "request": ["cwd", "session"],
+      "usage_fields": null,
+      "store": {
+        "parent": null,
+        "marks": [{"table": "steps", "id": "idx", "key": "idx", "payload": "step_payload",
+                   "columns": ["step_type", "status", "metadata"], "prefix": "step:", "key_scope": "session",
+                   "start": "newest", "pending_max_age": {"pointer": null, "unit": "seconds", "seconds": 86400}}],
+        "marker": null
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity"],
+      "messages": {"unsupported_mode": "Antigravity observation mode not integrated", "non_object": null},
+      "legacy_state": [
+        {"prefix": "agy_idx::", "field": "marks.steps.last", "kind": "signed"},
+        {"prefix": "agy_pending::", "field": "marks.steps.pending", "kind": "set"}
+      ],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "file_stem"},
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

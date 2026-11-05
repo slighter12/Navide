@@ -1,10 +1,9 @@
 /**
- * Retiring a pane's terminal (ticket 05, review-9): ONE rule for every path that closes,
- * rebuilds, reclaims or releases a pane. The pane's own `terminal.kill` is a best-effort first
- * step (it carries the caller's graceful/force choice); the proof is the backend's settlement
- * answer — `manual_pane.release_pty`, `manual_pane.unspawn` or `pipeline.slot_unspawn` — which
- * settles in-flight creates and published sessions for the pane (verified cleanup) BEFORE it
- * touches any record, and refuses otherwise.
+ * Retiring a pane's terminal: ONE rule for every path that closes, rebuilds, reclaims or releases
+ * a pane. The pane's own `terminal.kill` is a best-effort first step (it carries the caller's
+ * graceful/force choice); the proof is the backend's settlement answer — `manual_pane.release_pty`,
+ * `manual_pane.unspawn` or `pipeline.slot_unspawn` — which settles in-flight creates and published
+ * sessions for the pane (verified cleanup) BEFORE it touches any record, and refuses otherwise.
  *
  * Only a non-null answer that does not say `ok: false` proves settlement. A refusal, a timeout or
  * a transport failure (`sendQuiet` answers `null` for all three) is a hard failure: the caller
@@ -14,13 +13,27 @@
  */
 export type SettlementAnswer = object | null | undefined
 
+export type ProvenEffect = () => Promise<void> | void
+
+/** Why a retirement was refused: no connection to ask, or the backend did not prove settlement. */
+export type RetirementRefusal = 'offline' | 'unproven'
+
 export interface PaneRetirementSteps {
+  /** False while the backend connection is down: nothing can be proven, so the retirement is
+   *  refused at once instead of waiting out the settlement timeout. Absent means connected. */
+  connected?: () => boolean
   /** The pane's own terminal kill, when it holds a terminal id. */
   killOwn?: () => Promise<void>
   /** Told about a failed own kill (the settlement below still decides). */
   onKillFailed?: (error: unknown) => void
   /** The backend settlement for the pane. */
   settle: () => Promise<SettlementAnswer>
+  /** The effects that cannot be put back (a cancelled watcher, a dropped question, an ACP kill, a
+   *  dropped scrollback): run in order, each awaited, only once the settlement is proven, so a
+   *  refused retirement leaves the pane as it was. A caller's own extension is one more entry. */
+  onProven?: ProvenEffect | readonly ProvenEffect[]
+  /** Told why the retirement was refused. */
+  onRefused?: (reason: RetirementRefusal) => void
 }
 
 /**
@@ -100,7 +113,13 @@ export function idsWithoutClosing(ids: string[], closing: ReadonlySet<string>): 
   return closing.size === 0 ? ids : ids.filter((id) => !closing.has(id))
 }
 
+// Kept out of App.vue (~20K lines) on purpose: the proof-before-effects rule lives here so a unit
+// test can drive it; App.vue's `onKill` is its only production caller.
 export async function settlePaneTerminals(steps: PaneRetirementSteps): Promise<boolean> {
+  if (steps.connected && !steps.connected()) {
+    steps.onRefused?.('offline')
+    return false
+  }
   if (steps.killOwn) {
     try {
       await steps.killOwn()
@@ -109,5 +128,11 @@ export async function settlePaneTerminals(steps: PaneRetirementSteps): Promise<b
     }
   }
   const answer = await steps.settle()
-  return answer != null && (answer as { ok?: unknown }).ok !== false
+  if (answer == null || (answer as { ok?: unknown }).ok === false) {
+    steps.onRefused?.('unproven')
+    return false
+  }
+  const proven = steps.onProven
+  for (const effect of Array.isArray(proven) ? proven : proven ? [proven] : []) await effect()
+  return true
 }

@@ -520,13 +520,18 @@ interface UseTerminalOptions {
    *  and onUserResume follow. The diagnostic log line is written regardless —
    *  it serves a bug report, this serves the person watching the pane. */
   onClipboardFailure?: (reason: ClipboardFailureReason, chars: number) => void
-  /** The pane's PTY did not survive the disconnect — a backend restart kills
-   *  every PTY, and the ownerless janitor eventually reaps the rest. Reported
-   *  rather than handled here because resuming is the owner's job: only App
-   *  knows the agent, the session id, and how to build the vendor's resume
-   *  command. Also reported when the Agent CLI Runtime dies under a live
-   *  backend (`terminal.exit` with reason `runtime_lost`). */
-  onPtyLostWhileDisconnected?: () => void
+  /** The pane's PTY did not survive a disconnect (a backend restart kills
+   *  every PTY, and the ownerless janitor eventually reaps the rest), though
+   *  the CLI's own session usually does. Reported rather than handled here
+   *  because resuming is the owner's job: only App knows the agent, the
+   *  session id, and how to build the vendor's resume command. */
+  onPtyLost?: () => void
+  /** The Agent CLI Runtime died under a live backend (`terminal.exit` with
+   *  reason `runtime_lost`). The backend never went away, so this is not the
+   *  disconnect path above: `wasWorking` is whether the pane's turn was
+   *  running or waiting on the user at the moment of the loss, read before
+   *  the pane flips to exited, for the owner's recovery plan. */
+  onRuntimeLost?: (wasWorking: boolean) => void
   /** A file picked from the ⌘-click picker that the host could not open.
    *  Reported rather than shown here, like onClipboardFailure. */
   onOpenFileFailure?: (filepath: string) => void
@@ -2524,6 +2529,8 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
 
     exitUnsub = terminalPort.onExit((payload) => {
       if (payload.terminal_session_id !== sessionId.value) return
+      // Read before `status` flips to exited below: that is what makes the badge stop saying running.
+      const wasWorking = displayStatus.value === 'running' || displayStatus.value === 'awaiting'
       const crashState = activeCrashKey && activeAgentKey && activeAgentKey !== 'terminal'
         ? recordTerminalExit(activeCrashKey, payload)
         : { count: 0, open: false }
@@ -2540,9 +2547,10 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
       term.writeln(`\r\n\x1b[${color}m[session] ${error.value || formatTerminalExit(payload)}\x1b[0m`)
       cleanupSession()
       // The Agent CLI Runtime died under a live backend: the PTY is as gone as
-      // after a backend restart, so hand the pane to the same conversation
-      // recovery owner. Nothing is sent to the backend from here.
-      if (payload.reason === 'runtime_lost') opts?.onPtyLostWhileDisconnected?.()
+      // after a backend restart, but the backend is not, so the owner gets its
+      // own entry (and the working state read above). Nothing is sent to the
+      // backend from here.
+      if (payload.reason === 'runtime_lost') opts?.onRuntimeLost?.(wasWorking)
     })
   }
 
@@ -2678,7 +2686,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
         // The PTY is gone for good (a backend restart kills all of them), but
         // the CLI's own session usually is not: hand the pane to the owner so
         // it can resume that conversation instead of leaving a dead pane.
-        opts?.onPtyLostWhileDisconnected?.()
+        opts?.onPtyLost?.()
         return
       }
     } catch {
@@ -2789,7 +2797,10 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
     const message = `terminal create unresolved: ${reason}. This pane is fenced and will not start another `
       + 'terminal itself; Rebuild or close it, which has the backend release (and verifiably clean) what it left.'
     createFence = message
-    if (!isDisposed) {
+    // A pane that already runs a replacement is not failed by an old generation's late close: the
+    // fence alone stops the next create, and the pane keeps serving the live session. Judged on the
+    // live state, not on `sessionId`, which keeps naming a session that has since exited.
+    if (!isDisposed && status.value !== 'running') {
       status.value = 'error'
       error.value = message
       term.writeln(`\r\n\x1b[31m[error] ${message}\x1b[0m`)
@@ -2850,7 +2861,25 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
     if (existing) return existing
     const settlement = settleCreate(generation)
     createSettlements.set(generation, settlement)
+    // Once ownership is resolved (or has fenced the pane, which `createFence` remembers on its own)
+    // and the create RPC itself has answered, nothing waits on this generation again. Releasing
+    // earlier would let that late answer start a second settlement for the same generation.
+    const release = (): void => {
+      const done = (): void => {
+        if (createSettlements.get(generation) === settlement) releaseCreate(generation)
+      }
+      const record = createRecords.get(generation)
+      if (record) void record.outcome.then(done, done)
+      else done()
+    }
+    void settlement.then(release, release)
     return settlement
+  }
+
+  function releaseCreate(generation: string): void {
+    createRecords.delete(generation)
+    createCancelRequests.delete(generation)
+    createSettlements.delete(generation)
   }
 
   /** Invalidate the current create locally, then wait until its ownership is resolved. */
@@ -3049,7 +3078,12 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
       }
       if (!resp.ok || !resp.payload) {
         activeCreateGeneration = null
-        void requestCreateCancel(createGeneration)
+        // The backend refused this create, so there is no terminal to own: the cancel only
+        // tombstones the generation, and nothing is tracked once it is answered.
+        const refused = requestCreateCancel(createGeneration)
+        void refused.then(() => {
+          if (!createSettlements.has(createGeneration)) releaseCreate(createGeneration)
+        })
         status.value = 'error'
         error.value = resp.error?.message ?? 'spawn failed'
         term.writeln(`\r\n\x1b[31m[error] ${error.value}\x1b[0m`)

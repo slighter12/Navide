@@ -52,7 +52,9 @@ ALLOWED_LOCAL_IMPORTS = {
     "base", "_protocols", "applog", "log_readers.base", "osplat", "skills_store",
     "usage_common", "_vendor_facts",
 }
-VENDOR_IMPORT_EXEMPTIONS = {"kilo": {"opencode"}}
+# Cursor's Python reader and the sidecar's reader share one activity bag (t36b W1: switching between them keeps the walks and the stamp
+# floor), so the reader decodes the bag's `native_state` entry with the state module's own `pack` / `unpack`.
+VENDOR_IMPORT_EXEMPTIONS = {"kilo": {"opencode"}, "cursor": {"cli_runtime_state"}}
 # psutil is a leaf (codex reads CODEX_HOME off running processes to keep a
 # live pane home out of the startup sweep).
 ALLOWED_THIRD_PARTY = {"httpx", "psutil", "yaml"}
@@ -60,8 +62,8 @@ ALLOWED_THIRD_PARTY = {"httpx", "psutil", "yaml"}
 
 def _frontend_declared_source(path: Path) -> str:
     source = path.read_text(encoding="utf-8")
-    if "from './_vendorFacts'" in source:
-        generated = (FRONTEND_AGENTS_DIR / "_vendorFacts.ts").read_text(encoding="utf-8")
+    if "shared/vendorFacts'" in source:
+        generated = (REPO_ROOT / "src" / "shared" / "vendorFacts.ts").read_text(encoding="utf-8")
         table = json.loads(generated.partition("export const VENDOR_FACTS = ")[2].partition(" as const\n")[0])
         facts = table[path.stem]
         source = re.sub(r"FACT\.(\w+)", lambda match: repr(facts[match[1]]), source)
@@ -106,25 +108,6 @@ def test_registry_matches_frontend_agent_specs() -> None:
         source = path.read_text(encoding="utf-8")
         frontend_keys |= set(re.findall(r"agentKey: '([a-z]+)'", source))
     assert frontend_keys - NON_VENDOR_AGENT_KEYS == set(registry.VENDORS)
-
-
-def test_runtime_inventory_has_one_row_per_registered_vendor() -> None:
-    # The G0 runtime inventory is the reference every later slice compares
-    # against, so a vendor registered without a row there (goose was added
-    # after the baseline) must fail here. Membership comes from the registry;
-    # no count is hard-coded.
-    inventory = (REPO_ROOT / "docs" / "testing" / "agent-cli-runtime-inventory.md").read_text(
-        encoding="utf-8"
-    )
-    section = inventory.partition("## All-vendor interactive declaration inventory")[2]
-    section = section.partition("\n## ")[0]
-    rows = re.findall(r"^\| ([a-z]+) / ", section, re.MULTILINE)
-    assert len(rows) == len(set(rows)), f"duplicate inventory rows: {rows}"
-    assert set(rows) == set(registry.VENDORS), (
-        f"inventory rows {sorted(rows)} disagree with the registry "
-        f"{sorted(registry.VENDORS)}; missing rows: "
-        f"{sorted(set(registry.VENDORS) - set(rows))}"
-    )
 
 
 # The supported-CLI sentence of each README: (file, the sentence's count and

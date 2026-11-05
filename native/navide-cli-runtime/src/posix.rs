@@ -27,39 +27,12 @@ mod linux;
 
 #[path = "adapters.rs"]
 mod adapters;
-#[path = "claude.rs"]
-mod claude;
-#[path = "codex.rs"]
-mod codex;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "initial_retention_test.rs"]
 mod initial_retention_test;
-#[path = "observe_aider.rs"]
-mod observe_aider;
-#[path = "observe_droid.rs"]
-mod observe_droid;
-#[path = "observe_grok.rs"]
-mod observe_grok;
-#[path = "observe_jsonl.rs"]
-mod observe_jsonl;
-#[path = "observe_kimi.rs"]
-mod observe_kimi;
-#[path = "observe_muse.rs"]
-mod observe_muse;
-#[path = "observe_pi.rs"]
-mod observe_pi;
-#[path = "observe_qwen.rs"]
-mod observe_qwen;
-#[path = "observe_antigravity.rs"]
-mod observe_antigravity;
-#[path = "observe_copilot.rs"]
-mod observe_copilot;
-#[path = "observe_cursor.rs"]
-mod observe_cursor;
-#[path = "observe_goose.rs"]
-mod observe_goose;
-#[path = "opencode.rs"]
-mod opencode;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "sqlite_identity_test.rs"]
+mod sqlite_identity_test;
 #[path = "vendor_facts.rs"]
 mod vendor_facts;
 
@@ -100,7 +73,6 @@ struct Request {
     id: u64,
     code: u16,
     meta: Value,
-    blob: Vec<u8>,
     #[allow(dead_code)] // held for its Drop
     reservation: Option<Reservation>,
 }
@@ -179,6 +151,8 @@ const OBSERVATION_QUEUE: usize = 256;
 /// Settled sessions remembered by id and generation after they leave the registry (E1 v8 5.5): memory-bounded.
 const TOMBSTONES: usize = 4096;
 const OBSERVATION_CHUNK: usize = 64 * 1024 - 256;
+// The observation core's answer ledger (`observe/answer.rs`) is sized to the answer this transport can send; the two must agree.
+const _: () = assert!(MAX_OBSERVATION_PARTS * OBSERVATION_CHUNK == crate::observe::ANSWER_BYTES);
 
 // ---- the per-session handle -----------------------------------------------------------------
 
@@ -1798,13 +1772,25 @@ mod fault {
 
     /// Harness build only: an observation whose path ends in `.fault-endless` gets a synthetic
     /// document and then a part stream that never ends.
-    pub fn observation(req: &Request) -> Option<io::Result<(Value, Option<Vec<u8>>)>> {
+    pub fn observation(req: &Request) -> Option<io::Result<Value>> {
         let path = req.meta["path"].as_str()?;
+        // A held observation: it occupies its worker until `<path>.release` exists, then fails. (A FIFO cannot hold one
+        // any more: a source that is not a regular file is refused without being opened.)
+        if path.ends_with(".fault-hold") {
+            let released = wait_for_file_bounded(&format!("{path}.release")).map_err(|_| {
+                io::Error::other("fault: held observation was not released within 60 s")
+            });
+            return Some(released.and(Err(io::Error::other("fault: held observation released"))));
+        }
         if path.ends_with(".fault-endless") {
-            return Some(Ok((
-                json!({"parser":"fault","path":path,"mode":req.meta["mode"]}),
-                None,
-            )));
+            return Some(Ok(json!({"parser":"fault","path":path,"mode":req.meta["mode"]})));
+        }
+        // An answer one byte over the transport's limit: the observation core can no longer produce one (its answer ledger keeps
+        // every answer inside the limit), so the transport's refusal is reached by this synthetic document alone.
+        if path.ends_with(".fault-oversize") {
+            return Some(Ok(
+                json!({"parser":"fault","path":path,"mode":req.meta["mode"],"pad":"x".repeat(MAX_OBSERVATION_PARTS * OBSERVATION_CHUNK)}),
+            ));
         }
         None
     }
@@ -2323,22 +2309,30 @@ fn observe(req: &Request, sessions: &Sessions, wire: &Arc<Wire>) {
         wire.out
             .error(req.code, req.id, error_code, stage, message, "none");
     };
-    if !req.meta["vendor"]
+    // The vendor's declaration is resolved once here and handed down; the wire's vendor string is not read again.
+    let facts = req.meta["vendor"]
         .as_str()
-        .is_some_and(adapters::integrated)
-    {
+        .and_then(crate::observe::adapters::find);
+    #[cfg(feature = "fault-hooks")]
+    let fault_vendor = req.meta["vendor"].as_str() == Some(adapters::FAULT_GRACEFUL);
+    #[cfg(not(feature = "fault-hooks"))]
+    let fault_vendor = false;
+    if facts.is_none() && !fault_vendor {
         return refuse("observer not integrated");
     }
     let context = match observation_context(req, sessions) {
         Ok(context) => context,
         Err(error) => return refuse(&error.to_string()),
     };
+    let run = || match facts {
+        Some(facts) => crate::observe::adapters::dispatch(facts, &req.meta),
+        None => Err(io::Error::other("observer not integrated")),
+    };
     #[cfg(feature = "fault-hooks")]
-    let computed =
-        fault::observation(req).unwrap_or_else(|| adapters::observe(&req.meta, &req.blob));
+    let computed = fault::observation(req).unwrap_or_else(run);
     #[cfg(not(feature = "fault-hooks"))]
-    let computed = adapters::observe(&req.meta, &req.blob);
-    let (mut document, anchor) = match computed {
+    let computed = run();
+    let mut document = match computed {
         Ok(computed) => computed,
         Err(error) => return refuse(&error.to_string()),
     };
@@ -2376,12 +2370,8 @@ fn observe(req: &Request, sessions: &Sessions, wire: &Arc<Wire>) {
             "message":message.chars().take(1024).collect::<String>(),"observation_parts":parts});
         return wire.out.error_with(req.code, req.id, meta);
     }
-    wire.out.respond_with_blob(
-        req.code,
-        req.id,
-        json!({"observation_parts":parts,"raw_anchor":anchor.is_some()}),
-        anchor.unwrap_or_default(),
-    );
+    wire.out
+        .respond(req.code, req.id, json!({ "observation_parts": parts }));
 }
 
 // ---- startup and the main loop -------------------------------------------------------------------
@@ -2651,7 +2641,6 @@ pub fn run() -> io::Result<()> {
             id: frame.correlation_id,
             code: frame.code,
             meta: frame.meta,
-            blob: frame.blob,
             reservation: Some(reservation),
         };
         {

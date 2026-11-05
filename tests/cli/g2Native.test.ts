@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 // @ts-ignore -- plain ESM helper shared with the hosted workflows, no declarations
-import { checkReceipts, dirStem, requiredIds } from './g2Native.mjs'
+import { checkReceipts, dirStem, receiptDirName, requiredIds } from './g2Native.mjs'
+
+describe('receiptDirName', () => {
+  it('names the test directory of a receipt file on POSIX and Windows paths alike', () => {
+    expect(receiptDirName('/tmp/g2-basetemp/test_b3_release0/runtime-receipts.jsonl')).toBe('test_b3_release0')
+    expect(receiptDirName('D:\\a\\_temp\\g2-basetemp\\test_b3_release0\\runtime-receipts.jsonl')).toBe('test_b3_release0')
+  })
+})
 
 describe('requiredIds', () => {
   it('reads ids with spaces and skips blanks and comments', () => {

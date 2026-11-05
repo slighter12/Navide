@@ -18,5 +18,55 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "integrated",
     "login": "integrated"
+  },
+  "observer": {
+    "parser": "grok",
+    "parser_id": "rust-grok-jsonl-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "jsonl",
+      "usage": "per_turn",
+      "store_file": null,
+      "request": ["cwd"],
+      "usage_fields": {
+        "select": [{"pointer": "/kind", "equals": "turn_completed"}],
+        "object": "/usage",
+        "input": ["/usage/inputTokens"],
+        "output": ["/usage/outputTokens"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": "/model",
+        "version": null,
+        "timestamp": "/timestamp",
+        "number": "lenient",
+        "text": "string",
+        "session": "/session"
+      },
+      "store": null,
+      "rules": {
+        "missing_identity_rotates": true,
+        "invalid_utf8_fails": false,
+        "non_object_fails": false,
+        "activity_non_object_fails": false,
+        "totals_never_decrease": false,
+        "water_survives_replacement": false
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity", "turns"],
+      "messages": {"unsupported_mode": "Grok observation mode not integrated", "non_object": null},
+      "legacy_state": [
+        {"prefix": "grok_text::", "field": "last_text", "kind": "json_text"},
+        {"prefix": "grok_act::", "field": "legacy_cursor", "kind": "byte_cursor"}
+      ],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "file_stem"},
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

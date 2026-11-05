@@ -1,0 +1,1203 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_qwen_golden -- --ignored",
+  "legacy_source": {
+    "blob": "d572862e9a705f5059e09d4a86605ce4c4f0d6a6",
+    "path": "native/navide-cli-runtime/src/observe_qwen.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 539,
+          "recent_keys": [
+            "a1"
+          ]
+        },
+        "error": null,
+        "events": [
+          {
+            "cache_read_tokens": 3,
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 363,
+              "recent_keys": [
+                "a1"
+              ]
+            },
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a1",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 10,
+            "model": "qwen-model",
+            "output_tokens": 7,
+            "session_id": "s1",
+            "timestamp": "t2",
+            "vendor": "qwen"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "first: usage",
+      "mode": "usage",
+      "raw_anchor": "7473223a5b7b2274657874223a2272656e616d6520746869732070616e65227d5d7d2c2274696d657374616d70223a227431222c2274797065223a2275736572222c2275756964223a22752d7431227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a226669727374227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a227432222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a332c2263616e64696461746573546f6b656e436f756e74223a352c2270726f6d7074546f6b656e436f756e74223a31302c2274686f7567687473546f6b656e436f756e74223a327d2c2275756964223a226131222c2276657273696f6e223a22312e322e33227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2266756e6374696f6e526573706f6e7365223a7b22726573706f6e7365223a7b226f7574707574223a224261636b67726f756e64206167656e74206c61756e63686564207375636365737366756c6c792e5c6e7461736b5f69643a206267315c6e227d7d7d5d7d2c2274696d657374616d70223a227433222c2274797065223a22746f6f6c5f726573756c74227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cache_read_tokens": 3,
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a1",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 10,
+            "model": "qwen-model",
+            "output_tokens": 7,
+            "session_id": "s1",
+            "timestamp": "t2",
+            "vendor": "qwen"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "first: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:1",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "rename this pane",
+            "timestamp": "t1",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:2",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t2",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "bg:3",
+            "detail": "background:start",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "bg1",
+            "timestamp": "t3",
+            "vendor": "qwen"
+          }
+        ],
+        "high_water": 3,
+        "identity": "",
+        "last_text": "first",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 0,
+          "ts": "t2"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "first: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1867,
+          "recent_keys": [
+            "a1",
+            "a3"
+          ]
+        },
+        "error": null,
+        "events": [
+          {
+            "cache_read_tokens": 0,
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1844,
+              "recent_keys": [
+                "a1",
+                "a3"
+              ]
+            },
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a3",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 4,
+            "model": "qwen-model",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "t9",
+            "vendor": "qwen"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "more: usage",
+      "mode": "usage",
+      "raw_anchor": "223a7b227061727473223a5b7b2266756e6374696f6e526573706f6e7365223a7b22726573706f6e7365223a7b226f7574707574223a224261636b67726f756e64207368656c6c20737461727465642e5c6e69643a20736832227d7d7d5d7d2c2274696d657374616d70223a227437222c2274797065223a22746f6f6c5f726573756c74227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a226e657874227d5d7d2c2274696d657374616d70223a227438222c2274797065223a2275736572222c2275756964223a22752d7438227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a2220207365636f6e6420227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a227439222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a312c2270726f6d7074546f6b656e436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cache_read_tokens": 0,
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a3",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 4,
+            "model": "qwen-model",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "t9",
+            "vendor": "qwen"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "more: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:4",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t4",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:5",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t4",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "bg:7",
+            "detail": "background:end",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "bg1",
+            "timestamp": "t6",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "bg:8",
+            "detail": "background:start",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "sh2",
+            "timestamp": "t7",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:0",
+            "detail": "boundary",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "again",
+            "timestamp": "t4",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:9",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "next",
+            "timestamp": "t8",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:10",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t9",
+            "vendor": "qwen"
+          }
+        ],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "second",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 1,
+          "ts": "t9"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "more: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1867,
+          "recent_keys": [
+            "a1",
+            "a3"
+          ]
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "nothing new: usage",
+      "mode": "usage",
+      "raw_anchor": "223a7b227061727473223a5b7b2266756e6374696f6e526573706f6e7365223a7b22726573706f6e7365223a7b226f7574707574223a224261636b67726f756e64207368656c6c20737461727465642e5c6e69643a20736832227d7d7d5d7d2c2274696d657374616d70223a227437222c2274797065223a22746f6f6c5f726573756c74227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a226e657874227d5d7d2c2274696d657374616d70223a227438222c2274797065223a2275736572222c2275756964223a22752d7438227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a2220207365636f6e6420227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a227439222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a312c2270726f6d7074546f6b656e436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "nothing new: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "second",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 1,
+          "ts": "t9"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "nothing new: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1867,
+          "recent_keys": [
+            "a1",
+            "a3"
+          ]
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle: usage",
+      "mode": "usage",
+      "raw_anchor": "223a7b227061727473223a5b7b2266756e6374696f6e526573706f6e7365223a7b22726573706f6e7365223a7b226f7574707574223a224261636b67726f756e64207368656c6c20737461727465642e5c6e69643a20736832227d7d7d5d7d2c2274696d657374616d70223a227437222c2274797065223a22746f6f6c5f726573756c74227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a226e657874227d5d7d2c2274696d657374616d70223a227438222c2274797065223a2275736572222c2275756964223a22752d7438227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a2220207365636f6e6420227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a227439222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a312c2270726f6d7074546f6b656e436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:1",
+            "detail": "idle",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "second",
+            "timestamp": "t9",
+            "vendor": "qwen"
+          }
+        ],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": true,
+          "idx": 1,
+          "ts": "t9"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1867,
+          "recent_keys": [
+            "a1",
+            "a3"
+          ]
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle once: usage",
+      "mode": "usage",
+      "raw_anchor": "223a7b227061727473223a5b7b2266756e6374696f6e526573706f6e7365223a7b22726573706f6e7365223a7b226f7574707574223a224261636b67726f756e64207368656c6c20737461727465642e5c6e69643a20736832227d7d7d5d7d2c2274696d657374616d70223a227437222c2274797065223a22746f6f6c5f726573756c74227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a226e657874227d5d7d2c2274696d657374616d70223a227438222c2274797065223a2275736572222c2275756964223a22752d7438227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a2220207365636f6e6420227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a227439222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a312c2270726f6d7074546f6b656e436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle once: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": true,
+          "idx": 1,
+          "ts": "t9"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 4000000000.0,
+        "now_ms": 4000000000000,
+        "session": "s1"
+      },
+      "label": "idle once: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2219,
+          "recent_keys": [
+            "a1",
+            "a3",
+            "a4"
+          ]
+        },
+        "error": null,
+        "events": [
+          {
+            "cache_read_tokens": 0,
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2122,
+              "recent_keys": [
+                "a1",
+                "a3",
+                "a4"
+              ]
+            },
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a4",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 2,
+            "model": "qwen-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "t10",
+            "vendor": "qwen"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "boundary: usage",
+      "mode": "usage",
+      "raw_anchor": "6164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a312c2270726f6d7074546f6b656e436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a227265706c79227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a22743130222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a322c2270726f6d7074546f6b656e436f756e74223a322c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226134222c2276657273696f6e223a22312e322e33227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a22627965227d5d7d2c2274696d657374616d70223a22743131222c2274797065223a2275736572222c2275756964223a22752d743131227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cache_read_tokens": 0,
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a4",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 2,
+            "model": "qwen-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "t10",
+            "vendor": "qwen"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "boundary: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:13",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t10",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:2",
+            "detail": "boundary",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "reply",
+            "timestamp": "t10",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:14",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "bye",
+            "timestamp": "t11",
+            "vendor": "qwen"
+          }
+        ],
+        "high_water": 14,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t11"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "boundary: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2219,
+          "recent_keys": [
+            "a1",
+            "a3",
+            "a4"
+          ]
+        },
+        "error": null,
+        "events": [
+          {
+            "cache_read_tokens": 3,
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 363,
+              "recent_keys": [
+                "a1"
+              ]
+            },
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a1",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 10,
+            "model": "qwen-model",
+            "output_tokens": 7,
+            "session_id": "s1",
+            "timestamp": "t2",
+            "vendor": "qwen"
+          },
+          {
+            "cache_read_tokens": 0,
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1844,
+              "recent_keys": [
+                "a1",
+                "a3"
+              ]
+            },
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a3",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 4,
+            "model": "qwen-model",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "t9",
+            "vendor": "qwen"
+          },
+          {
+            "cache_read_tokens": 0,
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2122,
+              "recent_keys": [
+                "a1",
+                "a3",
+                "a4"
+              ]
+            },
+            "cli_version": "1.2.3",
+            "cwd": "/w",
+            "dedup_key": "a4",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "input_tokens": 2,
+            "model": "qwen-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "t10",
+            "vendor": "qwen"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "replaced: usage",
+      "mode": "usage",
+      "raw_anchor": "6164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a312c2270726f6d7074546f6b656e436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a227265706c79227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a22743130222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a322c2270726f6d7074546f6b656e436f756e74223a322c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226134222c2276657273696f6e223a22312e322e33227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a22627965227d5d7d2c2274696d657374616d70223a22743131222c2274797065223a2275736572222c2275756964223a22752d743131227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "replaced: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 14,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t11"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "replaced: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2219,
+          "recent_keys": [
+            "a1",
+            "a3",
+            "a4"
+          ]
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "half: usage",
+      "mode": "usage",
+      "raw_anchor": "6164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a312c2270726f6d7074546f6b656e436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a227265706c79227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a22743130222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a322c2270726f6d7074546f6b656e436f756e74223a322c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226134222c2276657273696f6e223a22312e322e33227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a22627965227d5d7d2c2274696d657374616d70223a22743131222c2274797065223a2275736572222c2275756964223a22752d743131227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "half: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 14,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "ts": "t11"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "half: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2292,
+          "recent_keys": [
+            "a1",
+            "a3",
+            "a4"
+          ]
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "whole: usage",
+      "mode": "usage",
+      "raw_anchor": "436f756e74223a342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a227265706c79227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a22743130222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a322c2270726f6d7074546f6b656e436f756e74223a322c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226134222c2276657273696f6e223a22312e322e33227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a22627965227d5d7d2c2274696d657374616d70223a22743131222c2274797065223a2275736572222c2275756964223a22752d743131227d0a7b2274797065223a2275736572222c2274696d657374616d70223a22743132222c226d657373616765223a7b227061727473223a5b7b2274657874223a22706c61696e227d5d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "whole: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:3",
+            "detail": "boundary",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "t11",
+            "vendor": "qwen"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:15",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/projects/-w/chats/s1.jsonl",
+            "session_id": "s1",
+            "text": "plain",
+            "timestamp": "t12",
+            "vendor": "qwen"
+          }
+        ],
+        "high_water": 15,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 4,
+          "ts": "t12"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "whole: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2299,
+          "recent_keys": [
+            "a1",
+            "a3",
+            "a4"
+          ]
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "not an object: usage",
+      "mode": "usage",
+      "raw_anchor": "342c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226133222c2276657273696f6e223a22312e322e33227d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a227265706c79227d5d7d2c226d6f64656c223a227177656e2d6d6f64656c222c2274696d657374616d70223a22743130222c2274797065223a22617373697374616e74222c2275736167654d65746164617461223a7b22636163686564436f6e74656e74546f6b656e436f756e74223a302c2263616e64696461746573546f6b656e436f756e74223a322c2270726f6d7074546f6b656e436f756e74223a322c2274686f7567687473546f6b656e436f756e74223a307d2c2275756964223a226134222c2276657273696f6e223a22312e322e33227d0a7b22637764223a222f77222c226d657373616765223a7b227061727473223a5b7b2274657874223a22627965227d5d7d2c2274696d657374616d70223a22743131222c2274797065223a2275736572222c2275756964223a22752d743131227d0a7b2274797065223a2275736572222c2274696d657374616d70223a22743132222c226d657373616765223a7b227061727473223a5b7b2274657874223a22706c61696e227d5d7d7d0a5b312c20325d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": "Qwen record is not an object",
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [
+          "a1",
+          "a3",
+          "a4"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "not an object: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": "Qwen record is not an object",
+        "events": [],
+        "high_water": 16,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-qwen-jsonl-v1",
+        "path": "$ROOT/projects/-w/chats/s1.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 4,
+          "ts": "t12"
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now": 0.0,
+        "now_ms": 0,
+        "session": "s1"
+      },
+      "label": "not an object: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "qwen"
+}

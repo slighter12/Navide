@@ -151,12 +151,6 @@ impl Outbound {
         self.push(Payload::Plain(bytes));
     }
 
-    #[cfg_attr(windows, allow(dead_code))] // observation answers are POSIX-only for now
-    pub fn respond_with_blob(&self, request_code: u16, cid: u64, meta: Value, blob: Vec<u8>) {
-        let bytes = self.frame(FrameType::Response, request_code, 0, cid, meta, blob);
-        self.push(Payload::Plain(bytes));
-    }
-
     /// `ERROR` frame (10.4): `meta` is `{code, stage, message, effect}`.
     pub fn error(
         &self,

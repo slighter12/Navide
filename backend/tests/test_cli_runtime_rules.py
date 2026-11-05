@@ -33,9 +33,12 @@ PY_SRC = ROOT / "backend/agent_team_backend"
 PRODUCT = Path(os.environ.get("NAVIDE_CLI_RUNTIME_BIN") or ROOT / "native/navide-cli-runtime/target/release/navide-cli-runtime")
 HARNESS = Path(os.environ.get("NAVIDE_CLI_RUNTIME_HARNESS_BIN") or ROOT / "native/navide-cli-runtime/target-harness/release/navide-cli-runtime")
 
-VENDOR_MODULES = {"claude.rs", "vendor_facts.rs", "codex.rs", "opencode.rs", "adapters.rs"}
+#: The Rust files that may name a vendor: the declarations' output and the vendor adapters (the generic core in
+#: `observe/` is scanned like any shared code, so a vendor key there is a failure).
+VENDOR_MODULES = {"vendor_facts.rs", "adapters.rs", "observe/adapters/mod.rs", "observe/adapters/claude.rs",
+                  "observe/adapters/codex.rs", "observe/adapters/opencode.rs"}
 PY_RUNTIME = ["cli_runtime.py", "cli_runtime_frames.py", "cli_runtime_handoff.py", "cli_runtime_observation.py"]
-PY_VENDOR = ["cli_runtime_claude.py", "cli_runtime_adapters.py"]
+PY_VENDOR = ["cli_runtime_native.py", "cli_runtime_adapters.py"]
 
 #: Symbols that exist only for the isolated harness build (cargo feature `fault-hooks`).
 FAULT_SYMBOLS = [b"fault: ", b"fault-survivor", b"ready-wire", b"requested isolated startup fault"]
@@ -64,7 +67,7 @@ def production(path: Path) -> str:
 
 
 def rust_files() -> list[Path]:
-    return [p for p in sorted(RUST_SRC.glob("*.rs")) if not p.name.endswith("_test.rs")]
+    return [p for p in sorted(RUST_SRC.rglob("*.rs")) if not p.name.endswith("_test.rs") and not p.name.endswith("_tests.rs")]
 
 
 # ------------------------------------------------------------------------------------ waits and bounds
@@ -108,10 +111,9 @@ def test_python_runtime_has_no_bare_numeric_deadline():
 
 def test_the_observation_waits_are_named_bounds_on_blocked_executor_calls():
     """The only waits the scan executors make are upper bounds on one blocked `future.result`: named, documented."""
-    for name in ("cli_runtime_observation.py", "cli_runtime_claude.py"):
-        text = (PY_SRC / name).read_text()
-        assert re.search(r"^OBSERVE_RESULT_S = \d+", text, re.M), name
-        assert "future.result(timeout=OBSERVE_RESULT_S)" in text, name
+    text = (PY_SRC / "cli_runtime_observation.py").read_text()
+    assert re.search(r"^OBSERVE_RESULT_S = \d+", text, re.M)
+    assert text.count("future.result(timeout=OBSERVE_RESULT_S)") == 1, "one bridge, one wait"
 
 
 # -------------------------------------------------------------------------------------- vendor locality
@@ -120,7 +122,7 @@ def test_shared_rust_code_never_compares_a_vendor_key():
     pattern = re.compile(r"agent_key\s*==|vendor_facts::[A-Z_]*KEY|\"claude\"|\"codex\"|\"opencode\"")
     offenders = []
     for path in rust_files():
-        if path.name in VENDOR_MODULES:
+        if path.relative_to(RUST_SRC).as_posix() in VENDOR_MODULES:
             continue
         for number, line in enumerate(production(path).splitlines(), 1):
             if pattern.search(line):

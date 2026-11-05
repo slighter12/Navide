@@ -1,0 +1,1220 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_kimi_golden -- --ignored",
+  "legacy_source": {
+    "blob": "986927e1004e5ca3efcd1cf4cb24d44b95753f34",
+    "path": "native/navide-cli-runtime/src/observe_kimi.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 459
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 222
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@222",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 17,
+            "model": "kimi-code",
+            "output_tokens": 3,
+            "session_id": "s1",
+            "timestamp": "1100",
+            "vendor": "kimi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "first: usage",
+      "mode": "usage",
+      "raw_anchor": "7b22696e707574223a5b7b2274657874223a2272656e616d6520746869732070616e65222c2274797065223a2274657874227d5d2c2274696d65223a313030302c2274797065223a227475726e2e70726f6d7074227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a313130302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a352c22696e7075744f74686572223a31302c226f7574707574223a337d7d0a7b226576656e74223a7b2270617274223a7b2274657874223a22686d6d222c2274797065223a227468696e6b227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a313135302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b226576656e74223a7b2270617274223a7b2274657874223a226669727374222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a313230302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::L2",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 17,
+            "model": "kimi-code",
+            "output_tokens": 3,
+            "session_id": "s1",
+            "timestamp": "1100",
+            "vendor": "kimi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L2"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "first: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:1",
+            "detail": "prompt",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input": [
+              {
+                "text": "rename this pane",
+                "type": "text"
+              }
+            ],
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "1000",
+            "vendor": "kimi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:2",
+            "detail": "usage",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "1100",
+            "vendor": "kimi"
+          }
+        ],
+        "high_water": 4,
+        "identity": "",
+        "last_text": "first",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 0,
+          "last_ms": 1200
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "first: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 995
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 593
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@593",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 2,
+            "model": "kimi-code",
+            "output_tokens": 0,
+            "session_id": "s1",
+            "timestamp": "1300",
+            "vendor": "kimi"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 746
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@746",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 9,
+            "model": "kimi-code",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "1400",
+            "vendor": "kimi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "again: usage",
+      "mode": "usage",
+      "raw_anchor": "6d65223a313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a302c226f7574707574223a307d7d0a7b2274797065223a22756e6b6e6f776e227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a313430302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a372c226f7574707574223a327d7d0a7b226576656e74223a7b2270617274223a7b2274657874223a222020222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a313435302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a323030302c2274797065223a227475726e2e656e646564227d0a7b22696e707574223a5b7b2274657874223a22616761696e222c2274797065223a2274657874227d5d2c2274696d65223a333030302c2274797065223a227475726e2e70726f6d7074227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::L5",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 2,
+            "model": "kimi-code",
+            "output_tokens": 0,
+            "session_id": "s1",
+            "timestamp": "1300",
+            "vendor": "kimi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::L7",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 9,
+            "model": "kimi-code",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "1400",
+            "vendor": "kimi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "again: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:5",
+            "detail": "usage",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "1300",
+            "vendor": "kimi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:7",
+            "detail": "usage",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "1400",
+            "vendor": "kimi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:0",
+            "detail": "turn-ended",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "first",
+            "timestamp": "2000",
+            "vendor": "kimi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:10",
+            "detail": "prompt",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input": [
+              {
+                "text": "again",
+                "type": "text"
+              }
+            ],
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "3000",
+            "vendor": "kimi"
+          }
+        ],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 1,
+          "last_ms": 3000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "again: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 995
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "nothing new: usage",
+      "mode": "usage",
+      "raw_anchor": "6d65223a313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a302c226f7574707574223a307d7d0a7b2274797065223a22756e6b6e6f776e227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a313430302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a372c226f7574707574223a327d7d0a7b226576656e74223a7b2270617274223a7b2274657874223a222020222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a313435302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a323030302c2274797065223a227475726e2e656e646564227d0a7b22696e707574223a5b7b2274657874223a22616761696e222c2274797065223a2274657874227d5d2c2274696d65223a333030302c2274797065223a227475726e2e70726f6d7074227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "nothing new: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 1,
+          "last_ms": 3000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 1500,
+        "session": "s1"
+      },
+      "label": "nothing new: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 995
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 20000,
+        "session": "s1"
+      },
+      "label": "idle: usage",
+      "mode": "usage",
+      "raw_anchor": "6d65223a313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a302c226f7574707574223a307d7d0a7b2274797065223a22756e6b6e6f776e227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a313430302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a372c226f7574707574223a327d7d0a7b226576656e74223a7b2270617274223a7b2274657874223a222020222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a313435302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a323030302c2274797065223a227475726e2e656e646564227d0a7b22696e707574223a5b7b2274657874223a22616761696e222c2274797065223a2274657874227d5d2c2274696d65223a333030302c2274797065223a227475726e2e70726f6d7074227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 20000,
+        "session": "s1"
+      },
+      "label": "idle: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:1",
+            "detail": "idle",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "3000",
+            "vendor": "kimi"
+          }
+        ],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": true,
+          "idx": 1,
+          "last_ms": 3000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 20000,
+        "session": "s1"
+      },
+      "label": "idle: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 995
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 20000,
+        "session": "s1"
+      },
+      "label": "idle once: usage",
+      "mode": "usage",
+      "raw_anchor": "6d65223a313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a302c226f7574707574223a307d7d0a7b2274797065223a22756e6b6e6f776e227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a313430302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a372c226f7574707574223a327d7d0a7b226576656e74223a7b2270617274223a7b2274657874223a222020222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a313435302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a323030302c2274797065223a227475726e2e656e646564227d0a7b22696e707574223a5b7b2274657874223a22616761696e222c2274797065223a2274657874227d5d2c2274696d65223a333030302c2274797065223a227475726e2e70726f6d7074227d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 20000,
+        "session": "s1"
+      },
+      "label": "idle once: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 11,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": true,
+          "idx": 1,
+          "last_ms": 3000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 20000,
+        "session": "s1"
+      },
+      "label": "idle once: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1485
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1408
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@1408",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 6,
+            "model": "kimi-code",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "21300",
+            "vendor": "kimi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "cancel: usage",
+      "mode": "usage",
+      "raw_anchor": "686973206c696e65206973206e6f74204a534f4e0a0a7b226576656e74223a7b2270617274223a7b2274657874223a227265706c79222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313030302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a32313130302c2274797065223a227475726e2e63616e63656c227d0a7b226576656e74223a7b2270617274223a7b2274657874223a2269676e6f726564222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313230302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a32313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a342c226f7574707574223a317d7d0a7b22696e707574223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c2274696d65223a32323030302c2274797065223a227475726e2e70726f6d7074227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::L16",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 6,
+            "model": "kimi-code",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "21300",
+            "vendor": "kimi"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7",
+          "kimi::s1::L16"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "cancel: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:2",
+            "detail": "cancel",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "reply",
+            "timestamp": "21100",
+            "vendor": "kimi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:16",
+            "detail": "usage",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "21300",
+            "vendor": "kimi"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:17",
+            "detail": "prompt",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input": [
+              {
+                "text": "after",
+                "type": "text"
+              }
+            ],
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "22000",
+            "vendor": "kimi"
+          }
+        ],
+        "high_water": 17,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 3,
+          "last_ms": 22000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "cancel: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1521
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "cancel again: usage",
+      "mode": "usage",
+      "raw_anchor": "74223a7b2274657874223a227265706c79222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313030302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a32313130302c2274797065223a227475726e2e63616e63656c227d0a7b226576656e74223a7b2270617274223a7b2274657874223a2269676e6f726564222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313230302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a32313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a342c226f7574707574223a317d7d0a7b22696e707574223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c2274696d65223a32323030302c2274797065223a227475726e2e70726f6d7074227d0a7b2274696d65223a32323130302c2274797065223a227475726e2e63616e63656c227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L16",
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "cancel again: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:3",
+            "detail": "cancel",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "22100",
+            "vendor": "kimi"
+          }
+        ],
+        "high_water": 18,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "cancelled": true,
+          "flushed": true,
+          "idx": 3,
+          "last_ms": 22000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "cancel again: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1521
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "half: usage",
+      "mode": "usage",
+      "raw_anchor": "74223a7b2274657874223a227265706c79222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313030302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a32313130302c2274797065223a227475726e2e63616e63656c227d0a7b226576656e74223a7b2270617274223a7b2274657874223a2269676e6f726564222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313230302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a32313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a342c226f7574707574223a317d7d0a7b22696e707574223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c2274696d65223a32323030302c2274797065223a227475726e2e70726f6d7074227d0a7b2274696d65223a32323130302c2274797065223a227475726e2e63616e63656c227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L16",
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "half: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 18,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "cancelled": true,
+          "flushed": true,
+          "idx": 3,
+          "last_ms": 22000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "half: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1598
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "whole: usage",
+      "mode": "usage",
+      "raw_anchor": "22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a32313130302c2274797065223a227475726e2e63616e63656c227d0a7b226576656e74223a7b2270617274223a7b2274657874223a2269676e6f726564222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313230302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a32313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a342c226f7574707574223a317d7d0a7b22696e707574223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c2274696d65223a32323030302c2274797065223a227475726e2e70726f6d7074227d0a7b2274696d65223a32323130302c2274797065223a227475726e2e63616e63656c227d0a7b2274797065223a227475726e2e70726f6d7074222c22696e707574223a5b7b2274797065223a2274657874222c2274657874223a22706c61696e227d5d2c2274696d65223a32333030307d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L16",
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "whole: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:19",
+            "detail": "prompt",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input": [
+              {
+                "text": "plain",
+                "type": "text"
+              }
+            ],
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "23000",
+            "vendor": "kimi"
+          }
+        ],
+        "high_water": 19,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 4,
+          "last_ms": 23000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "whole: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1598
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 222
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@222",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 17,
+            "model": "kimi-code",
+            "output_tokens": 3,
+            "session_id": "s1",
+            "timestamp": "1100",
+            "vendor": "kimi"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 593
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@593",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 2,
+            "model": "kimi-code",
+            "output_tokens": 0,
+            "session_id": "s1",
+            "timestamp": "1300",
+            "vendor": "kimi"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 746
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@746",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 9,
+            "model": "kimi-code",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "1400",
+            "vendor": "kimi"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cwd": "/w",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1408
+            },
+            "cwd": "/w",
+            "dedup_key": "kimi::s1::@1408",
+            "file_path": "$ROOT/sessions/wd/s1/wire.jsonl",
+            "input_tokens": 6,
+            "model": "kimi-code",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "21300",
+            "vendor": "kimi"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "replaced: usage",
+      "mode": "usage",
+      "raw_anchor": "22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a32313130302c2274797065223a227475726e2e63616e63656c227d0a7b226576656e74223a7b2270617274223a7b2274657874223a2269676e6f726564222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313230302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a32313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a342c226f7574707574223a317d7d0a7b22696e707574223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c2274696d65223a32323030302c2274797065223a227475726e2e70726f6d7074227d0a7b2274696d65223a32323130302c2274797065223a227475726e2e63616e63656c227d0a7b2274797065223a227475726e2e70726f6d7074222c22696e707574223a5b7b2274797065223a2274657874222c2274657874223a22706c61696e227d5d2c2274696d65223a32333030307d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L16",
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "replaced: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 19,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 4,
+          "last_ms": 23000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "replaced: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cwd": "/w",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1605
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "not an object: usage",
+      "mode": "usage",
+      "raw_anchor": "742e617070656e645f6c6f6f705f6576656e74227d0a7b2274696d65223a32313130302c2274797065223a227475726e2e63616e63656c227d0a7b226576656e74223a7b2270617274223a7b2274657874223a2269676e6f726564222c2274797065223a2274657874227d2c2274797065223a22636f6e74656e742e70617274227d2c2274696d65223a32313230302c2274797065223a22636f6e746578742e617070656e645f6c6f6f705f6576656e74227d0a7b226d6f64656c223a226b696d692d636f6465222c2274696d65223a32313330302c2274797065223a2275736167652e7265636f7264222c227573616765223a7b22696e70757443616368654372656174696f6e223a322c22696e707574436163686552656164223a302c22696e7075744f74686572223a342c226f7574707574223a317d7d0a7b22696e707574223a5b7b2274657874223a226166746572222c2274797065223a2274657874227d5d2c2274696d65223a32323030302c2274797065223a227475726e2e70726f6d7074227d0a7b2274696d65223a32323130302c2274797065223a227475726e2e63616e63656c227d0a7b2274797065223a227475726e2e70726f6d7074222c22696e707574223a5b7b2274797065223a2274657874222c2274657874223a22706c61696e227d5d2c2274696d65223a32333030307d0a5b312c20325d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": "Kimi record is not an object",
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [
+          "kimi::s1::L16",
+          "kimi::s1::L2",
+          "kimi::s1::L5",
+          "kimi::s1::L7"
+        ]
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "not an object: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": "Kimi record is not an object",
+        "events": [],
+        "high_water": 20,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "parser": "rust-kimi-jsonl-v1",
+        "path": "$ROOT/sessions/wd/s1/wire.jsonl",
+        "seen": [],
+        "state": {
+          "flushed": false,
+          "idx": 4,
+          "last_ms": 23000
+        }
+      },
+      "extra": {
+        "cwd": "/w",
+        "now_ms": 22500,
+        "session": "s1"
+      },
+      "label": "not an object: activity",
+      "mode": "activity",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "kimi"
+}

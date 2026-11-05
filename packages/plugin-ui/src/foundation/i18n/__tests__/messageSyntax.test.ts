@@ -57,6 +57,8 @@ const PLURAL_KEYS = [
   'pane.plans.deleted-count',
   'pane.terminal.session-resumed',
   'pane.terminal.session-resume-failed',
+  'pane.terminal.runtime-session-resumed',
+  'pane.terminal.runtime-session-resume-failed',
   'pane.terminal.idle-reclaimed',
   'pane.terminal.rebuild-busy-skipped-batch',
   'pane.terminal.rebuild-running-confirm-body-batch',

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuotaFailover } from '../composables/useQuotaFailover'
-import { VENDOR_FACTS } from '../platform/plugin-shell/agents/_vendorFacts'
+import { VENDOR_FACTS } from '../../../shared/vendorFacts'
 
 import MockDialog from './helpMocks/MockDialog.vue'
 import MockFigure from './helpMocks/MockFigure.vue'

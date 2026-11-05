@@ -18,5 +18,57 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "unknown",
     "login": "unknown"
+  },
+  "observer": {
+    "parser": "qwen",
+    "parser_id": "rust-qwen-jsonl-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "jsonl",
+      "usage": "per_turn",
+      "store_file": null,
+      "request": ["cwd", "session", "now_ms"],
+      "usage_fields": {
+        "select": [{"pointer": "/type", "equals": "assistant"}],
+        "object": "/usageMetadata",
+        "input": ["/usageMetadata/promptTokenCount"],
+        "output": ["/usageMetadata/candidatesTokenCount", "/usageMetadata/thoughtsTokenCount"],
+        "cache_read": ["/usageMetadata/cachedContentTokenCount"],
+        "cache_creation": [],
+        "key": ["/uuid"],
+        "key_join": "",
+        "model": "/model",
+        "version": "/version",
+        "timestamp": "/timestamp",
+        "number": "lenient",
+        "text": "any",
+        "cache": "separate",
+        "cwd": "/cwd"
+      },
+      "store": null,
+      "rules": {
+        "missing_identity_rotates": true,
+        "invalid_utf8_fails": true,
+        "non_object_fails": true,
+        "activity_non_object_fails": true,
+        "totals_never_decrease": false,
+        "water_survives_replacement": true
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity"],
+      "messages": {"unsupported_mode": "Qwen observation mode not integrated", "non_object": "Qwen record is not an object"},
+      "legacy_state": [
+        {"prefix": "act_hw::", "field": "water", "kind": "int"},
+        {"prefix": "qwen_text::", "field": "last_text", "kind": "text"},
+        {"prefix": "qwen_turn::", "field": "adapter", "kind": "json"}
+      ],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "file_stem"},
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

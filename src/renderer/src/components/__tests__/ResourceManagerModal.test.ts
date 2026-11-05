@@ -204,7 +204,7 @@ describe('ResourceManagerModal', () => {
     w.unmount()
   })
 
-  // review-5 B1: a pane the user is closing is still in the roster and the sweep until it settles.
+  // A pane the user is closing is still in the roster and the sweep until it settles.
   it('does not bring a closing pane back from the roster or the measurement fallback', async () => {
     const { w } = await mountModal({ bytes: { ...DEFAULT_BYTES, ghost: 50 * MB }, hiddenKeys: new Set(['p1', 'ghost']) })
     expect(w.find('[data-pane="p1"]').exists()).toBe(false)

@@ -18,5 +18,54 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "vendor-unsupported",
     "login": "unknown"
+  },
+  "observer": {
+    "parser": "goose",
+    "parser_id": "rust-goose-sqlite-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "sqlite",
+      "usage": "per_turn",
+      "store_file": "sessions.db",
+      "usage_fields": {
+        "select": [],
+        "object": null,
+        "input": ["/input_tokens"],
+        "output": ["/output_tokens"],
+        "cache_read": ["/cache_read_tokens"],
+        "cache_creation": ["/cache_write_tokens"],
+        "key": [],
+        "key_join": "",
+        "model": "/model",
+        "version": null,
+        "timestamp": "/created_timestamp",
+        "number": "lenient",
+        "text": "any",
+        "cache": "separate",
+        "time": "epoch_seconds"
+      },
+      "store": {
+        "rows": {"table": "usage_ledger", "id": "id", "key": "id", "group": "session_id",
+                 "columns": ["model", "created_timestamp", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"],
+                 "raw_id": "row_id"},
+        "parent": {"table": "sessions", "key": "id", "dir": "working_dir", "up": "parent_session_id", "columns": ["session_type"],
+                   "top": {"column": "session_type", "equals": "user"}},
+        "marks": {"table": "messages", "id": "id", "group": "session_id", "payload": "content_json", "stamp": "created_timestamp",
+                  "columns": ["role", "metadata_json"], "prefix": "message:", "start": "newest_or_zero"},
+        "row_prefix": "usage:",
+        "marker": {"text": "at-pane:", "role": {"column": "role", "equals": "user"}}
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity", "has_session", "identify"],
+      "messages": {"unsupported_mode": "Goose observation mode not integrated", "non_object": null},
+      "legacy_state": [{"prefix": "goose_message::", "field": "marks.messages.last", "kind": "int"}],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "store"},
+      "compat": {
+        "absent_file_is_empty": false,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

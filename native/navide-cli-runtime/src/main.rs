@@ -3,6 +3,8 @@
 mod compose;
 mod frame;
 #[cfg(unix)]
+mod observe;
+#[cfg(unix)]
 mod posix;
 #[cfg(unix)]
 mod session_pty;

@@ -345,23 +345,30 @@ export interface BackendRestartNotice {
   notResumed: { paneId: string; name: string; reason: 'crash-loop' | 'over-limit' | 'idle-off-screen' | 'no-session' | 'failed' }[]
 }
 
-const backendRestartNotices = ref<{ notice: BackendRestartNotice; at: number }[]>([])
+/** What an Agent CLI Runtime loss did to the window's CLI panes. The backend
+ *  stayed up, so there is no crash loop to report. */
+export type RuntimeLossNotice = Omit<BackendRestartNotice, 'crashLoop'>
+
+const backendRestartNotices = ref<{ notice: BackendRestartNotice; at: number; cause: 'backend' | 'runtime' }[]>([])
 
 function backendRestartItems(): Announcement[] {
   const t = i18n.global.t
-  return backendRestartNotices.value.map(({ notice, at }) => {
+  return backendRestartNotices.value.map(({ notice, at, cause }) => {
     const highlights: string[] = []
     if (notice.resumed.length) highlights.push(t('announce.backend-restart.resumed', { names: notice.resumed.join(', ') }))
     if (notice.interrupted.length) highlights.push(t('announce.backend-restart.interrupted', { names: notice.interrupted.join(', ') }))
     for (const row of notice.notResumed) {
       highlights.push(t(`announce.backend-restart.not-resumed.${row.reason}`, { name: row.name }))
     }
+    const runtime = cause === 'runtime'
     return {
-      id: `backend-restart:${at}`,
+      id: `${runtime ? 'runtime-lost' : 'backend-restart'}:${at}`,
       kind: 'backend-restart' as const,
-      title: t('announce.backend-restart.title', { time: new Date(at).toLocaleTimeString() }),
+      title: t(runtime ? 'announce.runtime-lost.title' : 'announce.backend-restart.title', { time: new Date(at).toLocaleTimeString() }),
       highlights,
-      note: notice.crashLoop ? t('announce.backend-restart.crash-loop') : t('announce.backend-restart.note'),
+      note: runtime
+        ? t('announce.runtime-lost.note')
+        : notice.crashLoop ? t('announce.backend-restart.crash-loop') : t('announce.backend-restart.note'),
       createdAt: at,
       read: false,
       actions: notice.notResumed.map((row) => ({ kind: 'pane-rebuild' as const, paneId: row.paneId, name: row.name })),
@@ -373,7 +380,17 @@ function backendRestartItems(): Announcement[] {
  *  pane leaves no row. */
 function noteBackendRestart(notice: BackendRestartNotice, at: number = Date.now()): void {
   if (!notice.resumed.length && !notice.interrupted.length && !notice.notResumed.length) return
-  backendRestartNotices.value = [{ notice, at }, ...backendRestartNotices.value]
+  backendRestartNotices.value = [{ notice, at, cause: 'backend' as const }, ...backendRestartNotices.value]
+}
+
+/** Record what an Agent CLI Runtime loss did to the panes. A loss that touched
+ *  no pane leaves no row. Shares the restart row's Rebuild buttons. */
+function noteRuntimeLoss(notice: RuntimeLossNotice, at: number = Date.now()): void {
+  if (!notice.resumed.length && !notice.interrupted.length && !notice.notResumed.length) return
+  backendRestartNotices.value = [
+    { notice: { ...notice, crashLoop: false }, at, cause: 'runtime' as const },
+    ...backendRestartNotices.value,
+  ]
 }
 
 /** H3: a row's Rebuild was used (or the pane is gone): drop its button. */
@@ -1420,6 +1437,7 @@ export function useAnnouncements() {
     noteBackendUpgrade,
     noteSchedulerDisabled,
     noteBackendRestart,
+    noteRuntimeLoss,
     dropBackendRestartPane,
     noteEvolveNotice,
     noteShareNotice,

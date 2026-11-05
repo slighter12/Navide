@@ -1,0 +1,1662 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_copilot_golden -- --ignored",
+  "legacy_source": {
+    "blob": "0616aa705d62deaea8fe29a7a1bd2e34eb0682eb",
+    "path": "native/navide-cli-runtime/src/observe_copilot.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 0
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "usage on an empty store",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "s2|gpt-5|12|4|2026-10-20T16:26:45.000Z",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 5
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|100|20|2026-10-20T16:26:41.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 1
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::1",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 100,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 20,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:41.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "ghost|gpt-5|7|3|2026-10-20T16:26:43.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 3
+            },
+            "cwd": "",
+            "dedup_key": "copilot_usage::3",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 7,
+            "model": "gpt-5",
+            "output_tokens": 3,
+            "session_id": "ghost",
+            "timestamp": "2026-10-20T16:26:43.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|None|9|None",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 4
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::4",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 0,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 9,
+            "session_id": "s1",
+            "timestamp": "",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "s2|gpt-5|12|4|2026-10-20T16:26:45.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 5
+            },
+            "cwd": "/work/b",
+            "dedup_key": "copilot_usage::5",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 12,
+            "model": "gpt-5",
+            "output_tokens": 4,
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:45.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "first usage over history",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "s2|gpt-5|12|4|2026-10-20T16:26:45.000Z",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 5
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "usage with nothing new",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "s2|gpt-5|8|2|2026-10-20T16:26:48.000Z",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 6
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "s2|gpt-5|8|2|2026-10-20T16:26:48.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 6
+            },
+            "cwd": "/work/b",
+            "dedup_key": "copilot_usage::6",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 8,
+            "model": "gpt-5",
+            "output_tokens": 2,
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:48.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "one new usage row",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {},
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::1",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 100,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 20,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:41.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {},
+            "cwd": "",
+            "dedup_key": "copilot_usage::3",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 7,
+            "model": "gpt-5",
+            "output_tokens": 3,
+            "session_id": "ghost",
+            "timestamp": "2026-10-20T16:26:43.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {},
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::4",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 0,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 9,
+            "session_id": "s1",
+            "timestamp": "",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {},
+            "cwd": "/work/b",
+            "dedup_key": "copilot_usage::5",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 12,
+            "model": "gpt-5",
+            "output_tokens": 4,
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:45.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {},
+            "cwd": "/work/b",
+            "dedup_key": "copilot_usage::6",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 8,
+            "model": "gpt-5",
+            "output_tokens": 2,
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:48.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "copilot_usage::1",
+          "copilot_usage::2",
+          "copilot_usage::3",
+          "copilot_usage::4",
+          "copilot_usage::5",
+          "copilot_usage::6"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "whole-store replay with an empty bag",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "copilot_usage::1",
+          "copilot_usage::2",
+          "copilot_usage::3",
+          "copilot_usage::4",
+          "copilot_usage::5",
+          "copilot_usage::6"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "whole-store replay again",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {},
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::7",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 2,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:49.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "copilot_usage::1",
+          "copilot_usage::2",
+          "copilot_usage::3",
+          "copilot_usage::4",
+          "copilot_usage::5",
+          "copilot_usage::6",
+          "copilot_usage::7"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "replay after one new row",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:usage:1",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:41.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "db_act:usage:2",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:42.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "",
+            "dedup_key": "db_act:usage:3",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "ghost",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:43.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:usage:4",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "db_act:usage:5",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:45.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "db_act:usage:6",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:48.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:usage:7",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:49.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:turn:1",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "hello",
+            "timestamp": "2026-10-20T16:26:46.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_turn:1",
+            "detail": "turn_row",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "hi there",
+            "timestamp": "2026-10-20T16:26:46.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "db_act:turn:2",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:47.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/b",
+            "dedup_key": "db_turn:2",
+            "detail": "turn_row",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:47.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "db_act_hw::usage:7",
+          "db_act_hw::turn:2"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "first activity over history",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "db_act_hw::usage:7",
+          "db_act_hw::turn:2"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "activity with nothing new",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:usage:8",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:51.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:turn:3",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "again",
+            "timestamp": "2026-10-20T16:26:50.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_turn:3",
+            "detail": "turn_row",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "ok",
+            "timestamp": "2026-10-20T16:26:50.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "db_act_hw::usage:8",
+          "db_act_hw::turn:3"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "activity after a turn and a usage row",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "s1|claude-haiku-4.5|3|1|2026-10-20T16:26:51.000Z",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 8
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|100|20|2026-10-20T16:26:41.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 1
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::1",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 100,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 20,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:41.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "ghost|gpt-5|7|3|2026-10-20T16:26:43.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 3
+            },
+            "cwd": "",
+            "dedup_key": "copilot_usage::3",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 7,
+            "model": "gpt-5",
+            "output_tokens": 3,
+            "session_id": "ghost",
+            "timestamp": "2026-10-20T16:26:43.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|None|9|None",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 4
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::4",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 0,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 9,
+            "session_id": "s1",
+            "timestamp": "",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "s2|gpt-5|12|4|2026-10-20T16:26:45.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 5
+            },
+            "cwd": "/work/b",
+            "dedup_key": "copilot_usage::5",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 12,
+            "model": "gpt-5",
+            "output_tokens": 4,
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:45.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "s2|gpt-5|8|2|2026-10-20T16:26:48.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 6
+            },
+            "cwd": "/work/b",
+            "dedup_key": "copilot_usage::6",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 8,
+            "model": "gpt-5",
+            "output_tokens": 2,
+            "session_id": "s2",
+            "timestamp": "2026-10-20T16:26:48.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|2|2|2026-10-20T16:26:49.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 7
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::7",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 2,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:49.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|3|1|2026-10-20T16:26:51.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 8
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::8",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 3,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:51.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "usage after the store was replaced",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "s1|claude-haiku-4.5|3|1|2026-10-20T16:26:51.000Z",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 8
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|3|1|2026-10-20T16:26:51.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 8
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::8",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 3,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 1,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:26:51.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "usage whose anchor row changed",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 0
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "usage after the table was emptied",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "db_act_hw::usage:0",
+          "db_act_hw::turn:0"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "activity after the tables were emptied",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "s1|claude-haiku-4.5|4|4|2026-10-20T16:27:00.000Z",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 9
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "s1|claude-haiku-4.5|4|4|2026-10-20T16:27:00.000Z",
+              "identity": "$IDENTITY0",
+              "kind": "sqlite",
+              "row_id": 9
+            },
+            "cwd": "/work/a",
+            "dedup_key": "copilot_usage::9",
+            "file_path": "$ROOT/session-store.db",
+            "input_tokens": 4,
+            "model": "claude-haiku-4.5",
+            "output_tokens": 4,
+            "session_id": "s1",
+            "timestamp": "2026-10-20T16:27:00.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "usage after the table restarted",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:usage:9",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2026-10-20T16:27:00.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_act:turn:4",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "fresh",
+            "timestamp": "2026-10-20T16:27:01.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "db_turn:4",
+            "detail": "turn_row",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/session-store.db",
+            "session_id": "s1",
+            "text": "start",
+            "timestamp": "2026-10-20T16:27:01.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "db_act_hw::usage:9",
+          "db_act_hw::turn:4"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "activity after the tables restarted",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": "sqlite error 1 in `SELECT COALESCE(MAX(id), 0) FROM turns`",
+        "events": [],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "db_act_hw::turn:4",
+          "db_act_hw::usage:9"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "activity while a table is missing",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "s1|claude-haiku-4.5|4|4|2026-10-20T16:27:00.000Z",
+          "identity": "$IDENTITY0",
+          "kind": "sqlite",
+          "row_id": 9
+        },
+        "error": "sqlite error 1 in `SELECT session_id, model, input_tokens, output_t`",
+        "events": [],
+        "identity": "",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "usage while the usage table is missing",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": "sqlite error 1 in `SELECT a.id, a.session_id, a.model, a.input_toke`",
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-store.db",
+        "seen": [
+          "copilot_usage::1",
+          "copilot_usage::2",
+          "copilot_usage::3",
+          "copilot_usage::4",
+          "copilot_usage::5",
+          "copilot_usage::6",
+          "copilot_usage::7"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "s1"
+      },
+      "label": "replay while the usage table is missing",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "refused": "No such file or directory (os error 2)"
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "usage on a log that is not there yet",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "replay on a log that is not there yet",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 0,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "opened": false,
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [],
+        "text_changed": false
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "activity on a log that is not there yet",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cli_version": "1.0.75",
+          "cwd": "/work/p",
+          "identity": "$IDENTITY1",
+          "input_total": 101,
+          "kind": "jsonl",
+          "model": "gpt-5",
+          "offset": 1046,
+          "output_total": 22
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cli_version": "1.0.75",
+              "cwd": "/work/p",
+              "identity": "$IDENTITY1",
+              "input_total": 101,
+              "kind": "jsonl",
+              "model": "gpt-5",
+              "offset": 339,
+              "output_total": 22
+            },
+            "cli_version": "1.0.75",
+            "cwd": "/work/p",
+            "dedup_key": "copilot_cumulative::log1::101::22",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "input_tokens": 101,
+            "model": "gpt-5",
+            "output_tokens": 22,
+            "session_id": "log1",
+            "timestamp": "2026-10-20T16:00:01.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY1",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "first usage over the log",
+      "mode": "usage",
+      "raw_anchor": "617461223a7b22636f6e74656e74223a22666972737420616e73776572227d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30342e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30352e3030305a222c2274797065223a22746f6f6c2e657865637574696f6e5f7374617274227d0a7b2264617461223a7b22636f6e74656e74223a22227d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30362e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30372e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30382e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30392e3030305a222c2274797065223a22746f6f6c2e657865637574696f6e5f636f6d706c657465227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cli_version": "1.0.75",
+          "cwd": "/work/p",
+          "identity": "$IDENTITY1",
+          "input_total": 101,
+          "kind": "jsonl",
+          "model": "gpt-5",
+          "offset": 1046,
+          "output_total": 22
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY1",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "usage with nothing new",
+      "mode": "usage",
+      "raw_anchor": "617461223a7b22636f6e74656e74223a22666972737420616e73776572227d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30342e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30352e3030305a222c2274797065223a22746f6f6c2e657865637574696f6e5f7374617274227d0a7b2264617461223a7b22636f6e74656e74223a22227d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30362e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30372e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30382e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30392e3030305a222c2274797065223a22746f6f6c2e657865637574696f6e5f636f6d706c657465227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cli_version": "1.0.75",
+            "cwd": "/work/p",
+            "dedup_key": "copilot_cumulative::log1::101::22",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "input_tokens": 101,
+            "model": "gpt-5",
+            "output_tokens": 22,
+            "session_id": "log1",
+            "timestamp": "2026-10-20T16:00:01.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [
+          "__cum__:in=101,out=22"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "whole-log replay",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [
+          "__cum__:in=101,out=22"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "whole-log replay again",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/p",
+            "dedup_key": "act:6",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "<pane>hello</pane>",
+            "timestamp": "2026-10-20T16:00:03.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/p",
+            "dedup_key": "act:7",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "",
+            "timestamp": "2026-10-20T16:00:04.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/p",
+            "dedup_key": "act:8",
+            "detail": "tool.execution_start",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "",
+            "timestamp": "2026-10-20T16:00:05.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/p",
+            "dedup_key": "act:9",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "",
+            "timestamp": "2026-10-20T16:00:06.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/p",
+            "dedup_key": "turn:10",
+            "detail": "turn_end",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "first answer",
+            "timestamp": "2026-10-20T16:00:07.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/p",
+            "dedup_key": "turn:11",
+            "detail": "turn_end",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "",
+            "timestamp": "2026-10-20T16:00:08.000Z",
+            "vendor": "copilot"
+          },
+          {
+            "cwd": "/work/p",
+            "dedup_key": "act:12",
+            "detail": "tool.execution_complete",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "",
+            "timestamp": "2026-10-20T16:00:09.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "high_water": 12,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "opened": true,
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [],
+        "text_changed": true
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "first activity over the log",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 12,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "opened": true,
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [],
+        "text_changed": false
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "activity with nothing new",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cli_version": "1.0.76",
+          "cwd": "/work/p",
+          "identity": "$IDENTITY1",
+          "input_total": 165,
+          "kind": "jsonl",
+          "model": "claude",
+          "offset": 1407,
+          "output_total": 40
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cli_version": "1.0.76",
+              "cwd": "/work/p",
+              "identity": "$IDENTITY1",
+              "input_total": 165,
+              "kind": "jsonl",
+              "model": "claude",
+              "offset": 1304,
+              "output_total": 40
+            },
+            "cli_version": "1.0.76",
+            "cwd": "/work/p",
+            "dedup_key": "copilot_cumulative::log1::165::40",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "input_tokens": 64,
+            "model": "claude",
+            "output_tokens": 18,
+            "session_id": "log1",
+            "timestamp": "2026-10-20T16:01:00.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY1",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "usage after a tokenDetails record",
+      "mode": "usage",
+      "raw_anchor": "74696d657374616d70223a22323032362d31302d32305431363a30303a30382e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30303a30392e3030305a222c2274797065223a22746f6f6c2e657865637574696f6e5f636f6d706c657465227d0a7b2264617461223a7b22636f70696c6f7456657273696f6e223a22312e302e3736222c2263757272656e744d6f64656c223a22636c61756465222c22746f6b656e44657461696c73223a7b2263616368655f72656164223a7b22746f6b656e436f756e74223a31307d2c2263616368655f7772697465223a7b22746f6b656e436f756e74223a2235227d2c22696e707574223a7b22746f6b656e436f756e74223a3135307d2c226f7574707574223a7b22746f6b656e436f756e74223a34307d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30302e3030305a222c2274797065223a22746f6b656e2e64657461696c73227d0a7b2264617461223a7b22636f6e74656e74223a227365636f6e6420616e73776572227d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30312e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cli_version": "1.0.76",
+            "cwd": "/work/p",
+            "dedup_key": "copilot_cumulative::log1::165::40",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "input_tokens": 64,
+            "model": "claude",
+            "output_tokens": 18,
+            "session_id": "log1",
+            "timestamp": "2026-10-20T16:01:00.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [
+          "__cum__:in=165,out=40"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "replay after a tokenDetails record",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/p",
+            "dedup_key": "act:14",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "",
+            "timestamp": "2026-10-20T16:01:01.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "high_water": 14,
+        "identity": "",
+        "last_text": "second answer",
+        "mode": "activity",
+        "opened": true,
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [],
+        "text_changed": true
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "activity after more records",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cli_version": "1.0.76",
+          "cwd": "/work/p",
+          "identity": "$IDENTITY1",
+          "input_total": 165,
+          "kind": "jsonl",
+          "model": "claude",
+          "offset": 1684,
+          "output_total": 40
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY1",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "usage after a total that fell",
+      "mode": "usage",
+      "raw_anchor": "6e436f756e74223a2235227d2c22696e707574223a7b22746f6b656e436f756e74223a3135307d2c226f7574707574223a7b22746f6b656e436f756e74223a34307d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30302e3030305a222c2274797065223a22746f6b656e2e64657461696c73227d0a7b2264617461223a7b22636f6e74656e74223a227365636f6e6420616e73776572227d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30312e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b226d6f64656c4d657472696373223a7b22636c61756465223a7b227573616765223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a327d7d2c22677074223a7b227573616765223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a337d7d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30302e3030305a222c2274797065223a2273657373696f6e2e73687574646f776e227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30312e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cli_version": "1.0.76",
+          "cwd": "/work/p",
+          "identity": "$IDENTITY1",
+          "input_total": 165,
+          "kind": "jsonl",
+          "model": "claude",
+          "offset": 1684,
+          "output_total": 40
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY1",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "usage again",
+      "mode": "usage",
+      "raw_anchor": "6e436f756e74223a2235227d2c22696e707574223a7b22746f6b656e436f756e74223a3135307d2c226f7574707574223a7b22746f6b656e436f756e74223a34307d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30302e3030305a222c2274797065223a22746f6b656e2e64657461696c73227d0a7b2264617461223a7b22636f6e74656e74223a227365636f6e6420616e73776572227d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30312e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b226d6f64656c4d657472696373223a7b22636c61756465223a7b227573616765223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a327d7d2c22677074223a7b227573616765223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a337d7d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30302e3030305a222c2274797065223a2273657373696f6e2e73687574646f776e227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30312e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [
+          "__cum__:in=4,out=5"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "replay after a total that fell",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/p",
+            "dedup_key": "turn:16",
+            "detail": "turn_end",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "second answer",
+            "timestamp": "2026-10-20T16:02:01.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "high_water": 16,
+        "identity": "",
+        "last_text": "",
+        "mode": "activity",
+        "opened": true,
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [],
+        "text_changed": true
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "activity after a turn end",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/p",
+            "dedup_key": "act:17",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "session_id": "log1",
+            "text": "",
+            "timestamp": "2026-10-20T16:03:00.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "high_water": 17,
+        "identity": "",
+        "last_text": "half",
+        "mode": "activity",
+        "opened": true,
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [],
+        "text_changed": true
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "activity over an unterminated last line",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cli_version": "1.0.76",
+          "cwd": "/work/p",
+          "identity": "$IDENTITY1",
+          "input_total": 165,
+          "kind": "jsonl",
+          "model": "claude",
+          "offset": 1684,
+          "output_total": 40
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY1",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "usage over an unterminated last line",
+      "mode": "usage",
+      "raw_anchor": "6e436f756e74223a2235227d2c22696e707574223a7b22746f6b656e436f756e74223a3135307d2c226f7574707574223a7b22746f6b656e436f756e74223a34307d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30302e3030305a222c2274797065223a22746f6b656e2e64657461696c73227d0a7b2264617461223a7b22636f6e74656e74223a227365636f6e6420616e73776572227d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30312e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b226d6f64656c4d657472696373223a7b22636c61756465223a7b227573616765223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a327d7d2c22677074223a7b227573616765223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a337d7d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30302e3030305a222c2274797065223a2273657373696f6e2e73687574646f776e227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30312e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "high_water": 17,
+        "identity": "",
+        "last_text": "half",
+        "mode": "activity",
+        "opened": true,
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": [],
+        "text_changed": false
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "activity once the line is complete",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "cli_version": "1.0.76",
+          "cwd": "/work/p",
+          "identity": "$IDENTITY1",
+          "input_total": 4,
+          "kind": "jsonl",
+          "model": "claude",
+          "offset": 1778,
+          "output_total": 5
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "cli_version": "1.0.76",
+              "cwd": "/work/p",
+              "identity": "$IDENTITY1",
+              "input_total": 4,
+              "kind": "jsonl",
+              "model": "claude",
+              "offset": 1605,
+              "output_total": 5
+            },
+            "cli_version": "1.0.76",
+            "cwd": "/work/p",
+            "dedup_key": "copilot_cumulative::log1::4::5",
+            "file_path": "$ROOT/session-state/log1/events.jsonl",
+            "input_tokens": 4,
+            "model": "claude",
+            "output_tokens": 5,
+            "session_id": "log1",
+            "timestamp": "2026-10-20T16:02:00.000Z",
+            "vendor": "copilot"
+          }
+        ],
+        "identity": "$IDENTITY1",
+        "mode": "usage",
+        "parser": "rust-copilot-jsonl-v1",
+        "path": "$ROOT/session-state/log1/events.jsonl",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/p",
+        "session": "log1"
+      },
+      "label": "usage after the log was replaced",
+      "mode": "usage",
+      "raw_anchor": "363a30313a30302e3030305a222c2274797065223a22746f6b656e2e64657461696c73227d0a7b2264617461223a7b22636f6e74656e74223a227365636f6e6420616e73776572227d2c2274696d657374616d70223a22323032362d31302d32305431363a30313a30312e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a7b2264617461223a7b226d6f64656c4d657472696373223a7b22636c61756465223a7b227573616765223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a327d7d2c22677074223a7b227573616765223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a337d7d7d7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30302e3030305a222c2274797065223a2273657373696f6e2e73687574646f776e227d0a7b2264617461223a7b7d2c2274696d657374616d70223a22323032362d31302d32305431363a30323a30312e3030305a222c2274797065223a22617373697374616e742e7475726e5f656e64227d0a7b2264617461223a7b22636f6e74656e74223a2268616c66227d2c2274696d657374616d70223a22323032362d31302d32305431363a30333a30302e3030305a222c2274797065223a22617373697374616e742e6d657373616765227d0a"
+    }
+  ],
+  "vendor": "copilot"
+}

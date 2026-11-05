@@ -18,5 +18,91 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "not-yet-integrated",
     "login": "integrated"
+  },
+  "observer": {
+    "parser": "copilot",
+    "parser_id": "rust-copilot-jsonl-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "sqlite",
+      "usage": "per_turn",
+      "store_file": "session-store.db",
+      "usage_fields": {
+        "select": [],
+        "object": null,
+        "input": ["/input_tokens"],
+        "output": ["/output_tokens"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": "/model",
+        "version": null,
+        "timestamp": "/created_at",
+        "number": "lenient",
+        "text": "any"
+      },
+      "store": {
+        "rows": {"table": "assistant_usage_events", "id": "id", "key": "id", "group": "session_id",
+                 "columns": ["model", "input_tokens", "output_tokens", "created_at"],
+                 "anchor": ["session_id", "model", "input_tokens", "output_tokens", "created_at"]},
+        "parent": {"table": "sessions", "key": "id", "dir": "cwd", "join": "left"},
+        "marks": [
+          {"table": "assistant_usage_events", "id": "id", "group": "session_id", "columns": ["created_at"],
+           "prefix": "db_act:usage:", "start": "oldest", "shrink": "oldest"},
+          {"table": "turns", "id": "id", "group": "session_id", "columns": ["user_message", "assistant_response", "timestamp"],
+           "prefix": "db_act:turn:", "start": "oldest", "shrink": "oldest", "after": "assistant_usage_events"}
+        ],
+        "row_prefix": "copilot_usage::",
+        "marker": null
+      }
+    }, {
+      "source": "jsonl",
+      "usage": "cumulative",
+      "store_file": "events.jsonl",
+      "request": ["cwd", "session"],
+      "usage_fields": {
+        "select": [],
+        "object": "/data/tokenDetails",
+        "input": ["/data/tokenDetails/input/tokenCount", "/data/tokenDetails/cache_read/tokenCount", "/data/tokenDetails/cache_write/tokenCount"],
+        "output": ["/data/tokenDetails/output/tokenCount"],
+        "cache_read": [],
+        "cache_creation": [],
+        "key": [],
+        "key_join": "",
+        "model": null,
+        "version": null,
+        "timestamp": "/timestamp",
+        "number": "lenient",
+        "text": "any"
+      },
+      "store": null,
+      "rules": {
+        "missing_identity_rotates": true,
+        "invalid_utf8_fails": false,
+        "non_object_fails": false,
+        "activity_non_object_fails": false,
+        "totals_never_decrease": true,
+        "water_survives_replacement": true
+      },
+      "defers_to": {"file": "session-store.db", "up": 3}
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity"],
+      "messages": {"unsupported_mode": "Copilot observation mode not integrated", "non_object": null},
+      "legacy_state": [
+        {"prefix": "act_hw::", "field": "water", "kind": "int"},
+        {"prefix": "__lasttext__:", "field": "last_text", "kind": "text"},
+        {"prefix": "__cum__:", "field": "totals", "kind": "pair"},
+        {"prefix": "db_act_hw::usage:", "field": "marks.assistant_usage_events.last", "kind": "int"},
+        {"prefix": "db_act_hw::turn:", "field": "marks.turns.last", "kind": "int"}
+      ],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "none", "identity_source": "file_stem"},
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": true
+      }
+    }
   }
 }

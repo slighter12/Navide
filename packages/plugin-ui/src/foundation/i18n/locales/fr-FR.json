@@ -957,6 +957,8 @@
       "backend-reconnecting": "Backend déconnecté – reconnexion. La saisie est suspendue.",
       "backend-restarting": "Le backend a planté – redémarrage ({attempt}/{max}). La saisie est suspendue.",
       "backend-unavailable": "Backend indisponible – la saisie est suspendue jusqu’à son redémarrage.",
+      "runtime-session-resumed": "{count} session reprise après l’arrêt du runtime CLI | {count} sessions reprises après l’arrêt du runtime CLI",
+      "runtime-session-resume-failed": "Impossible de reprendre {count} session après l’arrêt du runtime CLI – utilisez « Reconstruire » pour réessayer | Impossible de reprendre {count} sessions après l’arrêt du runtime CLI – utilisez « Reconstruire » pour réessayer",
       "session-resumed": "{count} session reprise après le redémarrage du backend | {count} sessions reprises après le redémarrage du backend",
       "session-resume-failed": "Impossible de reprendre {count} session après le redémarrage du backend – utilisez « Reconstruire » pour réessayer | Impossible de reprendre {count} sessions après le redémarrage du backend – utilisez « Reconstruire » pour réessayer",
       "option-select-hint": "Cette CLI capture la souris – maintenez {key} en faisant glisser pour sélectionner du texte",
@@ -985,6 +987,9 @@
       "rebuild-in-progress": "Reconstruction déjà en cours",
       "rebuild-not-resumable": "Session introuvable sur le disque – impossible de reconstruire par reprise",
       "rebuild-probe-failed": "Impossible de vérifier la session – le service ne répond pas, réessayez",
+      "close-offline": "Impossible de fermer ce pane tant que le backend est déconnecté – réessayez une fois la connexion rétablie",
+      "close-workspace-offline": "Impossible de fermer cet espace de travail tant que le backend est déconnecté – réessayez une fois la connexion rétablie",
+      "close-unverified": "L'arrêt de la session n'a pas pu être confirmé, le pane a donc été conservé – réessayez de le fermer",
       "rebuild-running-confirm-title": "La CLI est en cours d’exécution",
       "rebuild-running-confirm-body": "La reconstruction interrompra le tour en cours et réaffichera la conversation. Reconstruire quand même ?",
       "rebuild-running-confirm-body-batch": "{count} CLI est en cours d’exécution – la reconstruction interrompra son tour en cours et réaffichera la conversation. Reconstruire quand même ? | {count} CLI sont en cours d’exécution – la reconstruction interrompra leurs tours en cours et réaffichera les conversations. Reconstruire quand même ?",
@@ -9432,6 +9437,10 @@
         "no-session": "{name} : non repris, car il n’a aucune conversation enregistrée à reprendre",
         "failed": "{name} : n’a pas pu être repris"
       }
+    },
+    "runtime-lost": {
+      "title": "Runtime CLI arrêté à {time}",
+      "note": "Les panneaux repris s’arrêtent à l’invite et ne continuent pas seuls ; les panneaux terminés restent tels quels jusqu’à leur reconstruction."
     },
     "scheduler-disabled": "La tâche planifiée « {name} » a été désactivée : son pane cible n’existe plus",
     "scheduler-disabled-note": "Son pane cible est resté introuvable {n} exécutions de suite, la tâche a donc été désactivée. Dans le panneau Planification, utilisez « Relier » pour la diriger vers un pane actif, puis réactivez-la.",

@@ -146,7 +146,7 @@ def _hold_free_port(host: str, port: int = 0) -> socket.socket:
     )[0]
     sock = socket.socket(family, kind, proto)
     try:
-        if os.name == "posix" and sys.platform != "cygwin":
+        if osplat.listen_socket_reuseaddr:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
         if family == socket.AF_INET6 and hasattr(socket, "IPPROTO_IPV6"):
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, True)

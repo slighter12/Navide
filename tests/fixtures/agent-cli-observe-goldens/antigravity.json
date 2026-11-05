@@ -1,0 +1,395 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_antigravity_golden -- --ignored",
+  "legacy_source": {
+    "blob": "0ff813581e752637453e783bb330ef3e3c781f79",
+    "path": "native/navide-cli-runtime/src/observe_antigravity.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": []
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: an empty store",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "agy_idx::0"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: first sight of a store with history",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:1",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "hello",
+            "timestamp": "2026-10-20T16:26:41+00:00",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:2",
+            "detail": "assistant:thinking",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:42+00:00",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:3",
+            "detail": "step-7",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:4",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:44+00:00",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:5",
+            "detail": "assistant:question",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:45+00:00",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:6",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:46+00:00",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:7",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:47+00:00",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:8",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "good",
+            "timestamp": "",
+            "vendor": "antigravity"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "agy_idx::8",
+          "agy_pending::[2, 7]"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: a pass of every kind of step",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:2",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:42+00:00",
+            "vendor": "antigravity"
+          },
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:9",
+            "detail": "assistant",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "final",
+            "timestamp": "2026-10-20T16:26:49+00:00",
+            "vendor": "antigravity"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "agy_idx::9",
+          "agy_pending::[7]"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: a pending step finishes and a reply arrives",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "agy_idx::9",
+          "agy_pending::[7]"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: nothing new",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:10",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "",
+            "vendor": "antigravity"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "agy_idx::10",
+          "agy_pending::[7, 10]"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: a new pending step",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:11",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/conversation.db",
+            "session_id": "conv-1",
+            "text": "next",
+            "timestamp": "2026-10-20T16:26:51+00:00",
+            "vendor": "antigravity"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "agy_idx::11",
+          "agy_pending::[7, 10]"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: a pending step that is gone",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [
+          {
+            "cwd": "/work/a",
+            "dedup_key": "step:conv-1:7",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT1/conversation.db",
+            "session_id": "conv-1",
+            "text": "",
+            "timestamp": "2026-10-20T16:26:47+00:00",
+            "vendor": "antigravity"
+          }
+        ],
+        "identity": "",
+        "mode": "activity",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT1/conversation.db",
+        "seen": [
+          "agy_idx::9"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "activity: a migrated bag",
+      "mode": "activity",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "usage",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "kept"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "usage answers nothing",
+      "mode": "usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "checkpoint": {},
+        "error": null,
+        "events": [],
+        "identity": "",
+        "mode": "session_usage",
+        "parser": "rust-antigravity-sqlite-v1",
+        "path": "$ROOT/conversation.db",
+        "seen": [
+          "kept"
+        ]
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "session_usage answers nothing",
+      "mode": "session_usage",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "refused": "Antigravity observation mode not integrated"
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "identify is refused",
+      "mode": "identify",
+      "raw_anchor": ""
+    },
+    {
+      "document": {
+        "refused": "Antigravity observation mode not integrated"
+      },
+      "extra": {
+        "cwd": "/work/a",
+        "session": "conv-1"
+      },
+      "label": "has_session is refused",
+      "mode": "has_session",
+      "raw_anchor": ""
+    }
+  ],
+  "vendor": "antigravity"
+}

@@ -1,14 +1,10 @@
 """Finite evaluated native observer integration roster, not capability/adoption claims."""
-from .cli_runtime_aider import reference_spec as aider_reference
-from .cli_runtime_blob import antigravity_reference, cursor_reference
-from .cli_runtime_claude import reference_spec as claude_reference
-from .cli_runtime_codex import reference_spec as codex_reference
-from .cli_runtime_droid import reference_spec as droid_reference
-from .cli_runtime_jsonl import grok_reference, kimi_reference, muse_reference, pi_reference, qwen_reference
-from .cli_runtime_opencode import reference_spec as opencode_reference
-from .cli_runtime_sqlite import copilot_reference, goose_reference, kilo_reference
+from .cli_runtime_native import native_reference
+from .cli_vendors._vendor_facts import FACTS
 
-__all__ = ['aider_reference', 'antigravity_reference', 'claude_reference', 'codex_reference', 'copilot_reference',
-           'cursor_reference', 'droid_reference',
-           'goose_reference', 'grok_reference', 'kilo_reference', 'kimi_reference', 'muse_reference',
-           'opencode_reference', 'pi_reference', 'qwen_reference']
+# One generic reader serves every parser: every declared observer runs on the observation core. The roster is the declarations
+# that have an `observer` block. The per-vendor names are the evaluation selector's.
+ON_THE_CORE = tuple(sorted(key for key, facts in FACTS.items() if facts.observer))
+globals().update({f'{key}_reference': native_reference for key in ON_THE_CORE})
+
+__all__ = sorted(f'{key}_reference' for key in ON_THE_CORE)

@@ -24,6 +24,8 @@ node tests/cli/g2Native.mjs proof --release $binary --harness $harness
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 $sha = (Get-FileHash -Algorithm SHA256 $binary).Hash.ToLower()
+$harnessSha = (Get-FileHash -Algorithm SHA256 $harness).Hash.ToLower()
+"G2_HARNESS_SHA=$harnessSha" >> $env:GITHUB_ENV
 "NAVIDE_CLI_RUNTIME_BIN=$binary" >> $env:GITHUB_ENV
 "NAVIDE_T05_SIDECAR=$binary" >> $env:GITHUB_ENV
 "G2_SIDECAR_SHA=$sha" >> $env:GITHUB_ENV

@@ -18,5 +18,50 @@
     "resume_by_id": "integrated",
     "session_id_at_launch": "integrated",
     "login": "integrated"
+  },
+  "observer": {
+    "parser": "claude",
+    "parser_id": "rust-claude-jsonl-v1",
+    "platforms": ["unix"],
+    "layouts": [{
+      "source": "jsonl",
+      "usage": "per_turn",
+      "store_file": null,
+      "usage_fields": {
+        "select": [{"pointer": "/type", "equals": "assistant"}],
+        "object": "/message/usage",
+        "input": ["/message/usage/input_tokens"],
+        "output": ["/message/usage/output_tokens"],
+        "cache_read": ["/message/usage/cache_read_input_tokens"],
+        "cache_creation": ["/message/usage/cache_creation_input_tokens"],
+        "key": ["/message/id", "/requestId"],
+        "key_join": "::",
+        "model": "/message/model",
+        "version": "/version",
+        "timestamp": "/timestamp",
+        "number": "lenient",
+        "text": "any"
+      },
+      "store": null,
+      "rules": {
+        "missing_identity_rotates": true,
+        "invalid_utf8_fails": true,
+        "non_object_fails": true,
+        "activity_non_object_fails": true,
+        "totals_never_decrease": false,
+        "water_survives_replacement": true
+      }
+    }],
+    "core": {
+      "modes": ["usage", "session_usage", "activity", "turns"],
+      "messages": {"unsupported_mode": "invalid observation mode", "non_object": "Claude record is not an object"},
+      "legacy_state": [{"prefix": "act_hw::", "field": "water", "kind": "int"}],
+      "python": {"prompt_detail": "user", "pane_scope": "none", "attribution": "file_stem", "identity_source": "file_stem"},
+      "compat": {
+        "absent_file_is_empty": true,
+        "no_python_turn_fallback": false,
+        "store_error_reported": false
+      }
+    }
   }
 }

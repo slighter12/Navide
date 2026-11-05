@@ -607,10 +607,11 @@ export function renderFallbackReport(turnText: string): string {
  *  only brings the conversation back — none of them was told to carry on, so
  *  whether to continue or re-dispatch is the parent's decision. Returns '' for
  *  no children. `cause` 'backend-restart' (H3) is the same notice after
- *  Navide's backend restarted under a running window. */
+ *  Navide's backend restarted under a running window; 'runtime-lost' is the
+ *  same after the Agent CLI Runtime died under a live backend. */
 export function renderInterruptedChildrenNotice(
   children: readonly { name: string; resumed: boolean }[],
-  cause: 'relaunch' | 'backend-restart' = 'relaunch',
+  cause: 'relaunch' | 'backend-restart' | 'runtime-lost' = 'relaunch',
 ): string {
   if (children.length === 0) return ''
   const lines = children.map((c) =>
@@ -618,9 +619,13 @@ export function renderInterruptedChildrenNotice(
       ? `- ${c.name}：已接回（對話已恢復，停在提示字元）`
       : cause === 'backend-restart'
         ? `- ${c.name}：未接回（已結束，超過自動接回上限、後端短時間內反覆崩潰或接回失敗）`
-        : `- ${c.name}：未接回（仍是還原佔位，超過自動接回上限或接回失敗）`,
+        : cause === 'runtime-lost'
+          ? `- ${c.name}：未接回（已結束，超過自動接回上限或接回失敗）`
+          : `- ${c.name}：未接回（仍是還原佔位，超過自動接回上限或接回失敗）`,
   )
-  const when = cause === 'backend-restart' ? 'Navide 的後端重新啟動時' : 'Navide 重新啟動時'
+  const when = cause === 'backend-restart'
+    ? 'Navide 的後端重新啟動時'
+    : cause === 'runtime-lost' ? 'Navide 的 CLI runtime 中止時' : 'Navide 重新啟動時'
   return (
     `${MSG_INTERRUPTED_PREFIX} — ${when}，你派出的以下 pane 正在工作中，回合被中斷：\n` +
     `${lines.join('\n')}\n\n` +

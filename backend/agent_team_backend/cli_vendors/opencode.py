@@ -413,33 +413,45 @@ class OpencodeLogReader(LogReader):
         if _V2_TABLES <= names:
             newest = self._query(path, _NEWEST_WRITES_SQL) if "message" in names else None
             if newest and _int(newest[0][0]) > _int(newest[0][1]):
-                self._report_problem(
-                    "schema", path, "mixed-schema",
-                    "both OpenCode 1.x and OpenCode 2 tables are present and the 1.x "
-                    "ones were written last; reading the 1.x tables, OpenCode 2 "
-                    "sessions are not seen",
-                    status="partial",
-                )
+                self._report_schema(path, {"kind": "mixed"})
                 return "v1"
             self._read_ok("schema")
             return "v2"
         if _V1_TABLES <= names:
             partial = names & _V2_TABLES
             if partial:
-                self._report_problem(
-                    "schema", path, "partial-v2-schema",
-                    f"OpenCode 2 table(s) {', '.join(sorted(partial))} without "
-                    f"{', '.join(sorted(_V2_TABLES - names))}; reading the 1.x tables",
-                    status="partial",
-                )
+                self._report_schema(path, {"kind": "partial", "held": sorted(partial), "missing": sorted(_V2_TABLES - names)})
                 return "v1"
             self._read_ok("schema")
             return "v1"
-        self._report_problem(
-            "schema", path, "unrecognized-schema",
-            "tables: " + (", ".join(sorted(names)) or "none"),
-        )
+        self._report_schema(path, {"kind": "none_applies", "tables": sorted(names)})
         return None
+
+    def _report_schema(self, path: Path, problem: dict) -> None:
+        """Record the schema problem of `path` (`kind`: `none_applies` with the `tables` the file holds, `partial` with the OpenCode 2
+        tables `held` and `missing`, `mixed`), as the one read problem under "schema". The native reader reports the same kinds
+        the sidecar names, so both spell a problem the same way."""
+        kind = problem["kind"]
+        if kind == "mixed":
+            self._report_problem(
+                "schema", path, "mixed-schema",
+                "both OpenCode 1.x and OpenCode 2 tables are present and the 1.x "
+                "ones were written last; reading the 1.x tables, OpenCode 2 "
+                "sessions are not seen",
+                status="partial",
+            )
+        elif kind == "partial":
+            self._report_problem(
+                "schema", path, "partial-v2-schema",
+                f"OpenCode 2 table(s) {', '.join(problem['held'])} without "
+                f"{', '.join(problem['missing'])}; reading the 1.x tables",
+                status="partial",
+            )
+        else:
+            self._report_problem(
+                "schema", path, "unrecognized-schema",
+                "tables: " + (", ".join(problem["tables"]) or "none"),
+            )
 
     def _report_problem(
         self, key: str, path: Path, reason: str, detail: str, *, status: str = "unreadable",

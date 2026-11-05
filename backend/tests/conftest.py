@@ -200,15 +200,28 @@ def _isolated_data_dir(tmp_path):
     # ``monkeypatch.undo()`` must not undo the isolation along with its own.
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setenv("AGENT_TEAM_DATA_DIR", str(tmp_path))
-        yield
         # pty_registry opens a Database handle for the data dir it first sees and, when the next test repoints
         # the dir, replaces the handle without closing it. Left to the garbage collector, that descriptor closes at
-        # a time no test controls (it skewed the descriptor baseline of the handoff test p4). Only a handle for this
-        # test's own dir: the app's injected instance is not this fixture's to close.
-        registry = sys.modules.get("agent_team_backend.pty_registry")
-        handle = getattr(registry, "_db", None)
-        if handle is not None and handle.path.parent == tmp_path:
-            registry.set_database(None)
+        # a time no test controls (it skewed the descriptor baseline of the handoff test p4). Record the handles
+        # the registry opens itself and close exactly those: an instance injected through ``set_database`` (the
+        # app's shared one, which a test that reloads ``app`` under ``tmp_path`` builds inside that directory) is
+        # not this fixture's to close, and a path check cannot tell the two apart.
+        from agent_team_backend import pty_registry
+
+        opened = []
+        real_database = pty_registry.Database
+
+        def record_open(*args, **kwargs):
+            handle = real_database(*args, **kwargs)
+            opened.append(handle)
+            return handle
+
+        monkeypatch.setattr(pty_registry, "Database", record_open)
+        yield
+        # Teardown order: this MonkeyPatch undoes after the closes, so ``Database`` is still the recorder here.
+        for handle in opened:
+            if pty_registry._db is handle:
+                pty_registry.set_database(None)
             handle.close()
 
 

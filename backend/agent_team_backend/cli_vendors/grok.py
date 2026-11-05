@@ -216,6 +216,10 @@ class GrokLogReader(LogReader):
     #: turns_for_session reads the turn_completed record's own usage.
     turns_method: str = "exact"
 
+    def observes_file(self, path: Path) -> bool:
+        """Only the transcript carries events: its siblings (chat history, signals, lock files) are never sent to the sidecar."""
+        return path.name == _TRANSCRIPT
+
     # ---- layout ------------------------------------------------------------
 
     def _home(self) -> Path:

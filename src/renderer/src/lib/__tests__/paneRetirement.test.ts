@@ -28,6 +28,87 @@ describe('settlePaneTerminals — the settlement answer is the only proof', () =
   })
 })
 
+describe('settlePaneTerminals — effects that cannot be undone wait for the proof', () => {
+  it('runs onProven after the settlement proves, and after the own kill', async () => {
+    const order: string[] = []
+    expect(await settlePaneTerminals({
+      killOwn: async () => { order.push('kill') },
+      settle: async () => { order.push('settle'); return { ok: true } },
+      onProven: async () => { order.push('proven') },
+    })).toBe(true)
+    expect(order).toEqual(['kill', 'settle', 'proven'])
+  })
+  it.each([
+    ['a refusal / timeout / transport failure', null],
+    ['an explicit ok:false', { ok: false }],
+  ])('never runs onProven on %s, and says the settlement was unproven', async (_label, answer) => {
+    const onProven = vi.fn()
+    const onRefused = vi.fn()
+    expect(await settlePaneTerminals({ settle: async () => answer, onProven, onRefused })).toBe(false)
+    expect(onProven).not.toHaveBeenCalled()
+    expect(onRefused).toHaveBeenCalledExactlyOnceWith('unproven')
+  })
+  it('fails fast while the backend is disconnected: no kill, no settlement, no onProven', async () => {
+    const killOwn = vi.fn(async () => {})
+    const settle = vi.fn(async () => ({ ok: true }))
+    const onProven = vi.fn()
+    const onRefused = vi.fn()
+    expect(await settlePaneTerminals({ connected: () => false, killOwn, settle, onProven, onRefused })).toBe(false)
+    expect(killOwn).not.toHaveBeenCalled()
+    expect(settle).not.toHaveBeenCalled()
+    expect(onProven).not.toHaveBeenCalled()
+    expect(onRefused).toHaveBeenCalledExactlyOnceWith('offline')
+  })
+  it('keeps the full retirement while the backend is connected', async () => {
+    const settle = vi.fn(async () => ({ ok: true }))
+    expect(await settlePaneTerminals({ connected: () => true, settle })).toBe(true)
+    expect(settle).toHaveBeenCalledOnce()
+  })
+
+  // What a caller hands over: the pane's own effects (timer, watcher, question, ACP kill) and an
+  // extension of its own (a rebuild's scrollback and account-follow drops).
+  const effectNames = ['timer', 'watcher', 'question', 'acp', 'scrollback', 'account-follow']
+  const effects = (ran: string[]) => effectNames.map((name) => async () => { ran.push(name) })
+
+  it.each([
+    ['a refusal / timeout / transport failure', null],
+    ['an explicit ok:false', { ok: false }],
+  ])('runs none of the listed effects on %s', async (_label, answer) => {
+    const ran: string[] = []
+    expect(await settlePaneTerminals({ killOwn: async () => {}, settle: async () => answer, onProven: effects(ran) })).toBe(false)
+    expect(ran).toEqual([])
+  })
+  it('runs none of the listed effects while the backend is disconnected', async () => {
+    const ran: string[] = []
+    expect(await settlePaneTerminals({ connected: () => false, settle: async () => ({ ok: true }), onProven: effects(ran) })).toBe(false)
+    expect(ran).toEqual([])
+  })
+  it('runs every listed effect, in order, once the settlement is proven', async () => {
+    const ran: string[] = []
+    expect(await settlePaneTerminals({ settle: async () => ({ ok: true }), onProven: effects(ran) })).toBe(true)
+    expect(ran).toEqual(effectNames)
+  })
+  it('awaits each effect before the next, so an ACP kill finishes before the extension runs', async () => {
+    const order: string[] = []
+    await settlePaneTerminals({
+      settle: async () => ({ ok: true }),
+      onProven: [
+        async () => { await Promise.resolve(); await Promise.resolve(); order.push('acp-killed') },
+        () => { order.push('scrollback-dropped') },
+      ],
+    })
+    expect(order).toEqual(['acp-killed', 'scrollback-dropped'])
+  })
+  it('a refusal on a later pane leaves the earlier pane retired and the later one untouched', async () => {
+    // closeWorkspace retires its panes one after another and stops at the first refusal.
+    const retired: string[] = []
+    const first = await settlePaneTerminals({ settle: async () => ({ ok: true }), onProven: () => { retired.push('first') } })
+    const second = await settlePaneTerminals({ settle: async () => null, onProven: () => { retired.push('second') } })
+    expect([first, second]).toEqual([true, false])
+    expect(retired).toEqual(['first'])
+  })
+})
+
 describe('closePaneHidden — the pane is hidden while settlement is pending', () => {
   function deferred<T>() {
     let resolve!: (value: T) => void
@@ -208,7 +289,7 @@ describe('idsWithoutClosing — a hidden closing pane is not part of a batch act
     }
     expect(closed).toEqual(['a', 'b'])
   })
-  it('review-5 B4: a batch [a, b] whose ids were snapshotted earlier closes b once when b is closed separately meanwhile', async () => {
+  it('a batch [a, b] whose ids were snapshotted earlier closes b once when b is closed separately meanwhile', async () => {
     const closing = new Set<string>()
     const closed: string[] = []
     let settleA!: (retired: boolean) => void
@@ -231,7 +312,7 @@ describe('idsWithoutClosing — a hidden closing pane is not part of a batch act
     expect(closed.filter((id) => id === 'b')).toHaveLength(1)
     expect(closed.filter((id) => id === 'a')).toHaveLength(1)
   })
-  it('review-5 B4: a batch id whose pane already settled and left the record is not closed again', async () => {
+  it('a batch id whose pane already settled and left the record is not closed again', async () => {
     const closing = new Set<string>()
     const open = new Set(['a', 'b'])
     const closed: string[] = []

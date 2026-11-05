@@ -138,6 +138,11 @@ has_tty_servicing: bool = platform_id == "win32"
 has_windows_runtime_client: bool = platform_id == "win32"
 __all__ += ["has_tty_servicing", "has_windows_runtime_client"]
 
+#: Whether a listening socket should set SO_REUSEADDR. POSIX only: on Windows it
+#: would let another process take over a bound port, and Cygwin follows Windows.
+listen_socket_reuseaddr: bool = platform_id != "win32" and sys.platform != "cygwin"
+__all__ += ["listen_socket_reuseaddr"]
+
 
 def has_native_vendor_observer() -> bool:
     """Whether the selected Rust runtime's sidecar answers vendor OBSERVE requests on this platform. The Windows

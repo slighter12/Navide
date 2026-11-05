@@ -1,0 +1,962 @@
+{
+  "generation": "NAVIDE_GOLDEN_WRITE=1 cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml regenerate_the_grok_golden -- --ignored",
+  "legacy_source": {
+    "blob": "bca9f13a906c1415682563775a4614e1b1d6ae7f",
+    "path": "native/navide-cli-runtime/src/observe_grok.rs"
+  },
+  "passes": [
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1032
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1032
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:4",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 10,
+            "model": "alpha-model",
+            "output_tokens": 5,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:13:20.299Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "first: usage",
+      "mode": "usage",
+      "raw_anchor": "616d704d73223a313730303030303030303230302c226576656e744964223a2233227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a226c6f222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303330302c226576656e744964223a2234227d2c2273657373696f6e4964223a227331222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a22656e645f7475726e222c227573616765223a7b22696e707574546f6b656e73223a31302c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a31302c226f7574707574546f6b656e73223a357d7d2c226f7574707574546f6b656e73223a357d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1032
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {},
+            "cwd": "/w",
+            "dedup_key": "usage:4",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 10,
+            "model": "alpha-model",
+            "output_tokens": 5,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:13:20.299Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:4"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "first: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "616d704d73223a313730303030303030303230302c226576656e744964223a2233227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a226c6f222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303330302c226576656e744964223a2234227d2c2273657373696f6e4964223a227331222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a22656e645f7475726e222c227573616765223a7b22696e707574546f6b656e73223a31302c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a31302c226f7574707574546f6b656e73223a357d7d2c226f7574707574546f6b656e73223a357d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 1032
+        },
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:1",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "rename this pane",
+            "timestamp": "2023-11-14T22:13:20.000Z",
+            "vendor": "grok"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:2",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2023-11-14T22:13:20.099Z",
+            "vendor": "grok"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:3",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2023-11-14T22:13:20.200Z",
+            "vendor": "grok"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:4",
+            "detail": "end_turn",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "Hello",
+            "timestamp": "2023-11-14T22:13:20.299Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "first: activity",
+      "mode": "activity",
+      "raw_anchor": "616d704d73223a313730303030303030303230302c226576656e744964223a2233227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a226c6f222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303330302c226576656e744964223a2234227d2c2273657373696f6e4964223a227331222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a22656e645f7475726e222c227573616765223a7b22696e707574546f6b656e73223a31302c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a31302c226f7574707574546f6b656e73223a357d7d2c226f7574707574546f6b656e73223a357d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2488
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2090
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:s1@2090",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 7,
+            "model": "alpha-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:15:00.250Z",
+            "vendor": "grok"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2459
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:8",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 3,
+            "model": "alpha-model",
+            "output_tokens": 1,
+            "session_id": "s2",
+            "timestamp": "2023-11-14T22:13:20.700Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "more: usage",
+      "mode": "usage",
+      "raw_anchor": "226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a372c226f7574707574546f6b656e73223a327d7d2c226f7574707574546f6b656e73223a327d7d7d2c2274696d657374616d70223a313730303030303130302e32357d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303730302c226576656e744964223a2238227d2c2273657373696f6e4964223a227332222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2488
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {},
+            "cwd": "/w",
+            "dedup_key": "usage:s1@2090",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 7,
+            "model": "alpha-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:15:00.250Z",
+            "vendor": "grok"
+          },
+          {
+            "checkpoint": {},
+            "cwd": "/w",
+            "dedup_key": "usage:8",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 3,
+            "model": "alpha-model",
+            "output_tokens": 1,
+            "session_id": "s2",
+            "timestamp": "2023-11-14T22:13:20.700Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:4",
+          "usage:s1@2090",
+          "usage:8"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "more: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a372c226f7574707574546f6b656e73223a327d7d2c226f7574707574546f6b656e73223a327d7d7d2c2274696d657374616d70223a313730303030303130302e32357d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303730302c226576656e744964223a2238227d2c2273657373696f6e4964223a227332222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2488
+        },
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:5",
+            "detail": "end_turn",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2023-11-14T22:13:20.400Z",
+            "vendor": "grok"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "act:6",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "again",
+            "timestamp": "2023-11-14T22:13:20.500Z",
+            "vendor": "grok"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:s1@2090",
+            "detail": "end_turn",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2023-11-14T22:15:00.250Z",
+            "vendor": "grok"
+          },
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:8",
+            "detail": "cancelled",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s2",
+            "text": "",
+            "timestamp": "2023-11-14T22:13:20.700Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "more: activity",
+      "mode": "activity",
+      "raw_anchor": "226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a372c226f7574707574546f6b656e73223a327d7d2c226f7574707574546f6b656e73223a327d7d7d2c2274696d657374616d70223a313730303030303130302e32357d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303730302c226576656e744964223a2238227d2c2273657373696f6e4964223a227332222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2488
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "nothing new: usage",
+      "mode": "usage",
+      "raw_anchor": "226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a372c226f7574707574546f6b656e73223a327d7d2c226f7574707574546f6b656e73223a327d7d7d2c2274696d657374616d70223a313730303030303130302e32357d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303730302c226576656e744964223a2238227d2c2273657373696f6e4964223a227332222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2488
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:4",
+          "usage:8",
+          "usage:s1@2090"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "nothing new: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a372c226f7574707574546f6b656e73223a327d7d2c226f7574707574546f6b656e73223a327d7d7d2c2274696d657374616d70223a313730303030303130302e32357d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303730302c226576656e744964223a2238227d2c2273657373696f6e4964223a227332222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2488
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "nothing new: activity",
+      "mode": "activity",
+      "raw_anchor": "226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a372c226f7574707574546f6b656e73223a327d7d2c226f7574707574546f6b656e73223a327d7d7d2c2274696d657374616d70223a313730303030303130302e32357d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303730302c226576656e744964223a2238227d2c2273657373696f6e4964223a227332222c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2741
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2741
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:11",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 4,
+            "model": "zeta-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:13:21.000Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "raw model order: usage",
+      "mode": "usage",
+      "raw_anchor": "657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2741
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {},
+            "cwd": "/w",
+            "dedup_key": "usage:11",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 4,
+            "model": "zeta-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:13:21.000Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:4",
+          "usage:8",
+          "usage:s1@2090",
+          "usage:11"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "raw model order: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2741
+        },
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "turn:11",
+            "detail": "end_turn",
+            "event_type": "turn_complete",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2023-11-14T22:13:21.000Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "raw model order: activity",
+      "mode": "activity",
+      "raw_anchor": "657373696f6e557064617465223a227475726e5f636f6d706c65746564222c2273746f705f726561736f6e223a2263616e63656c6c6564222c227573616765223a7b22696e707574546f6b656e73223a332c226d6f64656c43616c6c73223a322c226d6f64656c5573616765223a7b22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a312c226f7574707574546f6b656e73223a317d2c227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a332c226f7574707574546f6b656e73223a317d7d2c226f7574707574546f6b656e73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "open reply: usage",
+      "mode": "usage",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:11",
+          "usage:4",
+          "usage:8",
+          "usage:s1@2090"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "open reply: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:9",
+            "detail": "assistant",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "",
+            "timestamp": "2023-11-14T22:13:20.799Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "partial",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "open reply: activity",
+      "mode": "activity",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 1032
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:4",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 10,
+            "model": "alpha-model",
+            "output_tokens": 5,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:13:20.299Z",
+            "vendor": "grok"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2090
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:s1@2090",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 7,
+            "model": "alpha-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:15:00.250Z",
+            "vendor": "grok"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2459
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:8",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 3,
+            "model": "alpha-model",
+            "output_tokens": 1,
+            "session_id": "s2",
+            "timestamp": "2023-11-14T22:13:20.700Z",
+            "vendor": "grok"
+          },
+          {
+            "checkpoint": {
+              "anchor": "",
+              "identity": "$IDENTITY0",
+              "kind": "jsonl",
+              "offset": 2741
+            },
+            "cwd": "/w",
+            "dedup_key": "usage:11",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "input_tokens": 4,
+            "model": "zeta-model",
+            "output_tokens": 2,
+            "session_id": "s1",
+            "timestamp": "2023-11-14T22:13:21.000Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "replaced: usage",
+      "mode": "usage",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:11",
+          "usage:4",
+          "usage:8",
+          "usage:s1@2090"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "replaced: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "replaced: activity",
+      "mode": "activity",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "half: usage",
+      "mode": "usage",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:11",
+          "usage:4",
+          "usage:8",
+          "usage:s1@2090"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "half: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 2962
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "half: activity",
+      "mode": "activity",
+      "raw_anchor": "73223a317d7d7d7d0a5b312c325d0a74686973206c696e65206973206e6f74204a534f4e0a0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223131222c226167656e7454696d657374616d704d73223a313730303030303030313030307d2c22757064617465223a7b2273657373696f6e557064617465223a227475726e5f636f6d706c65746564222c227573616765223a7b22696e707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 3141
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "whole: usage",
+      "mode": "usage",
+      "raw_anchor": "707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223130222c226167656e7454696d657374616d704d73223a313730303030303030303930307d2c22757064617465223a7b2273657373696f6e557064617465223a22757365725f6d6573736167655f6368756e6b222c22636f6e74656e74223a5b7b2274797065223a2274657874222c2274657874223a22706c61696e227d5d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 3141
+        },
+        "error": null,
+        "events": [],
+        "identity": "$IDENTITY0",
+        "mode": "session_usage",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [
+          "usage:11",
+          "usage:4",
+          "usage:8",
+          "usage:s1@2090"
+        ],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "whole: session_usage",
+      "mode": "session_usage",
+      "raw_anchor": "707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223130222c226167656e7454696d657374616d704d73223a313730303030303030303930307d2c22757064617465223a7b2273657373696f6e557064617465223a22757365725f6d6573736167655f6368756e6b222c22636f6e74656e74223a5b7b2274797065223a2274657874222c2274657874223a22706c61696e227d5d7d7d7d0a"
+    },
+    {
+      "document": {
+        "checkpoint": {
+          "anchor": "",
+          "identity": "$IDENTITY0",
+          "kind": "jsonl",
+          "offset": 3141
+        },
+        "error": null,
+        "events": [
+          {
+            "cwd": "/w",
+            "dedup_key": "act:10",
+            "detail": "user",
+            "event_type": "agent_active",
+            "file_path": "$ROOT/sessions/g/s1/updates.jsonl",
+            "session_id": "s1",
+            "text": "plain",
+            "timestamp": "2023-11-14T22:13:20.900Z",
+            "vendor": "grok"
+          }
+        ],
+        "identity": "$IDENTITY0",
+        "mode": "activity",
+        "parser": "rust-grok-jsonl-v1",
+        "path": "$ROOT/sessions/g/s1/updates.jsonl",
+        "pending": "",
+        "seen": [],
+        "turns": []
+      },
+      "extra": {
+        "cwd": "/w"
+      },
+      "label": "whole: activity",
+      "mode": "activity",
+      "raw_anchor": "707574546f6b656e73223a342c226f7574707574546f6b656e73223a322c226d6f64656c5573616765223a7b227a6574612d6d6f64656c223a7b22696e707574546f6b656e73223a347d2c22616c7068612d6d6f64656c223a7b22696e707574546f6b656e73223a317d7d7d7d7d7d0a7b226a736f6e727063223a22322e30222c226d6574686f64223a2273657373696f6e2f757064617465222c22706172616d73223a7b225f6d657461223a7b226167656e7454696d657374616d704d73223a313730303030303030303830302c226576656e744964223a2239227d2c2273657373696f6e4964223a227331222c22757064617465223a7b22636f6e74656e74223a7b2274657874223a227061727469616c222c2274797065223a2274657874227d2c2273657373696f6e557064617465223a226167656e745f6d6573736167655f6368756e6b227d7d7d0a7b22706172616d73223a7b2273657373696f6e4964223a227331222c225f6d657461223a7b226576656e744964223a223130222c226167656e7454696d657374616d704d73223a313730303030303030303930307d2c22757064617465223a7b2273657373696f6e557064617465223a22757365725f6d6573736167655f6368756e6b222c22636f6e74656e74223a5b7b2274797065223a2274657874222c2274657874223a22706c61696e227d5d7d7d7d0a"
+    }
+  ],
+  "vendor": "grok"
+}

@@ -2,7 +2,7 @@
 """Audit CLI-agent callers for independent vendor fact tables and launch bypasses.
 
 Declared facts live in ``shared/agent-cli/<key>.json`` and reach callers through
-the generated ``_vendor_facts.py`` / ``_vendorFacts.ts`` / ``vendor_facts.rs``.
+the generated ``_vendor_facts.py`` / ``vendorFacts.ts`` / ``vendor_facts.rs``.
 Vendor-specific behaviour lives in the registered strategies under
 ``backend/agent_team_backend/cli_vendors/``. Anything else that restates a
 vendor's command, permission flag, resume or login arguments, or that starts an
@@ -28,7 +28,6 @@ SKIP_FILE_SUFFIXES = (".test.ts", ".spec.ts", ".d.ts", ".test.tsx")
 # Generated fact files, the declarations' consumers by construction.
 GENERATED = {
     "backend/agent_team_backend/cli_vendors/_vendor_facts.py",
-    "src/renderer/src/platform/plugin-shell/agents/_vendorFacts.ts",
     "src/shared/vendorFacts.ts",
 }
 # Registered strategies and the terminal service seam may hold vendor behaviour

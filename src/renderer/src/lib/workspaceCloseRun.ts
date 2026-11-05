@@ -42,6 +42,15 @@ export function closeEndsTheRun(probe: WorkspaceCloseProbe): boolean {
   return probe.doomedOrigins.includes('pipeline')
 }
 
+/** Is a workspace close refused because the backend is down?
+ *
+ *  Every pane the close retires is settled through the backend, so offline none
+ *  of them can be proven. A workspace with no pane has nothing to prove and
+ *  closes as it always did. */
+export function closeRefusedOffline(probe: { connected: boolean, panesToRetire: number }): boolean {
+  return !probe.connected && probe.panesToRetire > 0
+}
+
 /** Does the window's pipeline run block restoring THIS workspace's panes?
  *
  *  A restore recreates panes from records, so it must not run for a workspace
