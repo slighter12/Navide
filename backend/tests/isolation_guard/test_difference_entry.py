@@ -60,7 +60,8 @@ def test_inherited_guard_precedes_successful_import(tmp_path, target):
     assert proof['target'] == target
     assert proof['kernel_origin_denied_before_import'] is True
     assert proof['source_helper_unchanged'] is True
-    assert proof['refusals'] == (1 if target == 'application' else 0)
+    assert proof['refusals'] == 0, "importing the application must not write to the executable askpass helper"
+    assert proof['probe_refusals'] == 1, "the live guard must refuse the probe's own write to the helper"
     assert proof['account_home'] == str(root / 'home')
 
 

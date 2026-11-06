@@ -1,7 +1,7 @@
 /** Claude Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '../../../../../shared/vendorFacts'
+import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
 
 const FACT = VENDOR_FACTS.claude
 

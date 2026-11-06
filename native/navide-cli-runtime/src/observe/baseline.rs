@@ -120,11 +120,11 @@ pub fn keep_resolved(ident: &mut super::Ident, cursor: &super::Cursor, rotated: 
 /// closes it reports that one).
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QuietTurn {
-    idx: i64,
+    pub(in crate::observe) idx: i64,
     #[serde(default)]
-    flushed: bool,
+    pub(in crate::observe) flushed: bool,
     #[serde(default)]
-    ts: String,
+    pub(in crate::observe) ts: String,
 }
 
 /// The file must have been quiet this long (the file's modification time against the wall clock the request names).

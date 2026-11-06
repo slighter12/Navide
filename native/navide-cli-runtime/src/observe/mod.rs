@@ -444,6 +444,10 @@ pub trait Source<O: Observer>: Sized {
 /// How a layout's usage is read: per turn or cumulative. A combination no source implements (cumulative usage in a row
 /// store) has no impl, so it cannot be dispatched.
 pub trait UsageScan<O: Observer, S>: Sized {
+    /// Whether the checkpoint this scan writes carries a window of recent keys (per turn) rather than running totals. The checkpoint-weight
+    /// pins read it, so they do not tell the scans apart by type name.
+    #[cfg_attr(not(test), allow(dead_code))]
+    const WINDOWED: bool;
     fn scan(source: &mut S, ctx: &Ctx, run: &mut Run<O>, start: u64) -> io::Result<Scan>;
 }
 
@@ -457,6 +461,7 @@ pub struct Cumulative;
 pub struct NoUsage;
 
 impl<O: Observer, S> UsageScan<O, S> for NoUsage {
+    const WINDOWED: bool = false;
     fn scan(_: &mut S, _: &Ctx, _: &mut Run<O>, _: u64) -> io::Result<Scan> {
         Ok(Scan { committed: 0, owed: Owed::Nothing })
     }

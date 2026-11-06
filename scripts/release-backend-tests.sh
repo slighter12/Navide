@@ -36,6 +36,14 @@ NO_SANDBOX_FILES=(
   backend/tests/test_pty_registry.py
   backend/tests/test_terminals_breakaway_kill.py
   backend/tests/test_terminals_exit_orphan_reap.py
+  backend/tests/isolation_guard/test_difference_entry.py
+  backend/tests/isolation_guard/test_native_file_guard.py
+  backend/tests/isolation_guard/test_native_guard_preflight.py
+  backend/tests/isolation_guard/test_os_startup.py
+  backend/tests/isolation_guard/test_owned_snapshot.py
+  backend/tests/isolation_guard/test_process_argv_guard.py
+  backend/tests/isolation_guard/test_process_env_guard.py
+  backend/tests/isolation_guard/test_runtime_self.py
 )
 
 # The main pass runs on four pytest-xdist workers, one file at a time each,

@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CLI_AGENT_SPECS } from '../index'
-import { VENDOR_FACTS } from '../../../../../../shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
 
 describe('vendor declarations', () => {
   it('declares every real CLI spec and nothing else', () => {

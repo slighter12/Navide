@@ -342,6 +342,7 @@ class RustTerminalService(TerminalService):
                 waiter.set_result(None)
         if self._ready_ok and (self._invalidation is None or self._invalidation.done()):
             self._invalidation = asyncio.create_task(self._invalidate(message))
+            # `_invalidate` settles its own exceptions; this retrieves what escapes its `finally` / post-try paths.
             self._invalidation.add_done_callback(lambda t: t.cancelled() or t.exception())
 
     def _stop_dispatch(self) -> None:
@@ -595,7 +596,13 @@ class RustTerminalService(TerminalService):
                     session.cleanup.set()
         except BaseException as error:  # noqa: BLE001
             self._lost = f"CLEANUP_FAILED: runtime loss cleanup did not finish ({type(error).__name__})"
-            raise
+            if not isinstance(error, Exception):
+                raise  # cancellation and interpreter exits keep propagating
+            # Settled here, not left on the task for a done-callback: a loop that shuts down in the same
+            # iteration never runs the callback, and the exception is then logged as never retrieved
+            # ("Executor shutdown has been called" is the usual cause). `_lost` records the failure.
+            log.error("runtime loss cleanup failed: %s: %s", type(error).__name__, error)
+            return
         finally:
             for record in settlements:
                 self._receipt({"event": "loss_settled", **record})

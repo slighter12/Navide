@@ -26,9 +26,9 @@ const PENDING_TEXT_MAX_CHARS: usize = 32_000;
 /// prompt lines are one prompt), and whether this pass has already said the agent is producing output (one event per pass).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Walk {
-    session: String,
-    prompt: bool,
-    output: bool,
+    pub(in crate::observe) session: String,
+    pub(in crate::observe) prompt: bool,
+    pub(in crate::observe) output: bool,
 }
 
 impl Observer for Aider {
@@ -109,18 +109,22 @@ fn whole_line(line: &Line) -> Option<String> {
     (line.complete && !line.oversize).then(|| decode_ignore(&line.bytes).trim_end_matches(['\r', '\n']).to_owned())
 }
 
+/// The two cursor / position-context keys the section state travels under: read by `identify`, declared in `CONTEXT_KEYS`, written by `persist`.
+const SECTION: &str = "section";
+const SECTION_TS: &str = "section_ts";
+
 impl JsonlObserver for Aider {
     fn identify(file: &mut JsonlFile, ctx: &Ctx, run: &Run<Self>) -> io::Result<Ident> {
         let mut ident = Ident::requested(ctx);
         let (slug, iso) = match run.mode {
             // An incremental pass goes on in the section its cursor stands in, unless it starts the log over.
-            Mode::Usage if !run.rotated => (ctx.req.cursor.text("section"), ctx.req.cursor.text("section_ts")),
+            Mode::Usage if !run.rotated => (ctx.req.cursor.text(SECTION), ctx.req.cursor.text(SECTION_TS)),
             // A replay that resumes after a page is in the section its position was saved in (`RESUMES_IN_CONTEXT`); it reads none of the
             // bytes before the position.
             Mode::SessionUsage => {
                 let saved = file.replay_context::<Self>(&run.saved.replay);
                 let text = |field: &str| saved.and_then(|context| context.get(field)).and_then(Value::as_str).unwrap_or("").to_owned();
-                (text("section"), text("section_ts"))
+                (text(SECTION), text(SECTION_TS))
             }
             _ => (String::new(), String::new()),
         };
@@ -129,12 +133,13 @@ impl JsonlObserver for Aider {
     }
 
     const RESUMES_IN_CONTEXT: bool = true;
+    const CONTEXT_KEYS: &'static [&'static str] = &[SECTION, SECTION_TS];
 
     fn persist(ident: &Ident, checkpoint: &mut Map<String, Value>) {
         // The cursor keeps the kind the baseline named it by, so one written by either reader is read by the other.
         checkpoint.insert("kind".into(), json!("aider-md"));
-        checkpoint.insert("section".into(), json!(ident.section));
-        checkpoint.insert("section_ts".into(), json!(ident.stamp));
+        checkpoint.insert(SECTION.into(), json!(ident.section));
+        checkpoint.insert(SECTION_TS.into(), json!(ident.stamp));
     }
 
     fn read_line(line: &Line) -> Decoded {

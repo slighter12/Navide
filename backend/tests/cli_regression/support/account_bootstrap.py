@@ -175,17 +175,30 @@ def main() -> None:
         assert before == after and before['mode'] & 0o777 == 0o755
         refusals = root / 'origin-refusals.jsonl'
         rows = [json.loads(line) for line in stable_bytes(refusals).splitlines()] if refusals.exists() else []
-        if target == 'application':
-            assert len(rows) == 1, rows
-            assert rows[0] == {'event': 'os.chmod', 'operation': 'write', 'origin': 'outside-fixture',
-                               'target_sha256': hashlib.sha256(os.fsencode(helper)).hexdigest(),
-                               'source': 'posix-paths', 'source_line': 111}, rows
+        # Importing the application used to chmod this already-executable helper (`osplat/_posix_paths.py`
+        # `askpass_launcher`), which the guard refused and this probe pinned as one refusal row. That chmod bumped the
+        # tracked source's ctime in every process that imported git_service (the field failure "changed guarded source
+        # identity: askpass" in a parallel run), so it now happens only when an execute bit is missing: no write attempt.
+        assert not rows, rows
+        import_refusals = len(rows)
+        # Live guard proof: after the import, attempt one guarded write ourselves. A same-mode chmod is refused before
+        # the syscall, so the tracked source's ctime does not move.
+        try:
+            os.chmod(helper, before['mode'] & 0o777)
+        except PermissionError:
+            guard_refused_probe_write = True
         else:
-            assert not rows, rows
+            raise AssertionError('the origin guard admitted a write to the tracked askpass helper')
+        rows = [json.loads(line) for line in stable_bytes(refusals).splitlines()]
+        assert len(rows) == 1 and rows[0]['source'] == 'synthetic-probe' and rows[0]['operation'] == 'write', rows
+        assert rows[0]['target_sha256'] == hashlib.sha256(os.fsencode(str(helper))).hexdigest(), rows
+        final = stable_file(helper)[1]
+        assert final == before, 'the refused probe write changed the tracked source'
         (root / 'import-proof.json').write_text(json.dumps({
-            'target': target, 'kernel_origin_denied_before_import': True,
-            'source_helper_unchanged': before == after, 'helper_identity': after,
-            'refusals': len(rows), 'account_home': pwd.getpwuid(os.getuid()).pw_dir,
+            'target': target, 'kernel_origin_denied_before_import': guard_refused_probe_write,
+            'source_helper_unchanged': before == final, 'helper_identity': final,
+            'probe_refusals': len(rows),
+            'refusals': import_refusals, 'account_home': pwd.getpwuid(os.getuid()).pw_dir,
             'backend_main_lifespan_sidecar_pty_called': False,
         }))
         return

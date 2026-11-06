@@ -108,7 +108,12 @@ def askpass_launcher(helper_py: Path, launch_argv: list[str]) -> Path:
         return launcher
 
     try:
-        helper_py.chmod(helper_py.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        mode = helper_py.stat().st_mode
+        wanted = mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        # Only when a bit is missing: chmod bumps the ctime even for an unchanged mode, and from a checkout this is the
+        # tracked source file, which every process importing git_service would otherwise touch.
+        if wanted != mode:
+            helper_py.chmod(wanted)
     except OSError:
         pass
     return helper_py

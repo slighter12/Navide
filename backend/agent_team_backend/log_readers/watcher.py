@@ -42,6 +42,26 @@ from .base import (
 
 log = logging.getLogger("agent_team_backend.log_readers.watcher")
 
+DEFAULT_RESCAN_S = 30.0
+_RESCAN_RANGE_S = (0.1, 30.0)
+
+
+def rescan_interval_from_env(raw: str | None) -> float:
+    """The safety-net sweep interval from NAVIDE_LOG_RESCAN_S: a finite number in 0.1-30 s, else the 30 s default.
+
+    A typo must not stop start-up, 0 or a negative value must not busy-loop the sweep, and inf must not switch it off.
+    """
+    if raw is None:
+        return DEFAULT_RESCAN_S
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not (_RESCAN_RANGE_S[0] <= value <= _RESCAN_RANGE_S[1]):  # also rejects nan
+        log.warning("NAVIDE_LOG_RESCAN_S=%r is not a number of seconds in %s-%s; using %s", raw, *_RESCAN_RANGE_S, DEFAULT_RESCAN_S)
+        return DEFAULT_RESCAN_S
+    return value
+
 # A file's activity dedup set used to hold one short key per line ever parsed
 # from it (see LogReader.parse_activity), for the whole process lifetime, so a
 # full-corpus scan pinned that memory permanently — and because those keys are
@@ -197,7 +217,7 @@ class LogWatcher:
         # this became the backend's largest retained structure.
         self._activity_seen: dict[str, set[str]] = {}
         self._activity_seen_swept_at: float | None = None
-        self._scan_mtimes: dict[str, float] = {}
+        self._scan_mtimes: dict[str, int | tuple[int, int, int]] = {}
         # Last seen size per file: a stat is how an append skips the line count.
         self._activity_sizes: dict[str, int] = {}
         self._queue: asyncio.Queue[tuple[Path | None, str]] = asyncio.Queue()
@@ -673,9 +693,19 @@ class LogWatcher:
         out: list[Path] = []
         for p in files:
             try:
-                mtime = p.stat().st_mtime
+                main = p.stat()
             except OSError:
                 continue
+            mtime: int | tuple[int, int, int] = main.st_mtime_ns
+            if p.suffix == ".db":
+                # A WAL-mode store takes its commits into `<store>-wal` and leaves the main file's mtime alone until a
+                # checkpoint, so the main file alone would hide every commit from this safety net. A WAL restart keeps
+                # the size, so the log's own mtime is part of the signature (nanoseconds, not a float).
+                try:
+                    wal = p.with_name(p.name + "-wal").stat()
+                    mtime = (main.st_mtime_ns, wal.st_mtime_ns, wal.st_size)
+                except OSError:
+                    pass
             k = str(p)
             if self._scan_mtimes.get(k) == mtime:
                 continue

@@ -125,13 +125,28 @@ class Rig:
             await asyncio.shield(service._invalidation)
 
     async def close(self):
+        killed = []  # (service, the invalidation task that existed before the kill)
         for service in self.services:
             runtime = service._runtime
             if runtime is not None and runtime.returncode is None:
+                prior = service._invalidation
                 try:
                     self.signal_sidecar(service, signal.SIGKILL)
+                    killed.append((service, prior))
                 except (psutil.NoSuchProcess, AssertionError):
                     pass
+        # A killed sidecar is a runtime loss: its invalidation must settle before the test's loop
+        # shuts down, or it fails in `asyncio.to_thread` after the default executor is gone.
+        for service, prior in killed:
+            try:
+                async with asyncio.timeout(20):
+                    while service._invalidation is prior and service._lost is None:
+                        await asyncio.sleep(0.01)
+                    if service._invalidation is not prior:
+                        await asyncio.wait({service._invalidation})
+            except TimeoutError:
+                pytest.fail("a killed sidecar's invalidation did not settle within 20 s")
+        for service in self.services:
             for generation in {r["runtime_generation"] for r in self.receipts() if "runtime_generation" in r}:
                 pty_registry.reap_runtime(generation, grace=0.0, settle=1.0)
         for pid in self.pids:
@@ -218,6 +233,20 @@ async def test_sidecar_death_invalidates_every_session_and_cleans_only_its_own_t
     assert len(ready) == 2 and len(invalidated) == 1 and ready[0] < invalidated[0] < ready[1] < owned_fresh
     assert records[invalidated[0]]["lost_generation"] == lost_generation
     assert records[invalidated[0]]["unresolved"] == 0 and records[invalidated[0]]["sessions"] == 3
+
+
+async def test_rig_close_waits_for_the_loss_of_a_service_that_already_recovered(rig):
+    service = rig.service()
+    await rig.shell(service, "pane-lost")
+    rig.signal_sidecar(service, signal.SIGKILL)
+    await rig.recovered(service)
+    await rig.shell(service, "pane-fresh")  # recovered once: _lost is None, _invalidation is the old done task
+    assert service._lost is None and service._invalidation.done()
+
+    await rig.close()
+
+    invalidated = [r for r in rig.receipts() if r["event"] == "runtime_invalidated"]
+    assert len(invalidated) == 2  # the fresh runtime's loss settled before close() returned
 
 
 async def test_loss_cleanup_never_touches_another_runtime(rig):
