@@ -616,6 +616,78 @@ fn a_position_keyed_replay_goes_on_numbering_its_lines_across_the_pages() {
     assert_eq!(delivered, expected, "the usage records of the log under their absolute line numbers, once, in order");
 }
 
+/// An adapter that resumes a replay in its context and persists nothing (so its saved position carries no context at all).
+struct Silent;
+
+impl super::Observer for Silent {
+    type State = ();
+}
+
+impl JsonlObserver for Silent {
+    fn identify(_: &mut JsonlFile, _: &Ctx, _: &super::Run<Self>) -> std::io::Result<super::Ident> {
+        Ok(super::Ident::default())
+    }
+    fn activity(_: &mut String, _: &mut (), _: &super::Ident, _: &Value, _: u64, _: &mut Vec<Value>) {}
+    const RESUMES_IN_CONTEXT: bool = true;
+}
+
+/// t36p C3 (t36m Z2): a replay position whose context lacks a key its adapter declares is a restart, and one whose adapter declares none is
+/// not: emptiness of the context is not the test (an adapter whose `persist` legitimately writes nothing saves an empty context on every
+/// page, and would restart every page from the start of the log).
+#[test]
+fn a_position_missing_a_declared_context_key_restarts_and_an_adapter_declaring_none_resumes_with_an_empty_context() {
+    let path = write("context-restart", "one\ntwo\nthree\n");
+    let file = JsonlFile::open_path(&path, LIMITS).unwrap();
+    let offset = 4; // after "one\n"
+    let saved = |context: serde_json::Map<String, Value>| {
+        Some(super::Replay::Log(super::Position { line: 1, offset, identity: file.identity().to_owned(), fingerprint: file.fingerprint(offset).unwrap(), context }))
+    };
+    let with = |keys: &[&str]| keys.iter().map(|key| ((*key).to_owned(), json!("x"))).collect::<serde_json::Map<_, _>>();
+    let aider = adapters::aider::Aider::CONTEXT_KEYS;
+    assert_eq!(aider, ["section", "section_ts"], "Aider reads both from the context");
+    for lacking in [&[][..], &["section"][..], &["section_ts"][..], &["kind"][..]] {
+        assert_eq!(file.replay_start::<adapters::aider::Aider>(&saved(with(lacking))), (0, 0), "a context of {lacking:?} lacks a declared key: restart");
+    }
+    assert_eq!(file.replay_start::<adapters::aider::Aider>(&saved(with(aider))), (offset, 1), "a context with every declared key resumes");
+    assert_eq!(file.replay_start::<Silent>(&saved(serde_json::Map::new())), (offset, 1), "an adapter that declares no key resumes with an empty context");
+}
+
+/// t36r K8 (A N7): `CONTEXT_KEYS` is the second spelling of what `persist` writes. An adapter that resumes in its context must write every
+/// key it declares, so a key renamed in one place only fails here instead of silently restarting every page (or resuming without it).
+#[test]
+fn every_adapter_that_resumes_in_its_context_persists_every_key_it_declares() {
+    // Both directions: every declared key is written, and an adapter that resumes in its context writes nothing else that the context
+    // could carry (`kind` is the baseline's cursor kind, not context). The other adapters' `persist` keys are checkpoint fields.
+    fn persists_what_it_declares<O: JsonlObserver>() -> (bool, Vec<&'static str>, Vec<String>) {
+        let mut written = serde_json::Map::new();
+        O::persist(&hot_ident(), &mut written);
+        let missing = O::CONTEXT_KEYS.iter().copied().filter(|key| !written.contains_key(*key)).collect();
+        let undeclared = if O::RESUMES_IN_CONTEXT {
+            written.keys().filter(|key| *key != "kind" && !O::CONTEXT_KEYS.contains(&key.as_str())).cloned().collect()
+        } else {
+            Vec::new()
+        };
+        (O::RESUMES_IN_CONTEXT, missing, undeclared)
+    }
+    let all = [
+        ("aider", persists_what_it_declares::<adapters::aider::Aider>()),
+        ("claude", persists_what_it_declares::<Claude>()),
+        ("codex", persists_what_it_declares::<Codex>()),
+        ("copilot", persists_what_it_declares::<adapters::copilot::Copilot>()),
+        ("droid", persists_what_it_declares::<adapters::droid::Droid>()),
+        ("grok", persists_what_it_declares::<Grok>()),
+        ("kimi", persists_what_it_declares::<adapters::kimi::Kimi>()),
+        ("muse", persists_what_it_declares::<adapters::muse::Muse>()),
+        ("pi", persists_what_it_declares::<Pi>()),
+        ("qwen", persists_what_it_declares::<adapters::qwen::Qwen>()),
+    ];
+    for (name, (resumes, missing, undeclared)) in &all {
+        assert!(missing.is_empty(), "{name} (resumes in context: {resumes}) declares {missing:?} in CONTEXT_KEYS but `persist` does not write it");
+        assert!(undeclared.is_empty(), "{name} resumes in its context and `persist` writes {undeclared:?}, which CONTEXT_KEYS does not declare");
+    }
+    assert!(all.iter().any(|(_, (resumes, _, _))| *resumes), "no adapter resumes in its context: the check above proves nothing");
+}
+
 // ---- the turns breakdown in pages -----------------------------------------------------------------------------------------
 
 /// t36m Z5 (t36l A3): the row of a `turns` answer is the core's typed `TurnRow`, whichever adapter fills it. Its members, the totals its calls
@@ -1001,20 +1073,18 @@ fn saved_weight<O: JsonlObserver>(adapter: O::State) -> usize {
         context: serde_json::Map::new(),
     };
     let legacy = super::LegacyCursor { offset: u64::MAX, identity: "x".repeat(64), anchor: "f".repeat(64) };
+    // Every field named, none defaulted: a field added to `Saved` does not compile here until its worst is chosen.
     let saved = super::Saved {
         water: u64::MAX,
         position: Some(at.clone()),
         legacy_cursor: Some(legacy),
+        totals: Some(super::usage::Totals { input: u64::MAX, output: u64::MAX }),
+        marks: std::collections::BTreeMap::new(), // the activity walks of a row store: no JSONL adapter keeps any
+        last_text: String::new(),                  // its own share (`OPEN_TEXT_BYTES`)
         replay: Some(super::Replay::Log(super::Position { context, ..at })),
         adapter,
-        ..super::Saved::default()
     };
     serde_json::to_string(&saved).unwrap().len()
-}
-
-/// The serialized weight of the whole state an `O` saves with the adapter state built from `worst` (its fields at their extremes).
-fn state_weight<O: JsonlObserver>(worst: Value) -> usize {
-    saved_weight::<O>(serde_json::from_value::<O::State>(worst).expect("a worst state of the adapter's own shape"))
 }
 
 /// t36l Y3 (A R2 of the t36b checkpoint), summed with the core's fields by t36m Z3 (t36l N4): the state share (`STATE_BYTES`) holds the
@@ -1025,14 +1095,15 @@ fn state_weight<O: JsonlObserver>(worst: Value) -> usize {
 fn every_adapter_state_at_its_worst_fits_the_state_share_beside_the_core_fields() {
     let budget = super::answer::STATE_BYTES;
     let hot = "\u{1}".repeat(super::answer::FIELD_CHARS);
-    let quiet = json!({"idx": i64::MIN, "flushed": true, "ts": hot});
+    // Each state is a struct literal naming every field: a field added to a state does not compile here until its worst is chosen.
+    let quiet = || QuietTurn { idx: i64::MIN, flushed: true, ts: hot.clone() };
     // The state the adapters build from a record they read: a timestamp of any size goes through the core's cap.
     let built = QuietTurn::after(&None, &"\u{1}".repeat(4 * 1024 * 1024));
     let pinned = [
-        ("aider", state_weight::<adapters::aider::Aider>(json!({"session": format!("aider-{}-20240101-000000", "n".repeat(4096)), "prompt": true, "output": true}))),
-        ("kimi", state_weight::<adapters::kimi::Kimi>(json!({"idx": i64::MIN, "last_ms": i64::MIN, "flushed": true, "cancelled": true}))),
-        ("pi", state_weight::<Pi>(quiet.clone())),
-        ("qwen", state_weight::<adapters::qwen::Qwen>(quiet)),
+        ("aider", saved_weight::<adapters::aider::Aider>(adapters::aider::Walk { session: format!("aider-{}-20240101-000000", "n".repeat(4096)), prompt: true, output: true })),
+        ("kimi", saved_weight::<adapters::kimi::Kimi>(Some(adapters::kimi::Turn { idx: i64::MIN, last_ms: i64::MIN, flushed: true, cancelled: true }))),
+        ("pi", saved_weight::<Pi>(Some(quiet()))),
+        ("qwen", saved_weight::<adapters::qwen::Qwen>(Some(quiet()))),
         ("pi built from a 4 MiB timestamp", saved_weight::<Pi>(Some(built))),
     ];
     for (name, weight) in pinned {
@@ -1053,22 +1124,44 @@ fn every_adapter_state_at_its_worst_fits_the_state_share_beside_the_core_fields(
     assert_eq!(stateful, ["aider", "kimi", "pi", "qwen"], "an adapter with a state of its own must be pinned at its worst above");
 }
 
-/// The checkpoint `O` writes with the worst identity (`hot_ident`) beside a window of 64 keys of the longest the core carries as they are
-/// (`KEY_BYTES`), after `fit_request_bound`: its serialized weight, and how many keys it kept.
-fn checkpoint_at_its_worst<O: JsonlObserver>() -> (usize, usize) {
-    let mut checkpoint = serde_json::Map::new();
-    checkpoint.insert("kind".into(), json!("jsonl"));
-    checkpoint.insert("offset".into(), json!(u64::MAX));
-    checkpoint.insert("identity".into(), json!(format!("{}:{}", u64::MAX, u64::MAX)));
-    checkpoint.insert("anchor".into(), json!("f".repeat(16)));
-    super::jsonl::persisted::<O>(&hot_ident(), &mut checkpoint);
+/// The checkpoint `O` writes at its worst: its serialized weight, and how many window keys it kept (none for a cumulative reader, which has
+/// no window). The core's own fields (`kind`, `offset`, `identity`, `anchor`, the window, the totals, the credit count) are what a real usage
+/// pass over the log leaves, written by the core's `finish` and its scans, so a field the core adds is counted here without this test
+/// naming it. The pass is handed a cursor at its worst: a window of 64 of the longest keys the core carries as they are (`KEY_BYTES`), every
+/// count at its maximum, and the worst identity (`hot_ident`) for what the vendor persists, which is written again for it before the whole is
+/// fitted to the request bound.
+fn checkpoint_at_its_worst<O: JsonlObserver, U: UsageScan<O, JsonlFile>>(vendor: &str) -> (usize, usize, bool) {
+    let facts = adapters::find(vendor).unwrap();
+    // The first layout of the declaration that reads a JSONL log (Copilot's first layout is its SQLite store).
+    let layout = facts.layouts.iter().find(|layout| layout.rules.is_some()).unwrap();
+    // The scan this pin runs is the one the declaration names (what `adapters::dispatch` is generated from), so a vendor moved to the
+    // other scan fails here instead of being pinned on the old one.
+    let declared = if U::WINDOWED { adapters::UsageMode::PerTurn } else { adapters::UsageMode::Cumulative };
+    assert_eq!(layout.usage, declared, "{vendor}: the scan pinned here is not the one its declaration names");
+    let path = write(&format!("worst-{vendor}"), "");
+    let log = JsonlFile::open_path(&path, LIMITS).unwrap();
+    let hot = "\u{1}".repeat(super::answer::FIELD_CHARS);
     let keys: Vec<String> = (0..64).map(|n| format!("{n:04}{}", "k".repeat(super::answer::KEY_BYTES - 4))).collect();
-    checkpoint.insert("recent_keys".into(), json!(keys));
-    if O::CREDITED {
-        checkpoint.insert("credited_count".into(), json!(i64::MAX));
+    let mut cursor = json!({"kind": "jsonl", "offset": 0, "identity": log.identity(), "anchor": log.anchor_at(0).unwrap()});
+    if O::RESUMES_IN_CONTEXT {
+        // Aider's cursor names the section it stands in.
+        cursor.as_object_mut().unwrap().extend([("section".to_owned(), json!(hot)), ("section_ts".to_owned(), json!(hot))]);
     }
+    // Only what the scan of this reader writes: a window and a credit count, or the totals (a field it does not write is carried as is).
+    let own = if U::WINDOWED {
+        json!({"recent_keys": keys, "credited_count": i64::MAX})
+    } else {
+        json!({"input_total": u64::MAX, "output_total": u64::MAX})
+    };
+    cursor.as_object_mut().unwrap().extend(own.as_object().cloned().unwrap());
+    let meta = json!({"vendor": vendor, "path": path, "mode": "usage", "checkpoint": cursor, "cwd": hot, "session": hot});
+    let request = Request::parse(&meta).unwrap();
+    let ctx = Ctx { req: &request, facts, core: &facts.core, layout };
+    let document = observe_with::<O, JsonlFile, U, NoCapability>(&ctx, Mode::Usage, log).unwrap();
+    let mut checkpoint = document["checkpoint"].as_object().unwrap().clone();
+    super::jsonl::persisted::<O>(&hot_ident(), &mut checkpoint);
     super::jsonl::fit_request_bound(&mut checkpoint);
-    (serde_json::to_string(&checkpoint).unwrap().len(), checkpoint["recent_keys"].as_array().unwrap().len())
+    (serde_json::to_string(&checkpoint).unwrap().len(), checkpoint.get("recent_keys").and_then(Value::as_array).map_or(0, Vec::len), U::WINDOWED)
 }
 
 /// t36m Z3 (t36l N3): what a vendor persists beside the window (`JsonlObserver::persist`: each value capped at `FIELD_CHARS`, and up to six
@@ -1077,21 +1170,25 @@ fn checkpoint_at_its_worst<O: JsonlObserver>() -> (usize, usize) {
 /// in any adapter, which would leave a vendor with nothing left to trim, fails here. The roster is every adapter that reads a JSONL log.
 #[test]
 fn what_every_adapter_persists_at_its_worst_leaves_room_for_half_of_a_window_of_the_longest_keys() {
+    // The scan each adapter reads its usage with is the one its declaration names (`checkpoint_at_its_worst` asserts the scan against the
+    // declaration, which `adapters::dispatch` is generated from): a per-turn reader keeps a window of keys, a cumulative one its totals.
     let worst = [
-        ("aider", checkpoint_at_its_worst::<adapters::aider::Aider>()),
-        ("claude", checkpoint_at_its_worst::<Claude>()),
-        ("codex", checkpoint_at_its_worst::<Codex>()),
-        ("copilot", checkpoint_at_its_worst::<adapters::copilot::Copilot>()),
-        ("droid", checkpoint_at_its_worst::<adapters::droid::Droid>()),
-        ("grok", checkpoint_at_its_worst::<Grok>()),
-        ("kimi", checkpoint_at_its_worst::<adapters::kimi::Kimi>()),
-        ("muse", checkpoint_at_its_worst::<adapters::muse::Muse>()),
-        ("pi", checkpoint_at_its_worst::<Pi>()),
-        ("qwen", checkpoint_at_its_worst::<adapters::qwen::Qwen>()),
+        ("aider", checkpoint_at_its_worst::<adapters::aider::Aider, PerTurn>("aider")),
+        ("claude", checkpoint_at_its_worst::<Claude, PerTurn>("claude")),
+        ("codex", checkpoint_at_its_worst::<Codex, Cumulative>("codex")),
+        ("copilot", checkpoint_at_its_worst::<adapters::copilot::Copilot, Cumulative>("copilot")),
+        ("droid", checkpoint_at_its_worst::<adapters::droid::Droid, Cumulative>("droid")),
+        ("grok", checkpoint_at_its_worst::<Grok, PerTurn>("grok")),
+        ("kimi", checkpoint_at_its_worst::<adapters::kimi::Kimi, PerTurn>("kimi")),
+        ("muse", checkpoint_at_its_worst::<adapters::muse::Muse, PerTurn>("muse")),
+        ("pi", checkpoint_at_its_worst::<Pi, PerTurn>("pi")),
+        ("qwen", checkpoint_at_its_worst::<adapters::qwen::Qwen, PerTurn>("qwen")),
     ];
-    for (name, (weight, kept)) in worst {
+    for (name, (weight, kept, windowed)) in worst {
         assert!(weight <= super::answer::CHECKPOINT_REQUEST_BYTES, "{name}: a checkpoint of {weight} bytes is over what a request may carry");
-        assert!(kept >= 32, "{name}: only {kept} of 64 keys fit beside what the adapter persists ({weight} bytes)");
+        if windowed {
+            assert!(kept >= 32, "{name}: only {kept} of 64 keys fit beside what the adapter persists ({weight} bytes)");
+        }
     }
     // The roster: every adapter file that reads a JSONL log is one of the ten above.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/observe/adapters");

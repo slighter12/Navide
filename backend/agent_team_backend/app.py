@@ -74,6 +74,7 @@ from .log_readers import (
     TokenUsage,
 )
 from .log_readers.attribution import Attribution
+from .log_readers.watcher import rescan_interval_from_env
 from .log_readers.claude import encode_claude_cwd
 from .credential_vault import CredentialVault
 from .credential_watcher import CredentialWatcher, reconcile_live_account
@@ -2612,6 +2613,9 @@ async def _start_log_watcher() -> None:
         checkpoint_provider=tokens_store.get_ingestion_checkpoint,
         checkpoint_sink=tokens_store.advance_ingestion_checkpoint,
         progress_sink=_on_backfill_progress,
+        # NAVIDE_LOG_RESCAN_S (0.1-30 s, else 30) shortens the safety-net sweep; the regression harness sets it so a
+        # test does not wait out the 30 s default.
+        rescan_interval_s=rescan_interval_from_env(os.environ.get("NAVIDE_LOG_RESCAN_S")),
     )
     for r in _readers:
         _log_watcher.add_reader(r)

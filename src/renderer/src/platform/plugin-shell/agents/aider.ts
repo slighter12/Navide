@@ -7,7 +7,7 @@ import {
   resumeHistoryFile,
 } from './aider/history'
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS } from '../../../../../shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
 
 const FACT = VENDOR_FACTS.aider
 

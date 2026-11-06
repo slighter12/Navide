@@ -140,10 +140,8 @@ impl TurnBreakdown for Claude {
             });
             turns.current = Some(index);
             let text = content_text(&message["content"]);
-            let prior = turns.out[index].prompt_excerpt.as_str();
-            if prior.is_empty() || (prior.starts_with('<') && !text.trim().starts_with('<') && !text.trim().is_empty()) {
-                turns.out[index].prompt_excerpt = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(80).collect();
-            }
+            let merged = TurnRow::merge_prompt_excerpt(&turns.out[index].prompt_excerpt, &text);
+            turns.out[index].prompt_excerpt = merged;
             return;
         }
         let (Some(index), Some(usage)) = (turns.current, usage) else { return };
@@ -229,5 +227,24 @@ mod tests {
         assert_eq!((turn["turn_index"].clone(), turn["prompt_excerpt"].clone(), turn["input"].clone()), (json!(1), json!("hello world"), json!(7)));
         assert_eq!(turn["calls"].as_array().unwrap().len(), 2, "the repeated call key is counted once");
         assert_eq!((turn["cache_read"].clone(), turn["output"].clone(), turn["cli_version"].clone()), (json!(2), json!(4), json!("1.2")));
+    }
+
+    /// The shared merge cuts a typed prompt to 500 characters before it collapses the white space, and Python's `split` also splits on the
+    /// separators `\x1c`-`\x1f`; Claude folds through the same core helper as Grok.
+    #[test]
+    fn the_turn_excerpt_is_the_shared_merge_at_its_two_edges() {
+        let call = |id: &str| json!({"type":"assistant","requestId":id,"message":{"id":id,"usage":{"input_tokens":1,"output_tokens":1}}});
+        let long = format!("a{}b", " ".repeat(600));
+        let wrapped_then_typed = [json!({"type":"user","promptId":"w","message":{"content":"<wrapper>"}}), json!({"type":"user","promptId":"w","message":{"content":"typed  prompt"}})];
+        let body = format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+            json!({"type":"user","promptId":"long","message":{"content":long}}), call("a"),
+            json!({"type":"user","promptId":"sep","message":{"content":"alpha\u{1c}beta\u{1f}gamma\u{1d} delta"}}), call("b"),
+            wrapped_then_typed[0], wrapped_then_typed[1], call("c"),
+            json!({"type":"user","promptId":"first","message":{"content":"first"}}),
+        );
+        let result = observe_file("excerpt", &body, "turns", json!([]), json!({})).unwrap();
+        let excerpts: Vec<&str> = result["turns"].as_array().unwrap().iter().map(|turn| turn["prompt_excerpt"].as_str().unwrap()).collect();
+        assert_eq!(excerpts, ["a", "alpha beta gamma delta", "typed prompt"]);
     }
 }

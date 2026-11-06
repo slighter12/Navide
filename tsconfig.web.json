@@ -23,6 +23,7 @@
       "@navide/terminal": ["src/renderer/src/platform/terminal/index.ts"],
       "@navide/terminal/testing": ["src/renderer/src/platform/terminal/testing.ts"],
       "@navide/plugin-shell": ["src/renderer/src/platform/plugin-shell/index.ts"],
+      "@shared/vendorFacts": ["src/shared/vendorFacts.ts"],
       "@navide/plugin-ui/foundation": ["packages/plugin-ui/src/foundation/index.ts"],
       "@navide/plugin-ui/foundation/*": ["packages/plugin-ui/src/foundation/*"]
     }

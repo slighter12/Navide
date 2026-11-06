@@ -35,28 +35,6 @@ fn chunk_text(update: &Value) -> String {
     blocks.into_iter().filter(|block| block.is_object() && block["type"] == "text").map(|block| str_or_empty(&block["text"])).collect()
 }
 
-/// Python `str.isspace` for one character: Unicode white space, and the four separators `\x1c`-`\x1f` Python counts as well.
-fn py_space(c: char) -> bool {
-    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
-}
-
-/// `log_readers.base.turn_excerpt`: the words of `text` joined by single spaces, the first 80 characters of them.
-fn turn_excerpt(text: &str) -> String {
-    text.split(py_space).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ").chars().take(80).collect()
-}
-
-/// `log_readers.base.merge_prompt_excerpt`: one more user record folded into a turn's excerpt. The first typed prompt wins, and a
-/// `<`-prefixed injected wrapper (session marker, command stub) only stands in until a typed one arrives (`user_prompt_text` drops the
-/// wrappers: stripped, empty or `<`-prefixed text is no prompt, any other is cut to 500 characters).
-fn merge_prompt_excerpt(current: &str, text: &str) -> String {
-    let stripped = text.trim_matches(py_space);
-    if !stripped.is_empty() && !stripped.starts_with('<') {
-        let typed: String = stripped.chars().take(500).collect();
-        return if !current.is_empty() && !current.starts_with('<') { current.to_owned() } else { turn_excerpt(&typed) };
-    }
-    if current.is_empty() { turn_excerpt(text) } else { current.to_owned() }
-}
-
 /// The keys of the object at `path` in the order the line spells them (`serde_json::Value` sorts a map's keys, and Python keeps insertion
 /// order, so "the first key" of an object is read from the raw line). Empty where the path is not an object of the line.
 fn ordered_keys(raw: &[u8], path: &[&str]) -> Vec<String> {
@@ -279,7 +257,7 @@ impl TurnBreakdown for Grok {
             if turns.started.is_none() {
                 turns.started = Some(event.timestamp.clone()).filter(|stamp| !stamp.is_empty());
             }
-            turns.prompt = merge_prompt_excerpt(&turns.prompt, &chunk_text(event.update));
+            turns.prompt = TurnRow::merge_prompt_excerpt(&turns.prompt,&chunk_text(event.update));
             return;
         }
         let usage = &event.update["usage"];

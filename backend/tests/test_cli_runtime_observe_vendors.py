@@ -37,7 +37,7 @@ from tests.cli_regression.support.vendor_data import MARKER, PANE, VendorData
 from tests.cli_regression.test_launch_snapshots import BOOT_DIR
 from tests.cli_regression.test_vendor_transport import _install, _records
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.cli_regression,
+pytestmark = [pytest.mark.cli_regression,
               pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="POSIX observation only (D2)")]
 
 #: Vendors whose Rust observation exists at the base commit on every POSIX platform (claude, codex). OpenCode, macOS-only
@@ -47,8 +47,15 @@ BASE_OBSERVED = frozenset({"claude", "codex"})
 PRESERVED = frozenset(key for key, spec in VENDORS.items() if spec.make_log_reader is None)
 #: Registry members with a reader, minus what Rust observes at the base commit: the vendors this ticket ports.
 PORTED = sorted(key for key, spec in VENDORS.items() if spec.make_log_reader and key not in BASE_OBSERVED)
-#: The wait that stands for "the watcher has caught up" after a stage's writes (a file event arrives in well under it).
-QUIET_S = 6.0
+#: The backend's safety-net sweep (`NAVIDE_LOG_RESCAN_S`; 30 s in production). A store that is first seen by this sweep is
+#: reported within one period, so a stage no longer waits out the default.
+RESCAN_S = 1.0
+#: The wait that stands for "the watcher has caught up" after a stage's writes: nothing delivered for this long. It is not a count of
+#: sweeps. A store written to is seen by the fs event at once or by the next sweep (at most RESCAN_S later plus the sweep and the drain,
+#: well under a second on the runs of t36q), so 3 s is that bound with margin for a loaded 4-worker runner. The backend runs at
+#: `--log-level warning`, so no log line says "first sight of this store"; the stream is the only observable and a silence window is
+#: the settle (the hosted Linux runs are the check of the margin).
+QUIET_S = 3.0
 STAGE_BOUND_S = 60.0
 EVENT_TYPES = {"session.detected": ("pane_id", "session_id", "vendor"),
                "agent.activity": ("vendor", "event_type", "detail", "text", "session_id", "pane_id", "workspace_path")}
@@ -146,6 +153,7 @@ def _backend(root: Path, runtime: str, stage: int, home: Path) -> BackendProcess
             backend.env["NAVIDE_CLI_RUNTIME_BIN"] = binary
     backend.env["XDG_DATA_HOME"] = str(home / ".local" / "share")  # where `VendorData` writes the vendor stores
     backend.env["GOOSE_PATH_ROOT"] = str(home / "goose-root")
+    backend.env["NAVIDE_LOG_RESCAN_S"] = str(RESCAN_S)
     return backend
 
 
@@ -215,6 +223,7 @@ async def _stage(root: Path, runtime: str, stage: int, vendor: str, data: Vendor
                 await _pump(backend, ws, lambda: any(
                     event["event_type"] == "turn_complete" for event in _types(backend, "agent.activity")),
                     "the turn_complete of the completion phase")
+            # Every phase that expects an event has pumped for it above; this drains what trails it.
             await _settle(backend, ws)
             if carries_marker:
                 marks["marker_end"] = len(_stream(backend.events))  # the write that carries the pane's marker ends here

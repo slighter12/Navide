@@ -8,6 +8,7 @@
       "@navide/terminal": ["src/renderer/src/platform/terminal/index.ts"],
       "@navide/terminal/testing": ["src/renderer/src/platform/terminal/testing.ts"],
       "@navide/plugin-shell": ["src/renderer/src/platform/plugin-shell/index.ts"],
+      "@shared/vendorFacts": ["src/shared/vendorFacts.ts"],
       "@navide/plugin-ui/file-picker": ["packages/plugin-ui/src/terminalFilePicker.ts"],
       "@navide/plugin-contracts": ["packages/plugin-contracts/src/index.ts"],
       "@navide/plugin-sdk": ["packages/plugin-sdk/src/index.ts"],

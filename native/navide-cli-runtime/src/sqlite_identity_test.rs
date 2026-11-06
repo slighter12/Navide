@@ -1,6 +1,12 @@
-//! macOS only: the SQLite the sidecar links is the system library, pinned by version and Mach-O UUID.
-//! Moved unchanged from the old `opencode.rs` test module when the SQLite reader moved into `observe::sqlite`.
-use libc::c_char;
+//! macOS only: the SQLite the sidecar links is the system library (`/usr/lib/libsqlite3.dylib`), not a copy it carries.
+//! Moved from the old `opencode.rs` test module when the SQLite reader moved into `observe::sqlite`.
+//!
+//! What is checked is a property that survives an OS update: the SQLite symbols resolve into that system image, whose Mach-O header holds
+//! a well-formed LC_UUID, and the library reports a 3.x version. The exact version and UUID are not pinned: the system library is rebuilt by
+//! every macOS update (3.54.0 with UUID 73d616f2... on the earlier macOS, 3.54.0 with UUID 36af1d09... on macOS 27.2, same version, other
+//! build), so a pin would only say which OS build ran the test. They are printed in the evidence line, which is where a registered run
+//! records them.
+use libc::{c_char, c_void};
 use serde_json::json;
 use std::ffi::CStr;
 
@@ -15,7 +21,11 @@ fn genuine_self_system_sqlite_identity() {
     let version = unsafe { CStr::from_ptr(sqlite3_libversion()) }
         .to_str()
         .unwrap();
-    assert_eq!(version, "3.54.0");
+    assert!(version.starts_with("3.") && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())), "{version}");
+    // The symbol the sidecar calls lives in the system image, not in a library the binary carries.
+    let mut home: libc::Dl_info = unsafe { std::mem::zeroed() };
+    assert_ne!(unsafe { libc::dladdr(sqlite3_libversion as *const c_void, &mut home) }, 0);
+    assert_eq!(unsafe { CStr::from_ptr(home.dli_fname) }.to_str().unwrap(), "/usr/lib/libsqlite3.dylib");
     let mut matched = None;
     for index in 0..unsafe { _dyld_image_count() } {
         let name = unsafe { CStr::from_ptr(_dyld_get_image_name(index)) }
@@ -45,7 +55,7 @@ fn genuine_self_system_sqlite_identity() {
         }
     }
     let uuid = matched.unwrap();
-    assert_eq!(uuid, "73d616f27b6c30468de6656f74793d5f");
+    assert!(uuid.len() == 32 && uuid.bytes().all(|b| b.is_ascii_hexdigit()) && uuid.bytes().any(|b| b != b'0'), "not an LC_UUID: {uuid}");
     let own = super::darwin::self_process().unwrap();
     assert_eq!(own["pid"], std::process::id());
     assert_eq!(own["parent"], unsafe { libc::getppid() });

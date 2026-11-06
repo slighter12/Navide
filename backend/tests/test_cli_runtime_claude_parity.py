@@ -109,6 +109,28 @@ def test_native_usage_activity_and_turns_match_existing_reader(tmp_path):
         assert observe(peer, path, "session_usage", seen=sorted(prior))["events"] == []
 
 
+def test_native_turn_prompt_excerpt_matches_the_shared_merge_at_both_edges(tmp_path):
+    """`merge_prompt_excerpt` cuts a typed prompt to 500 characters BEFORE it collapses the white space, and
+    `str.split` also splits on `\\x1c`-`\\x1f`. A simplified merge differs on exactly these two prompts."""
+    records = [
+        {"type": "user", "promptId": "long", "message": {"content": "a" + " " * 600 + "b"}},
+        assistant(1, "answer", "end_turn"),
+        {"type": "user", "promptId": "separators", "message": {"content": "alpha\x1cbeta\x1fgamma\x1d delta"}},
+        assistant(2, "answer", "end_turn"),
+        # An injected wrapper only stands in until the typed prompt of the same turn arrives.
+        {"type": "user", "promptId": "wrapped", "message": {"content": "<wrapper>"}},
+        {"type": "user", "promptId": "wrapped", "message": {"content": "typed  prompt"}},
+        assistant(3, "answer", "end_turn"),
+    ]
+    path = tmp_path / "home/.claude/projects/-tmp-parity/excerpt.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in records))
+    expected = [asdict(turn) for turn in ClaudeLogReader().turns_for_session(path)]
+    assert [turn["prompt_excerpt"] for turn in expected] == ["a", "alpha beta gamma delta", "typed prompt"]
+    with closing(NativePeer(tmp_path)) as peer:
+        assert observe(peer, path, "turns")["turns"] == expected
+
+
 def test_native_image_prompt_activity_matches_upstream_reader(tmp_path):
     image = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}}
     note = "[Image: original 780x3746, displayed at 416x2000.]"

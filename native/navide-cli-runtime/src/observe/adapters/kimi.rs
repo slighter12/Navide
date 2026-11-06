@@ -20,12 +20,12 @@ pub struct Kimi;
 /// A turn left open: its number, the latest time any record of it carried (ms), and whether it has ended or been cancelled.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Turn {
-    idx: i64,
-    last_ms: i64,
+    pub(in crate::observe) idx: i64,
+    pub(in crate::observe) last_ms: i64,
     #[serde(default)]
-    flushed: bool,
+    pub(in crate::observe) flushed: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    cancelled: bool,
+    pub(in crate::observe) cancelled: bool,
 }
 
 impl Observer for Kimi {

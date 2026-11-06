@@ -114,6 +114,20 @@ describe('changed backend tests run isolated', () => {
     expect(list('scripts/isolated-pytest.sh')?.length).toBeGreaterThan(0)
   })
 
+  // These tests start a child under their own Seatbelt profile
+  // (`sandbox-exec`, directly or through the difference entry). macOS refuses
+  // a second `sandbox_apply` inside the outer deny-security sandbox, so they
+  // fail there with "Operation not permitted" and must run in the second pass.
+  it('runs the tests that apply their own Seatbelt profile outside the outer sandbox', () => {
+    const own = [
+      'test_difference_entry', 'test_native_file_guard', 'test_native_guard_preflight', 'test_os_startup',
+      'test_owned_snapshot', 'test_process_argv_guard', 'test_process_env_guard', 'test_runtime_self',
+    ].map((name) => `backend/tests/isolation_guard/${name}.py`)
+    for (const script of ['scripts/isolated-pytest.sh', 'scripts/release-backend-tests.sh']) {
+      expect(list(script), script).toEqual(expect.arrayContaining(own))
+    }
+  })
+
   it('never runs pytest outside the isolated runner, and never syncs', () => {
     const runner = readFileSync('scripts/changed-backend-tests.mjs', 'utf8')
     expect(runner).toContain("'scripts/isolated-pytest.sh'")

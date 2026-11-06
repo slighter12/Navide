@@ -277,10 +277,12 @@ impl JsonlFile {
 
     /// The position a replay that stopped at the pass budget resumes from: its saved position while this file still holds the bytes the
     /// position fingerprinted. A vendor whose records mean what the context above them says (`RESUMES_IN_CONTEXT`) also needs the context
-    /// the position was saved with: a position with none (written before the context was saved) cannot be resumed and is a restart.
+    /// the position was saved with: a position whose context lacks a key the adapter declares (`CONTEXT_KEYS`; written before the context was
+    /// saved, or by a reader that did not know the key) cannot be resumed and is a restart. An adapter that declares none is never restarted
+    /// for its context, whatever its `persist` wrote.
     fn replay_position<'a, O: JsonlObserver>(&self, replay: &'a Option<Replay>) -> Option<&'a Position> {
         match replay {
-            Some(Replay::Log(at)) if self.holds(at) && !(O::RESUMES_IN_CONTEXT && at.context.is_empty()) => Some(at),
+            Some(Replay::Log(at)) if self.holds(at) && !(O::RESUMES_IN_CONTEXT && O::CONTEXT_KEYS.iter().any(|key| !at.context.contains_key(*key))) => Some(at),
             _ => None,
         }
     }
@@ -487,6 +489,9 @@ pub trait JsonlObserver: Observer {
     /// (`Position::context`), and the page that resumes there takes it from the position (`JsonlFile::replay_context`) and reads none of the
     /// bytes before it. The context is bounded like a checkpoint's persisted fields (each value `FIELD_CHARS`).
     const RESUMES_IN_CONTEXT: bool = false;
+    /// The keys of `persist` that the vendor's resumed page reads from the context. A saved position whose context lacks one is a restart
+    /// (`RESUMES_IN_CONTEXT` vendors only); none declared means a context is never a reason to restart.
+    const CONTEXT_KEYS: &'static [&'static str] = &[];
     /// The dedup key of a usage record that names itself by its place in the log (hook: no field of the record is an id): the line
     /// number in a replay, the byte offset after the line in an incremental pass. `None` leaves the key to the declared pointers.
     fn position_key(_ident: &Ident, _replay: bool, _line: u64, _end: u64, _record: &Value) -> Option<String> {
@@ -578,7 +583,29 @@ pub struct TurnRow {
     pub cli_version: String,
 }
 
+/// Python `str.isspace` for one character: Unicode white space, and the four separators `\x1c`-`\x1f` Python counts as well.
+fn py_space(c: char) -> bool {
+    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
+}
+
+/// `log_readers.base.turn_excerpt`: the words of `text` joined by single spaces, the first 80 characters of them.
+fn turn_excerpt(text: &str) -> String {
+    text.split(py_space).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ").chars().take(80).collect()
+}
+
 impl TurnRow {
+    /// `log_readers.base.merge_prompt_excerpt`: one more user record folded into a turn's excerpt. The first typed prompt wins, and a
+    /// `<`-prefixed injected wrapper (session marker, command stub) only stands in until a typed one arrives (`user_prompt_text` drops the
+    /// wrappers: stripped, empty or `<`-prefixed text is no prompt, any other is cut to 500 characters). Claude and Grok both fold through it.
+    pub fn merge_prompt_excerpt(current: &str, text: &str) -> String {
+        let stripped = text.trim_matches(py_space);
+        if !stripped.is_empty() && !stripped.starts_with('<') {
+            let typed: String = stripped.chars().take(500).collect();
+            return if !current.is_empty() && !current.starts_with('<') { current.to_owned() } else { turn_excerpt(&typed) };
+        }
+        if current.is_empty() { turn_excerpt(text) } else { current.to_owned() }
+    }
+
     /// A turn of `session_id` that began at `started_at`, with no call yet.
     pub fn new(session_id: String, started_at: Option<String>) -> Self {
         Self {
@@ -712,6 +739,7 @@ impl<O: JsonlObserver> Source<O> for JsonlFile {
 }
 
 impl<O: JsonlObserver> UsageScan<O, JsonlFile> for PerTurn {
+    const WINDOWED: bool = true;
     /// Per-turn usage: each record carries its own usage and is deduplicated by key. `usage` keeps a bounded window of
     /// keys in the cursor; `session_usage` dedups against the whole seen bag. An incremental event is built with its final cursor
     /// (the offset after its line, that line's anchor, the window as it stands after the event) before the ledger weighs it.
@@ -854,6 +882,7 @@ impl<O: JsonlObserver> UsageScan<O, JsonlFile> for PerTurn {
 }
 
 impl<O: JsonlObserver> UsageScan<O, JsonlFile> for Cumulative {
+    const WINDOWED: bool = false;
     /// Cumulative usage: the vendor reports running totals; the observation emits the delta since the saved totals.
     fn scan(file: &mut JsonlFile, ctx: &Ctx, run: &mut Run<O>, start: u64) -> io::Result<Scan> {
         let fields = usage_fields(ctx)?;

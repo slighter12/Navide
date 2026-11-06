@@ -78,6 +78,7 @@ export default defineConfig({
       { find: '@navide/plugin-ui', replacement: resolve(__dirname, 'packages/plugin-ui/src/index.ts') },
       { find: '@navide/terminal', replacement: resolve(__dirname, 'src/renderer/src/platform/terminal/index.ts') },
       { find: '@navide/plugin-shell', replacement: resolve(__dirname, 'src/renderer/src/platform/plugin-shell/index.ts') },
+      { find: '@shared/vendorFacts', replacement: resolve(__dirname, 'src/shared/vendorFacts.ts') },
     ],
   },
   define: {

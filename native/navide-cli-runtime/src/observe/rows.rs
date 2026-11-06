@@ -1153,6 +1153,7 @@ impl Sqlite {
 }
 
 impl<O: Observer> UsageScan<O, Sqlite> for PerTurn {
+    const WINDOWED: bool = true;
     fn scan(db: &mut Sqlite, ctx: &Ctx, run: &mut Run<O>, _: u64) -> io::Result<Scan> {
         db.usage::<O>(ctx, run)?;
         Ok(Scan { committed: 0, owed: super::Owed::Nothing })

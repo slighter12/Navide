@@ -50,6 +50,39 @@ def sidecars(backend) -> list[psutil.Process]:
     return found
 
 
+def children_running(binary: str, children) -> list:
+    """The children whose executable is `binary`; one that exits between being listed and being read is not one."""
+    found = []
+    for child in children:
+        try:
+            if child.exe() == binary:
+                found.append(child)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess, ProcessLookupError):
+            pass
+    return found
+
+
+async def test_a_child_that_exits_between_being_listed_and_its_exe_being_read_is_skipped():
+    class Gone:
+        pid = 1
+
+        def exe(self):
+            raise psutil.NoSuchProcess(self.pid)
+
+    class Zombie(Gone):
+        def exe(self):
+            raise psutil.ZombieProcess(self.pid)
+
+    class Sidecar:
+        pid = 2
+
+        def exe(self):
+            return "/bin/sidecar"
+
+    sidecar = Sidecar()
+    assert children_running("/bin/sidecar", [Gone(), sidecar, Zombie()]) == [sidecar]
+
+
 def rust_backend(root: Path, binary: Path):
     from tests.cli_regression.support.backend_process import BackendProcess
     backend = BackendProcess(root)
@@ -186,7 +219,7 @@ async def test_a_create_that_arrives_during_the_background_start_waits_for_it_an
         assert held.calls == 1, "one handshake: the create did not start a second sidecar"
         assert len(rig.receipts_of("ready")) == 1
         binary = str(rig.binary)
-        started = [child for child in psutil.Process().children() if child.exe() == binary]
+        started = children_running(binary, psutil.Process().children())
         assert len(started) == 1 and started[0].pid == service._runtime.pid
         await service.kill_all()
     finally:
