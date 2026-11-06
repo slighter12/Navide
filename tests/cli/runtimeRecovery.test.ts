@@ -437,7 +437,8 @@ it.runIf(process.platform === 'darwin')('runtime death with a held resize fence 
       let durableBefore: Record<string, any> = {}
       await until(async () => {
         durableBefore = await driver.ctl<Record<string, any>>('checkpoint')
-        return JSON.stringify(durableBefore['@activity']?.keys ?? []).includes('act_hw::5')
+        // The high-water mark lives in the typed state entry (cli_runtime_state.py), not in an act_hw key.
+        return (durableBefore['@activity']?.keys ?? []).some((key: string) => /^native_state::.*"water":5[,}]/.test(key))
       }, 'stage-1 activity checkpoint durable', 40_000).catch((error) => { throw new Error(`${error.message}: ${JSON.stringify(durableBefore)}`) })
       const stageOne = ['assistant:question', 'background:start'].map((detail) => activity.filter((e) => e.detail === detail).length)
       const observedBefore = driver.receipts().filter((r) => r.event === 'observed').length
@@ -472,7 +473,7 @@ it.runIf(process.platform === 'darwin')('runtime death with a held resize fence 
       for (const value of Object.values(durableAfter)) {
         if (typeof (value as any)?.offset === 'number') expect((value as any).offset).toBeLessThanOrEqual(firstOffset) // nothing advanced
       }
-      expect(JSON.stringify(durableAfter['@activity']?.keys)).not.toContain('act_hw::10')
+      expect(JSON.stringify(durableAfter['@activity']?.keys)).not.toMatch(/\\"water\\":10[,}]/)
       // The persisted/live checkpoint did not advance, was not zeroed and nothing replayed.
       expect(await totals()).toEqual([15, 4])
       expect(activity.length).toBe(activityBefore)
@@ -499,8 +500,12 @@ it.runIf(process.platform === 'darwin')('runtime death with a held resize fence 
     expect(durable.usage.offset).toBe(durable.file_size)
     expect(durable.usage.offset).toBeGreaterThan(firstOffset)
     expect(durable.usage.recent_keys).toHaveLength(2)
-    expect(durable.activity.keys.filter((key: string) => !key.startsWith('act_pos::'))).toEqual(['act_hw::10'])
-    expect(durable.activity.keys.filter((key: string) => key.startsWith('act_pos::'))).toHaveLength(1)
+    const statePrefix = 'native_state::rust-claude-jsonl-v1::'
+    expect(durable.activity.keys).toHaveLength(1)
+    expect(durable.activity.keys[0].startsWith(statePrefix)).toBe(true)
+    const state = JSON.parse(durable.activity.keys[0].slice(statePrefix.length))
+    expect(state.water).toBe(10)
+    expect(state.position).toMatchObject({ line: expect.any(Number), offset: expect.any(Number) })
     expect([durable.totals.input, durable.totals.output]).toEqual([22, 9])
   })
 }, 240_000)

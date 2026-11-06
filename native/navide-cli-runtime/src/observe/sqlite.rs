@@ -451,7 +451,11 @@ pub mod testing {
             let name = CString::new(path.to_str().unwrap()).unwrap();
             let mut raw = std::ptr::null_mut();
             assert_eq!(unsafe { sqlite3_open_v2(name.as_ptr(), &mut raw, 6, std::ptr::null()) }, 0);
-            Self { root, path, writer: Some(Connection::wrap(raw)) }
+            let writer = Connection::wrap(raw);
+            // The bundled SQLite (Linux) enforces foreign keys by default, the system one (macOS) does not; the Python baseline's
+            // writer leaves them off, and the scenarios insert ledger rows for sessions that were never created.
+            writer.query("PRAGMA foreign_keys=OFF", &[]).unwrap();
+            Self { root, path, writer: Some(writer) }
         }
 
         pub fn new(file: &str) -> Self {
@@ -506,6 +510,16 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fixture_writer_leaves_foreign_keys_off_on_every_platform() {
+        let store = testing::Fixture::bare("fk.db");
+        store.sql("CREATE TABLE parent(id TEXT PRIMARY KEY)", &[]);
+        store.sql("CREATE TABLE child(id TEXT, parent_id TEXT REFERENCES parent(id))", &[]);
+        store.sql("INSERT INTO child VALUES('c','ghost')", &[]);
+        let pragma = store.writer.as_ref().unwrap().query("PRAGMA foreign_keys", &[]).unwrap();
+        assert_eq!(pragma, vec![vec![json!(0)]]);
+    }
 
     #[test]
     fn a_path_with_uri_metacharacters_is_encoded_as_a_path() {
