@@ -179,8 +179,13 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux')('native 
       expect(durable.usage.kind).toBe('jsonl')
       expect(durable.usage.offset).toBe(stage === 1 ? firstOffset : durable.file_size)
       expect(durable.usage.recent_keys).toHaveLength(stage)
-      expect(durable.activity.keys.filter((key: string) => !key.startsWith('act_pos::'))).toEqual([`act_hw::${stage === 1 ? 5 : 10}`])
-      expect(durable.activity.keys.filter((key: string) => key.startsWith('act_pos::'))).toHaveLength(1)
+      // The activity bag holds one typed state entry (cli_runtime_state.py), which replaced the act_hw/act_pos keys.
+      const statePrefix = 'native_state::rust-claude-jsonl-v1::'
+      expect(durable.activity.keys).toHaveLength(1)
+      expect(durable.activity.keys[0].startsWith(statePrefix)).toBe(true)
+      const state = JSON.parse(durable.activity.keys[0].slice(statePrefix.length))
+      expect(state.water).toBe(stage === 1 ? 5 : 10)
+      expect(state.position).toMatchObject({ line: expect.any(Number), offset: expect.any(Number) })
       expect([durable.totals.input, durable.totals.output]).toEqual(stage === 1 ? [15, 4] : [22, 9])
     }
     expect(new Set(tids).size).toBe(2)
