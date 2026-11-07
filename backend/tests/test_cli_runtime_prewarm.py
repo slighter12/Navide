@@ -18,7 +18,7 @@ import pytest
 from agent_team_backend import cli_runtime
 from tests.cli_regression.support.frame_peer import PRODUCT
 from tests.test_cli_runtime_lifecycle import LifeRig
-from tests.test_cli_runtime_review1 import stop_stub, stub_service
+from tests.test_cli_runtime_control_failures import stop_stub, stub_service
 
 pytestmark = [
     pytest.mark.asyncio,

@@ -1,6 +1,6 @@
-"""Review 3 of the whole E3 ticket (evidence/e3/reviewer-e3-3.md): the non-blocking items that changed code.
+"""Pre-publication reads and limit validation: the handoff slot's chunk granularity and the advertised limits.
 
-N-4 (pre-publication chunks keep the reader's granularity), N-6 (`snapshot_ms` is validated like every other limit),
+Pins the whole-ticket review items that changed code (evidence/e3/reviewer-e3-3.md): N-4 (pre-publication chunks keep the reader's granularity), N-6 (`snapshot_ms` is validated like every other limit),
 N-12 (no vendor literal in the shared adapter code, covered by the rules guard).
 """
 from __future__ import annotations
@@ -13,8 +13,9 @@ import pytest
 
 from agent_team_backend.cli_runtime import RustTerminalService
 from agent_team_backend.cli_runtime_handoff import HandoffSlot
+from agent_team_backend.terminals import TerminalService
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT
-from tests.test_cli_runtime_review1 import stop_stub, stub_service
+from tests.test_cli_runtime_control_failures import stop_stub, stub_service
 
 pytestmark = [
     pytest.mark.asyncio,
@@ -56,13 +57,13 @@ async def test_n4_publication_absorbs_one_entry_per_read(tmp_path, monkeypatch):
     try:
         service = rig.service()
         absorbed: list[int] = []
-        original = RustTerminalService._absorb_output
+        original = TerminalService._absorb_output
 
         def counting(self, session, chunk, nbytes):
             absorbed.append(nbytes)
             return original(self, session, chunk, nbytes)
 
-        monkeypatch.setattr(RustTerminalService, "_absorb_output", counting)
+        monkeypatch.setattr(TerminalService, "_absorb_output", counting)
         release = tmp_path / "release-n4"
         program = ("import sys, time\nfor n in range(4):\n    sys.stdout.write('part %d\\n' % n * 50); sys.stdout.flush(); time.sleep(0.15)\n")
         task = asyncio.create_task(service.create_async(

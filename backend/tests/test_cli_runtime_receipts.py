@@ -163,8 +163,13 @@ async def test_the_control_ledger_counts_frames_and_bytes_per_type_and_has_no_ou
 FLOOD = "import sys\nfor n in range(3000): sys.stdout.write('LINE %05d ' % n + 'x' * 88 + '\\n')\nsys.stdout.write('FINISHED\\n'); sys.stdout.flush()"
 
 
+def stream_of(service):
+    """The Terminal Stream a service presents through: the in-process service is its own, the Rust service composes one."""
+    return getattr(service, "stream", service)
+
+
 async def counters_for(service, exited, pane, workspace, env):
-    counters = ReaderCounters().attach(service)
+    counters = ReaderCounters().attach(stream_of(service))
     arguments = dict(pane_id=pane, agent_key="terminal", cwd=str(workspace), env=env, cols=100, rows=30,
                      command=[base_python_executable(), "-c", FLOOD])
     session = await service.create_async(**arguments) if hasattr(service, "create_async") else service.create(**arguments)
@@ -202,7 +207,7 @@ async def test_the_reader_counters_satisfy_the_same_equalities_on_both_arms(rig)
 
 async def test_the_resize_slurp_watermark_is_recorded_after_the_slurp(rig):
     service = rig.service()
-    counters = ReaderCounters().attach(service)
+    counters = ReaderCounters().attach(stream_of(service))
     session = await rig.life(service, "pane-watermark")
     await rig.say(service, session, "flood 300")
     async with service.control_async(session.id, 120, 40):

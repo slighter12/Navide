@@ -1,7 +1,8 @@
-"""Review 1 of E3 checkpoint 1: one red-first proof per accepted finding (evidence/e3/reviewer-e3-1.md).
+"""How the runtime bridge fails: control-plane protocol errors, request expiry, loss and exit-watcher failure.
 
-Each test is written to fail against the checkpoint-1 code and pass after the fix; the closure table
-of checkpoint 2 maps finding -> test. Real sidecar (product or harness build) wherever the behaviour is
+Pins the `owned` event validation, wrong-code and unsolicited answers, the inbound byte budget, bounded loss, a failed
+exit watcher that is killed and reaped before answering, and a ping that goes unanswered after a request expiry. The
+test names keep the checkpoint-1 finding ids (`test_b1_…` to `test_b10_…`; evidence/e3/reviewer-e3-1.md). Real sidecar (product or harness build) wherever the behaviour is
 the sidecar's, the production `RustTerminalService` everywhere, a stub sidecar only to put protocol
 violations the real one never emits onto the production receiver.
 """
@@ -436,7 +437,8 @@ def lost_world(tmp_path):
     os.close(slave)
     from agent_team_backend.cli_runtime_handoff import MasterHandle
     session.handle = MasterHandle(master, session.proc)
-    service._sessions[session.id] = service._retained[session.id] = session
+    service.stream.adopt_session(session)
+    service._retained[session.id] = session
     service._ready_ok = True
     return service, session, frames
 
@@ -477,7 +479,7 @@ async def test_b7_a_normal_publication_in_flight_at_loss_is_neither_repeated_nor
     await asyncio.sleep(0.2)
     exits = [f for f in frames if f.get("type") == "terminal.exit"]
     assert len(exits) == 1, f"{len(exits)} exits: one session must publish exactly once"
-    assert session.id not in service._sessions or service._retired_generation(GENERATION)
+    assert service.get(session.id) is None or service._retired_generation(GENERATION)
 
 
 # ------------------------------------------------------------ B8: loss stays bounded

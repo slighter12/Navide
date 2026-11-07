@@ -1,6 +1,6 @@
 {
   "stubs": {
-    "review1": "e192f04c8aa7aeb560d52777825912f41021199ecc00a835d992e7f1caae3d5b",
+    "protocol-violation": "e192f04c8aa7aeb560d52777825912f41021199ecc00a835d992e7f1caae3d5b",
     "observe": "d4483e3f3aa77a3e1a1b9a1c092a04b1fbfd90bf16f6b00970a866f9b7d1a817",
     "handshake-after-ready": "cf4b75bcbb0accf814696630f86c4386d9d2e6997766ba536a4920e70952fcc6"
   },
@@ -111,7 +111,7 @@
         "test_b3_a_late_answer_to_an_expired_request_is_tolerated_once"
       ],
       "kinds": [
-        "stub:review1"
+        "stub:protocol-violation"
       ]
     },
     {
@@ -129,7 +129,7 @@
         "test_b3_end_to_end_a_wrong_code_answer_ends_the_generation"
       ],
       "kinds": [
-        "stub:review1"
+        "stub:protocol-violation"
       ]
     },
     {
@@ -138,7 +138,7 @@
         "test_b4_a_create_waits_create_answer_ms_not_request_ms_and_then_the_generation_is_lost"
       ],
       "kinds": [
-        "stub:review1"
+        "stub:protocol-violation"
       ]
     },
     {
@@ -147,7 +147,7 @@
         "test_b5_a_prevented_cancel_settles_the_lost_create_without_a_generation_loss"
       ],
       "kinds": [
-        "stub:review1"
+        "stub:protocol-violation"
       ]
     },
     {
@@ -777,7 +777,7 @@
         "test_s6_a_create_cleanup_failed_ends_the_generation"
       ],
       "kinds": [
-        "stub:review1"
+        "stub:protocol-violation"
       ]
     },
     {

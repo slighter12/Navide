@@ -10,8 +10,14 @@ import pytest
 import sys
 
 from agent_team_backend import osplat
-from agent_team_backend.credential_launch import CredentialLaunch, wrap_command
+from agent_team_backend.credential_launch import CredentialLaunch, render_wrapper, wrap_plan
 from agent_team_backend.cli_vendors.registry import VENDORS
+
+
+def wrap(command, spec, helper, *, env=None):
+    """The in-process arm's wrapping as `ws_handlers` composes it: the plan, then its rendering."""
+    plan = wrap_plan(command, spec, helper, env=env)
+    return None if plan is None else render_wrapper(command, spec, plan, env=env)
 
 
 @pytest.fixture
@@ -106,7 +112,7 @@ def test_wrapper_preserves_rc_environment_and_arguments(tmp_path, posix_bash):
         cli.chmod(0o700)
         chosen = str(tmp_path / "chosen store")
         command = [posix_bash, "-c", "kilo --session 'two words'"]
-        wrapped = wrap_command(command, VENDORS["kilo"], launch.helper_argv())
+        wrapped = wrap(command,VENDORS["kilo"], launch.helper_argv())
         assert wrapped is not None
         wrapped[-1] = "export XDG_DATA_HOME=" + shlex.quote(chosen) + "; " + wrapped[-1]
         process = await asyncio.create_subprocess_exec(
@@ -129,7 +135,7 @@ def test_unknown_function_keeps_regular_command_behavior(tmp_path, posix_bash):
     async def run():
         launch = await CredentialLaunch.start(("XDG_DATA_HOME",), timeout=2)
         command = [posix_bash, "-c", "kilo"]
-        wrapped = wrap_command(command, VENDORS["kilo"], launch.helper_argv())
+        wrapped = wrap(command,VENDORS["kilo"], launch.helper_argv())
         wrapped[-1] = "kilo() { printf original; }; " + wrapped[-1]
         process = await asyncio.create_subprocess_exec(
             *wrapped, env={"HOME": str(tmp_path), "PATH": os.defpath, **launch.env},
@@ -147,8 +153,8 @@ def test_unknown_function_keeps_regular_command_behavior(tmp_path, posix_bash):
 
 
 def test_complex_command_is_not_rewritten():
-    assert wrap_command(["/bin/bash", "-lc", "XDG_DATA_HOME=/elsewhere kilo"], VENDORS["kilo"], ["helper"]) is None
-    assert wrap_command(["/bin/bash", "-lc", "kilo && echo done"], VENDORS["kilo"], ["helper"]) is None
+    assert wrap(["/bin/bash", "-lc", "XDG_DATA_HOME=/elsewhere kilo"], VENDORS["kilo"], ["helper"]) is None
+    assert wrap(["/bin/bash", "-lc", "kilo && echo done"], VENDORS["kilo"], ["helper"]) is None
 
 
 async def test_fake_token_and_extra_env_cannot_consume_launch_report(tmp_path, helper_env):
@@ -244,7 +250,7 @@ async def test_native_launch_reuses_platform_shim_and_refuses_unknown_batch(tmp_
         helper = launch.helper_argv(login=True, vendor="kilo")
         if "--wait-child" not in helper:
             helper.append("--wait-child")
-        wrapped = wrap_command(subprocess.list2cmdline(argv), VENDORS["kilo"], helper, env=env)
+        wrapped = wrap(subprocess.list2cmdline(argv),VENDORS["kilo"], helper, env=env)
         assert wrapped is not None
         assert wrapped[wrapped.index("--") + 1:] == [str(program), str(cli), *argv[-3:]]
         process = await asyncio.create_subprocess_exec(*wrapped, env={**env, **launch.env}, cwd=tmp_path,
@@ -261,7 +267,7 @@ async def test_native_launch_reuses_platform_shim_and_refuses_unknown_batch(tmp_
             "argv": ["--session", "two words"], "cwd": str(tmp_path), "home": str(tmp_path),
             "xdg": env["XDG_DATA_HOME"], "unrelated": "FAKE-PRIVATE", "channel": []}
         shim.write_text('set XDG_DATA_HOME=elsewhere\n@"%~dp0\\node.exe" "%~dp0\\cli.js" %*\n')
-        assert wrap_command("kilo.cmd", VENDORS["kilo"], helper, env=env) is None
+        assert wrap("kilo.cmd",VENDORS["kilo"], helper, env=env) is None
         assert osplat.paths.pty_launch_parts(str(shim))[0] == "cmd.exe"
     finally:
         if process is not None and process.returncode is None:
@@ -277,7 +283,7 @@ async def test_unknown_wrapper_preserves_shell_fallback_and_exit_status(tmp_path
     wrapper.chmod(0o700)  # Deliberately no shebang: the original shell handles ENOEXEC.
     launch = await CredentialLaunch.start(("XDG_DATA_HOME",), timeout=1)
     try:
-        command = wrap_command([bash, "-c", "kilo"], VENDORS["kilo"], launch.helper_argv(vendor="kilo"))
+        command = wrap([bash, "-c", "kilo"],VENDORS["kilo"], launch.helper_argv(vendor="kilo"))
         process = await asyncio.create_subprocess_exec(*command, cwd=tmp_path,
             env={"HOME": str(tmp_path), "PATH": str(tmp_path) + os.pathsep + os.defpath,
                  "UNRELATED_SECRET": "FAKE-WRAPPER-ENV", **launch.env},

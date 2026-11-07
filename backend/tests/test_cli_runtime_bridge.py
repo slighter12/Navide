@@ -23,7 +23,7 @@ async def test_native_create_uses_upstream_detached_server_mark(
     tmp_path, monkeypatch, tracking, supplied_metadata,
 ):
     """Real create bookkeeping; only sidecar transport and settings are substituted."""
-    from agent_team_backend import cli_runtime, detached_servers, resource_limits
+    from agent_team_backend import cli_runtime_receipts, detached_servers, resource_limits
 
     async def emit(_frame):
         pass
@@ -50,7 +50,7 @@ async def test_native_create_uses_upstream_detached_server_mark(
         launches.append(dict(env))
         return env
 
-    monkeypatch.setattr(cli_runtime, "prepare_native_launch", prepare, raising=False)  # what isolation.py assigns
+    monkeypatch.setattr(cli_runtime_receipts, "_launch_guard", prepare)  # what isolation.py registers
 
     async def started():
         pass
@@ -168,7 +168,8 @@ async def test_control_failure_unlocks_the_control_lock_and_the_barrier(failure)
                              RuntimeProcessView(100), "unit-generation", {}, {})
     session.handle = SimpleNamespace(read=lambda n: (_ for _ in ()).throw(BlockingIOError()),
                                      pause_reading=lambda: None, resume_reading=lambda: None)
-    service._sessions[session.id] = service._retained[session.id] = session
+    service.stream.adopt_session(session)
+    service._retained[session.id] = session
     entered = asyncio.Event()
 
     calls = []
@@ -203,7 +204,7 @@ async def test_control_failure_unlocks_the_control_lock_and_the_barrier(failure)
         with pytest.raises((RuntimeError, OSError)):
             await asyncio.wait_for(task, 2)
     assert not session.control_lock.locked(), "the control lock is released on every failure path"
-    assert not service._resize_barriers[session.id].locked(), "so is the barrier"
+    assert not service.stream.barrier(session).locked(), "so is the barrier"
     assert acknowledged == []
     async with service.control_async(session.id, 90, 30):  # a later control still works
         pass

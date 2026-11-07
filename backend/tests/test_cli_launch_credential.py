@@ -1,7 +1,7 @@
 """G2 ticket 05, delta addendum 10.2: the managed-credential outer wrapper as a structured launch shape.
 
-`credential_launch.wrap_command` stays the Windows/`argv` renderer and the oracle. `wrap_plan` applies
-exactly its predicates but returns typed data, and `cli_launch.build_launch(..., credential=plan)` wraps
+`credential_launch.wrap_plan` is the one decision (typed data); `credential_launch.render_wrapper` renders it as
+the `argv` the in-process arm spawns and is the oracle, and `cli_launch.build_launch(..., credential=plan)` wraps
 the ordinary launch object in the `credential` shape that the Rust runtime renders.
 """
 from __future__ import annotations
@@ -21,24 +21,25 @@ HELPER = VECTORS["helper"]
 KILO = SimpleNamespace(key="kilo")
 
 
-def test_the_vectors_are_the_live_wrap_command_output():
+def test_the_vectors_are_the_live_rendering_of_the_plan():
     """The vectors are the oracle both runtimes must reproduce byte for byte; they must not drift."""
     for case in VECTORS["script_cases"]:
         command = [case["shell"], case["flags"][0], case["line"]]
-        assert credential_launch.wrap_command(command, KILO, HELPER) == case["expected"], case["id"]
+        plan = credential_launch.wrap_plan(command, KILO, HELPER)
+        assert credential_launch.render_wrapper(command, KILO, plan) == case["expected"], case["id"]
     for case in VECTORS["refused_cases"]:
-        assert credential_launch.wrap_command([case["shell"], case["flags"][0], case["line"]], KILO, HELPER) is None, case["id"]
+        assert credential_launch.wrap_plan([case["shell"], case["flags"][0], case["line"]], KILO, HELPER) is None, case["id"]
     assert VECTORS["unset"] == [PORT_ENV, TOKEN_ENV]
 
 
 @pytest.mark.parametrize("case", VECTORS["script_cases"], ids=lambda case: case["id"])
-def test_wrap_plan_wraps_exactly_when_wrap_command_does(case):
+def test_wrap_plan_wraps_every_script_vector(case):
     plan = credential_launch.wrap_plan([case["shell"], case["flags"][0], case["line"]], KILO, HELPER)
     assert plan == {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": None}
 
 
 @pytest.mark.parametrize("case", VECTORS["refused_cases"], ids=lambda case: case["id"])
-def test_wrap_plan_declines_what_wrap_command_declines(case):
+def test_wrap_plan_declines_every_refused_vector(case):
     assert credential_launch.wrap_plan([case["shell"], case["flags"][0], case["line"]], KILO, HELPER) is None
 
 
@@ -48,10 +49,10 @@ def test_wrap_plan_for_a_string_command_carries_the_resolved_program(tmp_path):
     program.chmod(0o700)
     env = {"PATH": str(tmp_path)}
     command = "kilo --port 4000"
-    expected = credential_launch.wrap_command(command, KILO, HELPER, env=env)
-    assert expected == [*HELPER, "--entrypoint", str(program), "--", str(program), "--port", "4000"]
-    assert credential_launch.wrap_plan(command, KILO, HELPER, env=env) == {
-        "helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": str(program)}
+    plan = credential_launch.wrap_plan(command, KILO, HELPER, env=env)
+    assert plan == {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": str(program)}
+    assert credential_launch.render_wrapper(command, KILO, plan, env=env) == [
+        *HELPER, "--entrypoint", str(program), "--", str(program), "--port", "4000"]
     assert credential_launch.wrap_plan(command, KILO, HELPER, env={"PATH": str(tmp_path / "nowhere")}) is None
     assert credential_launch.wrap_plan("other --port 4000", KILO, HELPER, env=env) is None
 
@@ -69,16 +70,15 @@ def test_a_direct_string_is_wrapped_even_with_glob_or_tilde_characters(case, tmp
     so the Rust runtime must not refuse it either."""
     program, env = _program(tmp_path), {"PATH": str(tmp_path)}
     expected = [item.replace("{PROGRAM}", str(program)) for item in case["expected"]]
-    assert credential_launch.wrap_command(case["command"], KILO, HELPER, env=env) == expected
-    assert credential_launch.wrap_plan(case["command"], KILO, HELPER, env=env) == {
-        "helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": str(program)}
+    plan = credential_launch.wrap_plan(case["command"], KILO, HELPER, env=env)
+    assert plan == {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": str(program)}
+    assert credential_launch.render_wrapper(case["command"], KILO, plan, env=env) == expected
 
 
 @pytest.mark.parametrize("case", VECTORS["string_refused_cases"], ids=lambda case: case["id"])
-def test_a_direct_string_is_declined_exactly_when_wrap_command_declines_it(case, tmp_path):
+def test_a_direct_string_is_declined_for_every_refused_vector(case, tmp_path):
     _program(tmp_path)
     env = {"PATH": str(tmp_path)}
-    assert credential_launch.wrap_command(case["command"], KILO, HELPER, env=env) is None
     assert credential_launch.wrap_plan(case["command"], KILO, HELPER, env=env) is None
 
 
@@ -135,7 +135,7 @@ def test_a_managed_credential_launch_of_a_rust_subject_is_admitted():
 
 
 def test_the_wrapper_arguments_survive_the_credential_shape_exactly():
-    """The line the oracle embeds is the text of the words the inner launch carries, whatever the quoting."""
+    """The line the rendering embeds is the text of the words the inner launch carries, whatever the quoting."""
     line = "/x/bin/kilo --note '世界 café' --port 4000"
     command = cli_launch.append_args(cli_launch.Command.literal("/x/bin/kilo"), "--note", "世界 café", "--port", "4000")
     final = ["/bin/bash", "-lc", command]
@@ -151,7 +151,6 @@ def test_two_shell_flags_are_not_a_sole_flag():
     """`simple_command_args` admits `-c`, `-lc` and `-ilc` only as the SOLE flag, so `-l -c` is declined by
     its own rule, independently of the `-x` vector (which fails the flag set, not the count)."""
     command = ["/bin/bash", "-l", "-c", "/x/bin/kilo"]
-    assert credential_launch.wrap_command(command, KILO, HELPER) is None
     assert credential_launch.wrap_plan(command, KILO, HELPER) is None
 
 

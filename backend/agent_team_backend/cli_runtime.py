@@ -22,14 +22,15 @@ from uuid import uuid4
 import psutil
 
 from . import cli_launch, cli_runtime_hook, osplat, pty_registry
-from .applog import in_data_dir
+from .applog import app_data_dir, in_data_dir
 from . import cli_runtime_frames as wire
 from .cli_runtime_frames import ChannelEof, Direction, FrameType, ProtocolError, code
 from .cli_runtime_handoff import HandoffRejected, HandoffSlot, MasterHandle, check_master
 from . import cli_runtime_windows as winrt
 from .ipc import make_event
 from .terminals import (
-    _BUF_CAP, CreateCancel, CreateCancelled, TerminalService, _clean_for_log, _forget_live_log, _register_live_log)
+    _BUF_CAP, CreateCancel, CreateCancelled, TerminalInterface, TerminalService, _forget_live_log, _register_live_log,
+    resolve_command)
 
 log = logging.getLogger(__name__)
 _CAP = 5 * 1024 * 1024
@@ -193,14 +194,20 @@ class RuntimeSession:
         return self.abandoned or not self.published
 
 
-class RustTerminalService(TerminalService):
-    """Reuse presentation, not Python native handles or process lifecycle."""
+class RustTerminalService(TerminalInterface):
+    """The Rust runtime's terminal service. It owns the process lifecycle; a session's output and input are presented
+    through `stream`, the in-process service's Terminal Stream, which it composes: the one batching, drain barrier,
+    backpressure and log mirror, reached by its public methods. What the stream does when a session's stream ends is
+    this service's (`_close`)."""
 
     _sending: asyncio.Future | None = None  # the frame write in progress, finished even if its caller left
     _prewarming: asyncio.Task | None = None  # the background start of `prewarm`
 
     def __init__(self, emit, hook: cli_runtime_hook.HarnessHook | None = None):
-        super().__init__(emit)
+        self._emit = emit
+        self._loop = asyncio.get_event_loop()
+        self._data_dir = app_data_dir()
+        self.stream = TerminalService(emit, end_stream=lambda session, *, reason: self._close(session, reason=reason))
         # The harness's hook under the isolated regression root, the product's (which does nothing) everywhere else.
         self._hook = cli_runtime_hook.from_environment() if hook is None else hook
         self._runtime: asyncio.subprocess.Process | None = None
@@ -399,37 +406,13 @@ class RustTerminalService(TerminalService):
     async def _quiesce_stream(self, session: RuntimeSession) -> None:
         """E1 8.1 step 2: let the baseline machinery finish what it already holds. No new bytes
         arrive (the handle is closed), so this ends unless the sink stalls (then the bound cuts it)."""
-        while True:
-            drain = self._drain_tasks.get(session.id)
-            barrier = self._resize_barriers.get(session.id)
-            if drain is not None:
-                await asyncio.wait({drain})
-            elif barrier is not None and barrier.locked():
-                async with barrier:
-                    pass
-            elif self._out_buffers.get(session.id):
-                if handle := self._out_handles.pop(session.id, None):
-                    handle.cancel()
-                self._flush_output(session)  # starts the drain that empties what queued behind
-            else:
-                return
+        await self.stream.quiesce_output(session)
 
     def _settle_stream(self, session: RuntimeSession) -> dict:
         """E1 8.1 steps 3-4, synchronously: untaken bytes are counted and marked, then the stream
         half of the baseline close, then the log is closed (decoder tail first)."""
-        drain = self._drain_tasks.get(session.id)
-        barrier = self._resize_barriers.get(session.id)
-        in_flight = drain is not None or (barrier is not None and barrier.locked())
-        chunks = self._out_buffers.pop(session.id, None) or []
-        self._out_buf_bytes.pop(session.id, None)
-        untaken = sum(len(chunk) for chunk in chunks)
-        if untaken:
-            self._out_dropped[session.id] = self._out_dropped.get(session.id, 0) + untaken
-        if self._out_dropped.get(session.id):
-            self._mirror_flush_to_log(session, b"")  # the existing marker, through the one decoder
-        if drain is not None:
-            drain.cancel()  # requested, not awaited
-        self._close_stream_state(session)
+        in_flight, untaken = self.stream.abandon_output(session)
+        self.stream.close_stream_state(session)
         if session.output_log_fp:
             with suppress(Exception):
                 session.output_log_fp.close()
@@ -1393,7 +1376,7 @@ class RustTerminalService(TerminalService):
         await self._ensure_started()  # the awaited launch may have ended in a loss that retired the generation
         if cancelled is not None and cancelled():
             raise CreateCancelled("create cancelled before it was dispatched")
-        argv = self._resolve_command(kwargs.get("spawn_command") or kwargs["command"])
+        argv = resolve_command(kwargs.get("spawn_command") or kwargs["command"])
         cwd = kwargs["cwd"]
         if not os.path.isdir(cwd):
             raise FileNotFoundError("cwd does not exist or is not a directory")
@@ -1426,7 +1409,7 @@ class RustTerminalService(TerminalService):
                 "agent_key": kwargs.get("agent_key") or ""}
         self._launches[sid] = args
         self._owned[sid] = self._loop.create_future()
-        command_view = self._resolve_command(kwargs["command"])
+        command_view = resolve_command(kwargs["command"])
 
         def provisional(root: dict) -> RuntimeSession:
             return RuntimeSession(sid, kwargs["pane_id"], kwargs.get("agent_key"), command_view, cwd,
@@ -1541,23 +1524,23 @@ class RustTerminalService(TerminalService):
                 slot.stop_reading()
                 session.handle = MasterHandle(slot.fd, session.proc)
                 session.tty, slot.fd = slot.tty, None
-            session.handle.start_reading(self._loop, lambda s=session: self._on_readable(s))
+            session.handle.start_reading(self._loop, lambda s=session: self.stream.read_ready(s))
             self._receipt(lambda: {"event": "handle_attached", "session_id": sid,
                                    "session_generation": generation, "handle": type(session.handle).__name__,
                                    # The duplicated pipe handle values (Windows), so W10 can see them reused across sessions.
                                    **({"handles": [slot.input_handle, slot.output_handle]} if WINDOWS else {})})
             self._task(self._adopt(session))
             session.published = True
-            self._sessions[sid] = session
+            self.stream.adopt_session(session)
             # What the pre-publication reader collected enters the Terminal Stream exactly as if its own
             # reader had read it (same absorb, same log mirror, same 5 MiB drop-oldest accounting), and a
             # stream that already ended is closed the way `_on_readable` would have closed it.
             chunks, dropped, eof, errored = slot.take()
             if dropped:
-                self._out_dropped[session.id] = self._out_dropped.get(session.id, 0) + dropped
+                self.stream.note_dropped(session.id, dropped)
             handed = 0
             for chunk in chunks:  # one absorb per read, exactly as `_on_readable` would have done
-                self._absorb_output(session, chunk, len(chunk))
+                self.stream.absorb(session, chunk, len(chunk))
                 handed += len(chunk)
             if eof or errored:
                 self._close(session, reason="error" if errored else "exit")
@@ -1624,7 +1607,7 @@ class RustTerminalService(TerminalService):
         spec = vendor(agent_key) if agent_key else None
         if spec is not None and spec.resume_id_from_command is not None:
             with suppress(Exception):
-                if resume_id := spec.resume_id_from_command(self._resolve_command(kwargs["command"])):
+                if resume_id := spec.resume_id_from_command(resolve_command(kwargs["command"])):
                     keys.add(f"resume:{agent_key}:{resume_id}")
         return keys
 
@@ -1652,7 +1635,7 @@ class RustTerminalService(TerminalService):
         root = result["root"] if result else {}
         stub = self._retained.get(sid)
         if stub is None or stub.published:
-            stub = RuntimeSession(sid, kwargs["pane_id"], kwargs.get("agent_key"), self._resolve_command(kwargs["command"]),
+            stub = RuntimeSession(sid, kwargs["pane_id"], kwargs.get("agent_key"), resolve_command(kwargs["command"]),
                                   cwd, RuntimeProcessView(root.get("pid", 0)), generation, metadata, root)
             self._retained[sid] = stub
         stub.abandoned = True
@@ -1768,33 +1751,74 @@ class RustTerminalService(TerminalService):
 
     async def kill_verified(self, sid: str) -> bool:
         """kill(), reporting whether the root's cleanup was verified (False when unknown)."""
-        session = self._retained.get(sid) or self._sessions.get(sid)
+        session = self._retained.get(sid) or self.stream.get(sid)
         if session is None:
             return False
         await self.kill(sid, force=True)
         return session.cleanup.is_set() and not session.cleanup_error
 
-    # The Terminal Stream is the baseline's: input, interrupt, foreground queries and activation run over the
-    # handed-off master through the interface's own methods (`TerminalInterface`), which this class inherits.
-    # The reader attaches at publication (E1 8), so there is nothing to activate.
+    # ---- the Terminal Stream: composed, not inherited ------------------------------------------
+    # Input, interrupt, foreground queries and the session queries run over the handed-off master through
+    # `stream`, the in-process service's own methods. The reader attaches at publication (E1 8), so there
+    # is nothing to activate.
+
+    def write(self, session_id: str, data: str) -> int:
+        return self.stream.write(session_id, data)
+
+    def shell_in_foreground(self, session_id: str) -> bool | None:
+        return self.stream.shell_in_foreground(session_id)
+
+    def interrupt(self, session_id: str) -> None:
+        self.stream.interrupt(session_id)
+
+    def resize(self, session_id: str, cols: int, rows: int) -> None:
+        self.stream.resize(session_id, cols, rows)
+
+    def force_redraw(self, session_id: str, cols: int, rows: int) -> None:
+        self.stream.force_redraw(session_id, cols, rows)
+
+    async def drain_output(self, session_id: str) -> None:
+        await self.stream.drain_output(session_id)
+
+    def log_sent(self, session_id: str, label: str, text: str) -> None:
+        self.stream.log_sent(session_id, label, text)
+
+    def get(self, session_id: str):
+        return self.stream.get(session_id)
+
+    def list_sessions(self) -> list:
+        return self.stream.list_sessions()
+
+    def list_session_ids(self) -> list[str]:
+        return self.stream.list_session_ids()
+
+    def live_pane_marks(self) -> set[str]:
+        return self.stream.live_pane_marks()
+
+    def memory_pid_groups(self) -> dict[str, tuple[str, list[int]]]:
+        return self.stream.memory_pid_groups()
+
+    def live_ids_for_surface(self, surface: str, workspace_path: str = "") -> list[tuple[str, str, str]]:
+        return self.stream.live_ids_for_surface(surface, workspace_path)
+
+    def find_live_by_resume_id(self, agent_key: str, resume_id: str, extract_resume_id) -> list:
+        return self.stream.find_live_by_resume_id(agent_key, resume_id, extract_resume_id)
 
     @asynccontextmanager
     async def control_async(self, sid: str, cols: int, rows: int, *, redraw: bool = False):
         """The resize barrier (E1 9.3): the baseline's drain, with the sidecar's acknowledgement
         inside the lock this code owns. The public acknowledgement is sent in the `yield`, still
         under the lock, so output absorbed after the slurp is emitted after it (B2)."""
-        session = self._sessions.get(sid)
+        session = self.stream.get(sid)
         if session is None or session.closed:
             yield
             return
         async with session.control_lock:
-            barrier = self._resize_barriers.setdefault(session.id, asyncio.Lock())
-            async with barrier:
-                await self._drain_output_behind_barrier(session)
+            async with self.stream.barrier(session):
+                await self.stream.drain_behind_barrier(session)
                 await self._request("resize", {"cols": cols, "rows": rows, "redraw": redraw}, session)
                 yield
-            if not session.closed and not barrier.locked() and self._out_buffers.get(session.id):
-                self._flush_output(session)
+            self.stream.flush_if_unblocked(session)
 
     # ---- stream end (E1 8): the baseline `_close` replaced by an ordered, awaited version -------
 
@@ -1812,29 +1836,6 @@ class RustTerminalService(TerminalService):
     def _retired_generation(self, generation: str) -> bool:
         return generation in self._retired
 
-    def _close_stream_state(self, session: RuntimeSession) -> None:
-        """The stream half of the baseline `_close`, in the baseline's order (E1 8 step 4, 8.1 step 4):
-        mark closed, drop input state, cancel the batch and pause timers, flush the log decoder's tail
-        into the log. The handle is closed by the caller; the log by the publication or loss path."""
-        session.closed = True
-        self._unwatch_writable(session)
-        self._in_buffers.pop(session.id, None)
-        self._recent_chunks.pop(session.id, None)
-        self._echo_probe.pop(session.id, None)
-        self._end_input_block(session)
-        if handle := self._out_handles.pop(session.id, None):
-            handle.cancel()
-        if timer := self._pause_timers.pop(session.id, None):
-            timer.cancel()
-        decoder = self._decoders.pop(session.id, None)
-        if decoder and session.output_log_fp:
-            if tail := decoder.decode(b"", final=True):
-                try:
-                    session.output_log_fp.write(_clean_for_log(tail))
-                except Exception as error:  # noqa: BLE001
-                    log.warning("output log write failed: %s", error)
-        self._resize_barriers.pop(session.id, None)
-
     async def _finish_stream(self, session: RuntimeSession) -> None:
         """Drain everything retained, then close our master, then `TTY_EOF`, then try to publish
         the exit. The retirement fence is checked after every awaited boundary and before every
@@ -1843,15 +1844,14 @@ class RustTerminalService(TerminalService):
         async with session.control_lock:  # an in-progress resize finishes or fails first
             if self._retired_generation(generation):
                 return
-            barrier = self._resize_barriers.setdefault(session.id, asyncio.Lock())
-            async with barrier:  # the inherited `_flush_output` defers while it is held
+            async with self.stream.barrier(session):  # the stream's `_flush_output` defers while it is held
                 if self._retired_generation(generation):
                     return
-                await self._drain_output_behind_barrier(session)  # the unchanged baseline helper
+                await self.stream.drain_behind_barrier(session)  # the unchanged baseline helper
                 if self._retired_generation(generation):
                     return
                 # `closed` is still false until here, so none of the baseline's discard paths ran.
-                self._close_stream_state(session)
+                self.stream.close_stream_state(session)
                 if WINDOWS:
                     # The join waits on worker threads: off the loop, bounded by THREAD_CLOSE_S.
                     closed = await asyncio.to_thread(session.handle.close)
@@ -1928,18 +1928,9 @@ class RustTerminalService(TerminalService):
 
     async def _publish_exit(self, session: RuntimeSession) -> None:
         """Release a closed session's presentation state and tell the renderer once."""
-        if session.output_log_fp:
-            if decoder := self._decoders.pop(session.id, None):
-                session.output_log_fp.write(decoder.decode(b"", final=True))
-            session.output_log_fp.close()
-            session.output_log_fp = None
+        self.stream.release_session(session)
         _forget_live_log(session.id)
-        self._sessions.pop(session.id, None)
-        self._recent_chunks.pop(session.id, None)
-        self._echo_probe.pop(session.id, None)
-        self._resize_barriers.pop(session.id, None)
         self._write_locks.pop(session.id, None)
-        self._out_dropped.pop(session.id, None)
         if session.hidden:
             return  # the renderer never learned of this create
         session.exit_started = True  # from here the exit is the sink's; loss must not present a second one

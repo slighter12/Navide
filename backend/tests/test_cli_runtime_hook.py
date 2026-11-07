@@ -2,8 +2,8 @@
 
 Receipts, the control ledger, the sidecar fault switch, the launch guard, the per-create kernel checkpoint, the
 binary digest and the log-rescan override are the harness's. The product runs with the hook that does nothing; only
-the isolated harness's environment selects the one that acts, so the frozen harness files keep reaching each of them
-through the same names.
+the isolated harness's environment selects the one that acts, and the harness reaches its launch guard and its watchers
+of the built service through that hook, never through the bridge's module or its classes.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_team_backend import cli_runtime, cli_runtime_hook
+from agent_team_backend import cli_runtime, cli_runtime_hook, cli_runtime_receipts
 from agent_team_backend.cli_runtime import RuntimeSession, RustTerminalService
 from agent_team_backend.cli_runtime_hook import HarnessHook
 from agent_team_backend.log_readers.watcher import DEFAULT_RESCAN_S
@@ -26,6 +26,12 @@ PY_SRC = Path(__file__).resolve().parents[1] / "agent_team_backend"
 
 async def _sink(_frame) -> None:
     return None
+
+
+def _install_guard(monkeypatch, guard) -> None:
+    """What the isolation module does, undone when the test ends."""
+    monkeypatch.setattr(cli_runtime_receipts, "_launch_guard", None)
+    cli_runtime_receipts.install_launch_guard(guard)
 
 
 @pytest.fixture
@@ -43,7 +49,7 @@ def test_without_the_isolated_root_the_hook_is_the_products_and_acts_on_nothing(
     def refusing_guard(*_args, **_kwargs):
         raise AssertionError("the product consulted a launch guard")
 
-    monkeypatch.setattr(cli_runtime, "prepare_native_launch", refusing_guard, raising=False)
+    _install_guard(monkeypatch, refusing_guard)
     hook = cli_runtime_hook.from_environment()
     assert type(hook) is HarnessHook
     assert hook.runtime_argv() == [], "the product never reads the fault switch"
@@ -132,7 +138,7 @@ async def test_the_harness_hook_asks_the_guard_the_isolation_module_installs(tmp
     monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(tmp_path))
     hook = cli_runtime_hook.from_environment()
     env = {"HOME": "/h"}
-    monkeypatch.delattr(cli_runtime, "prepare_native_launch", raising=False)
+    _install_guard(monkeypatch, None)
     assert hook.launch_env(["x"], cwd="/w", env=env) is env, "no guard installed: the launch environment is unchanged"
     seen = []
 
@@ -140,7 +146,7 @@ async def test_the_harness_hook_asks_the_guard_the_isolation_module_installs(tmp
         seen.append((argv, cwd, env))
         return {**env, "GUARDED": "1"}
 
-    monkeypatch.setattr(cli_runtime, "prepare_native_launch", guard, raising=False)  # what isolation.py assigns
+    cli_runtime_receipts.install_launch_guard(guard)  # what isolation.py registers
     assert hook.launch_env(["x"], cwd="/w", env=env) == {"HOME": "/h", "GUARDED": "1"}
     assert seen == [(["x"], "/w", env)]
 
@@ -150,7 +156,7 @@ async def test_a_requested_launch_guard_that_is_not_installed_refuses_the_launch
     assigned, passing the environment through would run a launch the harness believes is guarded."""
     monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(tmp_path))
     monkeypatch.setenv("NAVIDE_REGRESSION_ACCOUNT_GUARD", "1")
-    monkeypatch.delattr(cli_runtime, "prepare_native_launch", raising=False)
+    _install_guard(monkeypatch, None)
     hook = cli_runtime_hook.from_environment()
     with pytest.raises(RuntimeError, match="launch guard"):
         hook.launch_env(["x"], cwd="/w", env={"HOME": "/h"})
@@ -160,7 +166,7 @@ async def test_a_requested_launch_guard_that_is_not_installed_refuses_the_launch
         seen.append(argv)
         return env
 
-    monkeypatch.setattr(cli_runtime, "prepare_native_launch", guard, raising=False)
+    cli_runtime_receipts.install_launch_guard(guard)
     assert hook.launch_env(["x"], cwd="/w", env={"HOME": "/h"}) == {"HOME": "/h"} and seen == [["x"]]
 
 

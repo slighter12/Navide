@@ -42,9 +42,12 @@ def _resolved_string(command: str, spec: VendorSpec, env: dict[str, str] | None)
 
 
 def wrap_plan(command: Any, spec: VendorSpec, helper: list[str], *, env: dict[str, str] | None = None) -> dict | None:
-    """The typed form of `wrap_command` (G2 delta 10.2): the same predicates, but the data the Rust runtime
-    renders instead of the rendered argv. `entrypoint` is the resolved program of a string command and
-    None for the bash/zsh list form. Returns None exactly when `wrap_command` would not wrap."""
+    """Decide whether to wrap a literal CLI invocation, and with what (G2 delta 10.2).
+
+    The one decision: the Rust runtime renders the plan itself, the in-process arm renders it with `render_wrapper`.
+    `entrypoint` is the resolved program of a string command and None for the bash/zsh list form. Other command
+    forms return None: they stay unchanged and cannot attest to a live store. Keep the original command
+    separately for resume discovery and history."""
     unset = [PORT_ENV, TOKEN_ENV]
     if isinstance(command, str) and simple_command_args(command):
         resolved = _resolved_string(command, spec, env)
@@ -58,25 +61,16 @@ def wrap_plan(command: Any, spec: VendorSpec, helper: list[str], *, env: dict[st
     return {"helper": list(helper), "unset": unset, "entrypoint": None}
 
 
-def wrap_command(command: Any, spec: VendorSpec, helper: list[str], *, env: dict[str, str] | None = None) -> list[str] | None:
-    """Wrap a literal bash/zsh CLI invocation, preserving shell function behavior.
+def render_wrapper(command: Any, spec: VendorSpec, plan: dict, *, env: dict[str, str] | None = None) -> list[str]:
+    """The argv the in-process arm spawns for a `plan` that `wrap_plan` decided for the same `command`, `spec` and `env`.
 
-    Other command forms remain unchanged and cannot attest to a live store.
-    Keep the original command separately for resume discovery and history.
-    """
-    words = simple_command_args(command)
-    if isinstance(command, str) and words:
-        # Native ConPTY commands have no shell rc phase. Reuse the existing
-        # platform parser and recognized npm-shim unwrapping before the helper.
-        resolved = _resolved_string(command, spec, env)
-        if resolved is None:
-            return None
-        program, head, tail = resolved
-        entrypoint = tail[0] if head != program and tail else program
-        return [*helper, "--entrypoint", entrypoint, "--", head, *tail]
+    The bash/zsh list form keeps shell function behavior; a native ConPTY string command has no shell rc phase, so it
+    reuses the platform parser and the recognized npm-shim unwrapping before the helper."""
+    helper = plan["helper"]
+    if plan["entrypoint"] is not None:
+        _, head, tail = _resolved_string(command, spec, env)
+        return [*helper, "--entrypoint", plan["entrypoint"], "--", head, *tail]
     words = _script_words(command, spec)
-    if words is None:
-        return None
     shell = Path(str(command[0])).name
     name = shlex.quote(words[0])
     prefix = shlex.join(helper)
@@ -87,7 +81,7 @@ def wrap_command(command: Any, spec: VendorSpec, helper: list[str], *, env: dict
     else:
         kind = f'[ "$(type -t -- {name})" = file ]'
         resolved = f'$(command -v -- {name})'
-    cleanup = f"unset {PORT_ENV} {TOKEN_ENV}"
+    cleanup = "unset " + " ".join(plan["unset"])
     text = (
         f'if {kind}; then '
         f'if {prefix} --shell-check -- "{resolved}" {args}; then {cleanup}; exec {command[-1]}; '

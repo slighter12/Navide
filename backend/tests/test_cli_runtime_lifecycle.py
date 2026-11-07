@@ -140,13 +140,13 @@ class LifeRig:
 
     def service(self) -> RustTerminalService:
         service = RustTerminalService(self.sink)
-        mirror = service._mirror_flush_to_log
+        mirror = service.stream._mirror_flush_to_log
 
         def recording_mirror(session, combined: bytes) -> None:
             self.batches.setdefault(session.id, []).append(combined)  # a taken batch, including pieces still behind a blocked emit
             return mirror(session, combined)
 
-        service._mirror_flush_to_log = recording_mirror
+        service.stream._mirror_flush_to_log = recording_mirror
         self.services.append(service)
         return service
 
@@ -171,7 +171,7 @@ class LifeRig:
         (taken, blocked in an emit) plus bytes still buffered. Deterministic readiness, not a sleep."""
         taken = b"".join(a[2] for a in self.sink.attempts if a[0] == "out" and a[1] == session.id)
         delivered = self.sink.raw(session.id)
-        buffered = b"".join(service._out_buffers.get(session.id, []))
+        buffered = b"".join(service.stream._out_buffers.get(session.id, []))
         batched = b"".join(self.batches.get(session.id, []))
         return max(taken, delivered, batched, key=len).count(marker) + buffered.count(marker)
 
@@ -291,12 +291,12 @@ async def test_t1b_forced_interleaving_every_retained_byte_precedes_the_exit_and
     await rig.say_noecho(service, session)  # `flood 200` and `closestdio` are typed while a flood prints
     rig.sink.hold(session.id)
     await rig.say(service, session, "flood 400")  # ~80 KB: a taken batch whose first piece blocks the sink
-    await rig.until(lambda: session.id in service._drain_tasks, "a drain in flight")
+    await rig.until(lambda: session.id in service.stream._drain_tasks, "a drain in flight")
     # Let the bounded reader pause expire so the reader resumes and absorbs more behind the drain.
-    await rig.until(lambda: session.id not in service._pause_timers, "READER_PAUSE_MAX_MS expiry", 5)
+    await rig.until(lambda: session.id not in service.stream._pause_timers, "READER_PAUSE_MAX_MS expiry", 5)
     await rig.say(service, session, "flood 200")
-    await rig.until(lambda: len(service._out_buffers.get(session.id, [])) > 0 and b"".join(service._out_buffers[session.id]).count(b"FLOOD_DONE") >= 0
-                    and service._out_buf_bytes.get(session.id, 0) > 30_000, "output absorbed behind the stalled drain", 20)
+    await rig.until(lambda: len(service.stream._out_buffers.get(session.id, [])) > 0 and b"".join(service.stream._out_buffers[session.id]).count(b"FLOOD_DONE") >= 0
+                    and service.stream._out_buf_bytes.get(session.id, 0) > 30_000, "output absorbed behind the stalled drain", 20)
     await rig.say(service, session, "closestdio 0.2")  # EOF arrives; the root exits right after
     await rig.until(lambda: session.stream_ending, "EOF reached the stream end", 10)
     rig.sink.open(session.id)
@@ -314,13 +314,13 @@ async def test_t6_eof_during_an_active_resize_barrier_waits_for_the_control_lock
     release = harness.root / "release-resize"
     session = await harness.life(service, f"fault:resize-hold:{release}")
     order: list[str] = []
-    original = service._drain_output_behind_barrier
+    original = service.stream._drain_output_behind_barrier
 
     async def traced(session_):
         order.append(f"drain(control_lock={session_.control_lock.locked()})")
         return await original(session_)
 
-    service._drain_output_behind_barrier = traced
+    service.stream._drain_output_behind_barrier = traced
     await harness.say_noecho(service, session)  # `closestdio` is typed while the flood prints
 
     async def resize():
@@ -625,7 +625,7 @@ async def test_r2_flood_during_resize_preserves_order_accounts_drops_and_emits_l
     service = rig.service()
     session = await rig.life(service, f"pane-r2-{slow}")
     DropCounter.total = 0
-    service._out_dropped = DropCounter(service._out_dropped)
+    service.stream._out_dropped = DropCounter(service.stream._out_dropped)
     reads = {"total": 0}
     inner = session.handle.read
 
@@ -636,13 +636,13 @@ async def test_r2_flood_during_resize_preserves_order_accounts_drops_and_emits_l
 
     session.handle.read = counting_read
     slurp: dict[str, int] = {}
-    original = service._drain_output_behind_barrier
+    original = service.stream._drain_output_behind_barrier
 
     async def traced(session_):
         await original(session_)
         slurp["read_total"] = reads["total"]
 
-    service._drain_output_behind_barrier = traced
+    service.stream._drain_output_behind_barrier = traced
     base = len(rig.sink.raw(session.id))
     if slow:
         rig.sink.delay = 0.02
@@ -768,13 +768,13 @@ async def test_r5_barrier_mechanics_lock_held_across_slurp_resize_ack_and_tail(h
     release = harness.root / "release-r5"
     session = await harness.life(service, f"fault:resize-hold:{release}")
     events: list[tuple] = []
-    barrier_locked = lambda: service._resize_barriers[session.id].locked()  # noqa: E731
+    barrier_locked = lambda: service.stream._resize_barriers[session.id].locked()  # noqa: E731
 
-    async def traced_drain(session_, original=service._drain_output_behind_barrier):
+    async def traced_drain(session_, original=service.stream._drain_output_behind_barrier):
         events.append(("slurp", barrier_locked(), session_.control_lock.locked()))
         return await original(session_)
 
-    service._drain_output_behind_barrier = traced_drain
+    service.stream._drain_output_behind_barrier = traced_drain
     request = service._request
 
     async def traced_request(op, args=None, session_=None, **kw):
@@ -801,7 +801,7 @@ async def test_r5_barrier_mechanics_lock_held_across_slurp_resize_ack_and_tail(h
     task = asyncio.create_task(resize())
     await harness.until(lambda: any(e[0] == "resize-sent" for e in events), "RESIZE sent")
     await harness.say(service, session, "flood 800")  # bytes absorbed during the round trip
-    await harness.until(lambda: service._out_buf_bytes.get(session.id, 0) > 50_000, "bytes absorbed under the held lock", 20)
+    await harness.until(lambda: service.stream._out_buf_bytes.get(session.id, 0) > 50_000, "bytes absorbed under the held lock", 20)
     assert not [r for r in harness.sink.timeline if r[0] == "out" and b"FLOOD 0000" in r[2]], "nothing emitted while the lock is held"
     release.touch()
     async with asyncio.timeout(60):
@@ -941,7 +941,7 @@ async def test_l7_stale_events_of_a_retired_generation_cannot_act_on_the_replace
     with pytest.raises(wire.ProtocolError) as caught:
         wire.parse_header(stale[:32], wire.Direction.RUST_TO_PYTHON, wire.runtime_tag(service._runtime_generation))
     assert caught.value.rule == "runtime_tag"
-    assert not fresh.closed and fresh.id in service._sessions and session.id not in service._sessions
+    assert not fresh.closed and fresh.id in service.stream._sessions and session.id not in service.stream._sessions
 
 
 async def test_l8_f3_principal_a_corrupt_frame_from_the_sidecar_ends_in_loss_and_recovery(harness):
@@ -955,7 +955,7 @@ async def test_l8_f3_principal_a_corrupt_frame_from_the_sidecar_ends_in_loss_and
     assert "PROTOCOL_ERROR" in invalidated["cause"] and invalidated["complete"] is True
     assert len(harness.sink.exits(bystander.id)) == 1 and harness.sink.exits(bystander.id)[0]["reason"] == "runtime_lost"
     fresh = await harness.life(service, "pane-l8-fresh")
-    assert fresh.id in service._sessions and service._runtime_generation != generation
+    assert fresh.id in service.stream._sessions and service._runtime_generation != generation
 
 
 # --------------------------------------- L1b-L1f: loss order, bounds, delivery and close-once
@@ -965,9 +965,9 @@ async def two_batch_session(rig, service, pane, **extra):
     session = await rig.life(service, pane, **extra)
     rig.sink.hold(session.id)
     await rig.say(service, session, "flood 500")  # ~100 KB: the taken batch has two pieces
-    await rig.until(lambda: session.id in service._drain_tasks, "a taken batch in flight")
+    await rig.until(lambda: session.id in service.stream._drain_tasks, "a taken batch in flight")
     await rig.until(lambda: rig.seen(service, session, b"FLOOD_DONE") >= 1, "the first flood fully read", 20)
-    await rig.until(lambda: session.id not in service._pause_timers, "reader resumed after the bounded pause", 5)
+    await rig.until(lambda: session.id not in service.stream._pause_timers, "reader resumed after the bounded pause", 5)
     await rig.say(service, session, "flood 100")
     await rig.until(lambda: rig.seen(service, session, b"FLOOD_DONE") >= 2, "the second flood fully read, buffered behind the batch", 20)
     return session
@@ -978,7 +978,7 @@ async def test_l1b_loss_order_and_bounds_with_a_wedged_sink(rig):
     logs = {name: rig.root / f"{name}.log" for name in ("a", "b")}
     first = await two_batch_session(rig, service, "pane-l1b-a", output_log_file=str(logs["a"]))
     second = await two_batch_session(rig, service, "pane-l1b-b", output_log_file=str(logs["b"]))
-    untaken = {s.id: sum(len(c) for c in service._out_buffers[s.id]) for s in (first, second)}
+    untaken = {s.id: sum(len(c) for c in service.stream._out_buffers[s.id]) for s in (first, second)}
     assert all(untaken.values()), "output is buffered behind each taken batch"
     taken_log = {name: logs[name].read_text(encoding="utf-8") for name in logs}  # mirrored at take time
     events: list[str] = []
@@ -1045,14 +1045,14 @@ async def test_l1c_loss_after_partial_delivery_never_resends_the_in_flight_piece
     rig.sink.hold(session.id)
     rig.sink.allow(session.id, 1)  # the first piece of the taken batch is accepted, then the sink blocks
     await rig.say(service, session, "flood 800")  # ~172 KB: three pieces
-    await rig.until(lambda: len(rig.sink.exits(session.id)) == 0 and len(rig.sink.raw(session.id)) > 0 and session.id in service._drain_tasks,
+    await rig.until(lambda: len(rig.sink.exits(session.id)) == 0 and len(rig.sink.raw(session.id)) > 0 and session.id in service.stream._drain_tasks,
                     "first piece delivered, the second blocked")
     await rig.until(lambda: rig.seen(service, session, b"FLOOD_DONE") >= 1, "the flood fully read", 20)
     delivered_before = rig.sink.raw(session.id)[len(already):]
-    await rig.until(lambda: session.id not in service._pause_timers, "reader resumed", 5)
+    await rig.until(lambda: session.id not in service.stream._pause_timers, "reader resumed", 5)
     await rig.say(service, session, "flood 50")
     await rig.until(lambda: rig.seen(service, session, b"FLOOD_DONE") >= 2, "output buffered behind the batch", 20)
-    untaken = sum(len(c) for c in service._out_buffers[session.id])
+    untaken = sum(len(c) for c in service.stream._out_buffers[session.id])
     taken_log = log.read_text(encoding="utf-8")
     rig.kill_sidecar(service)
     await rig.recovered(service)
@@ -1089,13 +1089,13 @@ async def test_l1d_a_split_multibyte_character_at_the_loss_cut_matches_the_basel
         return fp.getvalue()
 
     recorded: dict[str, list[bytes]] = {}
-    original = RustTerminalService._mirror_to_log
+    original = TerminalService._mirror_to_log
 
     def recording(self, session_, data):
         recorded.setdefault(session_.id, []).append(bytes(data))
         return original(self, session_, data)
 
-    rig.monkeypatch.setattr(RustTerminalService, "_mirror_to_log", recording)
+    rig.monkeypatch.setattr(TerminalService, "_mirror_to_log", recording)
     for cut in (True, False):
         service = rig.service()
         log = rig.root / f"split-{cut}.log"
@@ -1105,18 +1105,18 @@ async def test_l1d_a_split_multibyte_character_at_the_loss_cut_matches_the_basel
         await rig.until(lambda: "NOECHO" in rig.sink.text(session.id), "echo off")
         rig.sink.hold(session.id)
         await rig.say(service, session, "rawhex " + (b"A" * 100 + prefix).hex())
-        await rig.until(lambda: session.id in service._drain_tasks and any(b"A" * 100 + prefix in c for c in calls), "the first batch is taken and mirrored at take")
-        await rig.until(lambda: session.id not in service._pause_timers, "reader resumed", 5)
+        await rig.until(lambda: session.id in service.stream._drain_tasks and any(b"A" * 100 + prefix in c for c in calls), "the first batch is taken and mirrored at take")
+        await rig.until(lambda: session.id not in service.stream._pause_timers, "reader resumed", 5)
         await rig.say(service, session, "rawhex " + (tail_ok + b"B" * 10).hex())
-        await rig.until(lambda: b"B" * 10 in b"".join(service._out_buffers.get(session.id, [])), "continuation buffered, untaken")
-        dropped_expected = sum(len(c) for c in service._out_buffers[session.id])
-        decoder = service._decoders[session.id]
+        await rig.until(lambda: b"B" * 10 in b"".join(service.stream._out_buffers.get(session.id, [])), "continuation buffered, untaken")
+        dropped_expected = sum(len(c) for c in service.stream._out_buffers[session.id])
+        decoder = service.stream._decoders[session.id]
         rig.kill_sidecar(service)
         if not cut:
             await rig.until(lambda: service._lost, "loss detected")
             rig.sink.open(session.id)  # released inside the bound
         await rig.recovered(service)
-        assert service._decoders.get(session.id) is None and decoder is not None, "the one decoder outlived every log write"
+        assert service.stream._decoders.get(session.id) is None and decoder is not None, "the one decoder outlived every log write"
         dropped = rig.receipts_of("loss_settled", session_id=session.id)[0]["untaken_dropped"]
         assert dropped == (dropped_expected if cut else 0)
         text = log.read_text(encoding="utf-8")
@@ -1176,10 +1176,10 @@ async def test_l1f_a_late_normal_closer_cannot_close_a_reused_number_or_publish_
     service._request = traced
     rig.sink.hold(session.id)
     await rig.say(service, session, "flood 300")
-    await rig.until(lambda: session.id in service._drain_tasks, "first batch taken, blocked")
-    await rig.until(lambda: session.id not in service._pause_timers, "reader resumed", 5)
+    await rig.until(lambda: session.id in service.stream._drain_tasks, "first batch taken, blocked")
+    await rig.until(lambda: session.id not in service.stream._pause_timers, "reader resumed", 5)
     await rig.say(service, session, "flood 50")
-    await rig.until(lambda: service._out_buf_bytes.get(session.id, 0) >= 50 * 200, "more output buffered")
+    await rig.until(lambda: service.stream._out_buf_bytes.get(session.id, 0) >= 50 * 200, "more output buffered")
     await rig.say(service, session, "closestdio 0.1")
     await rig.until(lambda: session.stream_ending, "EOF: _finish_stream is running")
     rig.sink.allow(session.id, 1)  # the first batch completes; _finish_stream now emits inline and blocks again

@@ -2,14 +2,15 @@
 
 The bridge holds a `HarnessHook` and calls it where the harness needs to see or guard something: a receipt, a frame
 counted, the sidecar's start arguments, the launch environment, a kernel checkpoint of a new session's descriptor, the
-digest of the sidecar binary, and the log watcher's rescan interval. The hook in this module is the product's and does
-nothing; every method answers the value the product would have used anyway.
+digest of the sidecar binary, the log watcher's rescan interval, and the terminal service the backend built. The hook in
+this module is the product's and does nothing; every method answers the value the product would have used anyway.
 
 The product never installs another one. `from_environment` returns the harness's implementation
 (`cli_runtime_receipts.RegressionHook`) only when the process runs under the isolated regression root, which only the
-harness sets. The harness reaches its guards by the names it always used: the isolation module assigns
-`cli_runtime.prepare_native_launch`, a driver sets `NAVIDE_ACR_FAULT`, `NAVIDE_LOG_RESCAN_S` or `NAVIDE_ACR_EVAL_RUNTIME`,
-and a counter gate reads `control_ledger()` from the service.
+harness sets. The harness reaches its guards through that implementation: the isolation module registers its launch guard
+with `cli_runtime_receipts.install_launch_guard`, a counter gate registers a watcher of the built service with
+`cli_runtime_receipts.watch_services`, and a driver sets `NAVIDE_ACR_FAULT`, `NAVIDE_LOG_RESCAN_S` or
+`NAVIDE_ACR_EVAL_RUNTIME`.
 """
 from __future__ import annotations
 
@@ -93,6 +94,9 @@ class HarnessHook:
     def rescan_interval_s(self) -> float:
         """The log watcher's safety-net sweep interval."""
         return DEFAULT_RESCAN_S
+
+    def attach(self, service: Any) -> None:
+        """The terminal service the backend has just built (either one), offered once so the harness can watch it."""
 
 
 def from_environment(environ: Mapping[str, str] | None = None) -> HarnessHook:

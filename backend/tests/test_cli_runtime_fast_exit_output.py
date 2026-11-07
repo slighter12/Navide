@@ -1,4 +1,4 @@
-"""F-1 (assignment 3): a CLI that finishes before the create is published keeps its output (E1 v8 8 item 4).
+"""Fast-exit output: a CLI that finishes before the create is published keeps its output (E1 v8 8 item 4; finding F-1).
 
 Measured mechanism (receipts/f1/, own processes): on macOS the last close of a slave blocks the closer for
 ~0.6 s while the master has unread output, then flushes that output. The master must therefore be read within

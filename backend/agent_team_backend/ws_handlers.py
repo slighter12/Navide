@@ -9314,7 +9314,7 @@ async def _terminal_create_impl(
             quota_tx_id = str(payload.get("quota_transaction_id") or "")
             quota_pane_id = str(payload.get("quota_original_pane_id") or "")
             if managed_path:
-                from .credential_launch import CredentialLaunch, wrap_command, wrap_plan
+                from .credential_launch import CredentialLaunch, render_wrapper, wrap_plan
                 from .credential_store import StoreUnverified
 
                 async def owned_vault_call(fn):
@@ -9333,9 +9333,9 @@ async def _terminal_create_impl(
                     *(name for _, values in vendor_spec.account_switch.uncertain_env_by_scope for name in values))))
                 helper_argv = launch.helper_argv(login=is_login, vendor=agent_key, credential_env=names)
                 wrap_env = {key: value for key, value in {**os.environ, **env}.items() if key not in (env_remove or ())}
-                wrapped = wrap_command(payload["command"], vendor_spec, helper_argv, env=wrap_env)
-                # The same decision as typed data: the Rust runtime renders the wrapper (delta 10.2).
+                # One decision (delta 10.2): the Rust runtime renders the plan itself, the in-process arm spawns its rendering.
                 plan = wrap_plan(payload["command"], vendor_spec, helper_argv, env=wrap_env)
+                wrapped = None if plan is None else render_wrapper(payload["command"], vendor_spec, plan, env=wrap_env)
                 if wrapped is None and is_login:
                     raise quota_failover.FailoverRefused("CREDENTIAL_STORE_UNVERIFIED", "this login command cannot verify its credential store")
                 if wrapped is not None:

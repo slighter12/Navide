@@ -29,7 +29,7 @@ from agent_team_backend import app, osplat
 from agent_team_backend.cli_vendors.registry import VENDORS
 from agent_team_backend.mcp_server import pane_home
 from agent_team_backend.mcp_server import wiring as mcp_wiring
-from agent_team_backend.terminals import TerminalInterface, TerminalService
+from agent_team_backend.terminals import TerminalInterface, TerminalService, resolve_command
 
 # Every CLI in the shared frontend/backend registry. This literal is the gate:
 # a new vendor must extend the launch coverage below; the inventory test fails
@@ -158,7 +158,7 @@ def _cli_argv(command: str | list[str]) -> list[str]:
     into the CLI's argv; on Windows the resolver's ``parse_command`` already
     split the single string with ``CommandLineToArgvW`` rules.
     """
-    resolved = TerminalService(lambda *_args: None)._resolve_command(command)
+    resolved = resolve_command(command)
     if isinstance(command, list):
         return shlex.split(resolved[-1])
     return resolved

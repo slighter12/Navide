@@ -19,7 +19,7 @@ uv --project backend run pytest \
   backend/tests/test_cli_runtime_sidecar.py \
   backend/tests/test_cli_runtime_managed_login.py \
   backend/tests/test_cli_runtime_vendor_transport.py \
-  backend/tests/test_cli_runtime_review1.py \
+  backend/tests/test_cli_runtime_control_failures.py \
   backend/tests/test_cli_runtime_observe.py \
   backend/tests/test_cli_runtime_claude.py \
   backend/tests/test_cli_runtime_claude_parity.py \

@@ -104,7 +104,7 @@ from .stages_store import StagesStore
 from .db import DB_FILENAME, Database, WorkspaceDatabases
 from .dev_time_store import DevTimeStore
 from .store_migrations import run_startup_migrations, version_change
-from .terminals import TerminalService, output_frame_session_id
+from .terminals import TerminalInterface, TerminalService, output_frame_session_id
 from .tokens_store import TokensStore
 
 
@@ -1044,7 +1044,7 @@ def _git_credential(payload: dict[str, Any]) -> dict[str, str] | None:
 # Output is routed per-PTY: each terminal session is owned by whichever WS
 # Session created or last reattached to it. A second window never steals PTYs
 # it didn't explicitly claim via terminal.create / terminal.reattach.
-_TERMINALS: TerminalService | None = None
+_TERMINALS: TerminalInterface | None = None
 # terminal_session_id → owning WS Session. Populated on terminal.create and
 # updated on terminal.reattach. Entries removed when the owning WS disconnects.
 _PTY_OWNERS: "dict[str, Session]" = {}
@@ -1150,9 +1150,9 @@ def harness_hook() -> cli_runtime_hook.HarnessHook:
     return _HARNESS_HOOK
 
 
-def get_terminals() -> TerminalService:
-    """The one app-level TerminalService. Lazy (not at import) because
-    TerminalService.__init__ binds to the running event loop."""
+def get_terminals() -> TerminalInterface:
+    """The one app-level terminal service. Lazy (not at import) because the service binds to the running event
+    loop."""
     global _TERMINALS
     if _TERMINALS is None:
         # The evaluation selector: the Rust runtime only under the isolated regression harness, until it is adopted.
@@ -1163,6 +1163,7 @@ def get_terminals() -> TerminalService:
             _TERMINALS = RustTerminalService(emit=_active_emit, hook=harness_hook())
         else:
             _TERMINALS = TerminalService(emit=_active_emit)
+        harness_hook().attach(_TERMINALS)
     return _TERMINALS
 
 

@@ -163,9 +163,10 @@ def _assert_outer_argv(vendor: str, outer: list[str], snapshot: dict, root: Path
     assert helper[0] == sys.executable and helper[helper.index("--vendor") + 1] == vendor, helper[:2]
     line = script.split("; exec ", 1)[1].split("; else _navide_credential_status", 1)[0]
     assert _normalise_argv(_normaliser(root), shlex.split(line)[1:]) == snapshot["child_argv"], line
-    oracle = credential_launch.wrap_command([outer[0], "-lc", line], SimpleNamespace(key=vendor), helper)
-    assert oracle is not None
-    assert outer == oracle, "the executed outer argv differs from credential_launch.wrap_command"
+    command, spec = [outer[0], "-lc", line], SimpleNamespace(key=vendor)
+    plan = credential_launch.wrap_plan(command, spec, helper)
+    assert plan is not None
+    assert outer == credential_launch.render_wrapper(command, spec, plan), "the executed outer argv differs from credential_launch.render_wrapper"
 
 
 @pytest.mark.parametrize("row", ROWS, ids=[row[0] for row in ROWS])

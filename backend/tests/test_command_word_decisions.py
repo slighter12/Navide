@@ -167,3 +167,10 @@ def test_a_bare_double_dash_ends_the_flag_search() -> None:
     assert resume_id_from_command(Command.literal(f"claude {flag} abc"), declared) == "abc"
     assert resume_id_from_command(Command.literal(f"claude -- {flag} abc"), declared) == ""
     assert resume_id_from_command(Command.literal(f"claude {flag}=abc"), declared) == "abc"
+
+
+def test_a_text_only_command_under_an_unlisted_login_shell_still_names_its_resume_id() -> None:
+    facts = FACTS["claude"]
+    for shell in ("/bin/tcsh", "/usr/bin/nu", "/bin/mksh", "xonsh"):
+        assert resume_id_from_command([shell, "-lc", "claude --resume abc-123"], facts) == "abc-123"
+        assert resume_id_from_command([shell, "-ilc", "claude --resume abc-123"], facts) == "abc-123"

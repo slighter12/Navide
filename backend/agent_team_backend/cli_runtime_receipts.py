@@ -128,10 +128,29 @@ class ControlLedger:
                 "late_observation_parts": self.late_parts, "late_observation_bytes": self.late_bytes, "late_answers": self.late_answers}
 
 
+#: The launch guard the harness's isolation module installed, or None. It sees every native launch's argv, cwd and
+#: environment and returns the environment to launch with, or refuses.
+_launch_guard: Callable[..., dict[str, str]] | None = None
+#: What the harness asked to be told of each terminal service the backend builds.
+_service_watchers: list[Callable[[Any], None]] = []
+
+
+def install_launch_guard(guard: Callable[..., dict[str, str]] | None) -> None:
+    """Register (or, with None, remove) the guard every native launch passes through."""
+    global _launch_guard
+    _launch_guard = guard
+
+
+def watch_services(watcher: Callable[[Any], None]) -> None:
+    """Register a callback that is handed each terminal service the backend builds, right after it is built."""
+    _service_watchers.append(watcher)
+
+
 class RegressionHook(HarnessHook):
     """The hook the isolated harness runs the bridge with: receipts under its root, the control ledger, the sidecar's
-    fault switch, the launch guard its isolation module installs, the kernel checkpoint, the binary digest and the
-    rescan override. The root is fixed at construction: a late task of one service never writes elsewhere."""
+    fault switch, the launch guard its isolation module installs, the kernel checkpoint, the binary digest, the
+    rescan override and the watchers of the built service. The root is fixed at construction: a late task of one
+    service never writes elsewhere."""
 
     def __init__(self, root: Path) -> None:
         super().__init__()
@@ -149,17 +168,18 @@ class RegressionHook(HarnessHook):
         return None
 
     def launch_env(self, argv: list[str], *, cwd: str, env: dict[str, str]) -> dict[str, str]:
-        from . import cli_runtime
-
-        # `tests/cli_regression/support/isolation.py` assigns its guard here. Without one the environment is unchanged,
-        # unless the isolation support has asked for launches to be guarded (its own switch): then an unguarded
-        # launch would run under a guarantee nobody provides, so it is refused.
-        guard = getattr(cli_runtime, "prepare_native_launch", None)
-        if guard is None:
+        # `tests/cli_regression/support/isolation.py` registers its guard with `install_launch_guard`. Without one the
+        # environment is unchanged, unless the isolation support has asked for launches to be guarded (its own switch):
+        # then an unguarded launch would run under a guarantee nobody provides, so it is refused.
+        if _launch_guard is None:
             if os.environ.get("NAVIDE_REGRESSION_ACCOUNT_GUARD") == "1":
                 raise RuntimeError("the isolated harness requires a launch guard and none is installed")
             return env
-        return guard(argv, cwd=cwd, env=env)
+        return _launch_guard(argv, cwd=cwd, env=env)
+
+    def attach(self, service: Any) -> None:
+        for watcher in _service_watchers:
+            watcher(service)
 
     def runtime_argv(self) -> list[str]:
         fault = os.environ.get("NAVIDE_ACR_FAULT")

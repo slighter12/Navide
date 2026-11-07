@@ -171,7 +171,7 @@ async def test_h2_missing_binary_refuses_without_a_child_or_a_python_pty(rig, mo
     before = len(psutil.Process().children(recursive=True))
     with pytest.raises(FileNotFoundError):
         await service.create_async(pane_id="p", agent_key="terminal", command=["/bin/cat"], cwd=str(rig.workspace))
-    assert len(psutil.Process().children(recursive=True)) == before and not service._sessions
+    assert len(psutil.Process().children(recursive=True)) == before and not service.stream._sessions
 
 
 async def test_h3_a_sidecar_reaped_before_its_identity_is_read_is_still_start_failed(harness, monkeypatch):
@@ -186,7 +186,7 @@ async def test_h3_a_sidecar_reaped_before_its_identity_is_read_is_still_start_fa
     service = harness.service()
     with pytest.raises(RuntimeError, match=r"START_FAILED: STARTUP_FAILED"):
         await service.create_async(pane_id="p", agent_key="terminal", command=["/bin/cat"], cwd=str(harness.workspace))
-    assert not service._sessions
+    assert not service.stream._sessions
 
 
 async def test_h3_startup_fatal_is_an_explicit_failure_with_no_fallback(harness, monkeypatch):
@@ -194,7 +194,7 @@ async def test_h3_startup_fatal_is_an_explicit_failure_with_no_fallback(harness,
     service = harness.service()
     with pytest.raises(RuntimeError, match=r"START_FAILED: STARTUP_FAILED"):
         await service.create_async(pane_id="p", agent_key="terminal", command=["/bin/cat"], cwd=str(harness.workspace))
-    assert service._runtime.returncode is not None and not service._sessions
+    assert service._runtime.returncode is not None and not service.stream._sessions
     assert any(r["event"] == "startup_failed" for r in harness.receipts())
     assert not [r for r in harness.receipts() if r["event"] == "owned"]
 
@@ -283,7 +283,7 @@ async def test_h6_h8_every_handshake_byte_rule_fails_explicitly_and_ends_the_stu
         await service._ensure_started()
     assert service._runtime.returncode is not None, "the stub must be ended by its own handle"
     failed = [r for r in rig.receipts() if r["event"] == "startup_failed"]
-    assert failed and failed[0]["stage"] == "handshake" and not service._sessions
+    assert failed and failed[0]["stage"] == "handshake" and not service.stream._sessions
 
 
 async def test_h6_ready_that_never_arrives_is_a_timeout(rig, monkeypatch):
@@ -350,7 +350,7 @@ async def test_p1_p5_p6_a_published_session_runs_over_the_handed_off_master(rig)
     assert set(received[0]) == {"event", "kind", "platform", "validated", "session_id", "session_generation",
                                 "owned_frame_bytes"}, "no descriptor values in receipts"
     await service.kill(session.id, force=True)
-    assert session.handle.fd is None and session.closed and session.id not in service._sessions
+    assert session.handle.fd is None and session.closed and session.id not in service.stream._sessions
     assert [e["terminal_session_id"] for e in rig.exits()] == [session.id]
 
 
@@ -501,9 +501,9 @@ async def test_p9_a_single_wrong_descriptor_fails_closed_and_unrelated_sessions_
     text = harness.output[other.id].decode()
     numbers = [int(line.split()[1]) for line in text.splitlines() if line.startswith("FLOOD ")]
     assert numbers == list(range(300)), "the bystander's output was disturbed"
-    assert other.id in service._sessions and not other.closed
+    assert other.id in service.stream._sessions and not other.closed
     assert not service._slots and len(service._claimed_ttys) == 1
-    assert not [s for s in service._sessions if s != other.id]
+    assert not [s for s in service.stream._sessions if s != other.id]
     await service.write_async(other.id, "still alive\r")
     await harness.until(lambda: b"ECHO still alive" in harness.output[other.id], "bystander still answers")
 
@@ -513,7 +513,7 @@ async def test_p9c_a_tty_already_held_by_a_claimed_session_fails_check_3(harness
     first = await harness.shell(service, "pane-first")
     with pytest.raises(RuntimeError, match="HANDOFF_FAILED: binding check 3"):
         await harness.shell(service, "fault:duplicate-tty")
-    assert first.id in service._sessions and not first.closed
+    assert first.id in service.stream._sessions and not first.closed
     await service.write_async(first.id, "after\r")
     await harness.until(lambda: b"ECHO after" in harness.output[first.id], "first session unaffected")
 
@@ -580,5 +580,5 @@ async def test_p3_zero_progress_on_the_first_send_is_channel_loss_with_no_misass
                                     for r in harness.receipts()), "loss handled", 40)
     invalidated = next(r for r in harness.receipts() if r["event"] == "runtime_invalidated" and r["lost_generation"] == generation)
     assert invalidated["complete"] is True and invalidated["unresolved"] == 0, invalidated
-    assert not service._slots and not service._claimed_ttys and not service._sessions
+    assert not service._slots and not service._claimed_ttys and not service.stream._sessions
     assert not [r for r in harness.receipts() if r["event"] in ("handoff_received", "handoff_rejected")]

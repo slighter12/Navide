@@ -217,7 +217,7 @@ async def test_sidecar_death_invalidates_every_session_and_cleans_only_its_own_t
     assert all(not any(flags) for flags in rig.alive_at_exit.values())
     assert not [pid for pid in (sessions[0].proc.pid, *pids) if alive(pid)]
     assert alive(unrelated.pid)
-    assert not service._sessions and service._lost is None
+    assert not service.stream._sessions and service._lost is None
     assert not [e for e in pty_registry._load().values() if e.get("runtime_generation") == lost_generation]
     with pytest.raises(Exception):
         await service.write_async(sessions[1].id, "stale\r")
@@ -353,7 +353,7 @@ async def test_abandoned_create_is_cleaned_never_resurrected_and_blocks_replacem
         root = next(r["root"]["pid"] for r in records if r["event"] == "owned" and r["session_id"] == first_sid)
         assert not alive(root)
     assert rig.exits(first_sid) == [] and first_sid not in rig.output  # never presented, no stale output
-    assert first_sid not in service._sessions and service._lost is None and alive(replacement.proc.pid)
+    assert first_sid not in service.stream._sessions and service._lost is None and alive(replacement.proc.pid)
     assert not service._launches and not service._unresolved
 
 
@@ -1111,7 +1111,7 @@ async def test_f2r4_cancel_after_the_gate_opened_is_proven_only_by_the_verified_
         cleaned = [r for r in rig.receipts() if r["event"] == "cleaned" and r["session_id"] == owned[0]["session_id"]]
         assert cleaned and cleaned[0]["cleanup_complete"] and cleaned[0]["root_reaped"]
         assert not _alive_pidfile(detached)
-        assert service._lost is None and not service._unresolved and not service._sessions
+        assert service._lost is None and not service._unresolved and not service.stream._sessions
     finally:
         hold.close()
         cleanup_leaks(rig, marker, detached)
@@ -1198,7 +1198,7 @@ async def _n2_case(rig, handler_world, *, hold: str, monkeypatch):
         released.set()
         if reader >= 0:
             os.close(reader)
-        for tid in list(service._sessions):
+        for tid in list(service.stream._sessions):
             with contextlib.suppress(Exception):
                 await service.kill(tid, force=True)
         cleanup_leaks(rig, marker, detached)
@@ -1218,7 +1218,7 @@ async def test_n2_cancel_after_the_native_answer_is_proven_only_by_verified_clea
         and result["cleaned_at_ack"][0]["root_reaped"], "cancelled:true was sent before verified cleanup"
     assert not result["acked_while_held"], "acknowledged while the published root could still run"
     assert result["response"].get("error", {}).get("code") == "CREATE_CANCELLED", result["response"]
-    assert not result["service"]._sessions, "the cancelled term was published and left live"
+    assert not result["service"].stream._sessions, "the cancelled term was published and left live"
 
 
 # ── review-6 R6-1: the create success/cancel decision is made once, before any yielding send ─────
@@ -1279,7 +1279,7 @@ async def test_r6_1_a_create_whose_success_is_being_sent_has_exactly_one_coheren
             # The create committed first: the cancel is not a pending create any more, the term is the
             # client's to close normally.
             tid = create_responses[0][1]["payload"]["terminal_session_id"]
-            assert tid in service._sessions and cancel_msg.get("ok") is True and not cancelled
+            assert tid in service.stream._sessions and cancel_msg.get("ok") is True and not cancelled
             owners.append(tid)
             await service.kill(tid, force=True)
     finally:
@@ -1287,7 +1287,7 @@ async def test_r6_1_a_create_whose_success_is_being_sent_has_exactly_one_coheren
         for task in (create, cancel):
             if task is not None and not task.done():
                 task.cancel()
-        for tid in list(service._sessions):
+        for tid in list(service.stream._sessions):
             with contextlib.suppress(Exception):
                 await service.kill(tid, force=True)
 
@@ -1317,7 +1317,7 @@ async def test_r6_1_a_success_send_that_finds_the_connection_dead_rolls_the_term
     owned = [r for r in rig.receipts() if r["event"] == "owned"]
     assert len(owned) == 1
     await rig.until(lambda: not alive(owned[0]["root"]["pid"]), "the undelivered term is rolled back", timeout=15)
-    assert not service._sessions
+    assert not service.stream._sessions
     transaction = session._terminal_create_transactions.get(("pane-drop", "gen-m1"))
     assert transaction is None or not transaction.get("committed")
 
@@ -1423,7 +1423,7 @@ async def test_r8_1b_unspawn_settles_an_unpublished_create_before_it_answers(rig
         hold.set()
         if unspawn is not None and not unspawn.done():
             unspawn.cancel()
-        for tid in list(service._sessions):
+        for tid in list(service.stream._sessions):
             with contextlib.suppress(Exception):
                 await service.kill(tid, force=True)
         cleanup_leaks(rig, marker, detached)
@@ -1504,7 +1504,7 @@ async def test_f2_pipeline_retirement_settles_an_unpublished_create_before_it_an
         hold.set()
         if retiring is not None and not retiring.done():
             retiring.cancel()
-        for tid in list(service._sessions):
+        for tid in list(service.stream._sessions):
             with contextlib.suppress(Exception):
                 await service.kill(tid, force=True)
         cleanup_leaks(rig, marker, detached)
@@ -1531,7 +1531,7 @@ async def test_f3_an_unresolved_settlement_refuses_and_retires_no_record(rig, ha
         _pipeline_slot(ws, pane)
         payload = ({"workspace_path": ws, "stage_index": 0, "slot_label": "Build"} if retire == "pipeline.slot_unspawn"
                    else {"workspace_path": ws, "pane_id": pane})
-    root = service._sessions[tid].proc.pid
+    root = service.stream._sessions[tid].proc.pid
     rig.signal_sidecar(service, signal.SIGSTOP)
     try:
         await asyncio.wait_for(app.handle_message(session, {"id": "u1", "type": retire, "payload": payload}), 90)
@@ -1594,12 +1594,12 @@ async def test_b6_kill_surface_settles_an_unpublished_panel_create_before_it_ans
         assert [r for r in at_reply if r["event"] == "cleaned" and r["session_id"] == old["session_id"]], \
             "kill_surface answered before the panel's root was verifiably cleaned"
         assert not alive(old["root"]["pid"]) and not _alive_pidfile(detached)
-        assert not service._sessions, "the closed window's panel was published after its close"
+        assert not service.stream._sessions, "the closed window's panel was published after its close"
     finally:
         hold.set()
         if closing is not None and not closing.done():
             closing.cancel()
-        for tid in list(service._sessions):
+        for tid in list(service.stream._sessions):
             with contextlib.suppress(Exception):
                 await service.kill(tid, force=True)
         cleanup_leaks(rig, marker, detached)
@@ -1644,7 +1644,7 @@ async def test_b6_an_unresolved_panel_settlement_refuses_and_retires_no_record(r
         hold.set()
         with contextlib.suppress(Exception):
             await asyncio.wait_for(create, 30)
-        for tid in list(service._sessions):
+        for tid in list(service.stream._sessions):
             with contextlib.suppress(Exception):
                 await service.kill(tid, force=True)
 

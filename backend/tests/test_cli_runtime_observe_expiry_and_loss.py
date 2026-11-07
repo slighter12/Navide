@@ -1,4 +1,8 @@
-"""Review 2 of E3 checkpoint 2 (evidence/e3/reviewer-e3-2.md): one proof per accepted finding.
+"""Observe expiry and transport loss: late parts of an expired observation, the expired-id tolerance, receipts root, loss kinds.
+
+Pins what happens to late and unknown observe parts, root-live attribution, a sidecar that advertises an old cleanup limit,
+a kill whose `cleaned` never arrives, forged identities, transport loss that keeps the PTYs, and the input-blocked
+events (checkpoint-2 findings, evidence/e3/reviewer-e3-2.md).
 
 Test names carry the finding id (`test_sp1_…`, `test_s2_…`) so a receipt line maps to a finding without a table.
 SP-1 / SP-2 / SP-3 / SP-5 prove the E1 v8 text (design/e1-runtime-protocol-v8.md, "Changes from v7"); the real sidecar
@@ -26,7 +30,7 @@ from agent_team_backend.cli_runtime_receipts import ControlLedger
 from tests.cli_regression.support.cli_shim import base_python_executable
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT, FramePeer
 from tests.test_cli_runtime_lifecycle import LifeRig, alive
-from tests.test_cli_runtime_review1 import GENERATION, TAG, receipts_of, stub_service, stop_stub, wait_for
+from tests.test_cli_runtime_control_failures import GENERATION, TAG, receipts_of, stub_service, stop_stub, wait_for
 
 pytestmark = [
     pytest.mark.asyncio,
@@ -293,7 +297,8 @@ async def test_c1_the_exit_publication_fence_uses_the_generation_the_task_captur
     session = RuntimeSession("c1", "pane", "terminal", [], "/work", RuntimeProcessView(11), "g" * 32, {}, {})
     session.stream_done = True
     session.exit_record = {"reason": "exit", "exit_code": 0, "uptime_ms": 1}
-    service._retained[session.id] = service._sessions[session.id] = session
+    service._retained[session.id] = session
+    service.stream.adopt_session(session)
     service._maybe_publish_exit(session, "old-generation")  # the current generation is live; the captured one is not
     await asyncio.sleep(0.05)
     assert not session.exit_published and not frames, "a task of a retired generation publishes nothing, whatever is current"

@@ -372,7 +372,9 @@ def install_external_guards(root: Path) -> None:
             refuse("Rust child provider credential")
         return launch_env(env)
 
-    cli_runtime.prepare_native_launch = guarded_native_launch
+    from agent_team_backend import cli_runtime_receipts
+
+    cli_runtime_receipts.install_launch_guard(guarded_native_launch)
     # The real vault implementation still runs; only the external OS account
     # store is empty. A scenario needing credentials supplies its own fake.
     from agent_team_backend import credential_vault

@@ -24,7 +24,11 @@ SOURCE_PATHS = {
 
 
 def _descriptor(root, interpreter, commands):
-    """Extract only original pure builder bodies; never start credentials."""
+    """Extract only original pure builder bodies; never start credentials.
+
+    This runs before the kernel boundary (`difference_entry` is started with `-I -S`, and `os_startup` calls it
+    while writing the shell profile), where the product cannot be imported: so the pure bodies are read from
+    source, and `test_managed_descriptor_matches_the_product` pins the result to the real functions."""
     trees, identities = {}, {}
     for name, path in SOURCE_PATHS.items():
         tree, identity = _read(path, 65536, ast.parse)
@@ -79,7 +83,7 @@ def _descriptor(root, interpreter, commands):
         if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name) and n.targets[0].id in {
                 'HELPER_FLAG', 'PORT_ENV', 'TOKEN_ENV'}:
             scope[n.targets[0].id] = ast.literal_eval(n.value)
-    definitions('builder', ('_script_words', 'helper_argv', 'wrap_command'), scope)
+    definitions('builder', ('_script_words', 'helper_argv', 'wrap_plan', 'render_wrapper'), scope)
     start = next(n for n in ast.walk(trees['builder'])
                  if isinstance(n, ast.AsyncFunctionDef) and n.name == 'start')
     actor = SimpleNamespace(_timeout=ast.literal_eval(start.args.kw_defaults[0]),
@@ -87,8 +91,14 @@ def _descriptor(root, interpreter, commands):
     helper = scope['helper_argv'](actor, login=False, vendor=key, credential_env=names)
     # Actual caller: nativeDifferences.test.ts:449-477, 525; fixed SID: driver:138.
     # The restored default --session spelling is never sent by this principal.
-    forms = [scope['wrap_command'](['/bin/bash', '-lc', word], SimpleNamespace(key=key), helper)
-             for word in commands]
+    # The same two steps `ws_handlers` takes: the decision (`wrap_plan`), then its rendering for the in-process arm.
+    spec, forms = SimpleNamespace(key=key), []
+    for word in commands:
+        command = ['/bin/bash', '-lc', word]
+        plan = scope['wrap_plan'](command, spec, helper)
+        if plan is None:
+            raise PermissionError('changed managed wrapper decision')
+        forms.append(scope['render_wrapper'](command, spec, plan))
     return {'version': 1, 'scope': 't04-managed-opencode-admission', 'root': str(root),
             'interpreter': str(interpreter), 'helper': identities['helper'],
             'sources': identities, 'forms': forms, 'commands': list(commands)}

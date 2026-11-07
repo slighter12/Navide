@@ -491,6 +491,14 @@ async def _to_thread_and_drain_on_cancel(func: Callable[..., Any], *args: Any) -
 NATIVE_OBSERVATION_UNAVAILABLE = "Selected native observation unavailable; no Python parser fallback"
 
 
+def resolve_command(command: str | list[str]) -> list[str]:
+    """A launch command as argv: a list is taken as it is, a string is parsed by the platform's own grammar."""
+    argv = list(command) if isinstance(command, list) else osplat.terminal_backend.parse_command(command)
+    if not argv:
+        raise ValueError("command is empty")
+    return argv
+
+
 class CreateCancelled(RuntimeError):
     """The caller cancelled this create while it was still being coordinated; nothing was sent."""
 
@@ -648,10 +656,16 @@ class TerminalService(TerminalInterface):
         self,
         emit: EventSink,
         token_event_sink: TokenEventSink | None = None,
+        *,
+        end_stream: Callable[..., None] | None = None,
     ) -> None:
         self._sessions: dict[str, TerminalSession] = {}
         self._emit = emit
         self._token_event_sink = token_event_sink
+        # A service that owns the process lifecycle itself (the Rust bridge) presents through this one and takes over
+        # what happens when a session's stream ends: it is called as `end_stream(session, reason=...)` in place of
+        # this service's own close.
+        self._end_stream = end_stream
         self._loop = asyncio.get_event_loop()
         # The crash-recovery registry lives in the data dir this service was
         # started under. Registry jobs run on worker threads and can still be
@@ -749,8 +763,8 @@ class TerminalService(TerminalInterface):
         output_log_file: str = "",
         spawn_command: str | list[str] | None = None,
     ) -> TerminalSession:
-        logical_argv = self._resolve_command(command)
-        argv = self._resolve_command(spawn_command) if spawn_command is not None else logical_argv
+        logical_argv = resolve_command(command)
+        argv = resolve_command(spawn_command) if spawn_command is not None else logical_argv
         if not os.path.isdir(cwd):
             # A path that exists as a file is a different mistake from a
             # missing one — a resumed pipeline once spawned into its own
@@ -1854,14 +1868,110 @@ class TerminalService(TerminalInterface):
             raise KeyError(f"unknown terminal session: {session_id}")
         return session
 
-    def _resolve_command(self, command: str | list[str]) -> list[str]:
-        if isinstance(command, list):
-            argv = list(command)
-        else:
-            argv = osplat.terminal_backend.parse_command(command)
-        if not argv:
-            raise ValueError("command is empty")
-        return argv
+    # ── the Terminal Stream ──
+    # What a service that owns its process lifecycle (the Rust bridge) presents a session's output and input through:
+    # the same batching, drain barrier, backpressure and log mirror the in-process service uses, reached by name
+    # instead of by its private state. Each method does what its private counterpart does and nothing else.
+
+    def adopt_session(self, session: TerminalSession) -> None:
+        """Present `session` through this stream: `get`, `write`, `resize` and the queries now answer for it."""
+        self._sessions[session.id] = session
+
+    def release_session(self, session: TerminalSession) -> None:
+        """Forget `session` and every piece of presentation state it left, closing its log (decoder tail first)."""
+        if session.output_log_fp:
+            if decoder := self._decoders.pop(session.id, None):
+                session.output_log_fp.write(decoder.decode(b"", final=True))
+            session.output_log_fp.close()
+            session.output_log_fp = None
+        self._sessions.pop(session.id, None)
+        self._recent_chunks.pop(session.id, None)
+        self._echo_probe.pop(session.id, None)
+        self._resize_barriers.pop(session.id, None)
+        self._out_dropped.pop(session.id, None)
+
+    def read_ready(self, session: TerminalSession) -> None:
+        """The session's master is readable: drain it into the output buffer and end the stream on EOF or error."""
+        self._on_readable(session)
+
+    def absorb(self, session: TerminalSession, chunk: bytes, nbytes: int) -> None:
+        """Buffer one drained batch of raw bytes, exactly as a read of the session's own master would."""
+        self._absorb_output(session, chunk, nbytes)
+
+    def note_dropped(self, session_id: str, nbytes: int) -> None:
+        """Count bytes that were discarded before the stream took them, so the log marks the gap."""
+        self._out_dropped[session_id] = self._out_dropped.get(session_id, 0) + nbytes
+
+    def barrier(self, session: TerminalSession) -> asyncio.Lock:
+        """The session's resize barrier. While it is held no flush starts a drain; the holder emits the remainder."""
+        return self._resize_barriers.setdefault(session.id, asyncio.Lock())
+
+    async def drain_behind_barrier(self, session: TerminalSession) -> None:
+        """Emit everything the session has buffered or the kernel still holds. The caller holds `barrier(session)`."""
+        await self._drain_output_behind_barrier(session)
+
+    def flush_if_unblocked(self, session: TerminalSession) -> None:
+        """Start the flush that output absorbed while a barrier was held is waiting for."""
+        barrier = self._resize_barriers.get(session.id)
+        if not session.closed and not (barrier is not None and barrier.locked()) and self._out_buffers.get(session.id):
+            self._flush_output(session)
+
+    async def quiesce_output(self, session: TerminalSession) -> None:
+        """Let a closed handle's stream finish what it already holds: no new bytes arrive, so this ends unless the sink
+        stalls."""
+        while True:
+            drain = self._drain_tasks.get(session.id)
+            barrier = self._resize_barriers.get(session.id)
+            if drain is not None:
+                await asyncio.wait({drain})
+            elif barrier is not None and barrier.locked():
+                async with barrier:
+                    pass
+            elif self._out_buffers.get(session.id):
+                if handle := self._out_handles.pop(session.id, None):
+                    handle.cancel()
+                self._flush_output(session)  # starts the drain that empties what queued behind
+            else:
+                return
+
+    def abandon_output(self, session: TerminalSession) -> tuple[bool, int]:
+        """Count the bytes no one took and mark the gap in the log, synchronously, and ask an in-flight drain to stop
+        (requested, not awaited). Returns (a drain or barrier was in flight, the bytes not taken)."""
+        drain = self._drain_tasks.get(session.id)
+        barrier = self._resize_barriers.get(session.id)
+        in_flight = drain is not None or (barrier is not None and barrier.locked())
+        chunks = self._out_buffers.pop(session.id, None) or []
+        self._out_buf_bytes.pop(session.id, None)
+        untaken = sum(len(chunk) for chunk in chunks)
+        if untaken:
+            self.note_dropped(session.id, untaken)
+        if self._out_dropped.get(session.id):
+            self._mirror_flush_to_log(session, b"")  # the existing marker, through the one decoder
+        if drain is not None:
+            drain.cancel()
+        return in_flight, untaken
+
+    def close_stream_state(self, session: TerminalSession) -> None:
+        """The stream half of a close, in the in-process service's order: mark closed, drop input state, cancel the
+        batch and pause timers, flush the log decoder's tail into the log. The handle is closed by the caller."""
+        session.closed = True
+        self._unwatch_writable(session)
+        self._in_buffers.pop(session.id, None)
+        self._recent_chunks.pop(session.id, None)
+        self._echo_probe.pop(session.id, None)
+        self._end_input_block(session)
+        if handle := self._out_handles.pop(session.id, None):
+            handle.cancel()
+        if timer := self._pause_timers.pop(session.id, None):
+            timer.cancel()
+        decoder = self._decoders.pop(session.id, None)
+        if decoder and session.output_log_fp:
+            if tail := decoder.decode(b"", final=True):
+                try:
+                    session.output_log_fp.write(_clean_for_log(tail))
+                except Exception as error:  # noqa: BLE001
+                    log.warning("output log write failed: %s", error)
+        self._resize_barriers.pop(session.id, None)
 
     def _on_readable(self, session: TerminalSession) -> None:
         if session.closed:
@@ -1898,7 +2008,7 @@ class TerminalService(TerminalInterface):
             pending = getattr(session, "pending_close_reason", None)
             if close_reason == "exit" and pending:
                 close_reason = pending
-            self._close(session, reason=close_reason)
+            (self._end_stream or self._close)(session, reason=close_reason)
 
     def _absorb_output(
         self, session: TerminalSession, chunk: bytes, nbytes: int

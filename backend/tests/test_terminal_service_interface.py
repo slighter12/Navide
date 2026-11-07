@@ -10,6 +10,7 @@ import inspect
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -208,4 +209,29 @@ async def test_native_observation_is_unavailable_on_the_in_process_service():
 
 
 def test_the_interface_is_one_class_the_services_share():
-    assert issubclass(TerminalService, terminals.TerminalInterface) and issubclass(RustTerminalService, TerminalService)
+    assert issubclass(TerminalService, terminals.TerminalInterface) and issubclass(RustTerminalService, terminals.TerminalInterface)
+
+
+def test_the_rust_service_composes_the_in_process_stream_it_does_not_inherit_it():
+    assert not issubclass(RustTerminalService, TerminalService)
+    declared = ("create", "write", "shell_in_foreground", "interrupt", "resize", "force_redraw", "drain_output", "kill",
+                "wait_until_reaped", "kill_all")
+    for name in declared:
+        assert getattr(RustTerminalService, name) is not getattr(terminals.TerminalInterface, name), (
+            f"RustTerminalService leaves {name} to the interface, which only raises")
+
+
+async def test_the_rust_service_presents_every_session_query_through_its_stream(tmp_path):
+    service = RustTerminalService(Sink())
+    assert isinstance(service.stream, TerminalService) and not isinstance(service, TerminalService)
+    session = SimpleNamespace(id="s1", pane_id="p", agent_key="claude", command=["claude", "--resume", "r1"],
+                              closed=False, metadata={"surface": "dock", "workspace_path": str(tmp_path),
+                                                      "pane_mark": "m1"},
+                              proc=SimpleNamespace(pid=7), descendants={8: "x"}, output_log_fp=None)
+    service.stream.adopt_session(session)
+    assert service.get("s1") is session and service.list_sessions() == [session] and service.list_session_ids() == ["s1"]
+    assert service.live_pane_marks() == {"m1"} and service.memory_pid_groups() == {"s1": ("p", [7, 8])}
+    assert service.live_ids_for_surface("dock") == [("s1", "p", str(tmp_path))]
+    assert service.find_live_by_resume_id("claude", "r1", lambda argv: argv[-1]) == [session]
+    service.stream.release_session(session)
+    assert service.get("s1") is None and service.list_sessions() == []

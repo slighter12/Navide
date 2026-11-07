@@ -66,7 +66,7 @@ try:
         shim = install_cli_shim(fixture, 'codex', [str(interpreter), '-u', str(script), str(fixture), 'codex'])
         os.environ['NAVIDE_REGRESSION_EXEC_MANIFEST_SHA256'] = register_fixture_chain(fixture, shim, script, interpreter)
         install_external_guards(fixture)
-        from agent_team_backend import cli_runtime
+        from agent_team_backend.cli_runtime_receipts import RegressionHook
         environment = {'HOME': str(fixture / 'home'), 'USERPROFILE': str(fixture / 'home'), 'PATH': str(fixture)}
         argv = [str(shim), '--version']
         if operation == 'exec-admission':
@@ -81,7 +81,7 @@ try:
             argv = [str(physical / 'codex')]
         elif operation != 'exec-registered':
             raise AssertionError('unknown admission operation')
-        cli_runtime.prepare_native_launch(argv, cwd=str(fixture), env=environment)
+        RegressionHook(fixture).launch_env(argv, cwd=str(fixture), env=environment)
         # Admission only. Never execute any negative control or vendor CLI.
     else:
         raise AssertionError('unknown synthetic operation')
