@@ -228,7 +228,7 @@ async def test_s2_a_service_writes_its_receipts_to_the_root_it_was_built_with(tm
     monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(first))
     service = RustTerminalService(lambda frame: asyncio.sleep(0))
     monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(second))  # the next test starts
-    service._receipt({"event": "runtime_invalidated", "lost_generation": "late"})
+    service._receipt(lambda: {"event": "runtime_invalidated", "lost_generation": "late"})
     assert (first / "runtime-receipts.jsonl").exists() and not (second / "runtime-receipts.jsonl").exists()
 
 

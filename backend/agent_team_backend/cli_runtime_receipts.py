@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import stat
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -137,9 +138,9 @@ class RegressionHook(HarnessHook):
         self._receipts = root / "runtime-receipts.jsonl"
         self.ledger = ControlLedger()  # frames and bytes per type (E2 3 item 5); counts only
 
-    def receipt(self, record: dict) -> None:
+    def receipt(self, build: Callable[[], dict]) -> None:
         with self._receipts.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+            stream.write(json.dumps(build(), ensure_ascii=False) + "\n")
 
     def create_checkpoint(self, fd: int, session_id: str, pane_id: str, generation: str, sidecar_tty: str,
                           root: dict) -> dict | None:
@@ -150,9 +151,15 @@ class RegressionHook(HarnessHook):
     def launch_env(self, argv: list[str], *, cwd: str, env: dict[str, str]) -> dict[str, str]:
         from . import cli_runtime
 
-        # `tests/cli_regression/support/isolation.py` assigns its guard here; without one the environment is unchanged.
+        # `tests/cli_regression/support/isolation.py` assigns its guard here. Without one the environment is unchanged,
+        # unless the isolation support has asked for launches to be guarded (its own switch): then an unguarded
+        # launch would run under a guarantee nobody provides, so it is refused.
         guard = getattr(cli_runtime, "prepare_native_launch", None)
-        return env if guard is None else guard(argv, cwd=cwd, env=env)
+        if guard is None:
+            if os.environ.get("NAVIDE_REGRESSION_ACCOUNT_GUARD") == "1":
+                raise RuntimeError("the isolated harness requires a launch guard and none is installed")
+            return env
+        return guard(argv, cwd=cwd, env=env)
 
     def runtime_argv(self) -> list[str]:
         fault = os.environ.get("NAVIDE_ACR_FAULT")

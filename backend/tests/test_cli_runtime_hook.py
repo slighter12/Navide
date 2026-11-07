@@ -53,7 +53,13 @@ def test_without_the_isolated_root_the_hook_is_the_products_and_acts_on_nothing(
     binary = tmp_path / "sidecar"
     binary.write_bytes(b"x")
     assert hook.executable_digest(binary) is None, "the product does not hash its binary"
-    assert hook.receipt({"event": "any"}) is None
+    built: list[str] = []
+
+    def build() -> dict:
+        built.append("built")
+        return {"event": "any"}
+
+    assert hook.receipt(build) is None and built == [], "the product's hook builds no record"
     assert hook.create_checkpoint(3, "sid", "pane", "gen", "/dev/ttys000", {"pid": 1}) is None
     hook.ledger.sent(1, 10)
     hook.ledger.received(object())
@@ -63,11 +69,45 @@ def test_without_the_isolated_root_the_hook_is_the_products_and_acts_on_nothing(
     assert list(tmp_path.iterdir()) == [binary], "the product wrote no file"
 
 
+def test_the_product_ledger_and_the_harness_ledger_have_the_members_of_the_one_contract():
+    from agent_team_backend.cli_runtime_receipts import ControlLedger
+
+    def members(cls) -> set[str]:
+        return {name for name in dir(cls) if not name.startswith("_") and callable(getattr(cls, name))}
+
+    contract = members(cli_runtime_hook.Ledger)
+    assert contract == {"sent", "received", "late_part", "late_answer", "snapshot"}
+    assert members(cli_runtime_hook.NullLedger) == contract, "the product's ledger drifted from the contract"
+    assert members(ControlLedger) == contract, "the harness's ledger drifted from the contract"
+
+
+async def test_the_backend_builds_one_hook_for_the_service_and_the_log_watcher(tmp_path, monkeypatch):
+    from agent_team_backend import app
+
+    monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(tmp_path))
+    monkeypatch.setenv("NAVIDE_ACR_EVAL_RUNTIME", "rust-shell")
+    hook = app.harness_hook()
+    assert app.harness_hook() is hook, "the watcher and anything else asking get the same hook"
+    assert app.get_terminals()._hook is hook, "the service runs with it too"
+
+
+def test_only_the_backend_entry_builds_a_hook_from_the_environment():
+    builders = [f"{path.relative_to(PY_SRC)}:{number}" for path in sorted(PY_SRC.rglob("*.py"))
+                for number, line in enumerate(path.read_text().splitlines(), 1)
+                if re.search(r"cli_runtime_hook\.from_environment\(", line)]
+    assert [site.split(":")[0] for site in builders] == ["app.py", "cli_runtime.py"], builders
+    # the service builds its own only when it is built without one (a test or a harness driver)
+    assert "if hook is None else hook" in (PY_SRC / "cli_runtime.py").read_text()
+
+
 async def test_a_service_built_without_the_root_counts_and_records_nothing(harness_env):
     service = RustTerminalService(_sink)
     assert type(service._hook) is HarnessHook
     assert service.control_ledger() == {}
-    service._receipt({"event": "unrecorded"})
+    def refuse() -> dict:
+        raise AssertionError("the product built a receipt record")
+
+    service._receipt(refuse)
 
 
 async def test_the_isolated_root_selects_the_hook_that_acts(tmp_path, monkeypatch):
@@ -75,8 +115,8 @@ async def test_the_isolated_root_selects_the_hook_that_acts(tmp_path, monkeypatc
     monkeypatch.delenv("NAVIDE_ACR_FAULT", raising=False)
     hook = cli_runtime_hook.from_environment()
     assert type(hook) is not HarnessHook and isinstance(hook, HarnessHook)
-    hook.receipt({"event": "a", "n": 1})
-    hook.receipt({"event": "b"})
+    hook.receipt(lambda: {"event": "a", "n": 1})
+    hook.receipt(lambda: {"event": "b"})
     assert [json.loads(line) for line in (tmp_path / "runtime-receipts.jsonl").read_text().splitlines()] == [
         {"event": "a", "n": 1}, {"event": "b"}]
     assert hook.runtime_argv() == []
@@ -103,6 +143,25 @@ async def test_the_harness_hook_asks_the_guard_the_isolation_module_installs(tmp
     monkeypatch.setattr(cli_runtime, "prepare_native_launch", guard, raising=False)  # what isolation.py assigns
     assert hook.launch_env(["x"], cwd="/w", env=env) == {"HOME": "/h", "GUARDED": "1"}
     assert seen == [(["x"], "/w", env)]
+
+
+async def test_a_requested_launch_guard_that_is_not_installed_refuses_the_launch(tmp_path, monkeypatch):
+    """The isolation support's own signal for "launches are guarded" is the account-guard switch. With it on and no guard
+    assigned, passing the environment through would run a launch the harness believes is guarded."""
+    monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(tmp_path))
+    monkeypatch.setenv("NAVIDE_REGRESSION_ACCOUNT_GUARD", "1")
+    monkeypatch.delattr(cli_runtime, "prepare_native_launch", raising=False)
+    hook = cli_runtime_hook.from_environment()
+    with pytest.raises(RuntimeError, match="launch guard"):
+        hook.launch_env(["x"], cwd="/w", env={"HOME": "/h"})
+    seen = []
+
+    def guard(argv, *, cwd, env):
+        seen.append(argv)
+        return env
+
+    monkeypatch.setattr(cli_runtime, "prepare_native_launch", guard, raising=False)
+    assert hook.launch_env(["x"], cwd="/w", env={"HOME": "/h"}) == {"HOME": "/h"} and seen == [["x"]]
 
 
 async def test_the_harness_hook_counts_control_frames_and_the_service_reports_them(tmp_path, monkeypatch):
@@ -168,12 +227,22 @@ def test_the_vendor_registry_does_not_depend_on_the_runtime():
     assert not offenders, "the vendor registry sits below the runtime: " + "; ".join(offenders)
 
 
-def test_every_runtime_session_field_is_read_or_written_somewhere():
+def _session_dataclasses():
+    from agent_team_backend import terminals
+
+    return [cls for module in (cli_runtime, terminals) for cls in vars(module).values()
+            if dataclasses.is_dataclass(cls) and isinstance(cls, type) and cls.__module__ == module.__name__]
+
+
+def test_every_session_dataclass_field_is_read_or_written_somewhere():
     sources = {path: path.read_text() for path in PY_SRC.rglob("*.py")}
     tests = {path: path.read_text() for path in (PY_SRC.parent / "tests").rglob("*.py")}
+    classes = _session_dataclasses()
+    assert {RuntimeSession.__name__, "TerminalSession"} <= {cls.__name__ for cls in classes}
     unused = []
-    for field in dataclasses.fields(RuntimeSession):
-        use = re.compile(rf"\.{field.name}\b")  # a read or an assignment through an object; a bare local does not count
-        if not sum(len(use.findall(text)) for text in (*sources.values(), *tests.values())):
-            unused.append(field.name)
-    assert unused == [], f"RuntimeSession fields nothing reads or writes: {unused}"
+    for cls in classes:
+        for field in dataclasses.fields(cls):
+            use = re.compile(rf"\.{field.name}\b")  # a read or an assignment through an object; a bare local does not count
+            if not sum(len(use.findall(text)) for text in (*sources.values(), *tests.values())):
+                unused.append(f"{cls.__name__}.{field.name}")
+    assert unused == [], f"dataclass fields nothing reads or writes: {unused}"

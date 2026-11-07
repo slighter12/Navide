@@ -382,12 +382,14 @@ def _reset_terminal_singleton():
     a person does, so without a reset the account-switch rate limit would start
     refusing switches partway through the run."""
     app._TERMINALS = None
+    app._HARNESS_HOOK = None
     app._active_session = None
     app._PTY_OWNERS.clear()
     app._pane_activity.clear()
     ws_handlers._switch_history.clear()
     yield
     app._TERMINALS = None
+    app._HARNESS_HOOK = None
     app._active_session = None
     app._PTY_OWNERS.clear()
     app._pane_activity.clear()

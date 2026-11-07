@@ -459,7 +459,9 @@ def _fake_terminals(monkeypatch, cwd_by_pane: dict[str, str]) -> None:
         f"t-{pane}": SimpleNamespace(pane_id=pane, cwd=cwd, closed=False)
         for pane, cwd in cwd_by_pane.items()
     }
-    monkeypatch.setattr(app_module, "_TERMINALS", SimpleNamespace(_sessions=sessions))
+    monkeypatch.setattr(
+        app_module, "_TERMINALS", SimpleNamespace(list_sessions=lambda: list(sessions.values()))
+    )
 
 
 @needs_git

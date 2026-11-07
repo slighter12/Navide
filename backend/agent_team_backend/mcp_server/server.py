@@ -314,7 +314,7 @@ def _live_pane_workspaces() -> list[str]:
     """
     try:
         terminals = _terminal_service()
-        sessions = list(getattr(terminals, "_sessions", {}).values())  # snapshot
+        sessions = terminals.list_sessions()  # snapshot
     except Exception:  # noqa: BLE001 — advisory check, never fatal
         return []
     workspaces: list[str] = []
@@ -609,7 +609,7 @@ def _pane_cwd(pane_id: str) -> str:
     # Read the service only if it exists: get_terminals() would create one, and
     # a roster read has no business starting the terminal service.
     service = getattr(_app, "_TERMINALS", None)
-    sessions = list(getattr(service, "_sessions", {}).values())
+    sessions = [] if service is None else service.list_sessions()
     for session in sessions:
         if getattr(session, "pane_id", "") == pane_id and not getattr(session, "closed", True):
             return str(getattr(session, "cwd", "") or "")

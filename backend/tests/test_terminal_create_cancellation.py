@@ -47,6 +47,9 @@ class FakeTerminals(terminals_module.TerminalInterface):
         self.killed.append((session_id, force))
         self._sessions.pop(session_id, None)
 
+    def get(self, session_id: str) -> SimpleNamespace | None:
+        return self._sessions.get(session_id)
+
     def find_live_by_resume_id(self, *args: Any, **kwargs: Any) -> list[Any]:
         return []
 
@@ -389,6 +392,54 @@ async def test_terminal_kill_requires_owner_and_clears_owner() -> None:
     )
     assert second.terminals.killed == [(term.id, False)]  # type: ignore[attr-defined]
     assert term.id not in app._PTY_OWNERS
+
+# ── a cancel is acknowledged only on proof ──────────────────────────────────
+
+class _AnswersCancelWith(FakeTerminals):
+    def __init__(self, answer: Any) -> None:
+        super().__init__()
+        self._answer = answer
+
+    async def cancel_dispatched(self, record: dict[str, Any]) -> Any:
+        return self._answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["pending", "garbage", None], ids=["raw-pending", "unknown-string", "none"])
+async def test_a_cancel_proof_that_is_not_a_known_proof_is_not_acknowledged(answer: Any) -> None:
+    """Fail closed: only PROVEN or ROLLBACK acknowledge. The raw string "pending" is the pending proof, and a
+    pending proof waits for the create's own disposition, which here is that the program may have run."""
+    session = make_session()
+    session.terminals = _AnswersCancelWith(answer)  # type: ignore[assignment]
+    done, settled = asyncio.Event(), asyncio.Event()
+    done.set()
+    settled.set()
+    session._terminal_create_transactions[("pane-1", "gen-1")] = {  # type: ignore[attr-defined]
+        "pane_id": "pane-1", "generation": "gen-1", "committed": False, "done": done,
+        "native": {"outcome": "published", "settled": settled},
+    }
+
+    await app.handle_message(session, cancel_message())
+
+    reply = session.websocket.sent[-1]  # type: ignore[attr-defined]
+    assert reply["error"]["code"] == "CREATE_CANCEL_UNRESOLVED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", [terminals_module.CreateCancel.PROVEN, terminals_module.CreateCancel.ROLLBACK])
+async def test_a_proven_or_rolled_back_cancel_is_acknowledged(answer: Any) -> None:
+    session = make_session()
+    session.terminals = _AnswersCancelWith(answer)  # type: ignore[assignment]
+    done = asyncio.Event()
+    done.set()
+    session._terminal_create_transactions[("pane-1", "gen-1")] = {  # type: ignore[attr-defined]
+        "pane_id": "pane-1", "generation": "gen-1", "committed": False, "done": done,
+    }
+
+    await app.handle_message(session, cancel_message())
+
+    assert session.websocket.sent[-1]["payload"]["cancelled"] is True  # type: ignore[attr-defined]
+
 
 # ── the push channel a create wires ─────────────────────────────────────────
 # A push channel is wired into the command before the spawn, but a spawn is not

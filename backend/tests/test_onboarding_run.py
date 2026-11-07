@@ -102,6 +102,32 @@ async def test_the_spawned_command_is_the_registry_one(monkeypatch: pytest.Monke
     assert session._onboarding_runs == {"term-1"}
 
 
+class _AsyncCreateOnlyTerminals(TerminalInterface):
+    """The Rust service's shape: the synchronous `create` is refused, only `create_async` spawns."""
+
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    def create(self, **kwargs: Any) -> Any:
+        raise RuntimeError("Selected Rust runtime requires native async create")
+
+    async def create_async(self, **launch: Any) -> Any:
+        self.created.append(launch)
+        return type("T", (), {"id": f"term-{len(self.created)}"})()
+
+
+@pytest.mark.asyncio
+async def test_a_run_starts_through_the_async_create_a_service_may_require(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ob, "resolve_run", lambda _r: {"ok": True, "command": "ollama pull x"})
+    terminals = _AsyncCreateOnlyTerminals()
+    session = _session(terminals)
+    reply = await _send(session, "onboarding.run", {"kind": "pull_model", "model": "x"})
+    payload = reply["payload"]
+    assert payload["ok"] is True and payload["run_id"] == "term-1" and "spawn_failed" not in payload
+    assert terminals.created[0]["agent_key"] == ws_handlers.ONBOARDING_RUN_AGENT_KEY
+    assert session._onboarding_runs == {"term-1"}
+
+
 @pytest.mark.asyncio
 async def test_a_missing_bootstrap_binary_is_reported_before_any_spawn(
     monkeypatch: pytest.MonkeyPatch,

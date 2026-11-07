@@ -65,7 +65,7 @@ from .analyzer_ollama import (
 from .analyzer_settings import AnalyzerSettingsStore
 from .ai_chat_settings import AIChatSettingsStore
 from .applog import app_data_dir, backend_log_path, backend_port_file, in_data_dir
-from .cli_vendors.registry import VENDORS as _CLI_VENDORS
+from .cli_vendors.registry import build as _build_cli_vendors
 from .cli_vendors.registry import vendor as cli_vendor
 from .codex_home import CodexHomeManager
 from .ipc import make_error, make_event, make_response
@@ -356,9 +356,9 @@ async def analyzer_benchmark(progress_cb=None) -> list:
     return await _llama_benchmark(progress_cb=progress_cb)
 
 # Log readers: one per vendor. Attribution maps log session files to panes.
-# The evaluation selector acts on the registry here, in place, before the readers are built; the registry itself
-# sits below the runtime.
-cli_runtime_adapters.install(_CLI_VENDORS)
+# The evaluation selector wraps a copy of the registry, built once here before the readers; the registry itself sits
+# below the runtime and is never rewritten.
+_CLI_VENDORS = _build_cli_vendors(wrap=cli_runtime_adapters.native_reference)
 # One reader per registered vendor — the registry is the single source.
 _readers = [
     spec.make_log_reader()
@@ -1137,6 +1137,18 @@ async def _active_emit(event: dict[str, Any] | bytes) -> None:
         log.warning("terminal output send failed: %s", err)
 
 
+_HARNESS_HOOK: cli_runtime_hook.HarnessHook | None = None
+
+
+def harness_hook() -> cli_runtime_hook.HarnessHook:
+    """The one evaluation hook this backend runs with, built on first use and handed to both of its consumers: the
+    terminal service and the log watcher. The product's hook does nothing."""
+    global _HARNESS_HOOK
+    if _HARNESS_HOOK is None:
+        _HARNESS_HOOK = cli_runtime_hook.from_environment()
+    return _HARNESS_HOOK
+
+
 def get_terminals() -> TerminalService:
     """The one app-level TerminalService. Lazy (not at import) because
     TerminalService.__init__ binds to the running event loop."""
@@ -1147,7 +1159,7 @@ def get_terminals() -> TerminalService:
         cli_runtime_hook.require_isolated_harness(selected)
         if selected == cli_runtime_hook.RUST_SELECTION:
             from .cli_runtime import RustTerminalService
-            _TERMINALS = RustTerminalService(emit=_active_emit)
+            _TERMINALS = RustTerminalService(emit=_active_emit, hook=harness_hook())
         else:
             _TERMINALS = TerminalService(emit=_active_emit)
     return _TERMINALS
@@ -2618,7 +2630,7 @@ async def _start_log_watcher() -> None:
         progress_sink=_on_backfill_progress,
         # The safety-net sweep keeps its default interval; only the harness's hook may shorten it, so a test does
         # not wait out the default.
-        rescan_interval_s=cli_runtime_hook.from_environment().rescan_interval_s(),
+        rescan_interval_s=harness_hook().rescan_interval_s(),
     )
     for r in _readers:
         _log_watcher.add_reader(r)
