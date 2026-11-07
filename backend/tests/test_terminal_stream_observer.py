@@ -350,6 +350,14 @@ async def test_m1_a_pump_drop_during_the_final_barrier_emit_is_reported_once_bef
     master._chunks.append(b"hi")  # unread: the final barrier's slurp reads it and its emit stalls on the sink
     master.buffered = 2
     sink.gate.clear()
+    closing_at_final_collection: list[bool] = []
+    close_stream_state = service.stream.close_stream_state
+
+    def spy(spied_session) -> None:
+        closing_at_final_collection.append(master._closing)  # the pump must already be unable to add a drop
+        close_stream_state(spied_session)
+
+    monkeypatch.setattr(service.stream, "close_stream_state", spy)
     service._close(session, reason="exit")
     await until(lambda: sink.frames, "the final barrier emit reaches the sink")
     run_pump(monkeypatch, master, *[bytes([65 + n]) * chunk for n in range(10)])  # the pump overflows during the stall
@@ -361,6 +369,7 @@ async def test_m1_a_pump_drop_during_the_final_barrier_emit_is_reported_once_bef
     assert recorder.total("read") == 2 + 8 * chunk, "the barrier's read, and the bytes the pump took and dropped"
     assert marked(session) == [8 * chunk], "the log has the gap, once"
     assert session.closed and recorder.total("emitted") == 2
+    assert closing_at_final_collection == [True], "`_finish_stream` begins the close before the stream's last collection"
 
 
 async def test_m1_a_pump_drop_pending_when_the_runtime_is_lost_is_reported_by_the_settlement(monkeypatch):
