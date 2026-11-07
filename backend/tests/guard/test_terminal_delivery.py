@@ -14,6 +14,7 @@ from agent_team_backend import agent_messaging, app
 from agent_team_backend.guard import is_tainted
 from agent_team_backend.mcp_server import server as mcp
 from agent_team_backend.mcp_server import wiring as mcp_wiring
+from agent_team_backend.terminals import TerminalInterface
 
 
 class FakeWebSocket:
@@ -24,7 +25,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self, at_prompt: bool | None) -> None:
         self.at_prompt = at_prompt
         self.written: list[str] = []

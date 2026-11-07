@@ -18,6 +18,7 @@ import pytest
 from agent_team_backend import agent_messaging, app, ws_handlers
 from agent_team_backend.projects import PaneRecord, Project, ProjectStore
 from agent_team_backend.spawn_history import SpawnHistoryStore
+from agent_team_backend.terminals import TerminalInterface
 
 
 class FakeWebSocket:
@@ -28,7 +29,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def create(self, **kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(
             id="term-1",

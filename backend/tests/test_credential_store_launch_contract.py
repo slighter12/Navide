@@ -13,6 +13,7 @@ import pytest
 from agent_team_backend import app, usage_service
 from agent_team_backend.credential_store import CredentialStores, active_store_metadata
 from agent_team_backend.pane_account_history import PaneAccountHistory
+from agent_team_backend.terminals import TerminalInterface
 from tests.test_credential_launch import posix_bash  # noqa: F401
 from tests.test_quota_failover_login_contract import call, rig, session  # noqa: F401
 
@@ -50,7 +51,7 @@ def launch_rig(request, rig, tmp_path, monkeypatch, posix_bash):
     cli.chmod(0o700)
     rc = tmp_path / "fixture.rc"
     rc.write_text("export XDG_DATA_HOME=" + shlex.quote(str(selected)) + "\n")
-    monkeypatch.setattr(app, "get_terminals", lambda: SimpleNamespace())
+    monkeypatch.setattr(app, "get_terminals", lambda: TerminalInterface())
     owner = session()
     processes = []
     snapshot_path = {"value": ""}

@@ -28,6 +28,9 @@ async def test_native_create_uses_upstream_detached_server_mark(
     async def emit(_frame):
         pass
 
+    # The launch guard is the harness's: it is consulted through the hook the isolated root selects.
+    (tmp_path / "isolated").mkdir()
+    monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", str(tmp_path / "isolated"))
     service = RustTerminalService(emit)
     monkeypatch.setattr(resource_limits, "current", lambda: {
         resource_limits.TRACK_DETACHED_KEY: tracking,
@@ -47,7 +50,7 @@ async def test_native_create_uses_upstream_detached_server_mark(
         launches.append(dict(env))
         return env
 
-    monkeypatch.setattr(cli_runtime, "prepare_native_launch", prepare)
+    monkeypatch.setattr(cli_runtime, "prepare_native_launch", prepare, raising=False)  # what isolation.py assigns
 
     async def started():
         pass

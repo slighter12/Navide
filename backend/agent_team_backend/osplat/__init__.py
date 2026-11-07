@@ -152,13 +152,3 @@ def has_native_vendor_observer() -> bool:
 
 
 __all__ += ["has_native_vendor_observer"]
-
-from . import controlling_tty  # noqa: E402
-
-#: A process's controlling-terminal device read from the kernel record, or None.
-controlling_terminal_device = {
-    "darwin": controlling_tty.from_libproc,
-    "linux": controlling_tty.from_proc,
-    "win32": controlling_tty.unsupported,
-}[platform_id]
-__all__ += ["controlling_terminal_device"]

@@ -25,7 +25,7 @@ class RecordingSocket:
             raise RuntimeError("socket closed")
         self.sent.append(payload)
 
-class FakeTerminals:
+class FakeTerminals(terminals_module.TerminalInterface):
     def __init__(self) -> None:
         self.created: list[SimpleNamespace] = []
         self.killed: list[tuple[str, bool]] = []

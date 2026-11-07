@@ -21,6 +21,7 @@ from agent_team_backend import app, quota_failover, ws_handlers
 from agent_team_backend.cli_vendors import registry
 from agent_team_backend.db import Database
 from agent_team_backend.profiles_store import CliProfilesStore
+from agent_team_backend.terminals import TerminalInterface
 
 CLAUDE_CREDENTIAL_ENV = (
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -89,7 +90,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.sessions: dict[str, SimpleNamespace] = {}

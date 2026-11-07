@@ -15,12 +15,11 @@ declaration and an adapter, not a reader.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import osplat
+from . import cli_runtime_hook, osplat
 from .cli_runtime_observation import observe_core
 from .cli_runtime_state import pack, unpack
 from .cli_vendors._vendor_facts import FACTS, WANTED_SESSION, Mode
@@ -413,8 +412,8 @@ def native_reference(spec):
     facts = FACTS.get(spec.key)
     if not (facts and facts.observer):
         return spec
-    if os.environ.get('NAVIDE_ACR_EVAL_RUNTIME') != 'rust-shell' or not osplat.has_native_vendor_observer():
+    selected = cli_runtime_hook.runtime_selection()
+    if selected != cli_runtime_hook.RUST_SELECTION or not osplat.has_native_vendor_observer():
         return spec
-    if not os.environ.get('NAVIDE_REGRESSION_ROOT'):
-        raise RuntimeError('Rust native differences require the isolated regression harness')
+    cli_runtime_hook.require_isolated_harness(selected)
     return replace(spec, make_log_reader=native_reader(spec.make_log_reader, spec.key))

@@ -16,6 +16,7 @@ from agent_team_backend.dev_time_store import (
     resolve_event_ts,
 )
 from agent_team_backend.projects import PROJECT_DIR_NAME
+from agent_team_backend.terminals import TerminalInterface
 
 UTC = timezone.utc
 # A fixed "now" well inside a day (12:00 UTC) so window math is unambiguous.
@@ -536,7 +537,7 @@ class _FakeWebSocket:
         self.sent.append(payload)
 
 
-class _FakeTerminals:
+class _FakeTerminals(TerminalInterface):
     """Only what terminal.input touches: write() and get()."""
 
     def __init__(self, sessions: dict) -> None:

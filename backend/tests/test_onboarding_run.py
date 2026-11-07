@@ -18,7 +18,7 @@ import pytest
 from agent_team_backend import app as app_mod
 from agent_team_backend import onboarding_deps as ob
 from agent_team_backend import ws_handlers
-from agent_team_backend.terminals import TerminalService
+from agent_team_backend.terminals import TerminalInterface, TerminalService
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell run")
 
@@ -31,7 +31,7 @@ class _FakeWebSocket:
         self.sent.append(payload)
 
 
-class _RecordingTerminals:
+class _RecordingTerminals(TerminalInterface):
     """Stands in for TerminalService.create: records what would be spawned."""
 
     def __init__(self, fail: Exception | None = None) -> None:

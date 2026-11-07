@@ -52,7 +52,7 @@ from . import (
     webhook_service,
 )
 from .cli_vendors.codex import command_with_resume_id as codex_command_with_resume_id
-from .cli_runtime import CreateCancelled, RustTerminalService
+from .terminals import CreateCancel, CreateCancelled
 from .cli_vendors.registry import VENDORS as CLI_VENDORS
 from .cli_vendors.registry import vendor as cli_vendor
 from .ipc import make_error, make_event, make_response
@@ -8427,12 +8427,8 @@ async def _rollback_terminal_create(
         transaction["rolled_back_term"] = term_id
         if app._PTY_OWNERS.get(term_id) is session:
             app._PTY_OWNERS.pop(term_id, None)
-        kill_verified = getattr(session.terminals, "kill_verified", None)
-        if kill_verified is None:
-            await session.terminals.kill(term_id, force=True)
-            return
         transaction["term_cleaned"] = False
-        transaction["term_cleaned"] = await kill_verified(term_id)
+        transaction["term_cleaned"] = await session.terminals.kill_verified(term_id)
 
     async def cleanup() -> None:
         from . import app
@@ -9078,8 +9074,7 @@ async def _terminal_create_impl(
             )
         except cli_launch.LaunchRefused as refused:
             # Refused before the service was reached: it still owes the one failed-create receipt.
-            if isinstance(session.terminals, RustTerminalService):
-                session.terminals.receipt_refused_create(str(payload.get("pane_id") or ""), refused)
+            session.terminals.receipt_refused_create(str(payload.get("pane_id") or ""), refused)
             raise
         # The builtin skills transformer cannot return lines; it keeps them.
         from .plugins.builtin.navide_skills import skills_wiring
@@ -9213,36 +9208,32 @@ async def _terminal_create_impl(
                 )
                 raise _TerminalCreateReapTimeout(stale.id)
     async def _spawn_and_claim(spawn_command=None, credential=None) -> Any:
-        native = isinstance(session.terminals, RustTerminalService)
-        create = session.terminals.create_async if native else session.terminals.create
-        term = create(
-            pane_id=payload["pane_id"],
-            agent_key=agent_key,
-            command=payload["command"],
-            cwd=payload["cwd"],
-            cols=int(payload.get("cols", 100)),
-            rows=int(payload.get("rows", 30)),
-            env=env or None,
-            env_remove=env_remove,
-            metadata=metadata,
-            output_log_file=payload.get("output_log_file") or "",
-            **({"spawn_command": spawn_command} if spawn_command is not None else {}),
-            **({"cancelled": lambda: transaction["cancelled"] or session.dead,
-                "cancel_record": transaction, "base_command": base_command,
-                "login_subcommand": login_subcommand,
-                **({"credential": credential} if credential is not None else {})} if native else {}),
-        )
-        if native:
-            try:
-                term = await term
-            except CreateCancelled:
-                raise _TerminalCreateCancelled from None
+        try:
+            term = await session.terminals.create_async(
+                pane_id=payload["pane_id"],
+                agent_key=agent_key,
+                command=payload["command"],
+                cwd=payload["cwd"],
+                cols=int(payload.get("cols", 100)),
+                rows=int(payload.get("rows", 30)),
+                env=env or None,
+                env_remove=env_remove,
+                metadata=metadata,
+                output_log_file=payload.get("output_log_file") or "",
+                **({"spawn_command": spawn_command} if spawn_command is not None else {}),
+                cancelled=lambda: transaction["cancelled"] or session.dead,
+                cancel_record=transaction,
+                base_command=base_command,
+                login_subcommand=login_subcommand,
+                credential=credential,
+            )
+        except CreateCancelled:
+            raise _TerminalCreateCancelled from None
         transaction["term_id"] = term.id
         # Claim immediately. A CLI can die while attribution registration is
         # still running; its terminal.exit must still reach this renderer.
         app._PTY_OWNERS[term.id] = session
-        if native:
-            await session.terminals.activate_async(term.id)
+        await session.terminals.activate_async(term.id)
         return term
 
     # The account this launch is pinned to, resolved ONCE (under the switch
@@ -9670,14 +9661,12 @@ async def terminal_create_cancel(
     if transaction and not transaction.get("committed"):
         transaction["cancelled"] = True
         session._terminal_create_tombstones.add(key)
-        # A native create: acknowledge only with proof its target cannot execute, or that
-        # its created root was cleaned by verified identity. Never a bare flag.
-        proven = True
-        cancel_native = getattr(session.terminals, "cancel_dispatched", None)
-        if cancel_native is not None:
-            proven = await cancel_native(transaction) == "proven"
-            if not proven:
-                proven = await _native_cancel_disposition(transaction)
+        # Acknowledge only with proof its target cannot execute, or that its created root was cleaned by
+        # verified identity. Never a bare flag. A create with no dispatch fence proves it by its own rollback.
+        outcome = await session.terminals.cancel_dispatched(transaction)
+        proven = outcome is not CreateCancel.PENDING
+        if outcome is CreateCancel.PENDING:
+            proven = await _native_cancel_disposition(transaction)
         await _rollback_terminal_create(session, transaction)
         if not proven:
             await session.send_json(
@@ -9751,9 +9740,7 @@ async def terminal_input(session: "Session", msg_id: str, msg_type: str, payload
     # started between the renderer's last look and this write still refuses it.
     session_id = payload["terminal_session_id"]
     if payload.get("require_shell_prompt") is True and payload["data"]:
-        foreground = (await session.terminals.shell_in_foreground_async(session_id)
-                      if isinstance(session.terminals, RustTerminalService)
-                      else session.terminals.shell_in_foreground(session_id))
+        foreground = await session.terminals.shell_in_foreground_async(session_id)
         if foreground is False:
             await session.send_json(
                 make_response(msg_id, msg_type, {"ok": False, "error": "foreground-busy"})
@@ -9774,9 +9761,7 @@ async def terminal_input(session: "Session", msg_id: str, msg_type: str, payload
         # Anything else written (a person typing, a kill-line after a failed
         # injection) means the line is no longer only what was injected.
         _GUARDED_LINES.pop(session_id, None)
-    pending = (await session.terminals.write_async(session_id, payload["data"])
-               if isinstance(session.terminals, RustTerminalService)
-               else session.terminals.write(session_id, payload["data"]))
+    pending = await session.terminals.write_async(session_id, payload["data"])
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "pending": pending}))
     # A keyboard frame (the renderer flags only those: not mouse/focus reports,
     # not paste or programmatic injection) is a human dev-time heartbeat for
@@ -9795,12 +9780,7 @@ async def terminal_shell_at_prompt(session: "Session", msg_id: str, msg_type: st
     running something in front of it (False), or unknown (None). Polled by the
     renderer's messaging gate; a tcgetpgrp per session, no subprocess."""
     ids = [str(x) for x in (payload.get("terminal_session_ids") or [])]
-    states = {
-        sid: (await session.terminals.shell_in_foreground_async(sid)
-              if isinstance(session.terminals, RustTerminalService)
-              else session.terminals.shell_in_foreground(sid))
-        for sid in ids
-    }
+    states = {sid: await session.terminals.shell_in_foreground_async(sid) for sid in ids}
     await session.send_json(make_response(msg_id, msg_type, {"ok": True, "states": states}))
 
 
@@ -10085,21 +10065,13 @@ async def terminal_resize(session: "Session", msg_id: str, msg_type: str, payloa
     # after narrowing and the CLI's repaints strand corrupt frames in
     # scrollback (visible as residual text). See drain_output().
     tid = payload["terminal_session_id"]
-    if isinstance(session.terminals, RustTerminalService):
-        async with session.terminals.control_async(tid, int(payload["cols"]), int(payload["rows"])):
-            await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
-        return
-    await session.terminals.drain_output(tid)
-    session.terminals.resize(tid, int(payload["cols"]), int(payload["rows"]))
-    await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
+    async with session.terminals.control_async(tid, int(payload["cols"]), int(payload["rows"])):
+        await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
 @handler("terminal.interrupt")
 async def terminal_interrupt(session: "Session", msg_id: str, msg_type: str, payload: dict) -> None:
-    if isinstance(session.terminals, RustTerminalService):
-        await session.terminals.interrupt_async(payload["terminal_session_id"])
-    else:
-        session.terminals.interrupt(payload["terminal_session_id"])
+    await session.terminals.interrupt_async(payload["terminal_session_id"])
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
 
 
@@ -10384,14 +10356,10 @@ async def terminal_reattach(session: "Session", msg_id: str, msg_type: str, payl
     app._claim_ptys(session, alive)
     async with AsyncExitStack() as controls:
         if cols > 0 and rows > 0:
-            if isinstance(session.terminals, RustTerminalService):
-                # One ACK covers all survivors; consistent unique lock order
-                # avoids overlapping reattach lists deadlocking each other.
-                for tid in sorted(set(alive)):
-                    await controls.enter_async_context(session.terminals.control_async(tid, cols, rows, redraw=True))
-            else:
-                for tid in alive:
-                    session.terminals.force_redraw(tid, cols, rows)
+            # One ACK covers all survivors; consistent unique lock order
+            # avoids overlapping reattach lists deadlocking each other.
+            for tid in sorted(set(alive)):
+                await controls.enter_async_context(session.terminals.control_async(tid, cols, rows, redraw=True))
         # Where each survivor is actually writing its transcript. A reattaching
         # pane has a fresh pane id, and the path its caller derives from that id
         # names a file no one ever opened — the conversation is in the log the
@@ -10450,12 +10418,7 @@ async def terminal_redraw(session: "Session", msg_id: str, msg_type: str, payloa
         # deadline; without draining first, the SIGWINCH could interrupt
         # an in-flight frame and strand a corrupt repaint — exactly what
         # the resize drain/grace machinery exists to prevent.
-        if isinstance(session.terminals, RustTerminalService):
-            async with session.terminals.control_async(tid, cols, rows, redraw=True):
-                await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
-        else:
-            await session.terminals.drain_output(tid)
-            session.terminals.force_redraw(tid, cols, rows)
+        async with session.terminals.control_async(tid, cols, rows, redraw=True):
             await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
         return
     await session.send_json(make_response(msg_id, msg_type, {"ok": True}))
@@ -11661,15 +11624,15 @@ async def _settle_inflight(matches: "Callable[[dict[str, Any]], bool]") -> str |
         # synchronous too, so from here this create can no longer commit.
         transaction["cancelled"] = True
         owner._terminal_create_tombstones.add((transaction["pane_id"], transaction["generation"]))
-        cancel_native = getattr(owner.terminals, "cancel_dispatched", None)
-        if cancel_native is None:
-            try:  # the non-native rollback kills what it created; wait for it to finish
+        outcome = await owner.terminals.cancel_dispatched(transaction)
+        if outcome is CreateCancel.ROLLBACK:
+            try:  # a create with no dispatch fence rolls back by killing what it created; wait for it to finish
                 async with asyncio.timeout(60):
                     await transaction["done"].wait()
             except TimeoutError:
                 return f"a create for pane {transaction['pane_id']} did not settle"
             continue
-        if await cancel_native(transaction) == "proven" or await _native_cancel_disposition(transaction):
+        if outcome is CreateCancel.PROVEN or await _native_cancel_disposition(transaction):
             continue
         return f"a create for pane {transaction['pane_id']} could not be proven cancelled or cleaned"
     return None

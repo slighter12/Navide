@@ -18,6 +18,7 @@ import pytest
 from agent_team_backend import app
 from agent_team_backend.cli_vendors import codex as codex_vendor
 from agent_team_backend.codex_home import CodexHomeManager
+from agent_team_backend.terminals import TerminalInterface
 
 PANE_A = "0a1b2c3d-1111-4222-8333-444455556666"
 PANE_B = "0a1b2c3d-7777-4888-8999-aaaabbbbcccc"
@@ -249,7 +250,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self, *, fail_spawn: bool = False) -> None:
         self.fail_spawn = fail_spawn
         self.killed: list[tuple[str, bool]] = []

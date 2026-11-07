@@ -28,6 +28,8 @@ from uvicorn.protocols.utils import ClientDisconnected
 
 from . import __version__
 from . import agent_messaging
+from . import cli_runtime_adapters
+from . import cli_runtime_hook
 from . import hook_auth
 from . import hook_drain
 from . import guard_fail_closed, guard_hooks
@@ -74,7 +76,6 @@ from .log_readers import (
     TokenUsage,
 )
 from .log_readers.attribution import Attribution
-from .log_readers.watcher import rescan_interval_from_env
 from .log_readers.claude import encode_claude_cwd
 from .credential_vault import CredentialVault
 from .credential_watcher import CredentialWatcher, reconcile_live_account
@@ -355,6 +356,9 @@ async def analyzer_benchmark(progress_cb=None) -> list:
     return await _llama_benchmark(progress_cb=progress_cb)
 
 # Log readers: one per vendor. Attribution maps log session files to panes.
+# The evaluation selector acts on the registry here, in place, before the readers are built; the registry itself
+# sits below the runtime.
+cli_runtime_adapters.install(_CLI_VENDORS)
 # One reader per registered vendor — the registry is the single source.
 _readers = [
     spec.make_log_reader()
@@ -631,9 +635,8 @@ class Session:
         # Session's send_json. See get_terminals().
         self.terminals = get_terminals()
         # The app-level service starts its background work (the Rust runtime) at the first connection. Startup reap
-        # has finished before any connection, so that start sees what a create would. Only a TerminalService has it.
-        if isinstance(self.terminals, TerminalService):
-            self.terminals.prewarm()
+        # has finished before any connection, so that start sees what a create would.
+        self.terminals.prewarm()
         # Track background tasks so they can be cancelled on disconnect.
         self._review_tasks: set[asyncio.Task] = set()
         # In-flight handle_message tasks; cancelled in ws() finally so handlers
@@ -1139,10 +1142,10 @@ def get_terminals() -> TerminalService:
     TerminalService.__init__ binds to the running event loop."""
     global _TERMINALS
     if _TERMINALS is None:
-        selected = os.environ.get("NAVIDE_ACR_EVAL_RUNTIME", "python")
-        if selected != "python":
-            if selected != "rust-shell" or not os.environ.get("NAVIDE_REGRESSION_ROOT"):
-                raise RuntimeError("Rust evaluation requires the isolated regression harness")
+        # The evaluation selector: the Rust runtime only under the isolated regression harness, until it is adopted.
+        selected = cli_runtime_hook.runtime_selection()
+        cli_runtime_hook.require_isolated_harness(selected)
+        if selected == cli_runtime_hook.RUST_SELECTION:
             from .cli_runtime import RustTerminalService
             _TERMINALS = RustTerminalService(emit=_active_emit)
         else:
@@ -2613,9 +2616,9 @@ async def _start_log_watcher() -> None:
         checkpoint_provider=tokens_store.get_ingestion_checkpoint,
         checkpoint_sink=tokens_store.advance_ingestion_checkpoint,
         progress_sink=_on_backfill_progress,
-        # NAVIDE_LOG_RESCAN_S (0.1-30 s, else 30) shortens the safety-net sweep; the regression harness sets it so a
-        # test does not wait out the 30 s default.
-        rescan_interval_s=rescan_interval_from_env(os.environ.get("NAVIDE_LOG_RESCAN_S")),
+        # The safety-net sweep keeps its default interval; only the harness's hook may shorten it, so a test does
+        # not wait out the default.
+        rescan_interval_s=cli_runtime_hook.from_environment().rescan_interval_s(),
     )
     for r in _readers:
         _log_watcher.add_reader(r)

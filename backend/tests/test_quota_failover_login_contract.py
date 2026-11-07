@@ -32,6 +32,7 @@ from agent_team_backend.credential_vault import LiveCredentials
 from agent_team_backend.db import Database
 from agent_team_backend.profiles_store import CliProfilesStore
 from agent_team_backend.quota_failover import QuotaFailoverService
+from agent_team_backend.terminals import TerminalInterface
 
 
 async def test_scoped_login_watch_harvests_completed_login(rig, monkeypatch):
@@ -287,7 +288,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self) -> None:
         self.registry: dict[str, SimpleNamespace] = {}
         self.created: list[dict[str, Any]] = []

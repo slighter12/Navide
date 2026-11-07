@@ -15,9 +15,8 @@ OBSERVE_RESULT_S = 20
 def _submit(vendor, parser, request, *, match, validate=None, receipt):
     """Send one OBSERVE request from a scan executor and wait for its answer."""
     from .app import get_terminals
-    from .cli_runtime import RustTerminalService
     service = get_terminals()
-    if not isinstance(service, RustTerminalService) or not service._loop.is_running():
+    if not service._loop.is_running():
         raise RuntimeError('Selected native observation unavailable; no Python parser fallback')
     try:
         loop = asyncio.get_running_loop()

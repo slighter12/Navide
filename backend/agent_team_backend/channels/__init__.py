@@ -489,7 +489,7 @@ async def _open_onto_session(record: Any, workspace_path: str, session_id: str) 
                for known_id in (pane_id, *agent_messaging.former_ids(pane_id))):
             return {"ok": False, "code": "session-open-elsewhere", "started": True}
         idle.add(pane_id)
-    name =(getattr(record, "custom_name", "") or getattr(record, "auto_name", "") or str(record.agent)).strip()
+    name = (getattr(record, "custom_name", "") or getattr(record, "auto_name", "") or str(record.agent)).strip()
     opened = await mcp.cli_open_agent(agent=str(record.agent), name=name.replace("/", "-"), task="",
                                       ctx=_host_ctx(), workspace_path=workspace_path, session_id=session_id)
     if not opened.get("ok"):
