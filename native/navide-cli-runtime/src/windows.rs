@@ -21,7 +21,6 @@ use crate::session::{mailbox, SessionCx, SessionHandle};
 use crate::session_pty_win::{CloseGate, GateReason, Identity, SessionPty};
 use crate::wire::Outbound;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::io::{self, Read};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::ptr::null_mut;
@@ -50,7 +49,6 @@ pub struct WindowsSession {
 /// What only the session's own thread touches.
 pub struct Owned {
     root: Identity,
-    descendants: HashMap<u32, Identity>,
 }
 
 /// A real handle to the reader thread (the pseudo handle cannot be used from another thread), so the writer can
@@ -180,10 +178,7 @@ impl WindowsHost {
                 pty,
                 gate: CloseGate::new(),
             },
-            owned: Owned {
-                root: identity,
-                descendants: HashMap::new(),
-            },
+            owned: Owned { root: identity },
             exit,
             tx,
             mailbox,
@@ -193,24 +188,8 @@ impl WindowsHost {
 
 // ---- lifecycle ---------------------------------------------------------------------------------
 
-/// Remember every non-root job member (descendants are enumerated through the job, 7.3).
-fn retain_members(pty: &SessionPty, owned: &mut Owned) -> Vec<Identity> {
-    let members = pty.members().unwrap_or_default();
-    for member in &members {
-        if *member != owned.root {
-            owned.descendants.insert(member.pid, member.clone());
-        }
-    }
-    members
-}
-
-/// Kill the whole tree by identity and confirm the job is empty; what is left is a survivor.
-fn end_tree(
-    pty: &SessionPty,
-    owned: &mut Owned,
-    deadline: Instant,
-) -> io::Result<Vec<Value>> {
-    retain_members(pty, owned);
+/// Kill the whole tree through the job and confirm the job is empty; what is left is a survivor.
+fn end_tree(pty: &SessionPty, deadline: Instant) -> io::Result<Vec<Value>> {
     end_tree_by(
         deadline,
         || {
@@ -300,7 +279,7 @@ fn natural_cleanup(cx: &mut SessionCx<'_, WindowsHost>) -> Outcome {
         .settle_deadline
         .get_or_insert_with(|| Instant::now() + Duration::from_millis(cleanup_ms()));
     let session = &cx.handle.platform;
-    survivors_of(end_tree(&session.pty, &mut cx.state.owned, deadline), &mut outcome);
+    survivors_of(end_tree(&session.pty, deadline), &mut outcome);
     finish_close(session, &mut outcome, deadline);
     outcome
 }
@@ -345,7 +324,6 @@ fn kill_cleanup(cx: &mut SessionCx<'_, WindowsHost>, peer_alive: bool) -> Outcom
     if !handle.adopted.load(Ordering::SeqCst) && session.pty.release_originals() {
         session.gate.satisfy(GateReason::OriginalsClosed);
     }
-    retain_members(&session.pty, &mut cx.state.owned);
     let _ = session.pty.terminate_tree();
     if !confirm_root_exit(
         deadline,
@@ -356,7 +334,7 @@ fn kill_cleanup(cx: &mut SessionCx<'_, WindowsHost>, peer_alive: bool) -> Outcom
         return outcome;
     }
     cx.send_exited();
-    survivors_of(end_tree(&session.pty, &mut cx.state.owned, deadline), &mut outcome);
+    survivors_of(end_tree(&session.pty, deadline), &mut outcome);
     if peer_alive {
         finish_close(session, &mut outcome, deadline);
     }
@@ -368,10 +346,7 @@ fn kill_cleanup(cx: &mut SessionCx<'_, WindowsHost>, peer_alive: bool) -> Outcom
 fn unsettled_cleanup(cx: &mut SessionCx<'_, WindowsHost>) -> Outcome {
     let mut outcome = Outcome::default();
     let deadline = cx.state.settle_deadline.unwrap_or_else(Instant::now);
-    survivors_of(
-        end_tree(&cx.handle.platform.pty, &mut cx.state.owned, deadline),
-        &mut outcome,
-    );
+    survivors_of(end_tree(&cx.handle.platform.pty, deadline), &mut outcome);
     outcome
         .failure
         .get_or_insert_with(|| "pre-close gate not satisfied within cleanup_ms".into());
@@ -386,17 +361,26 @@ impl Host for WindowsHost {
     /// Vendor observers read POSIX session files; none is integrated on Windows (E5 scope: shells).
     type Observer = ();
     type Link = Link;
+    /// The channel is the sidecar's own stdin and stdout: no option.
+    type Options = ();
+    /// A host with a settle window can end a session unsettled, so the cleanup carries a token for it.
+    type Unsettled = ();
 
     const PTY_BACKEND: &'static str = "conpty";
     const HANDOFF: &'static str = "duplicate_handle";
     const SERVICING: bool = true;
     const OBSERVES: bool = false;
+    const OPTIONS: &'static [&'static str] = &[];
 
-    fn boot(_config: &Config) -> io::Result<Self> {
+    fn set_option(_: &mut (), _: &str, _: String) {}
+    fn check_options(_: &()) -> Result<(), String> {
+        Ok(())
+    }
+    fn boot(_config: &Config, _options: ()) -> io::Result<Self> {
         Ok(Self)
     }
 
-    fn open_link(&self, _config: &Config) -> io::Result<Link> {
+    fn open_link(&self) -> io::Result<Link> {
         // Called on the thread that reads the channel.
         Ok(Link(current_thread()?))
     }
@@ -440,7 +424,7 @@ impl Host for WindowsHost {
     }
     fn worst_case(&self) -> WorstCase {
         WorstCase {
-            root: json!({"pid":u32::MAX,"start_kind":crate::session_pty_win::START_KIND,
+            root: json!({"pid":u32::MAX,"pgid":u32::MAX,"start_kind":crate::session_pty_win::START_KIND,
                 "start_value":u64::MAX.to_string()}),
             pty: json!({"input":u64::MAX,"output":u64::MAX}),
             outer: false,
@@ -493,24 +477,25 @@ impl Host for WindowsHost {
     fn stream_settled(&self, cx: &SessionCx<'_, Self>) -> bool {
         cx.handle.platform.gate.reason().is_some()
     }
-    fn settle_window(&self) -> Option<Duration> {
-        Some(Duration::from_millis(cleanup_ms()))
+    fn settle_window(&self) -> Option<(Duration, Self::Unsettled)> {
+        Some((Duration::from_millis(cleanup_ms()), ()))
     }
-    fn cleanup(&self, cx: &mut SessionCx<'_, Self>, how: Cleanup) -> Outcome {
+    fn cleanup(&self, cx: &mut SessionCx<'_, Self>, how: Cleanup<Self::Unsettled>) -> Outcome {
         match how {
             Cleanup::Natural => natural_cleanup(cx),
             Cleanup::Kill { .. } => kill_cleanup(cx, true),
             Cleanup::Shutdown { peer_alive } => kill_cleanup(cx, peer_alive),
-            Cleanup::Unsettled => unsettled_cleanup(cx),
+            Cleanup::Unsettled(()) => unsettled_cleanup(cx),
         }
     }
+    /// The job's members now, less the root. A member that exited is gone from the job, so the published set never
+    /// names a dead identity (K3); a failed read publishes nothing, leaving the last set in force.
     fn snapshot(&self, cx: &mut SessionCx<'_, Self>, _due: Instant) -> Option<Vec<Value>> {
-        retain_members(&cx.handle.platform.pty, &mut cx.state.owned);
+        let members = cx.handle.platform.pty.members().ok()?;
         Some(
-            cx.state
-                .owned
-                .descendants
-                .values()
+            members
+                .iter()
+                .filter(|member| **member != cx.state.owned.root)
                 .map(Identity::record)
                 .collect(),
         )
@@ -620,6 +605,22 @@ mod tests {
             || panic!("an emptied tree lists no members"),
         );
         assert!(result.unwrap().is_empty());
+    }
+
+    /// K4: the worst-case records the create bound uses name every key a real record has, and are at least as long.
+    #[test]
+    fn the_worst_case_records_cover_a_real_root_and_a_real_pty_record() {
+        let pty = SessionPty::open(24, 80).unwrap();
+        let real_root = Identity {
+            pid: 4,
+            start: 133_000_000_000_000_000,
+        }
+        .record();
+        crate::testing::assert_worst_case_covers(
+            &WindowsHost.worst_case(),
+            &real_root,
+            &pty.owned_record().unwrap(),
+        );
     }
 
     /// E5 final review 4 finding 2: a kill or shutdown arriving while the exited root's gate deadline runs

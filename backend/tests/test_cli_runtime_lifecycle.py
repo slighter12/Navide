@@ -458,6 +458,34 @@ async def test_t4_after_eof_the_remaining_descendants_are_swept_by_identity(rig)
     assert not alive(detached) and not session.cleanup_error, "the remaining descendant was swept after EOF"
 
 
+async def test_k3_a_member_that_exits_leaves_the_registry_through_the_real_snapshot(rig):
+    """K3: nothing is injected. A member exits and is reaped; the sidecar's own next snapshots no longer list it, and the
+    registry record follows (macOS used to keep an exited member listed for the life of the session)."""
+    from agent_team_backend.applog import in_data_dir
+
+    def recorded(service, session) -> dict:
+        entry = in_data_dir(service._data_dir, pty_registry._load)().get(str(session.proc.pid)) or {}
+        return entry.get("descendants") or {}
+
+    service = rig.service()
+    session = await rig.life(service, "pane-k3")
+    await rig.say(service, session, "detach")
+    await rig.until(lambda: "DETACHED " in rig.sink.text(session.id), "detached descendant started")
+    detached = json.loads(rig.sink.text(session.id).split("DETACHED ")[1].splitlines()[0])["pid"]
+    rig.pids.add(detached)
+    await rig.until(lambda: str(detached) in recorded(service, session), "the registry records the descendant", 30)
+    os.kill(detached, signal.SIGKILL)
+    await rig.until(lambda: not alive(detached), "the member is gone", 5)
+    # The peer reaps an exited child at its next `Popen` (until then the member is a zombie, which a snapshot still
+    # lists): a second detached member is that next spawn, and the only one that may stay recorded.
+    await rig.say(service, session, "detach")
+    await rig.until(lambda: rig.sink.text(session.id).count("DETACHED ") == 2, "a second detached descendant")
+    second = json.loads(rig.sink.text(session.id).split("DETACHED ")[2].splitlines()[0])["pid"]
+    rig.pids.add(second)
+    await rig.until(lambda: set(recorded(service, session)) == {str(second)},
+                    "the sidecar's own snapshots drop the exited member and keep the live one", 40)
+
+
 async def test_r9_the_registry_follows_the_ownership_set_and_clears_on_the_empty_one(rig):
     from agent_team_backend.applog import in_data_dir
 
@@ -473,13 +501,28 @@ async def test_r9_the_registry_follows_the_ownership_set_and_clears_on_the_empty
     rig.pids.add(detached)
     await rig.until(lambda: len(recorded(service, session)) >= 1, "the registry records the descendant", 30)
     assert set(recorded(service, session)) == {str(detached)}
+
+    def publish(members: list[dict]) -> None:
+        # Injected: the sidecar's real snapshot is seconds away, and a macOS one keeps an exited member listed.
+        service._on_frame(cli_runtime.wire.Frame(
+            cli_runtime.wire.FrameType.EVENT, cli_runtime.wire.code.SESSION_OWNERSHIP, 0, 0,
+            cli_runtime.wire.runtime_tag(service._runtime_generation),
+            {"session_id": session.id, "session_generation": session.generation, "pane_id": session.pane_id,
+             "workspace_path": session.cwd, "part": 0, "final": True, "descendants": members}), None)
+
+    # D2: a member of the root's own process group is persisted too. After a sidecar death the root can be gone when
+    # the recovery runs, and the member's recorded identity is then the only thing that authorizes a signal to it (a
+    # group id cannot be tied to a root that no longer exists).
+    root = session.proc.pid
+    same_group = {"pid": root + 100_000, "pgid": root, "start_kind": "posix-lstart", "start_value": "same group"}
+    left_the_group = {"pid": detached, "pgid": detached, "start_kind": "posix-lstart",
+                      "start_value": recorded(service, session)[str(detached)]}
+    publish([same_group, left_the_group])
+    await rig.until(lambda: session.descendants.get(same_group["pid"]) == "same group", "the set is applied", 5)
+    await rig.until(lambda: set(recorded(service, session)) == {str(same_group["pid"]), str(detached)},
+                    "a same-group member is persisted with the detached one", 5)
     # The sidecar now says the set is empty (its final part, with nothing in it): the stale record is cleared.
-    # Injected here because a macOS snapshot keeps an exited member listed; the next real snapshot is seconds away.
-    service._on_frame(cli_runtime.wire.Frame(
-        cli_runtime.wire.FrameType.EVENT, cli_runtime.wire.code.SESSION_OWNERSHIP, 0, 0,
-        cli_runtime.wire.runtime_tag(service._runtime_generation),
-        {"session_id": session.id, "session_generation": session.generation, "pane_id": session.pane_id,
-         "workspace_path": session.cwd, "part": 0, "final": True, "descendants": []}), None)
+    publish([])
     await rig.until(lambda: not recorded(service, session), "the empty set clears the stale record", 5)
 
 

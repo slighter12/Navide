@@ -43,6 +43,99 @@ mod initial_retention_test;
 #[cfg(all(test, target_os = "macos", feature = "fault-hooks"))]
 mod sqlite_identity_test;
 
+/// Where a test can interleave an action with the spawn and cleanup paths (R17). The production paths call these
+/// and nothing else: in a production build every one is empty, and only here does the build differ. A test arms one
+/// for the thread it runs on.
+mod seams {
+    #[cfg(all(test, target_os = "linux"))]
+    use std::cell::Cell;
+    #[cfg(test)]
+    use std::cell::RefCell;
+
+    #[cfg(test)]
+    thread_local! {
+        /// Runs once, right after `cleanup`'s first snapshot, so a test can place the root's exit (and a late
+        /// same-group child) between that snapshot and the signal.
+        pub(in crate::posix) static AFTER_FIRST_SNAPSHOT: RefCell<Option<Box<dyn FnOnce()>>> =
+            const { RefCell::new(None) };
+        /// The next `kill_and_reap_released` wait on this thread answers `ECHILD`.
+        #[cfg(target_os = "linux")]
+        pub(in crate::posix) static FORCE_ECHILD: Cell<bool> = const { Cell::new(false) };
+        /// Runs on the creating thread right before the failed-create branch waits for its child.
+        #[cfg(target_os = "linux")]
+        pub(in crate::posix) static BEFORE_CHILD_WAIT: RefCell<Option<Box<dyn FnOnce(i32)>>> =
+            const { RefCell::new(None) };
+        /// The next create's gate owner panics right after it released the gate.
+        #[cfg(target_os = "linux")]
+        pub(in crate::posix) static PANIC_AFTER_RELEASE: Cell<bool> = const { Cell::new(false) };
+        /// Runs on the creating thread while it holds the reaper gate, right after the `stopped` check passed and
+        /// before any pipe or fork.
+        #[cfg(target_os = "linux")]
+        pub(in crate::posix) static AFTER_STOPPED_CHECK: RefCell<Option<Box<dyn FnOnce()>>> =
+            const { RefCell::new(None) };
+    }
+
+    pub(in crate::posix) fn after_first_snapshot() {
+        #[cfg(test)]
+        if let Some(hook) = AFTER_FIRST_SNAPSHOT.with(|cell| cell.borrow_mut().take()) {
+            hook();
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(in crate::posix) fn after_stopped_check() {
+        #[cfg(test)]
+        if let Some(hook) = AFTER_STOPPED_CHECK.with(|cell| cell.borrow_mut().take()) {
+            hook();
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(in crate::posix) fn before_child_wait(pid: i32) {
+        #[cfg(test)]
+        if let Some(hook) = BEFORE_CHILD_WAIT.with(|cell| cell.borrow_mut().take()) {
+            hook(pid);
+        }
+        #[cfg(not(test))]
+        let _ = pid;
+    }
+
+    /// `waitpid` on a child of this process.
+    pub(in crate::posix) fn waitpid(pid: i32, status: &mut libc::c_int, flags: libc::c_int) -> libc::pid_t {
+        #[cfg(all(test, target_os = "linux"))]
+        if FORCE_ECHILD.with(|forced| forced.get()) {
+            // SAFETY: errno is thread-local; this stands in for a third party having reaped the root.
+            unsafe { *libc::__errno_location() = libc::ECHILD };
+            return -1;
+        }
+        // SAFETY: waitpid on our own child with a valid status pointer.
+        unsafe { libc::waitpid(pid, status, flags) }
+    }
+
+    /// Whether the gate owner of a create fails after it released the gate. Read on the creating thread (the
+    /// owner runs on another one) and handed to the owner.
+    #[derive(Clone, Copy)]
+    pub(in crate::posix) struct GateRelease {
+        #[cfg(all(test, target_os = "linux"))]
+        fail: bool,
+    }
+
+    impl GateRelease {
+        pub(in crate::posix) fn read() -> Self {
+            Self {
+                #[cfg(all(test, target_os = "linux"))]
+                fail: PANIC_AFTER_RELEASE.with(|flag| flag.get()),
+            }
+        }
+        pub(in crate::posix) fn after_release(self) {
+            #[cfg(all(test, target_os = "linux"))]
+            if self.fail {
+                panic!("test: the gate owner failed after it released the gate");
+            }
+        }
+    }
+}
+
 /// Worst-case encoded sizes used by the pre-spawn `SESSION_OWNED` bound (5.1.3).
 const TTY_NAME_MAX: usize = 32;
 
@@ -67,6 +160,14 @@ pub(crate) fn retry_pause(attempt: &mut u32, deadline: Instant) {
 #[derive(Default)]
 pub struct PosixHost {
     ttys: Mutex<HashSet<String>>,
+    /// The control socket, set at boot from `--control-fd`.
+    control_fd: Option<i32>,
+}
+
+/// What a POSIX sidecar reads from its command line.
+#[derive(Default)]
+pub struct Options {
+    control_fd: Option<i32>,
 }
 
 /// The platform half of a session handle.
@@ -108,15 +209,14 @@ pub(crate) fn retain_owned(owned: &mut Owned, table: &Table) {
             .filter(|(child, _)| **child != pid)
             .map(|(&child, entry)| (child, entry.clone())),
     );
+    // The table is a verified snapshot: a retained identity it does not list is absent, dead or replaced. Live
+    // detached descendants are seeds of the snapshot, so they stay listed and kept. Pruning here is what lets the
+    // published set shrink, and so lets Python learn that the last descendant is gone (R9, K3).
+    owned
+        .descendants
+        .retain(|child, _| table.contains_key(child));
     #[cfg(target_os = "linux")]
-    {
-        // The table is a verified snapshot: a retained identity it does not list is absent, dead or replaced.
-        // Live detached descendants are seeds of the snapshot, so they stay listed and kept.
-        owned
-            .descendants
-            .retain(|child, _| table.contains_key(child));
-        owned.births.retain_live(pid, table);
-    }
+    owned.births.retain_live(pid, table);
 }
 
 /// Event-driven wait for owned (possibly non-child) processes to exit; returns those still running at `deadline`.
@@ -238,9 +338,7 @@ struct GateContext<'a> {
     reaper: Option<&'a Arc<linux::Reaper>>,
     #[cfg(target_os = "linux")]
     slot: &'a Mutex<Option<linux::RootReservation>>,
-    /// Test only: the owner panics right after it released the gate, so the spawn succeeded and the owner failed.
-    #[cfg(all(test, target_os = "linux"))]
-    panic_after_release: bool,
+    release: seams::GateRelease,
 }
 fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Table, Value, Births)> {
     let GateContext {
@@ -257,8 +355,7 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         reaper,
         #[cfg(target_os = "linux")]
         slot,
-        #[cfg(all(test, target_os = "linux"))]
-        panic_after_release,
+        release: gate_release,
     } = *ctx;
     #[cfg(feature = "fault-hooks")]
     if let Some(path) = before_read {
@@ -309,10 +406,7 @@ fn gate_owner(report_r: i32, gate_w: i32, ctx: &GateContext) -> io::Result<(Tabl
         }
         Ok(())
     })?;
-    #[cfg(all(test, target_os = "linux"))]
-    if panic_after_release {
-        panic!("test: the gate owner failed after it released the gate");
-    }
+    gate_release.after_release();
     Ok((table, root, births))
 }
 
@@ -408,21 +502,6 @@ fn watch_exit(pid: i32, cell: Arc<ExitCell>, tx: mpsc::Sender<Msg>, slot: RootSl
     Ok(())
 }
 
-#[cfg(all(test, target_os = "linux"))]
-thread_local! {
-    /// Test seam: the next `kill_and_reap_released` wait on this thread answers `ECHILD`.
-    static FORCE_ECHILD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// Test seam: runs on the creating thread right before the failed-create branch waits for its child.
-    static BEFORE_CHILD_WAIT: std::cell::RefCell<Option<Box<dyn FnOnce(i32)>>> =
-        const { std::cell::RefCell::new(None) };
-    /// Test seam: the next create's gate owner panics right after it released the gate.
-    static PANIC_AFTER_RELEASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// Test seam: runs on the creating thread while it holds the reaper gate, right after the `stopped` check
-    /// passed and before any pipe or fork.
-    static AFTER_STOPPED_CHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 /// A released root whose session could not be set up: signal its group by the identity just recorded and report
 /// whether it was verified reaped (E1 5.1.3). It is our own child, so the wait is a real `waitpid`. Only the
 /// **root** is waited for: the group was just signalled and the only claim made on `effect:none` is that the root
@@ -448,18 +527,7 @@ fn kill_and_reap_released(pid: i32) -> bool {
         let flags = libc::WNOHANG;
         #[cfg(not(target_os = "macos"))]
         let flags = 0; // a SIGKILLed child exits promptly; E5 replaces this with pidfd
-        // SAFETY: waitpid on our own child with a valid status pointer.
-        #[cfg(not(all(test, target_os = "linux")))]
-        let reaped = unsafe { libc::waitpid(pid, &mut status, flags) };
-        #[cfg(all(test, target_os = "linux"))]
-        let reaped = if FORCE_ECHILD.with(|forced| forced.get()) {
-            // SAFETY: errno is thread-local; this stands in for a third party having reaped the root.
-            unsafe { *libc::__errno_location() = libc::ECHILD };
-            -1
-        } else {
-            // SAFETY: as above.
-            unsafe { libc::waitpid(pid, &mut status, flags) }
-        };
+        let reaped = seams::waitpid(pid, &mut status, flags);
         if reaped == pid {
             return true;
         }
@@ -543,10 +611,8 @@ impl PosixHost {
                 "the Linux child reaper has stopped; no new session can be started safely",
             ));
         }
-        #[cfg(all(test, target_os = "linux"))]
-        if let Some(hook) = AFTER_STOPPED_CHECK.with(|cell| cell.borrow_mut().take()) {
-            hook();
-        }
+        #[cfg(target_os = "linux")]
+        seams::after_stopped_check();
         // The reservation lives here, not in the gate-owner thread, so a panic of that thread cannot drop it.
         #[cfg(target_os = "linux")]
         let slot: Mutex<Option<linux::RootReservation>> = Mutex::new(None);
@@ -599,8 +665,7 @@ impl PosixHost {
             let before_read = fault::before_report_read(&parsed.pane);
             #[cfg(target_os = "linux")]
             let (reaper_ref, slot_ref) = (reaper.as_ref(), &slot);
-            #[cfg(all(test, target_os = "linux"))]
-            let panic_after_release = PANIC_AFTER_RELEASE.with(|flag| flag.get());
+            let release = seams::GateRelease::read();
             let (spawned, verdict) = thread::scope(|scope| {
                 let watcher = scope.spawn(move || {
                     // Owner side of the gate: every path below ends by closing the gate's write end (released
@@ -622,8 +687,7 @@ impl PosixHost {
                             reaper: reaper_ref,
                             #[cfg(target_os = "linux")]
                             slot: slot_ref,
-                            #[cfg(all(test, target_os = "linux"))]
-                            panic_after_release,
+                            release,
                         },
                     );
                     close_fds(&[report_r, gate_w]);
@@ -653,10 +717,8 @@ impl PosixHost {
                             *held = Some(reaper.reserve(child.id() as i32));
                         }
                     }
-                    #[cfg(all(test, target_os = "linux"))]
-                    if let Some(hook) = BEFORE_CHILD_WAIT.with(|cell| cell.borrow_mut().take()) {
-                        hook(child.id() as i32);
-                    }
+                    #[cfg(target_os = "linux")]
+                    seams::before_child_wait(child.id() as i32);
                     let _ = child.wait();
                     return Err(error);
                 }
@@ -726,14 +788,6 @@ impl PosixHost {
 
 // ---- lifecycle ---------------------------------------------------------------------------------
 
-#[cfg(test)]
-thread_local! {
-    /// Test seam: runs once, right after `cleanup`'s first snapshot, so a test can place the root's exit (and a
-    /// late same-group child) between that snapshot and the signal.
-    static AFTER_FIRST_SNAPSHOT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 /// Signal recorded identities, wait event-driven, escalate, verify (13.1 kill policy). `hangup` is true for a kill:
 /// unless the adapter defers it, the sidecar's master closes right after the first signal and `SESSION_HANGUP`
 /// tells Python (5.5 R-e).
@@ -751,10 +805,7 @@ fn cleanup(
     }
     let before = snapshot(None, &known_owned(&cx.state.owned), &mut cx.state.owned.births)?;
     retain_owned(&mut cx.state.owned, &before);
-    #[cfg(test)]
-    if let Some(hook) = AFTER_FIRST_SNAPSHOT.with(|cell| cell.borrow_mut().take()) {
-        hook();
-    }
+    seams::after_first_snapshot();
     let root_start = cx.state.owned.root["start_value"].as_str().map(String::from);
     let root_live = handle.exit.get().is_none()
         && before
@@ -978,14 +1029,30 @@ impl Host for PosixHost {
     type Owned = Owned;
     type Observer = &'static crate::observe::adapters::ObserverFacts;
     type Link = i32;
+    type Options = Options;
+    /// A POSIX session has no settle window: it settles on Python's end-of-stream report alone.
+    type Unsettled = std::convert::Infallible;
 
     const PTY_BACKEND: &'static str = "posix";
     const HANDOFF: &'static str = "scm_rights";
     const SERVICING: bool = false;
     const OBSERVES: bool = true;
+    const OPTIONS: &'static [&'static str] = &["--control-fd"];
 
-    fn boot(config: &Config) -> io::Result<Self> {
-        let fd = config.control_fd;
+    fn set_option(options: &mut Options, _name: &str, value: String) {
+        options.control_fd = value.parse::<u64>().ok().map(|fd| fd as i32);
+    }
+    fn check_options(options: &Options) -> Result<(), String> {
+        options
+            .control_fd
+            .map(drop)
+            .ok_or_else(|| "--control-fd required".to_owned())
+    }
+
+    fn boot(_config: &Config, options: Options) -> io::Result<Self> {
+        let fd = options
+            .control_fd
+            .ok_or_else(|| io::Error::other("control descriptor is not open"))?;
         // SAFETY: the descriptor was passed by the owner (`pass_fds`); flags only.
         if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
             return Err(io::Error::other("control descriptor is not open"));
@@ -1010,7 +1077,10 @@ impl Host for PosixHost {
         // can exist, so the choice is fixed for the process lifetime.
         #[cfg(target_os = "linux")]
         linux::enable_scoped_mode();
-        Ok(Self::default())
+        Ok(Self {
+            control_fd: Some(fd),
+            ..Self::default()
+        })
     }
 
     /// The macOS evaluation harness reads the sidecar's own process facts off the `ready` line, from the product
@@ -1026,8 +1096,9 @@ impl Host for PosixHost {
         }
     }
 
-    fn open_link(&self, config: &Config) -> io::Result<i32> {
-        Ok(config.control_fd)
+    fn open_link(&self) -> io::Result<i32> {
+        self.control_fd
+            .ok_or_else(|| io::Error::other("control descriptor is not open"))
     }
     fn link_read(&self, link: &i32, buffer: &mut [u8]) -> io::Result<usize> {
         read_control(*link, buffer)
@@ -1099,16 +1170,20 @@ impl Host for PosixHost {
         })
     }
 
+    /// A POSIX session settles when Python reports the end of the stream.
     fn stream_settled(&self, cx: &SessionCx<'_, Self>) -> bool {
-        cx.eof()
+        cx.state.eof
     }
-    fn cleanup(&self, cx: &mut SessionCx<'_, Self>, how: Cleanup) -> Outcome {
+    fn settle_window(&self) -> Option<(Duration, Self::Unsettled)> {
+        None
+    }
+    fn cleanup(&self, cx: &mut SessionCx<'_, Self>, how: Cleanup<Self::Unsettled>) -> Outcome {
         let survivors = match how {
             // R-d: the stream ended first; now the remaining descendants go, by identity.
             Cleanup::Natural => cleanup(cx, false, false),
             Cleanup::Kill { force } => cleanup(cx, force, true),
             Cleanup::Shutdown { .. } => cleanup(cx, false, true),
-            Cleanup::Unsettled => unreachable!("a POSIX session has no settle window"),
+            Cleanup::Unsettled(never) => match never {},
         };
         outcome(survivors)
     }
@@ -1141,7 +1216,13 @@ impl Host for PosixHost {
         )
     }
     /// On Linux the due time is moved back onto a sidecar-wide 5 s grid (never later than the session's own
-    /// cadence), so sessions snapshot together and share their scans.
+    /// cadence), so sessions snapshot together and share their scans, and a full `/proc` read that was expensive
+    /// holds it back (`scan_board`, B-R1).
+    ///
+    /// macOS has no stretch (K1): its snapshot walks the session's own tree with `proc_listchildpids` and
+    /// `proc_listpgrppids`, so what it costs follows the size of that tree and not the number of processes on the
+    /// host, and no scan is shared between sessions that a cost could be charged to. A policy there would have to be
+    /// per session and measured around the walk, and the walk is already bounded by `SNAPSHOT_MS`.
     fn next_snapshot(&self, own: Instant) -> Instant {
         #[cfg(target_os = "linux")]
         return linux::grid_due(own);
@@ -1405,7 +1486,7 @@ mod root_exit_tests {
         let born = std::rc::Rc::new(std::cell::RefCell::new(None));
         let hook_handle = handle.clone();
         let hook_born = born.clone();
-        AFTER_FIRST_SNAPSHOT.with(|cell| {
+        seams::AFTER_FIRST_SNAPSHOT.with(|cell| {
             *cell.borrow_mut() = Some(Box::new(move || {
                 *hook_born.borrow_mut() = Some(late_member(pid));
                 reap(&mut root, &hook_handle);
@@ -1521,7 +1602,45 @@ mod root_exit_tests {
 #[cfg(test)]
 mod startup_tests {
     use crate::control::parse_args;
-    use crate::posix::PosixHost;
+    use crate::host::Host;
+    use crate::posix::{identity, retain_owned, Owned, PosixHost, Table};
+    use crate::session_pty::SessionPty;
+    use serde_json::json;
+
+    /// K3: a retained descendant that the verified table no longer lists is dropped, so the published set can shrink
+    /// to nothing and Python learns the last descendant is gone (R9); one that is still listed stays.
+    #[test]
+    fn a_descendant_the_verified_table_no_longer_lists_is_dropped_from_the_published_set() {
+        let entry = |parent, group, start: &str| (parent, group, start.to_owned());
+        let mut owned = Owned {
+            pid: 100,
+            root: json!({"pid":100,"start_value":"root-start"}),
+            descendants: [(101, entry(100, 100, "a")), (102, entry(100, 100, "b"))].into(),
+            births: Default::default(),
+        };
+        // 101 is gone, 102 is listed again, 103 is new, the root itself is never kept as a descendant.
+        let table: Table = [
+            (100, entry(1, 100, "root-start")),
+            (102, entry(100, 100, "b")),
+            (103, entry(102, 100, "c")),
+        ]
+        .into();
+        retain_owned(&mut owned, &table);
+        let mut kept: Vec<_> = owned.descendants.keys().copied().collect();
+        kept.sort();
+        assert_eq!(kept, vec![102, 103]);
+        retain_owned(&mut owned, &[(100, entry(1, 100, "root-start"))].into());
+        assert!(owned.descendants.is_empty(), "the last descendant is gone: the set must empty");
+    }
+
+    /// K4: the worst-case records the create bound uses name every key a real record has, and are at least as long.
+    #[test]
+    fn the_worst_case_records_cover_a_real_root_and_a_real_pty_record() {
+        let (pty, _slave) = SessionPty::open(24, 80).unwrap();
+        // The longest pid a Linux kernel hands out, and a start string at its usual length.
+        let real_root = identity(4_194_304, &(1, 4_194_304, "Thu Nov  5 12:34:56 2026".into()));
+        crate::testing::assert_worst_case_covers(&PosixHost::default().worst_case(), &real_root, &pty.owned_record());
+    }
 
     #[test]
     fn unknown_and_missing_arguments_fail_startup_and_a_wrong_wire_is_incompatible() {
@@ -1629,7 +1748,7 @@ mod scoped_tests {
     fn echild_on_root_is_unverified() {
         // A pid that cannot name a group: the group kill finds nothing.
         let nowhere = i32::MAX - 1;
-        FORCE_ECHILD.with(|forced| forced.set(true));
+        seams::FORCE_ECHILD.with(|forced| forced.set(true));
         scoped(true);
         assert!(
             !kill_and_reap_released(nowhere),
@@ -1640,7 +1759,7 @@ mod scoped_tests {
             kill_and_reap_released(nowhere),
             "with scoped mode off, ECHILD keeps its HEAD meaning"
         );
-        FORCE_ECHILD.with(|forced| forced.set(false));
+        seams::FORCE_ECHILD.with(|forced| forced.set(false));
         // watch_exit: waiting for a pid that is not our child answers ECHILD.
         // SAFETY: getppid takes no arguments.
         let stranger = unsafe { libc::getppid() };
@@ -1694,11 +1813,11 @@ mod scoped_tests {
         let reaper = linux::Reaper::new();
         linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = Some(reaper.clone()));
         scoped(true);
-        PANIC_AFTER_RELEASE.with(|flag| flag.set(true));
+        seams::PANIC_AFTER_RELEASE.with(|flag| flag.set(true));
         let seen = Arc::new(AtomicBool::new(false));
         {
             let (reaper, seen) = (reaper.clone(), seen.clone());
-            BEFORE_CHILD_WAIT.with(|cell| {
+            seams::BEFORE_CHILD_WAIT.with(|cell| {
                 *cell.borrow_mut() = Some(Box::new(move |pid| {
                     assert!(
                         reaper.holds(pid),
@@ -1712,7 +1831,7 @@ mod scoped_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let runtime = runtime(Some(dir.join("journal.jsonl")));
         let result = create_for_test(&runtime, &direct_sleep("u19", &dir), 1);
-        PANIC_AFTER_RELEASE.with(|flag| flag.set(false));
+        seams::PANIC_AFTER_RELEASE.with(|flag| flag.set(false));
         scoped(false);
         linux::REAPER_FORCE.with(|forced| *forced.borrow_mut() = None);
         assert!(result.is_err(), "the owner failed after the release");
@@ -1785,7 +1904,7 @@ mod scoped_tests {
         let held = Arc::new(AtomicBool::new(false));
         {
             let (reaper, held) = (reaper.clone(), held.clone());
-            AFTER_STOPPED_CHECK.with(|cell| {
+            seams::AFTER_STOPPED_CHECK.with(|cell| {
                 *cell.borrow_mut() = Some(Box::new(move || {
                     // The create holds the gate and has read `stopped == false`. End the reaper now.
                     reaper.inject(linux::INJECT_WAITID_ERROR);

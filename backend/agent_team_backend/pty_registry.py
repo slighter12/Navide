@@ -226,6 +226,21 @@ def _match_descendants(
     return leaders, plain
 
 
+def _survives(
+    fresh: dict[int, tuple[int, str]], pid: int, group: bool, table: dict[int, tuple[int, str]]
+) -> bool:
+    """Is the target (`pid`, `group`) that the verdict on `table` made still the same in the `fresh` table?
+
+    A process is the same while its start identity matches. A GROUP outlives its leader: while any member still holds
+    the group id, the kernel gives that pid to no other process, so the group is still the verified one and a signal
+    to it can only reach what the verdict named. Without this, a leader that ends on the first signal drops the group
+    from the force round while a member that ignores it keeps running."""
+    entry = fresh.get(pid)
+    if entry is not None:
+        return _lstart_eq(entry[1], table[pid][1])
+    return group and any(pgid == pid for pgid, _lstart in fresh.values())
+
+
 def _signal_each(targets: "list[tuple[int, bool]]", *, force: bool) -> None:
     """Signal each (pid, is_group) target; already-dead pids are skipped."""
     tree = osplat.process_tree
@@ -241,16 +256,13 @@ def _still_same(
 ) -> "list[tuple[int, bool]]":
     """The targets whose start-time identity in a fresh table still matches
     the one in `table` (the snapshot the verdict was made on). A pid gone or
-    recycled in between is dropped; a failed fresh probe drops everything —
-    an identity that cannot be re-checked never authorizes a second kill."""
+    recycled in between is dropped (a group stays while a member holds its id,
+    see `_survives`); a failed fresh probe drops everything — an identity that
+    cannot be re-checked never authorizes a second kill."""
     fresh = _ps_table()
     if fresh is None:
         return []
-    return [
-        (pid, group)
-        for pid, group in targets
-        if pid in fresh and _lstart_eq(fresh[pid][1], table[pid][1])
-    ]
+    return [(pid, group) for pid, group in targets if _survives(fresh, pid, group, table)]
 
 
 def _collect_stale(
@@ -689,8 +701,7 @@ def _recheck(targets: "list[tuple[int, bool]]", table: dict[int, tuple[int, str]
     fresh = _ps_table()
     if fresh is None:
         return None
-    return [(pid, group) for pid, group in targets
-            if pid in fresh and _lstart_eq(fresh[pid][1], table[pid][1])]
+    return [(pid, group) for pid, group in targets if _survives(fresh, pid, group, table)]
 
 
 def reap_runtime(runtime_generation: str, grace: float = 1.0, settle: float = 3.0,

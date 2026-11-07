@@ -542,3 +542,113 @@ def test_a_matching_windows_root_enters_the_registry_by_the_identity_the_inspect
     signalled = pty_registry.reap_stale(grace=0.2)
 
     assert root in signalled and _wait_gone(root)
+
+
+# D2. A root's own process group: the leader ends on SIGTERM, one member ignores it. Recovery signals the group, the
+# leader dies on the first round, and what remains of the group is only this member. The force round must still reach
+# it, with no record of the member: the group id outlives its leader, and no other process can hold it meanwhile.
+_GROUP_LAUNCHER = """
+import os, signal, sys
+r, w = os.pipe()
+if os.fork() == 0:
+    if os.fork() == 0:
+        os.setsid()
+        member = os.fork()
+        if member == 0:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)  # stays ignored across exec
+        else:
+            os.write(w, ("%d %d" % (os.getpid(), member)).encode())
+        os.close(w)
+        null = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(null, fd)
+        os.execvp("sleep", ["sleep", "300"])
+    os._exit(0)
+os.wait()
+os.close(w)
+sys.stdout.write(os.read(r, 64).decode())
+"""
+
+
+def _group_with_a_stubborn_member() -> tuple[int, int]:
+    out = subprocess.run([sys.executable, "-c", _GROUP_LAUNCHER], capture_output=True, text=True, timeout=10,
+                         check=True)
+    leader, member = (int(part) for part in out.stdout.split())
+    _started.extend([leader, member])
+    assert os.getpgid(member) == leader
+    return leader, member
+
+
+def test_runtime_recovery_force_kills_a_group_member_that_outlives_its_leader():
+    leader, member = _group_with_a_stubborn_member()
+    _register(leader)  # no descendant is recorded: only the group id can reach the member
+
+    result = pty_registry.reap_runtime(GENERATION, grace=0.3, settle=3.0)
+
+    assert _wait_gone(leader)
+    assert _wait_gone(member), "a SIGTERM-ignoring member of the root's group survived the recovery"
+    assert result["unresolved"] == [] and result["unverifiable"] is False
+    assert pty_registry._load() == {}
+
+
+def test_restart_reap_force_kills_a_group_member_that_outlives_its_leader():
+    leader, member = _group_with_a_stubborn_member()
+    _register(leader, owner=1)  # owner 1: not a live backend
+
+    signalled = pty_registry.reap_stale(grace=0.3, settle=3.0)
+
+    assert leader in signalled
+    assert _wait_gone(leader)
+    assert _wait_gone(member), "a SIGTERM-ignoring member of the root's group survived the restart reap"
+
+
+def _group_whose_leader_is_gone() -> tuple[int, int, str]:
+    """A stubborn member of a root's group, the root already dead (after a sidecar death the root can be gone when the
+    recovery runs). Returns the root, the member and the root's start identity as it was registered."""
+    leader, member = _group_with_a_stubborn_member()
+    registered = osplat.process_tree.start_time(leader)
+    psutil.Process(leader).kill()
+    assert _wait_gone(leader) and _alive(member)
+    return leader, member, registered
+
+
+def test_recovery_kills_a_recorded_member_of_a_dead_roots_group():
+    leader, member, registered = _group_whose_leader_is_gone()
+    _register(leader, lstart=registered)
+    pty_registry.update_descendants({leader: {member: osplat.process_tree.start_time(member)}})
+
+    result = pty_registry.reap_runtime(GENERATION, grace=0.3, settle=3.0)
+
+    assert _wait_gone(member), "the recorded member is named by its own identity and must go"
+    assert result["unresolved"] == [] and member in result["signalled"]
+
+
+def test_recovery_never_signals_a_group_it_can_only_name_by_id():
+    """D2: with the root gone and the member unrecorded, the group id is all that is left, and it cannot be tied to the
+    root (the pid can be reused, the group may belong to the new holder). Nothing is signalled."""
+    leader, member, registered = _group_whose_leader_is_gone()
+    _register(leader, lstart=registered)
+
+    result = pty_registry.reap_runtime(GENERATION, grace=0.3, settle=1.0)
+
+    assert result["signalled"] == [] and _alive(member)
+
+
+def test_a_group_target_survives_only_while_its_verified_group_does(monkeypatch):
+    """A group is the target of the force round while its leader is the verified one, or while a member still holds
+    the group id (no other process can have the pid then). A pid that was recycled, or a group with nobody left in it,
+    is not a target; a plain (non-group) target needs its own process."""
+    began, recycled = "Mon Jan  1 00:00:00 2024", "Tue Feb  2 00:00:00 2025"
+    verdict = {10: (10, began)}
+
+    def against(fresh: dict) -> list:
+        monkeypatch.setattr(pty_registry, "_ps_table", lambda: fresh)
+        group, plain = pty_registry._still_same([(10, True)], verdict), pty_registry._still_same([(10, False)], verdict)
+        assert pty_registry._recheck([(10, True)], verdict) == group
+        assert pty_registry._recheck([(10, False)], verdict) == plain
+        return [group, plain]
+
+    assert against({10: (10, began)}) == [[(10, True)], [(10, False)]]  # the leader itself
+    assert against({11: (10, "member")}) == [[(10, True)], []]  # the leader is gone, a member holds the group
+    assert against({11: (11, "other")}) == [[], []]  # nobody holds the group id any more
+    assert against({10: (10, recycled), 11: (10, "member")}) == [[], []]  # the pid belongs to another process now

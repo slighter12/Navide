@@ -8,7 +8,7 @@
 use crate::compose;
 use crate::frame::{self, code, Direction, Frame};
 use crate::host::{CreateArgs, Host, Launch, Msg, Spawned};
-use crate::refusal::{self, bad_request, classify, fault, Code, Refusal, Stage};
+use crate::refusal::{self, bad_request, classify, effect_of, fault, Code, Effect, Refusal, Stage};
 use crate::session::{
     bounded_survivors, session_thread, CancelVerdict, Registry, SessionHandle,
 };
@@ -39,12 +39,6 @@ pub const SNAPSHOT_STEADY_MS: u64 = 30_000;
 pub const SNAPSHOT_YOUNG_WINDOW_MS: u64 = 30_000;
 /// `limits.snapshot_ms`: the bound on one ownership snapshot (E1 13.3 rows 12-13).
 pub const SNAPSHOT_MS: u64 = 5000;
-/// B-R1: ownership sampling may use at most 1/`SNAPSHOT_COST_FACTOR` of a core. A snapshot that took `spent` pushes
-/// the session's next one out by at least `spent * SNAPSHOT_COST_FACTOR` (capped at `SNAPSHOT_STRETCH_MAX_MS`), so a
-/// host where a snapshot is expensive (the Linux full-scan fallback reads every PID) pays a bounded duty, not a
-/// cost that grows with its PID count. A normal snapshot (a few ms) stays under the cadence and is not stretched.
-pub const SNAPSHOT_COST_FACTOR: u32 = 1000;
-pub const SNAPSHOT_STRETCH_MAX_MS: u64 = 300_000;
 /// `limits.max_inbound_bytes` (E1 1.4): the wire bytes of every request that has been read and not yet finished.
 /// The reader blocks while the next request would exceed it (backpressure, nothing dropped).
 const MAX_INBOUND_BYTES: usize = 16 * 1024 * 1024;
@@ -75,6 +69,21 @@ pub struct Request {
     pub meta: Value,
     #[allow(dead_code)] // held for its Drop
     reservation: Reservation,
+}
+
+#[cfg(test)]
+impl Request {
+    /// A request as the reader would hand it over, with a reservation of its own.
+    pub fn for_test(id: u64, code: u16, meta: Value) -> Self {
+        Self {
+            id,
+            code,
+            meta,
+            reservation: InboundBudget::new(1 << 20)
+                .acquire(0)
+                .expect("an open budget admits an empty request"),
+        }
+    }
 }
 
 pub struct InboundBudget {
@@ -152,7 +161,7 @@ impl Wire {
         }
     }
     /// Answer `request_code`/`id` with the error `error` carries.
-    fn refuse(&self, request_code: u16, id: u64, error: &io::Error, effect: &str) {
+    fn refuse(&self, request_code: u16, id: u64, error: &io::Error, effect: Effect) {
         let (error_code, stage) = classify(error, request_code == code::CREATE);
         self.out.error(
             request_code,
@@ -160,7 +169,7 @@ impl Wire {
             error_code.wire(),
             stage.wire(),
             &error.to_string(),
-            effect,
+            effect.wire(),
         );
     }
 }
@@ -204,6 +213,52 @@ impl<H: Host> Runtime<H> {
             return Err(Refusal::named(Code::CreateCancelled).into());
         }
         release().inspect_err(|_| registry.release_failed(request))
+    }
+
+    /// End every session before `deadline` and say whether all of them ended clean (K10). In-flight creates are
+    /// waited for first, as a condition; one still running at the deadline makes the teardown unclean, because its
+    /// session may register after the handles below were collected and would never be told to end. Handles are
+    /// collected, signalled and awaited, and then once more: a create that finished during the wait is signalled
+    /// too.
+    ///
+    /// This is the control plane's teardown step, kept out of `run` because `run` owns the process's standard
+    /// streams and command line, which leaves a test no other way in.
+    pub(crate) fn shut_down(&self, peer_alive: bool, deadline: Instant) -> (Vec<Arc<SessionHandle<H>>>, bool) {
+        let mut clean = {
+            let mut registry = self.registry();
+            while registry.creating > 0 {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                registry = self.creates_changed.wait_timeout(registry, left).unwrap().0;
+            }
+            registry.creating == 0
+        };
+        let mut ended: Vec<Arc<SessionHandle<H>>> = Vec::new();
+        for _ in 0..2 {
+            let fresh: Vec<_> = self
+                .registry()
+                .sessions
+                .values()
+                .filter(|handle| !ended.iter().any(|known| Arc::ptr_eq(known, handle)))
+                .cloned()
+                .collect();
+            if fresh.is_empty() {
+                break;
+            }
+            for handle in &fresh {
+                if !handle.finished() {
+                    handle.send(Msg::Shutdown { peer_alive });
+                }
+            }
+            for handle in &fresh {
+                let left = deadline.saturating_duration_since(Instant::now());
+                clean &= handle.wait_finished(left) == Some(true);
+            }
+            ended.extend(fresh);
+        }
+        (ended, clean)
     }
 }
 
@@ -384,7 +439,15 @@ fn evicted_session<H: Host>(runtime: &Runtime<H>, meta: &Value) -> bool {
 
 fn create<H: Host>(runtime: &Arc<Runtime<H>>, req: &Request) -> io::Result<Value> {
     let host = &runtime.host;
-    let parsed = create_args(host, &req.meta)?;
+    let parsed = match create_args(host, &req.meta) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            // The reader noted this create before it was parsed: a refusal here ends it, so no later `CANCEL` can
+            // find a record that will never be released, and the table does not grow with every malformed create.
+            runtime.registry().create_failed(req.id);
+            return Err(error);
+        }
+    };
     if !handoff_size_ok(host, req.id, &parsed) {
         runtime.registry().create_failed(req.id);
         return Err(bad_request(Stage::HandoffSize, "invalid handoff_size"));
@@ -472,8 +535,11 @@ fn create<H: Host>(runtime: &Arc<Runtime<H>>, req: &Request) -> io::Result<Value
     match owned_event.and_then(|meta| host.send_owned(runtime, &handle, meta)) {
         Ok(()) => {}
         Err(error) => {
+            // The root has run. Like any failure after the release, the answer says `effect:none` only if the root
+            // was verified ended and reaped first (E1 5.1.3); a size error here is no pre-spawn refusal.
             handle.send(Msg::Kill(true));
-            return Err(error);
+            let verified = handle.exit.wait(ROOT_REAP).is_some();
+            return Err(post_effect_failure(verified, "SESSION_OWNED could not be sent", &error));
         }
     }
     if cancelled {
@@ -491,15 +557,30 @@ fn create<H: Host>(runtime: &Arc<Runtime<H>>, req: &Request) -> io::Result<Value
     )
 }
 
-fn resize_session<H: Host>(
-    host: &H,
-    handle: &SessionHandle<H>,
-    meta: &Value,
-) -> Result<Value, (Code, String, Value)> {
+/// A resize that failed: what to tell Python and how much of it was applied.
+struct ResizeError {
+    code: Code,
+    message: String,
+    effect: Effect,
+    /// Size steps already applied; `None` for a request refused before any step.
+    steps: Option<u32>,
+}
+
+impl ResizeError {
+    fn bad(message: &str) -> Self {
+        Self {
+            code: Code::BadRequest,
+            message: message.to_owned(),
+            effect: Effect::None,
+            steps: None,
+        }
+    }
+}
+
+fn resize_session<H: Host>(host: &H, handle: &SessionHandle<H>, meta: &Value) -> Result<Value, ResizeError> {
     use crate::host::ResizeFailure::{Closed, Failed};
-    let bad = |message: &str| (Code::BadRequest, message.to_owned(), json!({"effect":"none"}));
-    let cols = dimension(meta, "cols").map_err(|_| bad("invalid cols"))?;
-    let rows = dimension(meta, "rows").map_err(|_| bad("invalid rows"))?;
+    let cols = dimension(meta, "cols").map_err(|_| ResizeError::bad("invalid cols"))?;
+    let rows = dimension(meta, "rows").map_err(|_| ResizeError::bad("invalid rows"))?;
     if handle.finished() {
         return Ok(json!({"applied":false,"steps":0}));
     }
@@ -509,53 +590,53 @@ fn resize_session<H: Host>(
             Ok(()) => steps = 1,
             Err(Closed(_)) => return Ok(json!({"applied":false,"steps":0})),
             Err(Failed(error)) => {
-                return Err((
-                    Code::IoFailed,
-                    error.to_string(),
-                    json!({"effect":"none","steps":0}),
-                ))
+                return Err(ResizeError {
+                    code: Code::IoFailed,
+                    message: error.to_string(),
+                    effect: Effect::None,
+                    steps: Some(0),
+                })
             }
         }
     }
     #[cfg(feature = "fault-hooks")]
     if steps == 1 && crate::fault::fail_second_resize(&handle.pane) {
-        return Err((
-            Code::IoFailed,
-            "fault: second size step refused".into(),
-            json!({"effect":"partial","steps":1}),
-        ));
+        return Err(ResizeError {
+            code: Code::IoFailed,
+            message: "fault: second size step refused".into(),
+            effect: Effect::Partial,
+            steps: Some(1),
+        });
     }
     match host.resize(&handle.platform, rows, cols) {
         Ok(()) => Ok(json!({"applied":true,"steps":steps + 1})),
         Err(Closed(_)) if steps == 0 => Ok(json!({"applied":false,"steps":0})),
-        Err(Closed(error) | Failed(error)) => Err((
-            Code::IoFailed,
-            error.to_string(),
-            json!({"effect":if steps > 0 {"partial"} else {"none"},"steps":steps}),
-        )),
+        Err(Closed(error) | Failed(error)) => Err(ResizeError {
+            code: Code::IoFailed,
+            message: error.to_string(),
+            effect: if steps > 0 { Effect::Partial } else { Effect::None },
+            steps: Some(steps),
+        }),
     }
 }
 
 /// Answer a failed resize on the wire.
-fn resize_error<H: Host>(
-    runtime: &Runtime<H>,
-    req: &Request,
-    (error_code, message, extra): (Code, String, Value),
-) {
-    let effect = extra["effect"].as_str().unwrap_or("none");
-    let mut meta = json!({"code":error_code.wire(),"stage":"io",
-        "message":message.chars().take(1024).collect::<String>(),"effect":effect});
-    if let Some(steps) = extra.get("steps") {
-        meta["steps"] = steps.clone();
+fn resize_error<H: Host>(runtime: &Runtime<H>, req: &Request, error: ResizeError) {
+    let mut meta = json!({"code":error.code.wire(),"stage":"io",
+        "message":error.message.chars().take(1024).collect::<String>(),"effect":error.effect.wire()});
+    if let Some(steps) = error.steps {
+        meta["steps"] = json!(steps);
     }
     runtime.wire.out.error_with(req.code, req.id, meta);
 }
 
-fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) {
+/// Answer one non-create request. `Some` ends the control channel: the request found the runtime in a state the
+/// protocol cannot continue from.
+fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) -> Option<Ended> {
     let wire = &runtime.wire;
     let host = &runtime.host;
     let reply = |meta: Value| wire.out.respond(req.code, req.id, meta);
-    let refuse = |error: &io::Error| wire.refuse(req.code, req.id, error, "none");
+    let refuse = |error: &io::Error| wire.refuse(req.code, req.id, error, Effect::None);
     // A late report for a session that settled long ago is idempotent (5.5 race item 6).
     let late = |error: &io::Error| {
         refusal::is(error, Code::UnknownSession) && evicted_session(runtime, &req.meta)
@@ -583,11 +664,7 @@ fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) {
                 crate::fault::wait_for_file(&path);
                 match resize_session(&runtime.host, &handle, &req.meta) {
                     Ok(meta) => runtime.wire.out.respond(req.code, req.id, meta),
-                    Err((error_code, message, extra)) => {
-                        let meta = json!({"code":error_code.wire(),"stage":"io","message":message,
-                            "effect":extra["effect"].as_str().unwrap_or("none")});
-                        runtime.wire.out.error_with(req.code, req.id, meta);
-                    }
+                    Err(failure) => resize_error(&runtime, &req, failure),
                 }
             });
         }
@@ -627,35 +704,7 @@ fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) {
             }
             Err(error) => refuse(&error),
         },
-        code::CANCEL => {
-            let Some(target) = req.meta["target_id"].as_u64() else {
-                return refuse(&Refusal::bad("invalid target_id").into());
-            };
-            // One lock: the verdict and the state it describes cannot diverge.
-            let mut registry = runtime.registry();
-            let verdict = match registry.cancel_verdict(target) {
-                Ok(verdict) => verdict,
-                Err(refusal) => {
-                    drop(registry);
-                    return refuse(&refusal.into());
-                }
-            };
-            let handle = match verdict {
-                CancelVerdict::Prevented => return reply(json!({"state":"prevented"})),
-                CancelVerdict::Released => return reply(json!({"state":"released"})),
-                CancelVerdict::Unknown => return reply(json!({"state":"unknown"})),
-                CancelVerdict::Registered(sid) => registry.sessions.get(&sid).cloned(),
-            };
-            drop(registry);
-            let Some(handle) = handle else {
-                return reply(json!({"state":"unknown"}));
-            };
-            if handle.adopted.load(Ordering::SeqCst) || handle.finished() {
-                return reply(json!({"state":"settled"}));
-            }
-            handle.send(Msg::Kill(true));
-            reply(json!({"state":"cleanup-started"}));
-        }
+        code::CANCEL => cancel(&req, runtime),
         code::PING => {
             let registry = runtime.registry();
             reply(
@@ -667,28 +716,21 @@ fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) {
         }
         code::OBSERVE if H::OBSERVES => {
             let sender = wire.observe_tx.lock().unwrap().clone();
-            let admitted = sender.is_some_and(|sender| match sender.try_send(req) {
-                Ok(()) => true,
-                Err(mpsc::TrySendError::Full(req) | mpsc::TrySendError::Disconnected(req)) => {
-                    wire.out.error(
-                        req.code,
-                        req.id,
-                        Code::BadRequest.wire(),
-                        Stage::Admit.wire(),
-                        "observation queue not admitting",
-                        "none",
-                    );
-                    true
-                }
-            });
-            if !admitted {
+            // The queue's sender is installed before the reader starts and taken only after it ended, so a missing
+            // one means the runtime's own bookkeeping is broken. No request can be answered then, and an answer
+            // with no request to name would be a protocol error for Python: the reader ends the channel instead.
+            let Some(sender) = sender else {
+                return Some(Ended::Protocol("observation worker is not running".into()));
+            };
+            if let Err(mpsc::TrySendError::Full(req) | mpsc::TrySendError::Disconnected(req)) = sender.try_send(req)
+            {
                 wire.out.error(
-                    code::OBSERVE,
-                    0,
+                    req.code,
+                    req.id,
                     Code::BadRequest.wire(),
                     Stage::Admit.wire(),
-                    "observation worker is not running",
-                    "none",
+                    "observation queue not admitting",
+                    Effect::None.wire(),
                 );
             }
         }
@@ -696,6 +738,41 @@ fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) {
         code::OBSERVE => refuse(&fault(Code::ObserverNotIntegrated, "observer not integrated")),
         _ => refuse(&Refusal::bad("invalid code").into()),
     }
+    None
+}
+
+/// Answer a `CANCEL`: the one verdict the registry gives for the target create.
+fn cancel<H: Host>(req: &Request, runtime: &Arc<Runtime<H>>) {
+    let wire = &runtime.wire;
+    let reply = |meta: Value| wire.out.respond(req.code, req.id, meta);
+    let refuse = |error: &io::Error| wire.refuse(req.code, req.id, error, Effect::None);
+    let Some(target) = req.meta["target_id"].as_u64() else {
+        return refuse(&Refusal::bad("invalid target_id").into());
+    };
+    // One lock: the verdict and the state it describes cannot diverge.
+    let mut registry = runtime.registry();
+    let verdict = match registry.cancel_verdict(target) {
+        Ok(verdict) => verdict,
+        Err(refusal) => {
+            drop(registry);
+            return refuse(&refusal.into());
+        }
+    };
+    let handle = match verdict {
+        CancelVerdict::Prevented => return reply(json!({"state":"prevented"})),
+        CancelVerdict::Released => return reply(json!({"state":"released"})),
+        CancelVerdict::Unknown => return reply(json!({"state":"unknown"})),
+        CancelVerdict::Registered(sid) => registry.sessions.get(&sid).cloned(),
+    };
+    drop(registry);
+    let Some(handle) = handle else {
+        return reply(json!({"state":"unknown"}));
+    };
+    if handle.adopted.load(Ordering::SeqCst) || handle.finished() {
+        return reply(json!({"state":"settled"}));
+    }
+    handle.send(Msg::Kill(true));
+    reply(json!({"state":"cleanup-started"}));
 }
 
 /// The ownership context an observation answer carries: the session's identity when the observation is bound to a
@@ -726,7 +803,7 @@ fn observation_context<H: Host>(req: &Request, runtime: &Runtime<H>) -> io::Resu
 /// (E1 14).
 fn observe<H: Host>(req: &Request, runtime: &Arc<Runtime<H>>) {
     let wire = &runtime.wire;
-    let refuse = |error: &io::Error| wire.refuse(req.code, req.id, error, "none");
+    let refuse = |error: &io::Error| wire.refuse(req.code, req.id, error, Effect::None);
     // The vendor's declaration is resolved once here and handed down; the wire's vendor string is not read again.
     let observer = req.meta["vendor"]
         .as_str()
@@ -768,7 +845,7 @@ fn observe<H: Host>(req: &Request, runtime: &Arc<Runtime<H>>) {
                 "result of {} bytes exceeds the observation limits",
                 bytes.len()
             ),
-            "none",
+            Effect::None.wire(),
         );
     }
     #[cfg(feature = "fault-hooks")]
@@ -785,7 +862,7 @@ fn observe<H: Host>(req: &Request, runtime: &Arc<Runtime<H>>) {
     }
     if let Some(message) = document["error"].as_str() {
         // The inherited activity "error with progress" shape: the document carries the progress.
-        let meta = json!({"code":Code::IoFailed.wire(),"stage":"io","effect":"partial",
+        let meta = json!({"code":Code::IoFailed.wire(),"stage":"io","effect":Effect::Partial.wire(),
             "message":message.chars().take(1024).collect::<String>(),"observation_parts":parts});
         return wire.out.error_with(req.code, req.id, meta);
     }
@@ -801,8 +878,6 @@ pub struct Config {
     pub owner_pid: u32,
     pub journal: std::path::PathBuf,
     /// The control socket a POSIX host reads and writes (Windows uses stdin and stdout).
-    #[cfg(unix)]
-    pub control_fd: i32,
     #[cfg(feature = "fault-hooks")]
     pub fail_startup: bool,
     #[cfg(feature = "fault-hooks")]
@@ -820,8 +895,6 @@ impl Config {
             generation: "0123456789abcdef0123456789abcdef".into(),
             owner_pid: std::process::id(),
             journal: std::env::temp_dir().join("navide-runtime-test-journal"),
-            #[cfg(unix)]
-            control_fd: -1,
             #[cfg(feature = "fault-hooks")]
             fail_startup: false,
             #[cfg(feature = "fault-hooks")]
@@ -832,14 +905,14 @@ impl Config {
     }
 }
 
-pub(crate) fn parse_args<H: Host>(args: &[String]) -> Result<Config, (&'static str, String)> {
+/// The command line: the options every platform reads (`Config`) and the ones only `H` reads (`H::Options`).
+pub(crate) fn parse_args<H: Host>(args: &[String]) -> Result<(Config, H::Options), (&'static str, String)> {
     let startup = |message: String| ("STARTUP_FAILED", message);
     let mut wire = None;
     let mut generation = None;
     let mut owner_pid = None;
     let mut journal = None;
-    #[cfg(unix)]
-    let mut control_fd = None;
+    let mut host_options = H::Options::default();
     #[cfg(feature = "fault-hooks")]
     let (mut fail_startup, mut ready_wire, mut ready_protocol) = (false, None, None);
     let mut iter = args.iter();
@@ -854,14 +927,15 @@ pub(crate) fn parse_args<H: Host>(args: &[String]) -> Result<Config, (&'static s
             "--runtime-generation" => generation = Some(value("--runtime-generation")?),
             "--owner-pid" => owner_pid = Some(value("--owner-pid")?),
             "--ownership-journal" => journal = Some(value("--ownership-journal")?),
-            #[cfg(unix)]
-            "--control-fd" => control_fd = Some(value("--control-fd")?),
             #[cfg(feature = "fault-hooks")]
             "--fail-startup" => fail_startup = true,
             #[cfg(feature = "fault-hooks")]
             "--ready-wire" => ready_wire = value("--ready-wire")?.parse().ok(),
             #[cfg(feature = "fault-hooks")]
             "--ready-protocol" => ready_protocol = Some(value("--ready-protocol")?),
+            host_option if H::OPTIONS.contains(&host_option) => {
+                H::set_option(&mut host_options, host_option, value(host_option)?)
+            }
             other => return Err(startup(format!("unknown argument {other}"))),
         }
     }
@@ -879,22 +953,23 @@ pub(crate) fn parse_args<H: Host>(args: &[String]) -> Result<Config, (&'static s
             "--runtime-generation must be 32 hex characters".into(),
         ));
     }
-    Ok(Config {
+    let config = Config {
         wire,
         generation,
         owner_pid: number(owner_pid, "--owner-pid")? as u32,
         journal: journal
             .map(std::path::PathBuf::from)
             .ok_or_else(|| startup("--ownership-journal required".into()))?,
-        #[cfg(unix)]
-        control_fd: number(control_fd, "--control-fd")? as i32,
         #[cfg(feature = "fault-hooks")]
         fail_startup,
         #[cfg(feature = "fault-hooks")]
         ready_wire,
         #[cfg(feature = "fault-hooks")]
         ready_protocol,
-    })
+    };
+    // Last, so a wrong wire or a missing core option is still reported as before.
+    H::check_options(&host_options).map_err(startup)?;
+    Ok((config, host_options))
 }
 
 fn stdout_line(value: &Value) -> io::Result<()> {
@@ -967,8 +1042,8 @@ enum Ended {
 /// Run the sidecar on host `H` until the channel ends or `SHUTDOWN` arrives.
 pub fn run<H: Host>() -> io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let config = match parse_args::<H>(&args) {
-        Ok(config) => config,
+    let (config, options) = match parse_args::<H>(&args) {
+        Ok(parsed) => parsed,
         Err((error_code, message)) => {
             fatal_line(error_code, &message);
             return Err(io::Error::other(error_code));
@@ -979,7 +1054,7 @@ pub fn run<H: Host>() -> io::Result<()> {
         fatal_line("STARTUP_FAILED", "requested isolated startup fault");
         return Err(io::Error::other("STARTUP_FAILED"));
     }
-    let host = match H::boot(&config) {
+    let host = match H::boot(&config, options) {
         Ok(host) => host,
         Err(error) => {
             fatal_line("STARTUP_FAILED", &error.to_string());
@@ -988,7 +1063,7 @@ pub fn run<H: Host>() -> io::Result<()> {
     };
     let tag = frame::runtime_tag(&config.generation).expect("validated while parsing");
     stdout_line(&ready_line(&host, &config))?;
-    let link = Arc::new(host.open_link(&config)?);
+    let link = Arc::new(host.open_link()?);
     let runtime = Runtime::new(host, Wire::new(&config, tag));
     let (observe_tx, observe_rx) = mpsc::sync_channel::<Request>(OBSERVATION_QUEUE);
     if H::OBSERVES {
@@ -1080,14 +1155,9 @@ pub fn run<H: Host>() -> io::Result<()> {
                     #[cfg(feature = "fault-hooks")]
                     Err(error) if crate::fault::is_suppressed(&error) => {}
                     Err(error) => {
-                        let effect = if refusal::is(&error, Code::CleanupFailed) {
-                            "partial"
-                        } else {
-                            "none"
-                        };
                         create_runtime
                             .wire
-                            .refuse(request.code, request.id, &error, effect);
+                            .refuse(request.code, request.id, &error, effect_of(&error));
                     }
                 }
                 create_runtime.registry().creating -= 1;
@@ -1097,8 +1167,8 @@ pub fn run<H: Host>() -> io::Result<()> {
                 runtime.registry().creating -= 1;
                 break Ended::Protocol("create worker could not start".into());
             }
-        } else {
-            dispatch(request, &runtime);
+        } else if let Some(end) = dispatch(request, &runtime) {
+            break end;
         }
     };
     if let Ended::Protocol(message) = &ended {
@@ -1110,30 +1180,7 @@ pub fn run<H: Host>() -> io::Result<()> {
     // Teardown: in-flight creates settle, then every session ends by the (non-forced) kill policy, each wait a
     // condition with the one overall `cleanup_ms` bound.
     let deadline = Instant::now() + Duration::from_millis(cleanup_ms());
-    {
-        let mut registry = runtime.registry();
-        while registry.creating > 0 {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                break;
-            }
-            registry = runtime.creates_changed.wait_timeout(registry, left).unwrap().0;
-        }
-    }
-    let handles: Vec<Arc<SessionHandle<H>>> =
-        runtime.registry().sessions.values().cloned().collect();
-    for handle in &handles {
-        if !handle.finished() {
-            handle.send(Msg::Shutdown {
-                peer_alive: matches!(ended, Ended::Shutdown(_)),
-            });
-        }
-    }
-    let mut clean = true;
-    for handle in &handles {
-        let left = deadline.saturating_duration_since(Instant::now());
-        clean &= handle.wait_finished(left) == Some(true);
-    }
+    let (handles, clean) = runtime.shut_down(matches!(ended, Ended::Shutdown(_)), deadline);
     runtime.host.teardown(deadline);
     if let Ended::Shutdown(id) = &ended {
         let survivors = bounded_survivors(
@@ -1274,5 +1321,143 @@ mod tests {
         assert_eq!(refused.to_string(), "invalid env key");
         let fine = environment::<Plat>(&json!({"env":{"PATH":"/usr/bin"}})).unwrap();
         assert_eq!(fine, vec![("PATH".to_owned(), "/usr/bin".to_owned())]);
+    }
+}
+
+/// The create, teardown and dispatch paths on a host that is only a double (`testing::MockHost`).
+#[cfg(test)]
+mod plane_tests {
+    use super::*;
+    use crate::refusal::Effect;
+    use crate::testing::{self, MockHost};
+
+    /// What the reader does before it routes a create: it records the request id and notes the create.
+    fn read_create(runtime: &Runtime<MockHost>, id: u64) {
+        let mut registry = runtime.registry();
+        registry.last_request = id;
+        registry.note_create(id);
+    }
+
+    /// K9: a create refused while its arguments are parsed was noted by the reader and never released. Its record
+    /// must go, or a later `CANCEL` is told `prevented` for a create that was answered long ago.
+    #[test]
+    fn a_create_refused_while_parsing_leaves_no_record_for_a_later_cancel() {
+        let runtime = testing::runtime(MockHost::default());
+        read_create(&runtime, 7);
+        let mut meta = testing::create_meta("s1", "/tmp");
+        meta["rows"] = json!(0);
+        let error = create(&runtime, &testing::request(7, code::CREATE, meta)).unwrap_err();
+        assert_eq!(classify(&error, true), (Code::BadRequest, Stage::Spawn), "{error}");
+        let mut registry = runtime.registry();
+        assert_eq!(registry.tracked_creates(), 0, "the refused create is still tracked");
+        assert_eq!(registry.cancel_verdict(7), Ok(CancelVerdict::Unknown));
+    }
+
+    #[test]
+    fn malformed_creates_do_not_grow_the_table() {
+        let runtime = testing::runtime(MockHost::default());
+        for id in 1..=20 {
+            read_create(&runtime, id);
+            let mut meta = testing::create_meta("s", "/tmp");
+            meta["cwd"] = json!(7);
+            assert!(create(&runtime, &testing::request(id, code::CREATE, meta)).is_err());
+        }
+        assert_eq!(runtime.registry().tracked_creates(), 0);
+    }
+
+    /// K5(a): the root has run by the time `SESSION_OWNED` is sent, so a failure to send it is not a pre-spawn
+    /// refusal. The root is ended first; `effect:none` is only said when that was verified (E1 5.1.3).
+    #[test]
+    fn a_session_owned_that_cannot_be_sent_after_the_spawn_is_a_post_release_failure() {
+        let host = MockHost {
+            kill_ends_root: true,
+            ..MockHost::default()
+        };
+        *host.owned_failure.lock().unwrap() = Some(bad_request(Stage::HandoffSize, "handoff_size"));
+        let runtime = testing::runtime(host);
+        read_create(&runtime, 1);
+        let error = create(&runtime, &testing::request(1, code::CREATE, testing::create_meta("s1", "/tmp"))).unwrap_err();
+        assert_eq!(
+            classify(&error, true),
+            (Code::SpawnFailed, Stage::Spawn),
+            "a size error after the release is no pre-spawn refusal: {error}"
+        );
+        assert_eq!(effect_of(&error), Effect::None, "the root was verified ended");
+        assert!(error.to_string().contains("SESSION_OWNED could not be sent"), "{error}");
+    }
+
+    #[test]
+    fn a_session_owned_that_cannot_be_sent_and_a_root_not_verified_ended_is_a_partial_cleanup_failure() {
+        let host = MockHost::default(); // a kill leaves the root's exit unknown
+        *host.owned_failure.lock().unwrap() = Some(bad_request(Stage::HandoffSize, "handoff_size"));
+        let runtime = testing::runtime(host);
+        read_create(&runtime, 1);
+        let error = create(&runtime, &testing::request(1, code::CREATE, testing::create_meta("s1", "/tmp"))).unwrap_err();
+        assert_eq!(classify(&error, true).0, Code::CleanupFailed, "{error}");
+        assert_eq!(effect_of(&error), Effect::Partial);
+    }
+
+    /// K10: a create still running at the deadline may register its session after the handles were collected; that
+    /// session is never told to end, so the teardown cannot call itself clean.
+    #[test]
+    fn a_create_still_running_at_the_teardown_deadline_makes_the_teardown_unclean() {
+        let runtime = testing::runtime(MockHost::default());
+        runtime.registry().creating = 1;
+        let began = Instant::now();
+        let (handles, clean) = runtime.shut_down(true, began + Duration::from_millis(60));
+        assert!(!clean, "a create was still running");
+        assert!(handles.is_empty());
+        assert!(began.elapsed() >= Duration::from_millis(60), "it waited for the create until the deadline");
+    }
+
+    #[test]
+    fn a_session_registered_while_the_teardown_waits_is_told_to_end() {
+        let runtime = testing::runtime(MockHost::default());
+        runtime.registry().creating = 1;
+        let (handle, mailbox) = testing::handle::<MockHost>(());
+        let finishing = {
+            let (runtime, handle) = (runtime.clone(), handle.clone());
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(30));
+                let mut registry = runtime.registry();
+                registry.sessions.insert("s".into(), handle);
+                registry.creating -= 1;
+                drop(registry);
+                runtime.creates_changed.notify_all();
+            })
+        };
+        // The session thread's part: answer the shutdown with a final cleanup.
+        let session = {
+            let handle = handle.clone();
+            thread::spawn(move || {
+                let told = mailbox.recv_timeout(Duration::from_secs(5));
+                *handle.done.0.lock().unwrap() = Some(true);
+                handle.done.1.notify_all();
+                matches!(told, Ok(Msg::Shutdown { peer_alive: true }))
+            })
+        };
+        let (handles, clean) = runtime.shut_down(true, Instant::now() + Duration::from_secs(5));
+        finishing.join().unwrap();
+        assert!(session.join().unwrap(), "the late session was not told to shut down");
+        assert!(clean);
+        assert_eq!(handles.len(), 1);
+    }
+
+    /// K11: the observation queue's sender is installed before the reader runs, so a missing one is the runtime's
+    /// own fault. An answer for request id 0 would be a protocol error Python reports as a runtime loss for a request
+    /// it never made; the reader ends the channel instead.
+    #[test]
+    fn an_observe_with_no_worker_ends_the_channel_and_answers_nothing() {
+        let runtime = testing::runtime(MockHost::default()); // `run` has not installed the queue
+        let ended = dispatch(testing::request(5, code::OBSERVE, json!({"vendor":"x"})), &runtime);
+        assert!(matches!(ended, Some(Ended::Protocol(_))), "the channel did not end");
+        assert!(testing::sent(&runtime).is_empty(), "something was answered");
+    }
+
+    #[test]
+    fn a_request_that_is_answered_does_not_end_the_channel() {
+        let runtime = testing::runtime(MockHost::default());
+        assert!(dispatch(testing::request(1, code::PING, json!({})), &runtime).is_none());
+        assert_eq!(testing::sent(&runtime).len(), 1);
     }
 }

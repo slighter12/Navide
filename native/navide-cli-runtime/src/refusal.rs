@@ -69,6 +69,22 @@ impl Stage {
     }
 }
 
+/// The `effect` of an `ERROR` frame: whether the failed request had already changed anything (E1 5.1.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effect {
+    None,
+    Partial,
+}
+
+impl Effect {
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Partial => "partial",
+        }
+    }
+}
+
 /// A typed refusal. It travels inside an `io::Error` (so `?` keeps working across the platform code) and is
 /// recovered by `classify`.
 #[derive(Debug, PartialEq, Eq)]
@@ -130,6 +146,15 @@ pub fn classify(error: &io::Error, creating: bool) -> (Code, Stage) {
         Some(refusal) => (refusal.code, refusal.stage.unwrap_or(default_stage)),
         None if creating => (Code::SpawnFailed, default_stage),
         None => (Code::IoFailed, default_stage),
+    }
+}
+
+/// What a failed create did: only a failed cleanup of a released target left something behind.
+pub fn effect_of(error: &io::Error) -> Effect {
+    if is(error, Code::CleanupFailed) {
+        Effect::Partial
+    } else {
+        Effect::None
     }
 }
 

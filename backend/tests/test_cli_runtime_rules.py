@@ -66,14 +66,37 @@ def production(path: Path) -> str:
     return re.sub(r"(?m)//.*$", "", text)
 
 
-#: Files compiled only under the cargo feature `fault-hooks` (declared `#[cfg(feature = "fault-hooks")]`): the harness
-#: build's fault injection, which `tests/product_binary.rs` proves is absent from the product binary.
-HARNESS_ONLY_FILES = {"fault.rs", "faults.rs"}
+#: The names the harness build's fault injection files carry today. They are not what makes a file harness-only: that is
+#: its declaration under the cargo feature (`harness_only_files`), and a file with one of these names that is not so
+#: declared fails `test_a_fault_file_is_harness_only_by_its_feature_declaration`.
+FAULT_FILE_NAMES = {"fault.rs", "faults.rs"}
+_FEATURE_GATED_MOD = re.compile(r"#\[cfg\(feature = \"fault-hooks\"\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;")
+
+
+def harness_only_files() -> set[Path]:
+    """Files compiled only under the cargo feature `fault-hooks`: the module declarations that carry the feature gate,
+    resolved to their path (`tests/product_binary.rs` proves the product binary has none of their symbols)."""
+    found = set()
+    for declaring in sorted(RUST_SRC.rglob("*.rs")):
+        # A crate root and a `mod.rs` hold their children beside them; any other file holds them in a directory of its name.
+        base = declaring.parent if declaring.name in {"main.rs", "lib.rs", "mod.rs"} else declaring.parent / declaring.stem
+        for name in _FEATURE_GATED_MOD.findall(declaring.read_text()):
+            found.update(path for path in (base / f"{name}.rs", base / name / "mod.rs") if path.is_file())
+    return found
 
 
 def rust_files() -> list[Path]:
+    harness = harness_only_files()
     return [p for p in sorted(RUST_SRC.rglob("*.rs"))
-            if not p.name.endswith("_test.rs") and not p.name.endswith("_tests.rs") and p.name not in HARNESS_ONLY_FILES]
+            if not p.name.endswith("_test.rs") and not p.name.endswith("_tests.rs") and p not in harness]
+
+
+def test_a_fault_file_is_harness_only_by_its_feature_declaration():
+    harness = harness_only_files()
+    assert harness, "no module is declared under the fault-hooks feature: the selection found nothing"
+    by_name = {p for p in RUST_SRC.rglob("*.rs") if p.name in FAULT_FILE_NAMES}
+    assert by_name <= harness, f"files named like fault injection that no feature gate declares: {sorted(by_name - harness)}"
+    assert not set(rust_files()) & harness, "a harness-only file is scanned as production code"
 
 
 # ------------------------------------------------------------------------------------ waits and bounds

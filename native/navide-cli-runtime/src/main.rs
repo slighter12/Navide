@@ -19,9 +19,14 @@ mod observe;
 #[cfg(unix)]
 mod posix;
 mod refusal;
+/// The Linux `/proc` read cache and its cost policy; generic, so its rules are tested on every host.
+#[cfg(any(target_os = "linux", test))]
+mod scan_board;
 mod session;
 #[cfg(unix)]
 mod session_pty;
+#[cfg(test)]
+mod testing;
 #[cfg(windows)]
 mod session_pty_win;
 mod vendor_facts;
