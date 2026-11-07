@@ -546,7 +546,7 @@ GrokLogReader.pane_cwd_match = _pane_cwd_match
 
 
 def _resume_id_from_command(command) -> str:
-    value = resume_id_from_command(command, FACT, plain_only=True)
+    value = resume_id_from_command(command, FACT, plain_only=FACT.plain_only)
     # Grok also accepts titles. Only a UUID identifies the transcript for
     # attribution and duplicate-PTY reaping without asking the CLI.
     try:
@@ -776,7 +776,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # The declared layout, including GROK_HOME and the HOME shim.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
     # ~/.agents/skills is still a scanned tier on the official CLI (docs
     # 08-skills.md lists .agents/skills alongside .grok/skills at every level),
     # and there is still no variable that relocates the skills root on its own
@@ -812,8 +811,8 @@ SPEC = VendorSpec(
     ),
     # `grok login` defaults to the browser OAuth flow at auth.x.ai, which a PTY
     # pane can carry: the CLI opens the browser and waits. `--device-auth` is
-    # the headless alternative and is not what a desktop pane needs.
-    login_command_args=FACT.login_args,
+    # the headless alternative and is not what a desktop pane needs (grok.json
+    # `login_args` declares the plain `login`).
     live_file=(".grok", "auth.json"),
     slot_file="auth.json",
     login_home_secret_file=("home", ".grok", "auth.json"),

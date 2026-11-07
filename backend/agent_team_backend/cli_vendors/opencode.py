@@ -68,7 +68,6 @@ from .base import (
     provider_entry_identity,
     provider_map_extract,
     provider_map_merge,
-    resume_reader_of,
 )
 from . import _protocols
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
@@ -1092,7 +1091,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same XDG database/auth root as _data_dir("opencode").
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
     skills_supported=True,
     # skills.paths registers extra roots; opencode deep-merges this document
     # over the user's own config, so their skills keep loading.
@@ -1146,7 +1144,6 @@ SPEC = VendorSpec(
     # `opencode auth login [url]` (verified against `opencode auth --help`,
     # 1.15.12) opens the provider picker, then the chosen provider's own
     # OAuth or key prompt — a flow a PTY pane carries.
-    login_command_args=FACT.login_args,
     # Multi-account: ``auth.json`` is a provider map, so a profile binds to
     # ONE provider entry (``scopes``) and a switch rewrites that entry only.
     # The data dir follows XDG_DATA_HOME alone — no dedicated variable to
@@ -1188,7 +1185,6 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_opencode(home),
     fetch_usage_from_context=lambda ctx: fetch_opencode(ctx.home, dict(ctx.env)),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=("OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"),
     make_log_reader=OpencodeLogReader,

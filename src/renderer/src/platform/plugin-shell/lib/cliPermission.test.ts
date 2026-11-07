@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
 import { CLI_AGENT_SPECS } from '../agents'
 import {
   cliPermissionKey,
@@ -68,10 +69,14 @@ describe('skipPermissionFlagFor', () => {
     }
   })
 
-  it('keeps the five flagless vendors flagless', () => {
+  it('leaves flagless exactly the vendors whose declaration names no permission flag', () => {
     const flagless = CLI_AGENT_SPECS.filter((spec) => !spec.skipPermissionFlag)
       .map((spec) => spec.agentKey)
       .sort()
-    expect(flagless).toEqual(['goose', 'grok', 'mcode', 'opencode', 'pi'])
+    const declaredFlagless = Object.entries(VENDOR_FACTS)
+      .filter(([, facts]) => facts.permission_flag === null)
+      .map(([key]) => key)
+      .sort()
+    expect(flagless).toEqual(declaredFlagless)
   })
 })

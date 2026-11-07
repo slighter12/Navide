@@ -94,7 +94,6 @@ from .base import (
     data_dirs_of,
     keychain_payload_items,
     platform_paths,
-    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -852,7 +851,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Verified CLI conversation store; exclude the IDE's other .cursor data.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15 (docs): .cursor/skills and .agents/skills in the
     # project, ~/.cursor/skills globally, and no relocation variable at all —
     # the same corner its MCP wiring is in, so the workspace file is again the
@@ -905,7 +903,6 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_cursor(home),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     make_log_reader=CursorLogReader,
     # Cursor CLI (closed source; binary `agent`, legacy installs `cursor-agent`)

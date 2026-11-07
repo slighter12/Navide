@@ -163,7 +163,7 @@ class LifeRig:
             cwd=str(self.workspace), cols=100, rows=30, env=self.env, **extra)
         self.pids.add(session.proc.pid)
         if ready:
-            await self.until(lambda: "LIFE_READY " in self.sink.text(session.id), "peer ready")
+            await self.line_whole(session, "LIFE_READY ", "peer ready")
         return session
 
     def seen(self, service, session, marker: bytes) -> int:
@@ -183,13 +183,26 @@ class LifeRig:
                 raise AssertionError(message)
             await asyncio.sleep(0.01)
 
+    async def line_whole(self, session, marker: str, message: str = "", timeout: float = 15) -> None:
+        """Wait until the line holding `marker` is in the sink whole, its line end included. A marker in the sink says the
+        text arrived, not the bytes behind it: the peer writes a line's text and its line end as two writes, so a test that
+        counts bytes after seeing the marker can sample between them (`splitline` makes that certain)."""
+        needle = marker.encode()
+
+        def whole() -> bool:
+            raw = self.sink.raw(session.id)
+            at = raw.rfind(needle)
+            return at != -1 and raw.find(b"\n", at) != -1
+
+        await self.until(whole, message or f"{marker!r} delivered whole", timeout)
+
     async def say(self, service, session, line: str) -> None:
         await service.write_async(session.id, line + "\r")
 
     async def say_noecho(self, service, session) -> None:
         """Stop the tty echoing typed input, so a command typed while a flood is printing cannot splice into a flood line."""
         await self.say(service, session, "noecho")
-        await self.until(lambda: "NOECHO" in self.sink.text(session.id), "tty echo off")
+        await self.line_whole(session, "NOECHO", "tty echo off")
 
     def peer_pid(self, session) -> int:
         return json.loads(self.sink.text(session.id).split("LIFE_READY ")[1].splitlines()[0])["pid"]
@@ -629,16 +642,41 @@ async def test_r2_flood_during_resize_preserves_order_accounts_drops_and_emits_l
         async with service.control_async(session.id, 130, 45):
             before_ack = len(rig.sink.raw(session.id)) - base
             rig.sink.timeline.append(("ack", session.id))
-    await rig.until(lambda: "FLOOD_DONE" in rig.sink.text(session.id), "flood delivered", 90)
+    await rig.line_whole(session, "FLOOD_DONE", "flood delivered", 90)  # the line end too: the count below is of bytes
     numbers = rig.sink.numbers(session.id)
     assert numbers == sorted(set(numbers)), "order preserved, no byte emitted twice"
     produced = (count * len(f"FLOOD {0:06d} " + "x" * 200 + "\r\n") + len("FLOOD_DONE\r\n")
                 + len(f"flood {count}\r\n"))  # the tty also echoes the typed command line
-    delivered = len(rig.sink.raw(session.id)) - base
-    assert delivered + DropCounter.total == produced, "every gap equals the reported drop accounting"
+    raw = rig.sink.raw(session.id)
+    delivered = len(raw) - base
+    assert delivered + DropCounter.total == produced, (
+        "every gap equals the reported drop accounting: "
+        f"delivered={delivered} dropped={DropCounter.total} produced={produced} "
+        f"first={raw[base:base + 16]!r} last={raw[-16:]!r}")
+    if not DropCounter.total:  # nothing was dropped, so the bytes are exactly the echo, the lines and the end marker
+        expected = (f"flood {count}\r\n".encode()
+                    + b"".join(f"FLOOD {n:06d} ".encode() + b"x" * 200 + b"\r\n" for n in range(count))
+                    + b"FLOOD_DONE\r\n")
+        got = raw[base:]
+        at = next((i for i, (a, b) in enumerate(zip(got, expected)) if a != b), min(len(got), len(expected)))
+        assert got == expected, f"first difference at byte {at}: got {got[at:at + 16]!r}, want {expected[at:at + 16]!r}"
     assert before_ack <= slurp["read_total"], "B2: no byte first read after the slurp was emitted before the ack"
     await rig.say(service, session, "size")
     await rig.until(lambda: "SIZE [130, 45]" in rig.sink.text(session.id), "resize completed")
+
+
+async def test_r2b_a_marker_in_the_sink_is_not_its_line_and_line_whole_waits_for_the_line_end(rig):
+    """The count in r2 is of bytes, so it must be taken once the lines it counts are whole. The peer writes a line's text and its
+    line end as two writes; here the second comes 0.5 s after the first, so the sink holds the marker without the line end."""
+    service = rig.service()
+    session = await rig.life(service, "pane-r2b")
+    await rig.say_noecho(service, session)  # the typed command would otherwise echo the marker
+    base = len(rig.sink.raw(session.id))
+    await rig.say(service, session, "splitline SPLIT_MARK 0.5")
+    await rig.until(lambda: "SPLIT_MARK" in rig.sink.text(session.id), "marker delivered")
+    assert len(rig.sink.raw(session.id)) - base == len("SPLIT_MARK"), "the line end is still in flight"
+    await rig.line_whole(session, "SPLIT_MARK")
+    assert len(rig.sink.raw(session.id)) - base == len("SPLIT_MARK\r\n"), "line_whole returned with the whole line in the sink"
 
 
 async def test_r3_resize_for_a_finished_session_is_not_applied_and_does_not_hang(rig):

@@ -452,6 +452,111 @@ pub fn decode(line: &Line) -> Decoded {
     }
 }
 
+/// The keys of the object at `path` in the order the line spells them. `serde_json::Value` sorts a map's keys and Python keeps
+/// insertion order, so a vendor whose behaviour names "the first key" of an object reads it from the raw line. Empty where
+/// `path` is not an object of the line, or the line ends before the object does (the keys read so far stay). A key the line spells
+/// twice is listed twice: the reader that wants a Python dict's single place keeps the first.
+pub fn ordered_keys(raw: &[u8], path: &[&str]) -> Vec<String> {
+    fn skip_ws(raw: &[u8], at: &mut usize) {
+        while raw.get(*at).is_some_and(u8::is_ascii_whitespace) {
+            *at += 1;
+        }
+    }
+    fn string_at(raw: &[u8], at: &mut usize) -> Option<String> {
+        if raw.get(*at) != Some(&b'"') {
+            return None;
+        }
+        let start = *at;
+        *at += 1;
+        while let Some(&byte) = raw.get(*at) {
+            match byte {
+                b'\\' => *at += 2,
+                b'"' => {
+                    *at += 1;
+                    return serde_json::from_slice::<String>(&raw[start..*at]).ok();
+                }
+                _ => *at += 1,
+            }
+        }
+        None
+    }
+    fn skip_value(raw: &[u8], at: &mut usize) -> bool {
+        match raw.get(*at) {
+            Some(b'"') => string_at(raw, at).is_some(),
+            Some(b'{') | Some(b'[') => {
+                let mut depth = 0;
+                while let Some(&byte) = raw.get(*at) {
+                    match byte {
+                        b'"' => {
+                            if string_at(raw, at).is_none() {
+                                return false;
+                            }
+                            continue;
+                        }
+                        b'{' | b'[' => depth += 1,
+                        b'}' | b']' => depth -= 1,
+                        _ => {}
+                    }
+                    *at += 1;
+                    if depth == 0 {
+                        return true;
+                    }
+                }
+                false
+            }
+            Some(_) => {
+                while raw.get(*at).is_some_and(|b| !matches!(b, b',' | b'}' | b']') && !b.is_ascii_whitespace()) {
+                    *at += 1;
+                }
+                true
+            }
+            None => false,
+        }
+    }
+    // One object level: `want` is the key to stop at the value of (`Some`), or None to list every key; the position is left at the value.
+    fn level(raw: &[u8], at: &mut usize, want: Option<&str>) -> Option<Vec<String>> {
+        skip_ws(raw, at);
+        if raw.get(*at) != Some(&b'{') {
+            return None;
+        }
+        *at += 1;
+        let mut keys = Vec::new();
+        loop {
+            skip_ws(raw, at);
+            if raw.get(*at) == Some(&b'}') || *at >= raw.len() {
+                return want.is_none().then_some(keys);
+            }
+            let Some(key) = string_at(raw, at) else {
+                return want.is_none().then_some(keys);
+            };
+            skip_ws(raw, at);
+            if raw.get(*at) != Some(&b':') {
+                return want.is_none().then_some(keys);
+            }
+            *at += 1;
+            skip_ws(raw, at);
+            if want == Some(key.as_str()) {
+                return Some(keys);
+            }
+            if !skip_value(raw, at) {
+                return want.is_none().then_some(keys);
+            }
+            keys.push(key);
+            skip_ws(raw, at);
+            if raw.get(*at) == Some(&b',') {
+                *at += 1;
+            }
+        }
+    }
+    let mut at = 0;
+    for wanted in path {
+        if level(raw, &mut at, Some(wanted)).is_none() {
+            return Vec::new();
+        }
+    }
+    level(raw, &mut at, None).unwrap_or_default()
+}
+
 /// The declared policy for the lines a scan cannot use. `incremental` scans (usage) always skip; a full scan follows the
 /// vendor's baseline: with the compatibility rules set, invalid UTF-8 and a non-object record fail the pass.
 fn policy(ctx: &Ctx, decoded: Decoded, incremental: bool) -> io::Result<Decoded> {

@@ -6,7 +6,7 @@ Commands (one per line on its tty): ``flood N`` (N numbered 200-byte lines, then
 descendant that holds the slave open; prints its pid), ``child-nohup`` (the same, ignoring SIGHUP),``detach`` (a descendant in its own
 session that keeps running), ``trap-term`` (ignore SIGTERM), ``winch`` (print the window
 size on every SIGWINCH), ``marker-file PATH`` (write PATH when everything printed so far was
-flushed), ``stubborn`` (ignore SIGTERM and SIGHUP).
+flushed), ``stubborn`` (ignore SIGTERM and SIGHUP), ``splitline TEXT SECONDS`` (TEXT, a pause, then its line end).
 """
 import fcntl
 import json
@@ -105,6 +105,12 @@ for line in lines():
             total += len(os.read(0, 65536))
         termios.tcsetattr(0, termios.TCSANOW, saved)
         print("DRAINED " + str(total), flush=True)
+    elif command == "splitline":
+        # ``splitline TEXT SECONDS``: TEXT, then after SECONDS its line end, as two writes. ``print`` does the same under
+        # ``-u`` (text, then "\n"), microseconds apart; the pause makes a reader that samples between them certain.
+        os.write(1, words[1].encode())
+        time.sleep(float(words[2]))
+        os.write(1, b"\n")
     elif command == "marker-file":
         open(words[1], "w").close()
         print("MARKED", flush=True)

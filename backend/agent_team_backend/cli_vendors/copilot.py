@@ -124,7 +124,6 @@ from .base import (
     SkillsWiring,
     VendorSpec,
     data_dirs_of,
-    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -1437,9 +1436,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same root as copilot_root, using the captured child environment.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
-    supports_effort=FACT.effort_flag is not None,
-    known_efforts=FACT.known_efforts or (),
     # Verified 2026-08-15: `copilot skill list` under a relocated COPILOT_HOME
     # lists exactly the skills below <home>/skills.
     skills_supported=True,
@@ -1458,8 +1454,8 @@ SPEC = VendorSpec(
     # the browser and captures the result on a loopback callback — exactly
     # what a login pane carries; the device-code flow it falls back to for
     # SSH/headless is auto-detected, so neither --web-flow nor --device-code
-    # is forced here. Verified against `copilot login --help`, 2026-09-18.
-    login_command_args=FACT.login_args,
+    # is forced in `login_args` (copilot.json). Verified against
+    # `copilot login --help`, 2026-09-18.
     # Multi-account: the CLI keeps EVERY login it has done (config.json
     # ``loggedInUsers``, one keyring item each under service "copilot-cli",
     # account "<host>:<login>") and ``lastLoggedInUser`` selects the one in
@@ -1505,7 +1501,6 @@ SPEC = VendorSpec(
     install_hooks=_install_hooks,
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_copilot(home),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=("COPILOT_HOME",),
     make_log_reader=CopilotLogReader,

@@ -248,44 +248,26 @@ def command_tokens(command: Any) -> list[str]:
 
 
 def spell_option(agent_key: str, option: str, value: str | None, quote: Callable[[str], str]) -> str:
-    """The text of one `opt` word, with its leading space, spelled from the subject's declared facts: the spelling the
-    sidecar renders. A refusal when the subject declares no such option, or it is not integrated."""
+    """The text of one `opt` word, with its leading space, spelled from the generated option table and the subject's declared
+    facts: the spelling the sidecar renders. A refusal when the subject declares no such option, or it is not integrated."""
     vendor = facts.FACTS.get(agent_key)
     if vendor is None:
         raise _refused(f"{option}: the subject declares no options")
-    status = {
-        "model": vendor.capabilities.model, "effort": vendor.capabilities.effort,
-        "skip_permissions": vendor.capabilities.skip_permissions, "resume": vendor.capabilities.resume_by_id,
-        "session_id": vendor.capabilities.session_id_at_launch, "login": vendor.capabilities.login,
-    }.get(option)
-    if status is None:
+    rule = facts.OPTIONS.get(option)
+    if rule is None:
         raise _refused(f"{option}: unknown option")
-    if status != "integrated":
+    if getattr(vendor.capabilities, rule.capability) != "integrated":
         raise _refused(f"{option}: not integrated for this subject")
-
-    def need() -> str:
-        if value is None:
-            raise _refused(f"{option}: a value is required")
-        return value
-
-    def declared(flag: str | None) -> str:
-        if flag is None:
-            raise _refused(f"{option}: no flag declared")
-        return flag
-
-    if option == "model":
-        return f" {declared(vendor.model_flag)} {quote(need())}"
-    if option == "effort":
-        if vendor.known_efforts is None or need() not in vendor.known_efforts:
-            raise _refused(f"effort: {value!r} is not a declared effort")
-        return f" {declared(vendor.effort_flag)} {quote(need())}"
-    if option == "skip_permissions":
-        return f" {declared(vendor.permission_flag)}"
-    if option == "resume":
-        return " " + declared(vendor.resume_args).replace("{id}", quote(need()))
-    if option == "session_id":
-        return f" {declared(vendor.session_id_flag)} {quote(need())}"
-    return f" {declared(vendor.login_args)}"
+    flag = getattr(vendor, rule.field)
+    if flag is None:
+        raise _refused(f"{option}: no flag declared")
+    if not rule.takes_value:
+        return f" {flag}"
+    if value is None:
+        raise _refused(f"{option}: a value is required")
+    if rule.values is not None and value not in (getattr(vendor, rule.values) or ()):
+        raise _refused(f"{option}: {value!r} is not a declared value")
+    return " " + (flag.replace("{id}", quote(value)) if rule.template else f"{flag} {quote(value)}")
 
 
 def append_args(command: Any, *args: str) -> Any:

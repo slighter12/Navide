@@ -158,6 +158,35 @@ async def test_kill_verified_reports_a_killed_process_as_gone(tmp_path):
     assert service.get(session.id) is None
 
 
+class _GracefulKill:
+    """A graceful vendor's kill: it returns while the child lives, and the reap event is set when the child is gone."""
+
+    def __init__(self, service: TerminalService):
+        self.reaped = asyncio.Event()
+        self.service = service
+
+    async def kill(self, session_id: str, force: bool = False) -> None:
+        self.service._graceful_kills[session_id] = self.reaped
+
+
+async def test_kill_verified_waits_for_the_reap_of_a_graceful_kill():
+    service = TerminalService(Sink())
+    graceful = _GracefulKill(service)
+    service.kill = graceful.kill
+    verified = asyncio.ensure_future(service.kill_verified("s1"))
+    await asyncio.sleep(0.05)
+    assert not verified.done(), "kill_verified answered while the graceful child was still alive"
+    graceful.reaped.set()
+    assert await verified is True
+
+
+async def test_kill_verified_is_false_when_the_child_outlives_the_reap_wait(monkeypatch):
+    service = TerminalService(Sink())
+    service.kill = _GracefulKill(service).kill
+    monkeypatch.setattr(terminals, "_reap_wait_timeout_s", lambda: 0.05)
+    assert await service.kill_verified("s1") is False
+
+
 async def test_a_create_without_a_dispatch_fence_says_its_own_rollback_settles_a_cancel():
     service = TerminalService(Sink())
     assert await service.cancel_dispatched({}) == CreateCancel.ROLLBACK == "rollback"

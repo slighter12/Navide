@@ -1201,5 +1201,22 @@ class VendorSpec:
         if declared is not None and not self.data_dir_env_vars:
             object.__setattr__(self, "data_dir_env_vars", declared)
         vendor = FACTS.get(self.key)
-        if self.session_path is None and vendor is not None and vendor.session_path and vendor.session_root:
+        if vendor is None:
+            return
+        if self.session_path is None and vendor.session_path and vendor.session_root:
             object.__setattr__(self, "session_path", partial(declared_vendor_session_path, vendor))
+        # The rest of what the declaration says is derived the same way, whenever the vendor leaves the field at its default:
+        # a vendor lists one only where it cannot be declared (Grok's reader of a resume id).
+        derived: dict[str, Any] = {
+            "supports_model": vendor.model_flag is not None,
+            "supports_effort": vendor.effort_flag is not None,
+            "known_efforts": vendor.known_efforts or (),
+            "login_command_args": vendor.login_args,
+            "resume_id_from_command": None if vendor.resume_args is None else resume_reader_of(vendor, plain_only=vendor.plain_only),
+            "shutdown": None if vendor.shutdown is None else ShutdownSpec(
+                graceful=vendor.shutdown.graceful, grace_s=vendor.shutdown.grace_s,
+                defer_master_close=vendor.shutdown.defer_master_close),
+        }
+        for name, value in derived.items():
+            if getattr(self, name) == type(self).__dataclass_fields__[name].default:
+                object.__setattr__(self, name, value)

@@ -50,7 +50,7 @@ from pathlib import Path
 from .base import ExtensionsSource, ExtensionsSpec, session_root
 from .session_layout import encode_droid_cwd
 from ._vendor_facts import FACTS
-from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, data_dirs_of, resume_reader_of
+from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, data_dirs_of
 from ..osplat import platform_id as _platform_id
 from ..log_readers.base import (
     ActivityLines,
@@ -488,7 +488,6 @@ SPEC = VendorSpec(
         resume="native",
         todo="key/blob layout read from the 0.206.0 bundle (machine-wide keyring key, no path binding); identity unreadable; keytar branch (Linux/Windows) not seen running; no real-account round-trip recorded",
     ),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=(
         # Relocates the whole ~/.factory tree.

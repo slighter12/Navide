@@ -44,7 +44,6 @@ from .base import (
     VendorSpec,
     data_dirs_of,
     keychain_payload_items,
-    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -812,9 +811,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Conversation root from AntigravityLogReader; honor the pane HOME shim.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
-    supports_effort=FACT.effort_flag is not None,
-    known_efforts=FACT.known_efforts or (),
     # Verified 2026-08-15: `gemini skills list` reports locations under
     # ~/.gemini/skills — not the ~/.gemini/antigravity-cli/skills that other
     # shared configs assume. Rides the HOME shim its MCP wiring builds.
@@ -861,7 +857,6 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_antigravity(home),
-    resume_id_from_command=resume_reader_of(FACT, plain_only=True),
     make_log_reader=AntigravityLogReader,
     install_dep=Dep("antigravity", "Antigravity CLI (Google)", "Google Antigravity CLI", "agent_cli",
         ["agy", "--version"], r"(\d+\.\d+\.\d+)",

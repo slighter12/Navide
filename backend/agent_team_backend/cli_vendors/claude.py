@@ -44,11 +44,9 @@ from .base import (
     McpValue,
     McpWiring,
     PushChannel,
-    ShutdownSpec,
     SkillsWiring,
     VendorSpec,
     data_dirs_of,
-    resume_reader_of,
 )
 from ..usage_common import (
     _KEYCHAIN_COOLDOWN_S,
@@ -1458,9 +1456,6 @@ SPEC = VendorSpec(
     # Same config home as install_dep; never use the backend reader's fallback
     # search across other accounts when this pane has an isolated config dir.
     data_dirs=data_dirs_of(CLAUDE.data_dirs),
-    supports_model=CLAUDE.model_flag is not None,
-    supports_effort=CLAUDE.effort_flag is not None,
-    known_efforts=CLAUDE.known_efforts or (),
     skills_supported=True,
     # --add-dir adds another project directory, and Claude Code discovers a
     # project's skills below .claude/skills — so the view has to carry that
@@ -1511,7 +1506,6 @@ SPEC = VendorSpec(
         ),
         max_chars=10_000,
     ),
-    login_command_args=CLAUDE.login_args,
     install_hooks=_install_hooks,
     # The usage-limit banner Claude Code prints ("You've hit your … limit ·
     # resets 3pm (Asia/Taipei)"); the same detector the frontend spec's
@@ -1560,7 +1554,6 @@ SPEC = VendorSpec(
     # The vault's claude behavior branches (Keychain dual-track, oauthAccount,
     # wiped guard, login CLAUDE_CONFIG_DIR + env removals) are the documented
     # exemption list and are NOT routed through this spec.
-    resume_id_from_command=resume_reader_of(CLAUDE),
     session_exists=_session_exists,
     home_env_vars=(
         "CLAUDE_CONFIG_DIR",
@@ -1589,6 +1582,7 @@ SPEC = VendorSpec(
         update_state_file=".last-update-result.json",
         config_home_env="CLAUDE_CONFIG_DIR", config_home_default=".claude",
         autoupdate_env="DISABLE_AUTOUPDATER"),
+    # The shutdown is declared in shared/agent-cli/claude.json (`shutdown`) and derived from it.
     # claude writes fullscreenBootPending[pid] into ~/.claude.json when it
     # starts in fullscreen and clears it from a SIGTERM handler on the way out.
     # A SIGKILL never runs that handler, so the entry survives; the next start
@@ -1597,6 +1591,4 @@ SPEC = VendorSpec(
     # (previous prompts shown when scrolling up) disappears. 3s is the room the
     # handler needs for a read-modify-write of that file, and the master stays
     # open across it because a HUP mid-write is the same lost entry.
-    shutdown=ShutdownSpec(graceful=CLAUDE.shutdown.graceful, grace_s=CLAUDE.shutdown.grace_s,
-                          defer_master_close=CLAUDE.shutdown.defer_master_close),
 )

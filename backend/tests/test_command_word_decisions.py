@@ -1,4 +1,4 @@
-"""Every decision about a command reads its words first; a rewrite stays a `Command` (t39f M2, M3, M9)."""
+"""Every decision about a command reads its words first; a rewrite stays a `Command`."""
 
 from __future__ import annotations
 

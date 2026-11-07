@@ -47,6 +47,9 @@ class FakeTerminals(terminals_module.TerminalInterface):
         self.killed.append((session_id, force))
         self._sessions.pop(session_id, None)
 
+    async def wait_until_reaped(self, session_id: str, timeout: float | None = None) -> bool:
+        return True
+
     def get(self, session_id: str) -> SimpleNamespace | None:
         return self._sessions.get(session_id)
 

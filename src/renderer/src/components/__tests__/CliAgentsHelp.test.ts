@@ -4,8 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '@navide/plugin-ui/foundation'
 
+import { CLI_AGENT_SPECS } from '../../platform/plugin-shell/agents'
+import { VENDOR_FACTS } from '../../../../shared/vendorFacts'
 import CliAgentsHelp from '../CliAgentsHelp.vue'
 import { expectNoChineseText } from './helpLocaleAssertions'
+
+// One table row per declared vendor: the count is the declaration set, not a number kept here.
+const VENDOR_ROWS = Object.keys(VENDOR_FACTS).length
 
 // The help topic is prose from the locale files plus a static vendor table.
 // vue-i18n reports every problem — a missing key, a message that failed to
@@ -47,7 +52,7 @@ describe('CliAgentsHelp', () => {
     expect(text).toContain('Supported CLIs')
     expect(text).toContain('Troubleshooting')
     expect(wrapper.findAll('.cah-h2')).toHaveLength(9)
-    expect(wrapper.findAll('.cah-table').at(0)!.findAll('tbody tr')).toHaveLength(16)
+    expect(wrapper.findAll('.cah-table').at(0)!.findAll('tbody tr')).toHaveLength(VENDOR_ROWS)
 
     // `{CLI}` is placeholder prose, not an interpolation — the escape must survive.
     expect(text).toContain('{CLI}')
@@ -63,7 +68,7 @@ describe('CliAgentsHelp', () => {
     expect(text).toContain('疑難排解')
     expect(text).toContain('取得 Session ID 中')
     expect(wrapper.findAll('.cah-h2')).toHaveLength(9)
-    expect(wrapper.findAll('.cah-table').at(0)!.findAll('tbody tr')).toHaveLength(16)
+    expect(wrapper.findAll('.cah-table').at(0)!.findAll('tbody tr')).toHaveLength(VENDOR_ROWS)
 
     expect(text).toContain('{CLI}')
     expect(unexpectedWarnings(warn)).toEqual([])
@@ -136,34 +141,15 @@ describe('CliAgentsHelp', () => {
     expect(table.findAll('thead th')).toHaveLength(6)
     expect(table.findAll('thead th').at(5)!.text()).toBe('Sign-in command')
 
-    // Mirrors `login_command_args` in backend/agent_team_backend/cli_vendors/.
-    // A vendor that declares none launches normally, so the cell says so
+    // Mirrors `login_args` of each declaration (shared/agent-cli/<key>.json), in the order the table lists the vendors (the
+    // spec order). A vendor that declares none launches normally, so the cell says so
     // instead of showing a command the sign-in button never runs.
     const cells = table.findAll('tbody tr').map((row) => row.findAll('td').at(5)!)
     const rendered = cells.map((c) => c.text())
-    expect(rendered).toEqual([
-      'claude auth login',
-      'codex login',
-      'Inside the CLI',
-      'grok login',
-      'kimi login',
-      'opencode auth login',
-      'Inside the CLI',
-      'kilo auth login',
-      'Inside the CLI',
-      'copilot login',
-      'Inside the CLI',
-      'Inside the CLI',
-      'muse login',
-      'Inside the CLI',
-      'mcode login',
-      'Inside the CLI',
-    ])
+    const declared = CLI_AGENT_SPECS.map((spec) => VENDOR_FACTS[spec.agentKey as keyof typeof VENDOR_FACTS])
+    expect(rendered).toEqual(declared.map((facts) => (facts.login_args ? `${facts.command} ${facts.login_args}` : 'Inside the CLI')))
     // A real command is typeset as one; the fallback is prose, not a command.
-    expect(cells.map((c) => c.find('code').exists())).toEqual([
-      true, true, false, true, true, true, false, true, false, true, false, false, true, false,
-      true, false,
-    ])
+    expect(cells.map((c) => c.find('code').exists())).toEqual(declared.map((facts) => facts.login_args !== null))
 
     expect(unexpectedWarnings(warn)).toEqual([])
   })

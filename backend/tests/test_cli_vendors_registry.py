@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from agent_team_backend.cli_vendors import registry
+from agent_team_backend.cli_vendors._vendor_facts import FACTS
 from agent_team_backend.cli_vendors.base import VendorSpec
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,11 +32,8 @@ CLI_AGENTS_HELP = (
     REPO_ROOT / "src" / "renderer" / "src" / "components" / "CliAgentsHelp.vue"
 )
 
-EXPECTED_KEYS = {
-    "aider", "antigravity", "claude", "codex", "copilot", "cursor",
-    "droid", "goose", "grok", "kilo", "kimi", "mcode", "muse", "opencode", "pi",
-    "qwen",
-}
+# The vendors are the declarations in shared/agent-cli/: that set is the inventory, and every roster below is checked against it.
+EXPECTED_KEYS = set(FACTS)
 
 # DEPS entries that are infrastructure, not CLI vendors.
 NON_VENDOR_DEPS = {"homebrew", "node", "ollama", "pnpm", "python", "uv"}
@@ -105,6 +103,18 @@ def test_registry_matches_log_reader_package() -> None:
         and path.stem not in {"base", "watcher", "attribution"}
     }
     assert reader_modules == set(registry.VENDORS)
+
+
+def test_the_lazy_log_reader_roster_names_every_vendor_that_has_a_reader() -> None:
+    """`log_readers/__init__.py` lists each reader class by hand (an import there would re-enter the vendor module): the
+    roster is exactly the vendors whose spec makes a reader, each under the name `<Key>LogReader`, in `__all__` too."""
+    from agent_team_backend import log_readers
+
+    with_reader = {key for key, spec in registry.VENDORS.items() if spec.make_log_reader is not None}
+    assert set(log_readers._MIGRATED_READERS.values()) == with_reader
+    assert set(log_readers._MIGRATED_READERS) == {f"{key.capitalize()}LogReader" for key in with_reader}
+    assert {name for name in log_readers.__all__ if name.endswith("LogReader") and name != "LogReader"} == set(
+        log_readers._MIGRATED_READERS)
 
 
 def test_registry_matches_frontend_agent_specs() -> None:

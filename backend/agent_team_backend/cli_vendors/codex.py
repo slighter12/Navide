@@ -34,7 +34,7 @@ import psutil
 from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
-    AccountSwitchSpec, Dep, McpWiring, SkillsWiring, VendorSpec, data_dirs_of, resume_reader_of,
+    AccountSwitchSpec, Dep, McpWiring, SkillsWiring, VendorSpec, data_dirs_of,
 )
 from ..applog import app_data_dir
 from ..skills_store import SkillsStore
@@ -1865,7 +1865,6 @@ SPEC = VendorSpec(
     network_override_env_vars=("OPENAI_BASE_URL", "CODEX_OSS_BASE_URL", "CODEX_OSS_PORT"),
     # CODEX_HOME is assigned per pane, including resumes in an existing home.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: codex resolves its skills from $CODEX_HOME/skills.
     skills_supported=True,
     skills_wiring=SkillsWiring(
@@ -1885,7 +1884,6 @@ SPEC = VendorSpec(
         flag_token_env_value='mcp_servers.{name}.bearer_token_env_var="{env}"',
         already_wired="mcp_servers.{name}",
     ),
-    login_command_args=FACT.login_args,
     live_file=(".codex", "auth.json"),
     slot_file="auth.json",
     login_home_secret_file=("auth.json",),
@@ -1920,7 +1918,6 @@ SPEC = VendorSpec(
         Path(os.environ["CODEX_HOME"]) if os.environ.get("CODEX_HOME")
         else home / ".codex"
     ),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=("CODEX_HOME",),
     interrupt_key=b"\x1b",

@@ -1,16 +1,65 @@
 # Adding a CLI vendor
 
-Navide supports one CLI agent per vendor file. Adding a vendor is a
-self-contained PR: two new files plus one registration line on each side.
-You never need to read or modify the shared orchestration code.
+Navide supports one CLI agent per declaration. Adding a vendor starts with a
+declaration — `shared/agent-cli/<key>.json` — and a generator run. A vendor
+file on each side then adds only what a declaration cannot say, and a native
+adapter exists only when the Rust core reads the CLI's log. You never need to
+read or modify the shared orchestration code.
+
+## Declare the CLI first
+
+1. Write `shared/agent-cli/<key>.json` (short lowercase key, e.g. `mycli`; copy
+   the closest existing declaration) and run
+
+   ```sh
+   uv --project backend run python scripts/generate-agent-cli-facts.py
+   uv --project backend run python scripts/generate-agent-cli-facts.py --check
+   ```
+
+   The generator writes `cli_vendors/_vendor_facts.py`, `src/shared/vendorFacts.ts`,
+   `native/navide-cli-runtime/src/vendor_facts.rs` and `observe/adapters/mod.rs`
+   from every declaration. Never edit those four by hand. The launch options
+   (`model`, `effort`, `skip_permissions`, `resume`, `session_id`, `login`) are spelled from one generated option
+   table that the Python backend, the renderer and the Rust sidecar all read, so a flag is written once.
+
+Each declaration field replaces a hook you used to write by hand:
+
+| Declaration field | Replaces (backend `VendorSpec` / frontend spec) |
+|---|---|
+| `command` | `defaultCommand` |
+| `model_flag`, `effort_flag`, `known_efforts` | `supports_model`, `supports_effort`, `known_efforts`; `modelArgs`, `effortArgs`, `knownEfforts` |
+| `permission_flag`, `permission_aliases` | `skipPermissionFlag`; the spellings that set a permission mode |
+| `resume_args`, `resume_aliases`, `subcommand` | `resumeArgs`; `resume_id_from_command` |
+| `plain_only` | the rule that a command line with shell syntax names no resume (Antigravity, Grok); optional, default `false`, and only with `resume_args` |
+| `session_id_flag` | the flag that pins a session id at launch |
+| `login_args` | `login_command_args` |
+| `data_dirs` | `data_dirs` (`data_dirs_of(FACT.data_dirs)`) and `data_dir_env_vars` |
+| `session_root`, `session_path` | `session_path` |
+| `logs` | where the sessions' logs are (`files`, `cwd`) |
+| `shutdown` | `shutdown=ShutdownSpec(...)` |
+| `supports_session_resume` | `supports_session_resume` (set it from `FACT`) |
+| `capabilities` | the status of each launch option; a flag is declared only next to a status the sidecar renders |
+| `observer` | the native observation of the CLI's log (see below) |
+
+A `VendorSpec` whose key has a declaration derives `supports_model`, `supports_effort`, `known_efforts`,
+`login_command_args`, `resume_id_from_command`, `shutdown`, `session_path` and `data_dir_env_vars`
+from it when you leave the field out. List one only where the declaration cannot say it (Grok's reader of
+a resume id, a platform-dependent session path, the data directories of Goose). The parity test
+`backend/tests/test_agent_cli_facts.py` checks that each vendor keeps to its declaration, including that a vendor
+reads a resume id if and only if it declares `resume_args`.
 
 ## Backend
 
+What is left after the declaration is exactly these steps, and every one of them is checked by a test that
+names what you forgot:
+
 1. Copy `backend/agent_team_backend/cli_vendors/_template.py` to
-   `cli_vendors/<key>.py` (short lowercase key, e.g. `mycli`) and fill in
-   the `SPEC`. Every capability you leave at its default is treated as
-   "unsupported" for your vendor — the app degrades gracefully.
-2. Register the spec in `cli_vendors/registry.py` (one line, alphabetical).
+   `cli_vendors/<key>.py` and fill in the `SPEC`, which starts from
+   `FACT = FACTS["<key>"]` and `key=FACT.key`. Add only named hooks and what
+   the declaration cannot say (credentials, quota, MCP and skills wiring, the install entry). Every capability you
+   leave at its default is treated as "unsupported" for your vendor — the app degrades gracefully.
+2. Register the spec in `cli_vendors/registry.py` (one import and one line, alphabetical). The import must stay
+   static: the packaged backend finds vendor modules through it.
 3. If the CLI writes local conversation logs, implement the log reader in
    your vendor file and set `make_log_reader`.
 4. Add `backend/agent_team_backend/log_readers/<key>.py`. Every registered
@@ -35,15 +84,16 @@ You never need to read or modify the shared orchestration code.
    unsupported capabilities with negative assertions instead of inventing
    uniform capabilities or skipping the vendor. See
    [CI and CLI regressions](en-US/ci-and-cli-regression.md).
-7. Add your key to the hardcoded lists in the tests: `EXPECTED_KEYS` in
-   `backend/tests/test_cli_vendors_registry.py`, and the `SNAPSHOT` in
+7. Add your entry to the `SNAPSHOT` in
    `backend/tests/vendors/test_install_deps_snapshot.py`. The snapshot is
    ordered by `DEPS`, which is `_AGENT_CLI_ORDER` first and then the remaining
    keys in **registry order** — so unless you add your key to
    `_AGENT_CLI_ORDER`, your entry goes where the key sorts among the others,
    which is usually *not* the end. Run the test and let the diff place it.
-8. Only if your spec sets `login_command_args`: add the key to the expected set
-   in `backend/tests/test_login_spawn_command.py`.
+   The expected vendor set (`EXPECTED_KEYS`) and the set of vendors with a
+   sign-in command are not lists to edit: they read the declarations.
+8. Update the vendor counts and lists in the README (three places); a test
+   compares them with the declaration set.
 9. Account switching is opt-in through `account_switch=AccountSwitchSpec(...)`
    on the spec, plus `slot_file` (the parked copy's file name). A spec without
    the declaration is never offered for switching and never inherits another
@@ -113,10 +163,9 @@ You never need to read or modify the shared orchestration code.
 A JSONL log is read by `native/navide-cli-runtime/src/observe/`; the vendor adds a declaration and a thin adapter, not a reader.
 The test recipe, in the order that keeps each step falsifiable:
 
-1. Declare the vendor in `shared/agent-cli/<key>.json` (usage fields, modes, `legacy_state` for every key of the Python bag the
-   typed state replaces, `core.modes`) and run `uv --project backend run python scripts/generate-agent-cli-facts.py`, then
-   `... --check`. The generator writes `_vendor_facts.py`, `src/shared/vendorFacts.ts`, `vendor_facts.rs` and
-   `observe/adapters/mod.rs`; never edit them by hand.
+1. Extend the `observer` block of the declaration you already wrote (usage fields, modes, `legacy_state` for every key of the Python bag the
+   typed state replaces, `core.modes`) and run the generator again, then `--check`. A vendor with no native observation
+   has no adapter and needs none of the steps below.
 2. Write `observe/adapters/<key>.rs`: an `Observer` with a typed `State`, and a `JsonlObserver` with only the hooks the log needs
    (`identify`, `activity`, `settle`, `position_key`, the consts). Name the Python source in the module doc with `file:line`.
 3. Add a `Log` scenario in the adapter's `tests` module (`observe/parity.rs`): `Log::new`, `append`, `passes`, `replaced`, a
@@ -141,17 +190,19 @@ The test recipe, in the order that keeps each step falsifiable:
 ## Frontend
 
 1. Copy `src/renderer/src/platform/plugin-shell/agents/_template.ts` to `agents/<key>.ts` and
-   fill in the spec (label, default command, resume syntax, capability
-   flags — the template lists every optional field with pointers to the
-   full docs in `agents/types.ts`).
+   fill in the spec. It starts from `const FACT = VENDOR_FACTS.<key>`,
+   `defaultCommand: FACT.command` and `...factOptions(FACT)`, which supplies
+   `modelArgs`, `effortArgs`, `knownEfforts`, `skipPermissionFlag` and
+   `resumeArgs` from the declaration. Add the label, the capability flags and
+   a named hook only where the facts cannot spell it (aider's
+   `resumeCommandPattern`); the template lists every optional field with
+   pointers to the full docs in `agents/types.ts`.
 2. Register it in `agents/index.ts` (one line, display order).
 3. Add a row to `vendors` in `src/renderer/src/components/CliAgentsHelp.vue`
    (Settings ▸ Help). It is a hand-maintained mirror, and
    `test_help_panel_sign_in_column_matches_login_command_args` compares its
-   `signIn` column against every spec's `login_command_args`.
-4. Update `src/renderer/src/components/__tests__/CliAgentsHelp.test.ts`: the
-   table row count (asserted twice, once per locale), the sign-in command
-   list, and the list of which cells render a `<code>` element.
+   `signIn` column against every declaration's `login_args`.
+4. `CliAgentsHelp.test.ts` needs no edit: its row count and sign-in column read the declarations.
 5. Append your `{ agentKey, label, hint }` to
    `plugins/navide-plans/src/retained/agentSpecs.ts` — the plans plugin keeps a
    retained copy that a test compares against the live list.
@@ -161,12 +212,10 @@ The test recipe, in the order that keeps each step falsifiable:
    product code, not a test list: a home relocator Navide sets itself must not
    be offered as a user-editable spawn env var, or the page promises an
    override that gets overwritten.
-7. Only if your spec has no `skipPermissionFlag`: update the flagless-vendor
-   list in `src/renderer/src/platform/plugin-shell/lib/cliPermission.test.ts`.
-8. Run `pnpm vitest run src/renderer/src/platform/plugin-shell/agents` — the structural tests there
+7. Run `pnpm vitest run src/renderer/src/platform/plugin-shell/agents` — the structural tests there
    check your spec against the rules the template states (key matches the
-   filename, the file is registered, `resumeCommandPattern` matches the
-   command Navide builds for you, no `/g` on a matcher). They need no edit
+   filename, the file is registered, the vendor's facts read back the
+   resume command Navide builds for you, no `/g` on a matcher). They need no edit
    when you add a vendor; they discover your file on their own.
 
 Write the spec as `export const SPEC = { … } as const satisfies AgentSpec`,
