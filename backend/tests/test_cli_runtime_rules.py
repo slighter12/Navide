@@ -66,15 +66,36 @@ def production(path: Path) -> str:
     return re.sub(r"(?m)//.*$", "", text)
 
 
+#: Files compiled only under the cargo feature `fault-hooks` (declared `#[cfg(feature = "fault-hooks")]`): the harness
+#: build's fault injection, which `tests/product_binary.rs` proves is absent from the product binary.
+HARNESS_ONLY_FILES = {"fault.rs", "faults.rs"}
+
+
 def rust_files() -> list[Path]:
-    return [p for p in sorted(RUST_SRC.rglob("*.rs")) if not p.name.endswith("_test.rs") and not p.name.endswith("_tests.rs")]
+    return [p for p in sorted(RUST_SRC.rglob("*.rs"))
+            if not p.name.endswith("_test.rs") and not p.name.endswith("_tests.rs") and p.name not in HARNESS_ONLY_FILES]
 
 
 # ------------------------------------------------------------------------------------ waits and bounds
 
+#: `sleep` call sites in the runtime: function name -> why it is not a wait on state.
+SLEEP_ALLOWLIST = {
+    "retry_pause": "R19: the pause between two reads of a process table that changed under the scan (a rate limit)",
+}
+
+
 def test_no_sleep_is_used_as_a_wait_in_the_rust_runtime():
-    offenders = [f"{p.name}: {m.group(0)}" for p in rust_files() for m in re.finditer(r"(?:thread::)?sleep\s*\(", production(p))]
+    offenders, used = [], set()
+    for path in rust_files():
+        text = production(path)
+        for match in re.finditer(r"(?:thread::)?sleep\s*\(", text):
+            owner = enclosing_fn(text, match.start())
+            if owner in SLEEP_ALLOWLIST:
+                used.add(owner)
+            else:
+                offenders.append(f"{path.name}: {match.group(0)} in fn {owner}")
     assert not offenders, offenders
+    assert used == set(SLEEP_ALLOWLIST), f"stale sleep allowlist: {set(SLEEP_ALLOWLIST) - used}"
 
 
 def test_every_rust_duration_comes_from_a_named_bound():
@@ -151,7 +172,7 @@ def test_no_text_encoded_bytes_anywhere_in_the_runtime_sources():
 
 #: libc::read call sites that are not a PTY master: function name -> what it reads.
 RAW_READ_ALLOWLIST = {
-    "read_full": "the control socket (the sidecar's reader)",
+    "read_control": "the control socket (the sidecar's reader, `Host::read_control`)",
     "gate_owner": "the child's pid report on the gate's report pipe",
     "spawn_gated": "the child's gate pipe inside `pre_exec`",
 }
@@ -238,5 +259,5 @@ def test_s3_the_call_sites_review_2_named_use_named_bounds():
     assert "self._runtime.wait(), HANDSHAKE_TEARDOWN_S" in runtime and "self._runtime.wait(), READY_EXIT_S" in runtime
     assert "asyncio.shield(self._owned[sid]), OWNED_RECEIPT_S" in runtime
     darwin = (RUST_SRC / "darwin.rs").read_text()
-    assert "Duration::from_millis(super::SNAPSHOT_MS)" in darwin and "Duration::from_secs(5)" not in production(RUST_SRC / "darwin.rs")
+    assert "Duration::from_millis(crate::control::SNAPSHOT_MS)" in darwin and "Duration::from_secs(5)" not in production(RUST_SRC / "darwin.rs")
     assert re.search(r'"cleanup_ms": 8_000', runtime), "the cleanup_ms ceiling is the derived 8 s (S-4)"

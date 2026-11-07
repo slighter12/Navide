@@ -146,7 +146,7 @@ __all__ += ["listen_socket_reuseaddr"]
 
 def has_native_vendor_observer() -> bool:
     """Whether the selected Rust runtime's sidecar answers vendor OBSERVE requests on this platform. The Windows
-    sidecar refuses every one (`native/navide-cli-runtime/src/windows.rs:1244`, "observer not integrated"), so a
+    sidecar refuses every one (`Host::observer` in `native/navide-cli-runtime/src/host.rs`, "observer not integrated"), so a
     Rust-launched Windows pane is observed by the Python watcher's baseline readers (spec D2)."""
     return platform_id != "win32"
 

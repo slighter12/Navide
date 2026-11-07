@@ -4,11 +4,11 @@
 //!
 //! Every handwritten piece here has a documented interface reason (delta section 7): the POSIX
 //! word quoting, the `shlex.split` grammar and the wrapper assembly. No crate is used for them.
-#![allow(dead_code)]
+// The Windows grammar and program resolution below are compiled on every host so their tests run everywhere, but
+// only the Windows host calls them.
+#![cfg_attr(not(windows), allow(dead_code))]
+use crate::vendor_facts;
 use serde_json::Value;
-
-#[path = "vendor_facts.rs"]
-mod vendor_facts;
 
 /// What the sidecar will spawn, and who composed it (the `argv_source` receipt field).
 #[derive(Debug, PartialEq, Eq)]

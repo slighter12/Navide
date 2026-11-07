@@ -4,9 +4,9 @@
 //! queue is full, nothing is ever dropped. `SESSION_OWNED` is the only frame that carries a
 //! descriptor; it travels as `Payload::Owned`, which holds the session's `SessionPty` so the
 //! writer lends the master to the send itself (no raw descriptor sits in the queue).
-use crate::frame::{self, Frame, FrameType, MAX_FRAME_R2P};
+use crate::frame::{self, code, Frame, FrameType, MAX_FRAME_R2P};
 #[cfg(unix)]
-use crate::frame::{code, FLAG_HAS_FD, MAX_HAS_FD_FRAME};
+use crate::frame::{FLAG_HAS_FD, MAX_HAS_FD_FRAME};
 #[cfg(unix)]
 use crate::session_pty::SessionPty;
 use serde_json::{json, Value};
@@ -114,7 +114,8 @@ impl Outbound {
         self.changed.notify_all();
     }
 
-    fn frame(
+    /// Encode a frame, or `None` when its body is over `max_frame_r2p`. The bound is checked in every build.
+    fn encode(
         &self,
         frame_type: FrameType,
         frame_code: u16,
@@ -122,7 +123,7 @@ impl Outbound {
         cid: u64,
         meta: Value,
         blob: Vec<u8>,
-    ) -> Vec<u8> {
+    ) -> Option<Vec<u8>> {
         let frame = Frame {
             frame_type,
             code: frame_code,
@@ -133,8 +134,27 @@ impl Outbound {
             blob,
         };
         let bytes = frame::encode(&frame);
-        debug_assert!(bytes.len() - frame::HEADER_LEN <= MAX_FRAME_R2P as usize);
-        bytes
+        (bytes.len() - frame::HEADER_LEN <= MAX_FRAME_R2P as usize).then_some(bytes)
+    }
+
+    /// A frame the peer must be able to accept. One that does not fit is never sent: the peer is told once, by a
+    /// small `FATAL`, and its generation ends. (No producer is expected to reach this; it is the last guard.)
+    fn frame(
+        &self,
+        frame_type: FrameType,
+        frame_code: u16,
+        flags: u16,
+        cid: u64,
+        meta: Value,
+        blob: Vec<u8>,
+    ) -> Vec<u8> {
+        self.encode(frame_type, frame_code, flags, cid, meta, blob)
+            .unwrap_or_else(|| {
+                let fatal = json!({"code":"PROTOCOL_ERROR","stage":"encode",
+                    "message":"an outbound frame exceeded max_frame_r2p and was not sent"});
+                self.encode(FrameType::Event, code::FATAL, 0, 0, fatal, Vec::new())
+                    .expect("a FATAL frame fits")
+            })
     }
 
     pub fn event(&self, event_code: u16, meta: Value) {
@@ -177,17 +197,19 @@ impl Outbound {
     /// the spawn (5.1.3); this guards the actual frame as well.
     #[cfg(unix)]
     pub fn session_owned(&self, meta: Value, pty: Arc<SessionPty>) -> io::Result<()> {
-        let bytes = self.frame(
-            FrameType::Event,
-            code::SESSION_OWNED,
-            FLAG_HAS_FD,
-            0,
-            meta,
-            Vec::new(),
-        );
-        if bytes.len() > MAX_HAS_FD_FRAME {
-            return Err(io::Error::other("handoff_size"));
-        }
+        let bytes = self
+            .encode(
+                FrameType::Event,
+                code::SESSION_OWNED,
+                FLAG_HAS_FD,
+                0,
+                meta,
+                Vec::new(),
+            )
+            .filter(|bytes| bytes.len() <= MAX_HAS_FD_FRAME)
+            .ok_or_else(|| {
+                crate::refusal::bad_request(crate::refusal::Stage::HandoffSize, "handoff_size")
+            })?;
         self.push(Payload::Owned { bytes, pty });
         Ok(())
     }
@@ -412,6 +434,36 @@ impl Sender for SocketSender {
         } else {
             Ok(sent as usize)
         }
+    }
+}
+
+#[cfg(test)]
+mod bound_tests {
+    use super::*;
+
+    /// R6: the frame bound is checked in every build, not only with debug assertions.
+    #[test]
+    fn a_frame_over_the_bound_is_never_queued_and_the_peer_is_told_instead() {
+        let out = Outbound::new(1);
+        out.event_for(
+            code::OBSERVATION_PART,
+            7,
+            json!({}),
+            vec![0; MAX_FRAME_R2P as usize],
+        );
+        let Some(Payload::Plain(bytes)) = out.next_payload() else {
+            panic!("a plain frame was queued");
+        };
+        assert!(bytes.len() - frame::HEADER_LEN <= MAX_FRAME_R2P as usize);
+        let header = frame::parse_header(
+            bytes[..frame::HEADER_LEN].try_into().unwrap(),
+            frame::Direction::RustToPython,
+            1,
+        )
+        .unwrap();
+        let decoded = frame::decode_body(header, &bytes[frame::HEADER_LEN..]).unwrap();
+        assert_eq!(decoded.code, code::FATAL);
+        assert_eq!(decoded.meta["stage"], "encode");
     }
 }
 
