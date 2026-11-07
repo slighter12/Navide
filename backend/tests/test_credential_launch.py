@@ -112,7 +112,7 @@ def test_wrapper_preserves_rc_environment_and_arguments(tmp_path, posix_bash):
         cli.chmod(0o700)
         chosen = str(tmp_path / "chosen store")
         command = [posix_bash, "-c", "kilo --session 'two words'"]
-        wrapped = wrap(command,VENDORS["kilo"], launch.helper_argv())
+        wrapped = wrap(command, VENDORS["kilo"], launch.helper_argv())
         assert wrapped is not None
         wrapped[-1] = "export XDG_DATA_HOME=" + shlex.quote(chosen) + "; " + wrapped[-1]
         process = await asyncio.create_subprocess_exec(
@@ -135,7 +135,7 @@ def test_unknown_function_keeps_regular_command_behavior(tmp_path, posix_bash):
     async def run():
         launch = await CredentialLaunch.start(("XDG_DATA_HOME",), timeout=2)
         command = [posix_bash, "-c", "kilo"]
-        wrapped = wrap(command,VENDORS["kilo"], launch.helper_argv())
+        wrapped = wrap(command, VENDORS["kilo"], launch.helper_argv())
         wrapped[-1] = "kilo() { printf original; }; " + wrapped[-1]
         process = await asyncio.create_subprocess_exec(
             *wrapped, env={"HOME": str(tmp_path), "PATH": os.defpath, **launch.env},
@@ -155,6 +155,19 @@ def test_unknown_function_keeps_regular_command_behavior(tmp_path, posix_bash):
 def test_complex_command_is_not_rewritten():
     assert wrap(["/bin/bash", "-lc", "XDG_DATA_HOME=/elsewhere kilo"], VENDORS["kilo"], ["helper"]) is None
     assert wrap(["/bin/bash", "-lc", "kilo && echo done"], VENDORS["kilo"], ["helper"]) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX executable file: the Windows resolution is covered by the native launch test")
+def test_a_program_that_vanishes_between_the_decision_and_the_rendering_is_not_wrapped_instead_of_crashing(tmp_path):
+    program = tmp_path / "kilo"
+    program.write_text("#!/bin/sh\n")
+    program.chmod(0o700)
+    env = {"PATH": str(tmp_path) + os.pathsep + os.defpath}
+    plan = wrap_plan("kilo --session x", VENDORS["kilo"], ["helper"], env=env)
+    assert plan is not None and plan["entrypoint"] is not None, "the program is found, so the launch is to be wrapped"
+    assert render_wrapper("kilo --session x", VENDORS["kilo"], plan, env=env) is not None
+    program.unlink()
+    assert render_wrapper("kilo --session x", VENDORS["kilo"], plan, env=env) is None, "no program to wrap any more: the launch runs unchanged, as `wrap_plan` says for an unresolved program"
 
 
 async def test_fake_token_and_extra_env_cannot_consume_launch_report(tmp_path, helper_env):
@@ -250,7 +263,7 @@ async def test_native_launch_reuses_platform_shim_and_refuses_unknown_batch(tmp_
         helper = launch.helper_argv(login=True, vendor="kilo")
         if "--wait-child" not in helper:
             helper.append("--wait-child")
-        wrapped = wrap(subprocess.list2cmdline(argv),VENDORS["kilo"], helper, env=env)
+        wrapped = wrap(subprocess.list2cmdline(argv), VENDORS["kilo"], helper, env=env)
         assert wrapped is not None
         assert wrapped[wrapped.index("--") + 1:] == [str(program), str(cli), *argv[-3:]]
         process = await asyncio.create_subprocess_exec(*wrapped, env={**env, **launch.env}, cwd=tmp_path,
@@ -267,7 +280,7 @@ async def test_native_launch_reuses_platform_shim_and_refuses_unknown_batch(tmp_
             "argv": ["--session", "two words"], "cwd": str(tmp_path), "home": str(tmp_path),
             "xdg": env["XDG_DATA_HOME"], "unrelated": "FAKE-PRIVATE", "channel": []}
         shim.write_text('set XDG_DATA_HOME=elsewhere\n@"%~dp0\\node.exe" "%~dp0\\cli.js" %*\n')
-        assert wrap("kilo.cmd",VENDORS["kilo"], helper, env=env) is None
+        assert wrap("kilo.cmd", VENDORS["kilo"], helper, env=env) is None
         assert osplat.paths.pty_launch_parts(str(shim))[0] == "cmd.exe"
     finally:
         if process is not None and process.returncode is None:
@@ -283,7 +296,7 @@ async def test_unknown_wrapper_preserves_shell_fallback_and_exit_status(tmp_path
     wrapper.chmod(0o700)  # Deliberately no shebang: the original shell handles ENOEXEC.
     launch = await CredentialLaunch.start(("XDG_DATA_HOME",), timeout=1)
     try:
-        command = wrap([bash, "-c", "kilo"],VENDORS["kilo"], launch.helper_argv(vendor="kilo"))
+        command = wrap([bash, "-c", "kilo"], VENDORS["kilo"], launch.helper_argv(vendor="kilo"))
         process = await asyncio.create_subprocess_exec(*command, cwd=tmp_path,
             env={"HOME": str(tmp_path), "PATH": str(tmp_path) + os.pathsep + os.defpath,
                  "UNRELATED_SECRET": "FAKE-WRAPPER-ENV", **launch.env},

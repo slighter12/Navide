@@ -351,7 +351,7 @@ fn credential_refused(why: &str) -> ComposeError {
 
 /// Characters `simple_command_args` refuses in a literal invocation (base.py).
 const SHELL_METACHARACTERS: &str = ";&|<>`$%#()\n\r";
-/// Characters the list form of `wrap_command` also declines (credential_launch.py).
+/// Characters the list form of `wrap_plan` (`_script_words`) also declines (credential_launch.py).
 const GLOB_CHARACTERS: &str = "~*?[]{}!";
 
 fn is_variable_name(name: &str) -> bool {
@@ -375,8 +375,8 @@ fn stem(path: &str) -> &str {
     }
 }
 
-/// The managed-credential outer wrapper (delta 10.2): the same text `credential_launch.wrap_command`
-/// builds, from typed data. Every predicate of `wrap_command` is re-checked here.
+/// The managed-credential outer wrapper (delta 10.2): the same text `credential_launch.render_wrapper`
+/// builds for a `credential_launch.wrap_plan` decision, from typed data. Every predicate of `wrap_plan` is re-checked here.
 fn compose_credential(agent_key: &str, object: &serde_json::Map<String, Value>) -> Result<Composed, ComposeError> {
     let strings = |key: &str| -> Result<Vec<String>, ComposeError> {
         let array = object.get(key).and_then(Value::as_array).ok_or_else(|| shape(&format!("credential needs {key}")))?;
@@ -545,7 +545,7 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
     };
     let allowed = match composition {
         // Windows: the managed-credential helper form has no Rust wrapper yet (it is composed from a
-        // resolved shim by `credential_launch.wrap_command`), so that launch keeps the `argv` shape.
+        // resolved shim by `credential_launch.wrap_plan` and `render_wrapper`), so that launch keeps the `argv` shape.
         vendor_facts::Composition::Rust if windows => matches!(shape, "direct" | "argv"),
         vendor_facts::Composition::Rust => {
             matches!(shape, "wrapped" | "direct") || (shape == "credential" && vendor_facts::find(agent_key).is_some())
@@ -562,7 +562,7 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
 // ---------------------------------------------------------------------------------------------
 // Windows program resolution (ticket 07). The Python runtime resolves the program only on its own
 // spawn path (`osplat/_windows.py` `spawn`: `shutil.which` then `pty_launch_parts`); the `argv` it
-// hands the sidecar (`cli_runtime.py` `_resolve_command`, `terminals.py` `_resolve_command`) is only
+// hands the sidecar (`terminals.py` `resolve_command`, which both terminal services call) is only
 // split, never resolved. The sidecar therefore resolves the composed program the same way.
 // ---------------------------------------------------------------------------------------------
 
@@ -1202,8 +1202,8 @@ mod tests {
 
     #[test]
     fn a_direct_string_with_glob_or_tilde_characters_is_composed_not_refused() {
-        // Only the list/script form declines `~*?[]{}!` (credential_launch.py 42); the entrypoint form of a
-        // resolved direct string accepts them, as wrap_command does. Metacharacters and a foreign program
+        // Only the list/script form declines `~*?[]{}!` (`_script_words` in credential_launch.py); the entrypoint form of a
+        // resolved direct string accepts them, as `wrap_plan` does. Metacharacters and a foreign program
         // are refused in both.
         let file: Value = serde_json::from_str(CREDENTIAL_VECTORS).unwrap();
         let helper = strings(&file["helper"]);

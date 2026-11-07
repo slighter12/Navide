@@ -666,6 +666,9 @@ mod tests {
             let outcome = open_regular(&path);
             drop(readers_only);
             assert!(outcome.is_ok(), "a writer that shares reading blocked the observer: {:?}", outcome.err());
+            // The observer's own read handle ends here: it is open on this file, and a writer that shares no reading cannot open a file
+            // anyone has open for reading (ERROR_SHARING_VIOLATION on the test's own writer, before `open_regular` is ever tried).
+            drop(outcome);
             // A writer that shares no reading (exclusive, or write-only sharing): no reader can open the file, and this one must say so
             // with the sharing violation, not panic or hang. The log is unobservable then; nothing here could read it.
             for share in [0, SHARE_WRITE] {

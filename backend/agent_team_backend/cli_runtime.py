@@ -29,8 +29,8 @@ from .cli_runtime_handoff import HandoffRejected, HandoffSlot, MasterHandle, che
 from . import cli_runtime_windows as winrt
 from .ipc import make_event
 from .terminals import (
-    _BUF_CAP, CreateCancel, CreateCancelled, TerminalInterface, TerminalService, _forget_live_log, _register_live_log,
-    resolve_command)
+    _BUF_CAP, CreateCancel, CreateCancelled, StreamObserver, TerminalInterface, TerminalService, _forget_live_log,
+    _register_live_log, resolve_command)
 
 log = logging.getLogger(__name__)
 _CAP = 5 * 1024 * 1024
@@ -1782,6 +1782,9 @@ class RustTerminalService(TerminalInterface):
 
     def log_sent(self, session_id: str, label: str, text: str) -> None:
         self.stream.log_sent(session_id, label, text)
+
+    def observe_stream(self, observer: StreamObserver) -> None:
+        self.stream.observe_stream(observer)
 
     def get(self, session_id: str):
         return self.stream.get(session_id)

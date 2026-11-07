@@ -511,6 +511,27 @@ class CreateCancel(StrEnum):
     ROLLBACK = "rollback"  # the create has no dispatch fence: its own rollback kills what it made
 
 
+class StreamObserver:
+    """What a Terminal Stream tells whoever observes it, by session id and byte count only (never the bytes). Every
+    method does nothing; an observer overrides the ones it counts. A harness counts through this seam and never
+    patches the stream's private methods, so both services are counted by the same code."""
+
+    def read(self, session_id: str, nbytes: int) -> None:
+        """`nbytes` were read from the session's master (a readable callback, or the resize drain's slurp)."""
+
+    def absorbed(self, session_id: str, nbytes: int) -> None:
+        """One drained batch of `nbytes` entered the output buffer."""
+
+    def dropped(self, session_id: str, nbytes: int) -> None:
+        """The drop-oldest rule discarded `nbytes` of the buffer while that batch was absorbed."""
+
+    def emitted(self, session_id: str, nbytes: int) -> None:
+        """One output frame carrying `nbytes` of payload is being handed to the sink."""
+
+    def drained(self, session_id: str) -> None:
+        """A resize drain finished: everything the session had buffered or the kernel still held has been emitted."""
+
+
 class TerminalInterface:
     """Everything a handler or the app calls on a terminal service, declared once. The async half is written here over
     the synchronous primitives (`create`, `write`, `resize`, ...), which a service implements. The in-process service
@@ -551,6 +572,11 @@ class TerminalInterface:
 
     def log_sent(self, session_id: str, label: str, text: str) -> None:
         """Record text the backend itself sent to a session, in that session's transcript."""
+
+    def observe_stream(self, observer: StreamObserver) -> None:
+        """Have the Terminal Stream this service presents sessions through tell `observer` what moves through it. One
+        observer per stream: a later call replaces the earlier one."""
+        raise NotImplementedError
 
     # ── queries ──
     def get(self, session_id: str) -> TerminalSession | None:
@@ -666,6 +692,7 @@ class TerminalService(TerminalInterface):
         # what happens when a session's stream ends: it is called as `end_stream(session, reason=...)` in place of
         # this service's own close.
         self._end_stream = end_stream
+        self._observer = StreamObserver()
         self._loop = asyncio.get_event_loop()
         # The crash-recovery registry lives in the data dir this service was
         # started under. Registry jobs run on worker threads and can still be
@@ -1246,7 +1273,7 @@ class TerminalService(TerminalInterface):
         lock = self._resize_barriers.setdefault(session.id, asyncio.Lock())
         try:
             async with lock:
-                await self._drain_output_behind_barrier(session)
+                await self.drain_behind_barrier(session)
         finally:
             # Output read while the barrier held was deferred by the lock and
             # its debounce timer may already have fired into nothing.  (A
@@ -1286,6 +1313,7 @@ class TerminalService(TerminalInterface):
                 break
             if not chunk:
                 break
+            self._observer.read(session.id, len(chunk))
             self._out_buffers.setdefault(session.id, []).append(chunk)
             self._out_buf_bytes[session.id] = (
                 self._out_buf_bytes.get(session.id, 0) + len(chunk)
@@ -1304,6 +1332,7 @@ class TerminalService(TerminalInterface):
             return
         combined = b"".join(chunks)
         for piece in self._split_chunks(combined):
+            self._observer.emitted(session.id, len(piece))
             await self._emit(self._build_output_frame(session, piece))
         self._mirror_flush_to_log(session, combined)
 
@@ -1909,6 +1938,10 @@ class TerminalService(TerminalInterface):
     async def drain_behind_barrier(self, session: TerminalSession) -> None:
         """Emit everything the session has buffered or the kernel still holds. The caller holds `barrier(session)`."""
         await self._drain_output_behind_barrier(session)
+        self._observer.drained(session.id)
+
+    def observe_stream(self, observer: StreamObserver) -> None:
+        self._observer = observer
 
     def flush_if_unblocked(self, session: TerminalSession) -> None:
         """Start the flush that output absorbed while a barrier was held is waiting for."""
@@ -1997,6 +2030,7 @@ class TerminalService(TerminalInterface):
             if not chunk:
                 close_reason = "exit"
                 break
+            self._observer.read(session.id, len(chunk))
             raw.append(chunk)
             nbytes += len(chunk)
 
@@ -2024,6 +2058,7 @@ class TerminalService(TerminalInterface):
         buf_size = self._out_buf_bytes.get(session.id, 0) + len(chunk)
         self._out_buf_bytes[session.id] = buf_size
         barrier = self._resize_barriers.get(session.id)
+        dropped = 0
         if buf_size >= _BUF_CAP and (
             session.id in self._drain_tasks or (barrier is not None and barrier.locked())
         ):
@@ -2032,7 +2067,6 @@ class TerminalService(TerminalInterface):
             # (see _READER_PAUSE_MAX_MS) — a flush would only defer, so the
             # only place left for the pressure is our own buffer.  Drop the
             # oldest chunks: the newest carry the TUI's current screen state.
-            dropped = 0
             while buf_size >= _BUF_CAP and len(buf) > 1:
                 old = buf.pop(0)
                 buf_size -= len(old)
@@ -2057,6 +2091,9 @@ class TerminalService(TerminalInterface):
                 session,
             )
             self._out_handles[session.id] = handle
+        self._observer.absorbed(session.id, len(chunk))
+        if dropped:
+            self._observer.dropped(session.id, dropped)
 
     def _window_bytes(self, session_id: str, *, now: float | None = None) -> int:
         """Bytes read from this PTY within the last _FAST_PATH_WINDOW_S,
@@ -2143,6 +2180,7 @@ class TerminalService(TerminalInterface):
         async def _drain() -> None:
             try:
                 for piece in self._split_chunks(combined):
+                    self._observer.emitted(session.id, len(piece))
                     await self._emit(self._build_output_frame(session, piece))
             finally:
                 timer = self._pause_timers.pop(session.id, None)

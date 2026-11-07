@@ -1,19 +1,22 @@
-"""Reader counters for both arms (E3 S13; E2 v10 section 3 item 4 c/e): installed from the harness by wrapping the
-Terminal Stream's base methods on a service instance, so the Python arm and the Rust arm are counted by the same
-code and `terminals.py` stays byte-identical (the zero-edit policy).
+"""Reader counters for both arms (E3 S13; E2 v10 section 3 item 4 c/e): the Terminal Stream tells its observer what moves through it
+(`terminals.StreamObserver`), and `attach` registers these counters as that observer through the terminal service interface
+(`TerminalInterface.observe_stream`), so the Python arm and the Rust arm are counted by the same code and nothing in the product is
+patched or reached by a private name.
 
-Per session: `read_total` (bytes `handle.read` returned), `emitted_total` (payload bytes of the binary frames handed
-to the sink), `dropped_oldest_total` (bytes the Terminal Stream's drop-oldest rule discarded), interval records
-(absorb / emit / drop, with a per-session emit sequence number) and the resize slurp watermark `R` (`read_total`
-right after `_drain_output_behind_barrier`'s slurp). Counts only; never payload bytes.
+Per session: `read_total` (bytes read from the session's master), `emitted_total` (payload bytes of the binary frames handed to the
+sink), `dropped_oldest_total` (bytes the Terminal Stream's drop-oldest rule discarded), interval records (absorb / emit / drop, with a
+per-session emit sequence number) and the resize drain's watermark `R` (`read_total` once the drain has emitted everything).
+Counts only; never payload bytes.
 """
 from __future__ import annotations
 
 import time
 from typing import Any
 
+from agent_team_backend.terminals import StreamObserver
 
-class ReaderCounters:
+
+class ReaderCounters(StreamObserver):
     def __init__(self) -> None:
         self.sessions: dict[str, dict[str, Any]] = {}
 
@@ -22,56 +25,30 @@ class ReaderCounters:
                                               "emit_seq": 0, "intervals": [], "resize_watermarks": []})
 
     def attach(self, service) -> "ReaderCounters":
-        counters = self
-        wrapped_handles: set[int] = set()
-        original_on_readable = service._on_readable
-        original_absorb = service._absorb_output
-        original_emit = service._emit
-        original_drain = service._drain_output_behind_barrier
-
-        def on_readable(session) -> None:
-            handle = session.handle
-            if id(handle) not in wrapped_handles and handle is not None:
-                wrapped_handles.add(id(handle))
-                inner = handle.read
-
-                def read(max_bytes, inner=inner, sid=session.id):
-                    data = inner(max_bytes)  # an exception (EAGAIN/EIO) propagates exactly as before
-                    if data:
-                        counters._of(sid)["read_total"] += len(data)
-                    return data
-
-                handle.read = read
-            return original_on_readable(session)
-
-        def absorb(session, chunk, nbytes) -> None:
-            before = service._out_dropped.get(session.id, 0)
-            original_absorb(session, chunk, nbytes)
-            entry = counters._of(session.id)
-            entry["intervals"].append(("absorb", time.monotonic(), len(chunk)))
-            after = service._out_dropped.get(session.id, 0)
-            if after > before:
-                entry["dropped_oldest_total"] += after - before
-                entry["intervals"].append(("drop", time.monotonic(), after - before))
-
-        async def emit(frame) -> None:
-            if isinstance(frame, (bytes, bytearray)):
-                sid_len = frame[5]
-                sid = bytes(frame[6:6 + sid_len]).decode()
-                payload = len(frame) - (7 + sid_len + frame[6 + sid_len])
-                entry = counters._of(sid)
-                entry["emit_seq"] += 1
-                entry["emitted_total"] += payload
-                entry["intervals"].append(("emit", time.monotonic(), payload, entry["emit_seq"]))
-            return await original_emit(frame)
-
-        async def drain(session):
-            result = await original_drain(session)
-            counters._of(session.id)["resize_watermarks"].append(counters._of(session.id)["read_total"])
-            return result
-
-        service._on_readable, service._absorb_output, service._emit, service._drain_output_behind_barrier = on_readable, absorb, emit, drain
+        """Count the Terminal Stream `service` presents sessions through (either arm's terminal service)."""
+        service.observe_stream(self)
         return self
+
+    def read(self, session_id: str, nbytes: int) -> None:
+        self._of(session_id)["read_total"] += nbytes
+
+    def absorbed(self, session_id: str, nbytes: int) -> None:
+        self._of(session_id)["intervals"].append(("absorb", time.monotonic(), nbytes))
+
+    def dropped(self, session_id: str, nbytes: int) -> None:
+        entry = self._of(session_id)
+        entry["dropped_oldest_total"] += nbytes
+        entry["intervals"].append(("drop", time.monotonic(), nbytes))
+
+    def emitted(self, session_id: str, nbytes: int) -> None:
+        entry = self._of(session_id)
+        entry["emit_seq"] += 1
+        entry["emitted_total"] += nbytes
+        entry["intervals"].append(("emit", time.monotonic(), nbytes, entry["emit_seq"]))
+
+    def drained(self, session_id: str) -> None:
+        entry = self._of(session_id)
+        entry["resize_watermarks"].append(entry["read_total"])
 
     def snapshot(self, sid: str) -> dict[str, int]:
         """The counters now (the ledger origin when taken after the start marker; `delta` gives the window)."""

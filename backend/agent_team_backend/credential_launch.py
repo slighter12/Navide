@@ -61,14 +61,18 @@ def wrap_plan(command: Any, spec: VendorSpec, helper: list[str], *, env: dict[st
     return {"helper": list(helper), "unset": unset, "entrypoint": None}
 
 
-def render_wrapper(command: Any, spec: VendorSpec, plan: dict, *, env: dict[str, str] | None = None) -> list[str]:
+def render_wrapper(command: Any, spec: VendorSpec, plan: dict, *, env: dict[str, str] | None = None) -> list[str] | None:
     """The argv the in-process arm spawns for a `plan` that `wrap_plan` decided for the same `command`, `spec` and `env`.
 
     The bash/zsh list form keeps shell function behavior; a native ConPTY string command has no shell rc phase, so it
-    reuses the platform parser and the recognized npm-shim unwrapping before the helper."""
+    reuses the platform parser and the recognized npm-shim unwrapping before the helper. A string command resolves its
+    program again here, and the program may be gone since `wrap_plan` found it: that is `wrap_plan`'s answer for a program
+    it cannot resolve, None (the launch runs unchanged), not an error."""
     helper = plan["helper"]
     if plan["entrypoint"] is not None:
-        _, head, tail = _resolved_string(command, spec, env)
+        if (resolved := _resolved_string(command, spec, env)) is None:
+            return None
+        _, head, tail = resolved
         return [*helper, "--entrypoint", plan["entrypoint"], "--", head, *tail]
     words = _script_words(command, spec)
     shell = Path(str(command[0])).name

@@ -57,6 +57,9 @@ pub struct Answered {
     pub bytes: Option<Vec<u8>>,
     /// What the scenario says of the adapter's log answers (see `LogExpect`).
     pub expect: LogExpect,
+    /// The kind of the OS error the core refused the pass with (`None` when it answered, or refused in its own words). The refusal's
+    /// text is the platform's message for that error, which differs between a POSIX and a Windows host; its kind does not.
+    pub os_refusal: Option<io::ErrorKind>,
 }
 
 /// What a scenario over a log tells the shared shaping about its adapter's answers: the two things no declaration says.
@@ -201,15 +204,20 @@ impl<'a> Chain<'a> {
             .and_then(|facts| facts.layout_for(path))
             .filter(|layout| is_log(layout.source))
             .and_then(|_| std::fs::read(path).ok());
-        let answered = |document: Value| Answered {
+        let answered = |document: Value, os_refusal: Option<io::ErrorKind>| Answered {
             document,
             state_before: state_before.clone(),
             file,
             asked: request.clone(),
             bytes: bytes.clone(),
             expect: self.expect.clone(),
+            os_refusal,
         };
-        let answered = core(self.vendor, &request).map(&answered).unwrap_or_else(|error| answered(json!({"refused": error.to_string()})));
+        let answered = match core(self.vendor, &request) {
+            Ok(document) => answered(document, None),
+            // An error the OS raised keeps its kind beside its text: `check_golden` compares it by kind (`normalise_os_refusal`).
+            Err(error) => answered(json!({"refused": error.to_string()}), error.raw_os_error().map(|_| error.kind())),
+        };
         // The caller's bag after the pass: the bag the pass was asked with and the keys it answered (the core answers only the keys
         // it delivered).
         let bag = bag_after(&seen_before, &answered.document);
@@ -792,6 +800,29 @@ fn error_code(document: &mut Value) {
     }
 }
 
+/// A refusal the OS raised is compared by the kind of its error. Its text is the host's message for that error ("No such file or
+/// directory (os error 2)" on POSIX, "The system cannot find the path specified. (os error 3)" on Windows, where a log whose parent
+/// directory is also absent is ERROR_PATH_NOT_FOUND), so the same refusal reads differently per platform; the kind is what the core
+/// decided. A refusal in the core's own words (`kind` is `None`) stays compared by its exact text.
+fn normalise_os_refusal(document: &mut Value, kind: Option<io::ErrorKind>) {
+    if let (Some(kind), true) = (kind, document.get("refused").is_some()) {
+        document["refused"] = json!(format!("an OS error of kind {kind:?}"));
+    }
+}
+
+/// The kind of the OS error a golden's refusal records, from the POSIX errno its text ends with (`... (os error N)`); `None` for a
+/// refusal in the core's own words. The goldens are recorded on POSIX, so the number is an errno: ENOENT (2) is `NotFound`, which
+/// Windows reports as ERROR_FILE_NOT_FOUND (2) or ERROR_PATH_NOT_FOUND (3). A number this does not know is a failure, not a guess.
+fn baseline_os_kind(golden: &Value) -> Option<io::ErrorKind> {
+    let text = golden.get("refused")?.as_str()?;
+    let code = text.strip_suffix(')')?.rsplit_once("(os error ")?.1;
+    match code.parse::<i32>() {
+        Ok(2) => Some(io::ErrorKind::NotFound),
+        Ok(13) => Some(io::ErrorKind::PermissionDenied),
+        _ => panic!("the golden refuses with an OS error the parity seam has no kind for: {text}"),
+    }
+}
+
 /// The request a golden recorded for a pass, as the scenario sends it now. A lookup request recorded before the lookup key was
 /// renamed also carried an ownership key (`session_id`) beside `wanted_session`; the sidecar reads that for itself (a live
 /// session handle), so a scenario no longer sends it. It is dropped from the recorded request after asserting it only repeated
@@ -848,6 +879,9 @@ pub fn check_golden(vendor: &str, chain: &Chain, roots: &[&std::path::Path], fil
                 seen.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
             }
         }
+        normalise_os_refusal(&mut shaped, answered.os_refusal);
+        let baseline_kind = baseline_os_kind(&expected);
+        normalise_os_refusal(&mut expected, baseline_kind);
         assert_eq!(mask_roots(&shaped, roots, files), expected, "pass `{label}`");
     }
 }
@@ -1048,5 +1082,51 @@ mod tests {
         let (begin, end) = (source.find("// ---- worked example begin").unwrap(), source.find("// ---- worked example end").unwrap());
         let lines = source[begin..end].lines().count();
         assert!(lines <= 150, "the example is {lines} lines");
+    }
+
+    // ---- a refusal the OS raised is compared by its kind ---------------------------------------------------------------------------
+
+    #[test]
+    fn a_windows_path_not_found_refusal_matches_the_posix_golden_by_kind() {
+        let golden = json!({"refused": "No such file or directory (os error 2)", "events": []});
+        // What a Windows host answers for the same pass: ERROR_PATH_NOT_FOUND, whose kind is `NotFound` as ENOENT's is.
+        let mut windows = json!({"refused": "The system cannot find the path specified. (os error 3)", "events": []});
+        let mut recorded = golden.clone();
+        assert_ne!(windows, golden, "the texts differ: that is the failure the comparison by kind removes");
+        normalise_os_refusal(&mut windows, Some(io::ErrorKind::NotFound));
+        normalise_os_refusal(&mut recorded, baseline_os_kind(&golden));
+        assert_eq!(windows, recorded);
+    }
+
+    #[test]
+    fn a_refusal_of_another_kind_or_in_the_cores_own_words_is_still_a_difference() {
+        let golden = json!({"refused": "No such file or directory (os error 2)"});
+        let mut denied = json!({"refused": "Permission denied (os error 13)"});
+        let mut recorded = golden.clone();
+        normalise_os_refusal(&mut denied, Some(io::ErrorKind::PermissionDenied));
+        normalise_os_refusal(&mut recorded, baseline_os_kind(&golden));
+        assert_ne!(denied, recorded, "a refusal for another kind is not the recorded one");
+        let own = json!({"refused": "a record that is no object"});
+        let mut compared = own.clone();
+        normalise_os_refusal(&mut compared, None);
+        assert_eq!(compared, own, "a refusal in the core's own words keeps its exact text");
+        assert_eq!(baseline_os_kind(&own), None);
+        let mut changed = json!({"refused": "a record that is an array"});
+        normalise_os_refusal(&mut changed, None);
+        assert_ne!(changed, own, "and a different text is still different");
+    }
+
+    #[test]
+    fn the_host_s_own_absent_log_error_reads_as_the_recorded_posix_one() {
+        // Whatever this host says for a log whose parent directory is absent (ENOENT here, ERROR_PATH_NOT_FOUND on Windows), the
+        // pass is compared with the recorded golden by kind.
+        let absent = std::env::temp_dir().join(format!("parity-no-such-parent-{}", std::process::id())).join("log.jsonl");
+        let error = std::fs::File::open(absent).unwrap_err();
+        assert!(error.raw_os_error().is_some(), "the host's error is an OS error: {error:?}");
+        let mut host = json!({"refused": error.to_string()});
+        let mut recorded = json!({"refused": "No such file or directory (os error 2)"});
+        normalise_os_refusal(&mut host, error.raw_os_error().map(|_| error.kind()));
+        normalise_os_refusal(&mut recorded, baseline_os_kind(&json!({"refused": "No such file or directory (os error 2)"})));
+        assert_eq!(host, recorded);
     }
 }
