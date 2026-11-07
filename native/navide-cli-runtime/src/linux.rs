@@ -1,5 +1,6 @@
 //! Linux owned metadata from procfs, without a `ps` subprocess.
 use crate::posix::Table;
+use crate::scan_board;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -285,25 +286,70 @@ fn process(pid: i32) -> io::Result<Option<Process>> {
     RealProc.stat(pid, None)
 }
 
-/// Boot time in seconds since the epoch, read from `/proc/stat` once per process (R1). Every process identity this
-/// sidecar derives uses the same value, so a clock step cannot make one process look like two, and the (large, on a
-/// many-CPU host) file is not re-read for every birth. A failed read is not cached.
-fn boot_seconds() -> io::Result<u64> {
-    static BOOT: Mutex<Option<u64>> = Mutex::new(None);
-    let mut cached = BOOT.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(boot) = *cached {
-        return Ok(boot);
+/// The wall clock minus the clock since boot, in milliseconds: it moves only when the wall clock is set. `/proc/stat`
+/// derives `btime` from the same difference, so a step of it is a new boot time.
+fn wall_minus_boot_ms() -> io::Result<i64> {
+    fn now_ms(clock: libc::clockid_t) -> io::Result<i64> {
+        let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: a valid output pointer; both clocks exist on every kernel the runtime supports.
+        if unsafe { libc::clock_gettime(clock, &mut now) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(i64::from(now.tv_sec) * 1000 + i64::from(now.tv_nsec) / 1_000_000)
     }
+    Ok(now_ms(libc::CLOCK_REALTIME)? - now_ms(libc::CLOCK_BOOTTIME)?)
+}
+
+fn read_boot_seconds() -> io::Result<u64> {
     #[cfg(test)]
     BOOT_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let stat = std::fs::read_to_string("/proc/stat")?;
-    let boot = stat
-        .lines()
+    stat.lines()
         .find_map(|line| line.strip_prefix("btime "))
         .and_then(|value| value.parse().ok())
-        .ok_or_else(|| io::Error::other("missing proc boot time"))?;
-    *cached = Some(boot);
-    Ok(boot)
+        .ok_or_else(|| io::Error::other("missing proc boot time"))
+}
+
+/// How far the wall clock may move before the cached boot time is read again (K8). Ordinary NTP slewing and the
+/// jitter between two clock reads stay far below it; a step does not.
+const BOOT_CLOCK_STEP_MS: i64 = 1000;
+
+/// The boot time with the wall-clock offset it was read at.
+struct BootCache(Mutex<Option<(u64, i64)>>);
+
+impl BootCache {
+    const fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    /// The cached boot time, unless the wall clock was set by `BOOT_CLOCK_STEP_MS` or more since it was read: then
+    /// the boot time is read again, because the kernel derives it from the wall clock and every identity this
+    /// sidecar computes must agree with what a fresh read says. `offset_ms` and `read` are the host's two sources
+    /// (the clocks and `/proc/stat`); a failed one is not cached.
+    fn get(
+        &self,
+        offset_ms: impl FnOnce() -> io::Result<i64>,
+        read: impl FnOnce() -> io::Result<u64>,
+    ) -> io::Result<u64> {
+        let mut cached = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let offset = offset_ms()?;
+        if let Some((boot, at)) = *cached {
+            if (offset - at).abs() < BOOT_CLOCK_STEP_MS {
+                return Ok(boot);
+            }
+        }
+        let boot = read()?;
+        *cached = Some((boot, offset));
+        Ok(boot)
+    }
+}
+
+/// Boot time in seconds since the epoch, read from `/proc/stat` once per process (R1) and again only after the wall
+/// clock was stepped (K8). Every process identity this sidecar derives uses the same value, so slewing cannot make
+/// one process look like two, and the (large, on a many-CPU host) file is not re-read for every birth.
+fn boot_seconds() -> io::Result<u64> {
+    static BOOT: BootCache = BootCache::new();
+    BOOT.get(wall_minus_boot_ms, read_boot_seconds)
 }
 
 /// How many times `/proc/stat` was read for the boot time.
@@ -475,62 +521,14 @@ fn owned_scan(
     Ok(owned)
 }
 
-/// A full read of /proc, numbered so a session can tell a scan it already used from a new one.
-#[derive(Clone)]
-struct Shared {
-    seq: u64,
-    /// Taken before the first `/proc` entry was read.
-    started: Instant,
-    all: Arc<HashMap<i32, Process>>,
-}
+/// The sidecar-wide scan cache, its 5 s grid and the cost policy of the full reads (see `scan_board`).
+static BOARD: scan_board::Board<HashMap<i32, Process>> =
+    scan_board::Board::new(Duration::from_millis(crate::control::SNAPSHOT_YOUNG_MS), scan_board::POLICY);
 
-/// The sidecar-wide scan cache: the last two scans, oldest first. Its lock also serialises scans, so scan `k + 1`
-/// always starts after scan `k` ended: two sequence numbers are two independent reads. Two are kept so a session
-/// that wakes a moment late still finds the pair a faster one used.
-struct Board(Mutex<Vec<Shared>>);
-
-impl Board {
-    /// The oldest cached scan with a sequence number above `after` that started at or after `not_before`, else a
-    /// new read. A scan taken before `not_before` is never returned.
-    fn scan_after(
-        &self,
-        after: u64,
-        not_before: Instant,
-        read: impl FnOnce() -> io::Result<HashMap<i32, Process>>,
-    ) -> io::Result<Shared> {
-        let mut scans = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(cached) = scans
-            .iter()
-            .find(|cached| cached.seq > after && cached.started >= not_before)
-        {
-            return Ok(cached.clone());
-        }
-        let started = Instant::now();
-        let all = Arc::new(read()?);
-        let seq = scans.last().map_or(1, |shared| shared.seq + 1);
-        let shared = Shared { seq, started, all };
-        if scans.len() == 2 {
-            scans.remove(0);
-        }
-        scans.push(shared.clone());
-        Ok(shared)
-    }
-}
-
-static BOARD: Board = Board(Mutex::new(Vec::new()));
-
-static EPOCH: OnceLock<Instant> = OnceLock::new();
-
-/// The latest point of the sidecar-wide 5 s grid at or before `own_due`. Never later than the session's own due
-/// time, so the "at most every 5 s / 30 s" bound holds; sessions snapshotting on the grid share their scans.
+/// When a session whose own cadence makes its next snapshot due at `own_due` takes it: on the sidecar-wide grid,
+/// never later than `own_due`, and not before the next full `/proc` read is allowed.
 pub(crate) fn grid_due(own_due: Instant) -> Instant {
-    grid_due_from(*EPOCH.get_or_init(Instant::now), own_due)
-}
-
-fn grid_due_from(epoch: Instant, own_due: Instant) -> Instant {
-    let step = crate::control::SNAPSHOT_YOUNG_MS;
-    let since = own_due.saturating_duration_since(epoch).as_millis() as u64;
-    epoch + Duration::from_millis(since / step * step)
+    BOARD.due(own_due)
 }
 
 /// Where a snapshot gets its `/proc` reads.
@@ -619,17 +617,20 @@ pub(crate) fn snapshot_with(
         let (all, scanned_at) = match reads {
             Reads::Own => {
                 let at = Instant::now();
-                (Arc::new(read_all(&known, deadline)?), at)
+                (Arc::new(read_all(&known, deadline)?.value), at)
             }
             Reads::Shared { due } => {
                 let shared = BOARD.scan_after(used, due, || read_all(&known, deadline))?;
                 used = shared.seq;
                 // Another session's walk may have been shared with this one: a live process this session
-                // already knows must be in it, or the full scan is read instead.
+                // already knows must be in it, or the full scan is read instead. That read is a full one like
+                // any other, so it is charged to the same policy.
                 if scoped() && omitted_known(&RealProc, &known, &shared.all)? {
                     counters::fallback("omitted");
                     let at = Instant::now();
-                    (Arc::new(scan(deadline)?), at)
+                    let all = Arc::new(scan(deadline)?);
+                    BOARD.charge(at.elapsed());
+                    (all, at)
                 } else {
                     (shared.all, shared.started)
                 }
@@ -1132,11 +1133,18 @@ static SCANNER: OnceLock<Scanner> = OnceLock::new();
 /// the reaper stay on.
 static CHILDREN_LOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// One read of the processes a snapshot works from: the sidecar's tree in scoped mode, else all of `/proc`.
-fn read_all(known: &HashMap<i32, Process>, deadline: Instant) -> io::Result<HashMap<i32, Process>> {
+/// One read of the processes a snapshot works from: the sidecar's tree in scoped mode, else all of `/proc`. It says
+/// whether it was a full read, which is what the cost policy charges.
+fn read_all(
+    known: &HashMap<i32, Process>,
+    deadline: Instant,
+) -> io::Result<scan_board::Read<HashMap<i32, Process>>> {
     if !scoped() || CHILDREN_LOST.load(std::sync::atomic::Ordering::SeqCst) {
         counters::scan_full_only();
-        return scan(deadline);
+        return Ok(scan_board::Read {
+            value: scan(deadline)?,
+            full: true,
+        });
     }
     let me = std::process::id() as i32;
     let scanner = SCANNER.get_or_init(Scanner::new);
@@ -1149,7 +1157,10 @@ fn read_all(known: &HashMap<i32, Process>, deadline: Instant) -> io::Result<Hash
         }
     }
     counters::source(&source);
-    Ok(table)
+    Ok(scan_board::Read {
+        value: table,
+        full: matches!(source, Source::Full(_)),
+    })
 }
 
 /// Scoped mode is decided once at startup and never changes (design section 4).
@@ -1274,7 +1285,7 @@ pub(crate) fn enable_scoped_mode() {
                 // the first grid point at or before it is the epoch itself, so that session's first snapshot is
                 // due at once, while its target is still starting. With the epoch fixed here the first point
                 // falls on the 5 s grid. With scoped mode off nothing is set and the grid is HEAD's.
-                EPOCH.get_or_init(Instant::now);
+                BOARD.start_grid();
             }
         }
     }
@@ -2121,6 +2132,45 @@ mod tests {
         );
     }
 
+    /// K8: the cached boot time follows a wall-clock step of a second or more, and ignores anything smaller.
+    #[test]
+    fn the_boot_time_is_read_again_only_after_the_wall_clock_was_stepped() {
+        let cache = BootCache::new();
+        let reads = std::cell::Cell::new(0u64);
+        let get = |offset: i64, boot: u64| {
+            cache
+                .get(
+                    || Ok(offset),
+                    || {
+                        reads.set(reads.get() + 1);
+                        Ok(boot)
+                    },
+                )
+                .unwrap()
+        };
+        assert_eq!(get(5_000, 1_000), 1_000);
+        // Slew and read jitter below a second: the cached value stands, in either direction.
+        assert_eq!(get(5_900, 1_001), 1_000);
+        assert_eq!(get(4_100, 1_001), 1_000);
+        assert_eq!(reads.get(), 1);
+        // A step of a second or more, forward or back, is read again.
+        assert_eq!(get(6_000, 1_001), 1_001);
+        assert_eq!(reads.get(), 2);
+        assert_eq!(get(-120_000, 900), 900);
+        assert_eq!(reads.get(), 3);
+        // The offset of the new read is the one compared with next.
+        assert_eq!(get(-120_500, 901), 900);
+        assert_eq!(reads.get(), 3);
+    }
+
+    #[test]
+    fn a_failed_boot_source_is_not_cached() {
+        let cache = BootCache::new();
+        assert!(cache.get(|| Ok(0), || Err(io::Error::other("no /proc"))).is_err());
+        assert!(cache.get(|| Err(io::Error::other("no clock")), || Ok(7)).is_err());
+        assert_eq!(cache.get(|| Ok(0), || Ok(7)).unwrap(), 7);
+    }
+
     #[test]
     fn proc_stat_comm_with_parentheses_does_not_shift_identity_fields() {
         let input = b"123 (a ) odd name) S 1 23 23 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 456 0";
@@ -2536,76 +2586,6 @@ mod tests {
         unsafe { libc::kill(-pid, libc::SIGKILL) };
     }
 
-    fn reader(counter: &std::sync::atomic::AtomicUsize) -> io::Result<HashMap<i32, Process>> {
-        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(60));
-        Ok(HashMap::new())
-    }
-
-    #[test]
-    fn sessions_due_together_share_one_scan_sequence() {
-        let board = Board(Mutex::new(Vec::new()));
-        let reads = std::sync::atomic::AtomicUsize::new(0);
-        let due = Instant::now();
-        std::thread::scope(|scope| {
-            for _ in 0..4 {
-                scope.spawn(|| {
-                    // Each session needs two independent scans for its equal-twice rule.
-                    let first = board.scan_after(0, due, || reader(&reads)).unwrap();
-                    let second = board
-                        .scan_after(first.seq, due, || reader(&reads))
-                        .unwrap();
-                    assert!(second.seq > first.seq);
-                });
-            }
-        });
-        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn a_session_never_uses_a_scan_taken_before_its_request() {
-        let board = Board(Mutex::new(Vec::new()));
-        let reads = std::sync::atomic::AtomicUsize::new(0);
-        let old = board
-            .scan_after(0, Instant::now(), || reader(&reads))
-            .unwrap();
-        std::thread::sleep(Duration::from_millis(5));
-        let due = Instant::now();
-        let fresh = board.scan_after(0, due, || reader(&reads)).unwrap();
-        assert!(fresh.seq > old.seq && fresh.started >= due);
-        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
-        // A scan that began after the request, and was not used yet, is reused.
-        let again = board.scan_after(old.seq, due, || reader(&reads)).unwrap();
-        assert_eq!(again.seq, fresh.seq);
-        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn a_failed_scan_is_not_cached() {
-        let board = Board(Mutex::new(Vec::new()));
-        let due = Instant::now();
-        assert!(board
-            .scan_after(0, due, || Err(io::Error::other("boom")))
-            .is_err());
-        let reads = std::sync::atomic::AtomicUsize::new(0);
-        board.scan_after(0, due, || reader(&reads)).unwrap();
-        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn the_grid_never_moves_a_snapshot_later_and_aligns_sessions() {
-        let epoch = Instant::now();
-        let ms = |n: u64| epoch + Duration::from_millis(n);
-        // Two sessions with different own due times land on the same grid point.
-        assert_eq!(grid_due_from(epoch, ms(15_200)), ms(15_000));
-        assert_eq!(grid_due_from(epoch, ms(15_900)), ms(15_000));
-        assert_eq!(grid_due_from(epoch, ms(15_000)), ms(15_000));
-        // The steady 30 s cadence stays on the same 5 s grid and is never later than its own due time.
-        assert_eq!(grid_due_from(epoch, ms(47_300)), ms(45_000));
-        // One cadence step after a snapshot is still strictly in the future.
-        let now = ms(12_040);
-        assert!(grid_due_from(epoch, now + Duration::from_millis(5000)) > now);
-    }
 }
 
 /// The scoped walk, the startup order and the reaper, driven through exact interleavings (design section 8,

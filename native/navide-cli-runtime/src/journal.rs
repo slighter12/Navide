@@ -12,8 +12,10 @@ pub fn record(wire: &Wire, root: &Value, argv0: &str, session_id: &str, generati
         "session_generation":generation,"runtime_generation":wire.generation,"owner_pid":wire.owner_pid})
 }
 
-/// Append one identity record and sync it. The line is a single `write`, so an abrupt death of this process
-/// leaves either the whole line or none of it.
+/// Append one identity record and sync it. The whole line goes out through `write_all` on an append-mode file, so a
+/// death of this process before the call leaves none of it. A death during it can leave a prefix (a short write is
+/// finished by further `write` calls), which recovery reports as a torn journal (`pty_registry.reap_stale`) and never
+/// trusts.
 ///
 /// Why one sync per create stays (E1 decision D12): this record is the crash-durable evidence that names a root
 /// before its target may run (ownership invariant I1 of ticket 05). Without the sync a crash could leave an

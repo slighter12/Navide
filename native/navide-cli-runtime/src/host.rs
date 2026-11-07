@@ -105,9 +105,10 @@ pub struct Outcome {
     pub failure: Option<String>,
 }
 
-/// Why a session is being cleaned up.
+/// Why a session is being cleaned up. `U` is the host's `Unsettled` token: only a host that has a settle window can
+/// make one, so for a host without a window (`U` uninhabited) that case cannot be built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Cleanup {
+pub enum Cleanup<U> {
     /// The root exited and the stream is settled: the remaining members go by identity.
     Natural,
     /// A `KILL` (or a cancel that arrived after the release).
@@ -115,7 +116,7 @@ pub enum Cleanup {
     /// The runtime is ending; `peer_alive` is false when the control channel is lost.
     Shutdown { peer_alive: bool },
     /// The root exited and nobody settled the stream within the settle window.
-    Unsettled,
+    Unsettled(U),
 }
 
 /// What the platform learned from a resize.
@@ -186,6 +187,10 @@ pub trait Host: Sized + Send + Sync + 'static {
     type Observer: Copy + Send;
     /// The open control channel.
     type Link: Send + Sync + 'static;
+    /// What the platform reads from the command line (a POSIX host: its control descriptor).
+    type Options: Default + Send + 'static;
+    /// Proof that the platform's settle window ran out. A platform with no window uses `Infallible`.
+    type Unsettled: Copy + Send + 'static;
 
     const PTY_BACKEND: &'static str;
     const HANDOFF: &'static str;
@@ -193,14 +198,20 @@ pub trait Host: Sized + Send + Sync + 'static {
     const SERVICING: bool;
     /// This platform runs vendor observers.
     const OBSERVES: bool;
+    /// The command-line options only this platform reads; each takes one value.
+    const OPTIONS: &'static [&'static str];
 
+    /// Record the value of one of `OPTIONS`.
+    fn set_option(options: &mut Self::Options, name: &str, value: String);
+    /// Every option the platform needs was given and is usable.
+    fn check_options(options: &Self::Options) -> Result<(), String>;
     /// Platform start-up that must precede the `ready` line and any session.
-    fn boot(config: &Config) -> io::Result<Self>;
+    fn boot(config: &Config, options: Self::Options) -> io::Result<Self>;
     /// Platform-private additions to the `ready` line.
     fn ready(&self, _ready: &mut Value) {}
 
     // ---- the control channel ------------------------------------------------------------------
-    fn open_link(&self, config: &Config) -> io::Result<Self::Link>;
+    fn open_link(&self) -> io::Result<Self::Link>;
     fn link_read(&self, link: &Self::Link, buffer: &mut [u8]) -> io::Result<usize>;
     /// The writer thread's body: send what `out` queues until it is finished or the channel is lost.
     fn link_write(&self, link: &Self::Link, out: &Outbound) -> io::Result<()>;
@@ -233,11 +244,10 @@ pub trait Host: Sized + Send + Sync + 'static {
     // ---- the session thread -------------------------------------------------------------------
     /// The stream is serviced or closed, so the session may be cleaned up once the root exited.
     fn stream_settled(&self, cx: &SessionCx<'_, Self>) -> bool;
-    /// How long the stream may stay unsettled after the root exited. `None`: no bound (POSIX).
-    fn settle_window(&self) -> Option<Duration> {
-        None
-    }
-    fn cleanup(&self, cx: &mut SessionCx<'_, Self>, how: Cleanup) -> Outcome;
+    /// How long the stream may stay unsettled after the root exited, with the token that proves the window ran out.
+    /// `None`: no bound (POSIX).
+    fn settle_window(&self) -> Option<(Duration, Self::Unsettled)>;
+    fn cleanup(&self, cx: &mut SessionCx<'_, Self>, how: Cleanup<Self::Unsettled>) -> Outcome;
     /// The identity of every current member of the session's tree, or `None` to keep the last good view.
     fn snapshot(&self, cx: &mut SessionCx<'_, Self>, due: Instant) -> Option<Vec<Value>>;
     /// When the session's next snapshot is due, given its own cadence.

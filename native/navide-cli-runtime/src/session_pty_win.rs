@@ -6,6 +6,7 @@
 //! session id; and no map from a handle value to a handle exists. The `pty` meta of `SESSION_OWNED`
 //! is produced by exactly one method, `owned_record`. `ClosePseudoConsole` needs a `ClosePermit`,
 //! which only `CloseGate::wait` can mint, so the pre-close gate of 7.3 cannot be skipped by a caller.
+use crate::refusal::{Refusal, Stage};
 use serde_json::{json, Value};
 use std::ffi::{c_void, OsStr};
 use std::io;
@@ -102,11 +103,13 @@ fn value_of(handle: &OwnedHandle) -> u64 {
     handle.as_raw_handle() as usize as u64
 }
 
+/// The console's size, or the typed refusal for one it cannot take: a `BAD_REQUEST` at the spawn stage, as before
+/// the control plane classified by type.
 fn console_size(rows: u16, cols: u16) -> io::Result<COORD> {
     let (y, x) = (i16::try_from(rows), i16::try_from(cols));
     match (x, y) {
         (Ok(x), Ok(y)) if x > 0 && y > 0 => Ok(COORD { X: x, Y: y }),
-        _ => Err(io::Error::other("invalid console size")),
+        _ => Err(Refusal::bad("invalid console size").staged(Stage::Spawn).into()),
     }
 }
 

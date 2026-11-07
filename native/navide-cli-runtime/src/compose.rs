@@ -4,9 +4,6 @@
 //!
 //! Every handwritten piece here has a documented interface reason (delta section 7): the POSIX
 //! word quoting, the `shlex.split` grammar and the wrapper assembly. No crate is used for them.
-// The Windows grammar and program resolution below are compiled on every host so their tests run everywhere, but
-// only the Windows host calls them.
-#![cfg_attr(not(windows), allow(dead_code))]
 use crate::vendor_facts;
 use serde_json::Value;
 
@@ -511,6 +508,10 @@ pub fn compose(agent_key: &str, launch: &Value) -> Result<Composed, ComposeError
 
 /// Compose a structured launch for `agent_key` with the Windows grammar (`direct` shapes only: the
 /// `wrapped` and `credential` shapes are POSIX shell text and are refused by `admit`).
+///
+/// Everything marked `cfg(any(windows, test))` here is called only by the Windows host; it is compiled on every host
+/// in a test build so its tests run everywhere, and not in a product build of another host.
+#[cfg(any(windows, test))]
 pub fn compose_windows(agent_key: &str, launch: &Value) -> Result<Composed, ComposeError> {
     compose_in(agent_key, launch, Grammar::Windows)
 }
@@ -589,14 +590,17 @@ pub fn admit(agent_key: &str, shape: &str, windows: bool) -> Result<(), ComposeE
 // ---------------------------------------------------------------------------------------------
 
 /// The filesystem Windows resolution reads; a fake in unit tests.
+#[cfg(any(windows, test))]
 pub trait Files {
     fn is_file(&self, path: &str) -> bool;
     /// The text of a candidate shim: `None` over `_SHIM_MAX_BYTES` (4096), unreadable or not UTF-8.
     fn shim_text(&self, path: &str) -> Option<String>;
 }
 
+#[cfg(windows)]
 pub struct OsFiles;
 
+#[cfg(windows)]
 impl Files for OsFiles {
     fn is_file(&self, path: &str) -> bool {
         std::fs::metadata(path).map(|meta| meta.is_file()).unwrap_or(false)
@@ -611,17 +615,21 @@ impl Files for OsFiles {
 }
 
 /// `shutil._WIN_DEFAULT_PATHEXT`.
+#[cfg(any(windows, test))]
 const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD;.VBS;.JSE;.WSF;.WSH;.MSC";
 
+#[cfg(any(windows, test))]
 fn is_separator(c: char) -> bool {
     c == '\\' || c == '/'
 }
 
+#[cfg(any(windows, test))]
 fn env_value<'a>(env: &'a [(String, String)], name: &str) -> Option<&'a str> {
     env.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str())
 }
 
 /// `pathlib.PurePath.suffix`, lowercased.
+#[cfg(any(windows, test))]
 fn suffix(path: &str) -> String {
     let name = path.rsplit(is_separator).next().unwrap_or("");
     match name.rfind('.') {
@@ -630,11 +638,13 @@ fn suffix(path: &str) -> String {
     }
 }
 
+#[cfg(any(windows, test))]
 fn dirname(path: &str) -> &str {
     path.rfind(is_separator).map_or("", |at| &path[..at])
 }
 
 /// `os.path.join` for two parts on Windows.
+#[cfg(any(windows, test))]
 fn join_path(dir: &str, file: &str) -> String {
     if dir.is_empty() || dir.ends_with(|c| is_separator(c) || c == ':') {
         format!("{dir}{file}")
@@ -644,6 +654,7 @@ fn join_path(dir: &str, file: &str) -> String {
 }
 
 /// `os.path.normpath` on Windows for the paths a shim names.
+#[cfg(any(windows, test))]
 fn normpath(path: &str) -> String {
     let path = path.replace('/', "\\");
     let (mut prefix, mut rest) = (String::new(), path.as_str());
@@ -677,6 +688,7 @@ fn normpath(path: &str) -> String {
 /// directory part is tried where it stands, and PATH directories are tried in order. Two deliberate
 /// differences: the current directory is not searched (the sidecar's is not the pane's), and the
 /// environment is the child's, read without regard to case.
+#[cfg(any(windows, test))]
 fn which(command: &str, path: Option<&str>, pathext: Option<&str>, files: &dyn Files) -> Option<String> {
     let source = pathext.filter(|text| !text.is_empty()).unwrap_or(DEFAULT_PATHEXT);
     let extensions: Vec<&str> = source.split(';').filter(|ext| !ext.is_empty()).collect();
@@ -705,6 +717,7 @@ fn which(command: &str, path: Option<&str>, pathext: Option<&str>, files: &dyn F
 }
 
 /// The lines a generated node shim may consist of (`_SHIM_LINE_RES`), matched whole, ASCII case-blind.
+#[cfg(any(windows, test))]
 fn is_shim_line(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
     if matches!(
@@ -729,6 +742,7 @@ fn is_shim_line(line: &str) -> bool {
 }
 
 /// The script a shim's invocation line runs (`_SHIM_INVOKE_RE`), with its original case.
+#[cfg(any(windows, test))]
 fn shim_target(line: &str) -> Option<String> {
     let lower = line.to_ascii_lowercase();
     let mut at = 0;
@@ -763,6 +777,7 @@ fn shim_target(line: &str) -> Option<String> {
 }
 
 /// `_unwrap_node_shim`: `(node.exe, script)` for a generated node shim at `program`.
+#[cfg(any(windows, test))]
 fn unwrap_node_shim(program: &str, path: Option<&str>, pathext: Option<&str>, files: &dyn Files) -> Option<(String, String)> {
     let text = files.shim_text(program)?;
     let mut targets = std::collections::BTreeSet::new();
@@ -796,6 +811,7 @@ fn unwrap_node_shim(program: &str, path: Option<&str>, pathext: Option<&str>, fi
 /// (`osplat/_windows.py` `spawn` and `launch_argv`). A `.cmd`/`.bat` recognised as a node shim runs its
 /// `node.exe` and script; any other batch file runs under `cmd.exe /d /c`; a `.ps1` under
 /// `powershell.exe -File`. Not found fails the create, as the Python path does.
+#[cfg(any(windows, test))]
 pub fn resolve_windows(
     program: &str,
     args: &[String],

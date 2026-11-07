@@ -15,7 +15,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// A message literal that exists only inside #[cfg(feature = "fault-hooks")] code in posix.rs. (The
+// A message literal that exists only inside the feature-gated `fault` module (`fault.rs`, declared under
+// #[cfg(feature = "fault-hooks")]); the shared control plane carries none. (The
 // `fault-graceful` constant is compared inline and does not survive as one contiguous string.)
 const FAULT_HOOKS_LITERAL = Buffer.from('fault: exit watcher could not start')
 

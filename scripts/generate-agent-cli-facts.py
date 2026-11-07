@@ -805,7 +805,6 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
                 "not-yet-integrated": "NotYetIntegrated", "unknown": "Unknown"}
     lines = [
         f"// {HEADER}",
-        "#![allow(dead_code)]",
         "",
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub enum Status {",
@@ -824,6 +823,8 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
         *(f"    pub {name}: Status," for name in CAPABILITIES),
         "}",
         "",
+        "// No vendor table is composed in Python today, so nothing constructs `Python`; `compose::admit` still matches it.",
+        "#[allow(dead_code)]",
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub enum Composition {",
         "    Rust,",

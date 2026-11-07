@@ -895,11 +895,17 @@ class RustTerminalService(TerminalService):
                 session.descendants = {entry["pid"]: entry["start_value"] for entry in pages}
                 self._ownership_pages.pop(sid, None)
                 # R9: the sidecar always sends a final part, an empty one included, so a set that became empty is
-                # persisted as empty and a record left by a member that has since exited is cleared. Unlike the
-                # baseline's `_refresh_descendants` (detached members only), every member is persisted: after a
-                # sidecar death the registry is what recovery signals from, and with the detached-only view
-                # `test_sidecar_death_invalidates_every_session_and_cleans_only_its_own_tree` left members of
-                # the root's group running.
+                # persisted as empty and a record left by a member that has since exited is cleared.
+                #
+                # Every member is persisted, unlike the baseline's `_refresh_descendants` (detached members only), and
+                # this is a requirement of the recovery, not a convenience (D2). After a sidecar death the root can
+                # already be gone when the recovery runs. A member of its group that ignores SIGTERM then has nothing
+                # that names it but its own recorded identity: a group id cannot be tied to a root that no longer
+                # exists (the pid can be reused, and the group may belong to its new holder), so the recovery never
+                # signals by group id alone. `test_sidecar_death_invalidates_every_session_and_cleans_only_its_own_tree`
+                # shows it, `test_recovery_kills_a_recorded_member_of_a_dead_roots_group` and
+                # `test_recovery_never_signals_a_group_it_can_only_name_by_id` pin both sides, and the R9 test pins that a
+                # same-group member is written.
                 self._task(asyncio.to_thread(in_data_dir(self._data_dir, pty_registry.update_descendants,
                                                           {session.proc.pid: session.descendants})))
         else:

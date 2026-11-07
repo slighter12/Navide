@@ -5,8 +5,7 @@
 //! step that differs by operating system (signals, reaping, ownership evidence, closing the terminal) is the
 //! `Host`'s; the order of the steps, the events they publish and the registry bookkeeping are here.
 use crate::control::{
-    Runtime, EOF_REAP_MS, SNAPSHOT_COST_FACTOR, SNAPSHOT_STEADY_MS, SNAPSHOT_STRETCH_MAX_MS, SNAPSHOT_YOUNG_MS,
-    SNAPSHOT_YOUNG_WINDOW_MS, TOMBSTONES,
+    Runtime, EOF_REAP_MS, SNAPSHOT_STEADY_MS, SNAPSHOT_YOUNG_MS, SNAPSHOT_YOUNG_WINDOW_MS, TOMBSTONES,
 };
 use crate::frame::code;
 use crate::host::{Cleanup, ExitCell, ExitInfo, Host, Msg, Outcome};
@@ -209,6 +208,11 @@ impl<H: Host> Registry<H> {
             }
         })
     }
+    /// How many creates the registry still tracks for cancellation.
+    #[cfg(test)]
+    pub fn tracked_creates(&self) -> usize {
+        self.creates.len()
+    }
     /// Is `id` with this `generation` a settled session that was evicted from the table?
     pub fn evicted(&self, id: &str, generation: &str) -> bool {
         self.tombstones
@@ -250,11 +254,18 @@ pub struct State<H: Host> {
     pub owned: H::Owned,
     pub closing: Option<bool>,
     exited_sent: bool,
-    eof: bool,
+    /// Python reported the end of the stream.
+    pub eof: bool,
     eof_deadline: Option<Instant>,
     /// Set when the root exited while the stream was still unsettled: when the platform stops waiting for it.
     pub settle_deadline: Option<Instant>,
+    /// What the host handed out with its settle window. Only a host that has a window can ever hold one, so a host
+    /// without one (`Unsettled = Infallible`) can never be asked for an unsettled cleanup.
+    unsettled: Option<H::Unsettled>,
     next_snapshot: Instant,
+    /// The member set last published as `SESSION_OWNERSHIP`, in `publish_ownership`'s canonical order. A session
+    /// starts with none, so one that never has a descendant never publishes (R9, K2).
+    published: Vec<Value>,
 }
 
 impl<H: Host> State<H> {
@@ -266,7 +277,9 @@ impl<H: Host> State<H> {
             eof: false,
             eof_deadline: None,
             settle_deadline: None,
+            unsettled: None,
             next_snapshot,
+            published: Vec::new(),
         }
     }
 }
@@ -293,11 +306,6 @@ impl<H: Host> SessionCx<'_, H> {
             .event(code::SESSION_EXITED, exited_meta(self.handle, &info, self.state.closing.is_some()));
         self.state.exited_sent = true;
     }
-    /// Python reported the end of the stream (a POSIX session settles on it; Windows settles on its gate).
-    #[cfg(unix)]
-    pub fn eof(&self) -> bool {
-        self.state.eof
-    }
 }
 
 fn exited_meta<H: Host>(handle: &SessionHandle<H>, info: &ExitInfo, killed: bool) -> Value {
@@ -317,14 +325,6 @@ pub fn snapshot_cadence(started: Instant) -> Duration {
             SNAPSHOT_STEADY_MS
         },
     )
-}
-
-/// B-R1: the earliest the next snapshot may run after one that took `spent`, whatever the cadence says. Zero for a
-/// snapshot cheap enough that the cadence alone keeps it under 1/`SNAPSHOT_COST_FACTOR` of a core.
-pub fn snapshot_cost_gap(spent: Duration) -> Duration {
-    spent
-        .saturating_mul(SNAPSHOT_COST_FACTOR)
-        .min(Duration::from_millis(SNAPSHOT_STRETCH_MAX_MS))
 }
 
 /// Bound a survivor list to what one frame carries; the rest is counted.
@@ -392,12 +392,25 @@ pub fn finish<H: Host>(runtime: &Runtime<H>, handle: &SessionHandle<H>, outcome:
     runtime.registry().settle(&handle.id);
 }
 
-/// Publish the session's members as `SESSION_OWNERSHIP` parts. The set is always published, an empty one as a
-/// single final part, so Python learns that the last descendant is gone (R9).
-fn publish_ownership<H: Host>(runtime: &Runtime<H>, handle: &SessionHandle<H>, members: &[Value]) {
+/// Publish the session's members as `SESSION_OWNERSHIP` parts, once per change of the set (K2). A change to the empty
+/// set is published as a single final part, so Python learns that the last descendant is gone (R9); an unchanged
+/// set, an empty one included, sends nothing, so an idle session costs the peer no event and no registry reload.
+///
+/// The hosts list their members out of hash maps, so the set is put in pid order first: the same members in another
+/// order are not a change.
+fn publish_ownership<H: Host>(
+    runtime: &Runtime<H>,
+    handle: &SessionHandle<H>,
+    published: &mut Vec<Value>,
+    mut members: Vec<Value>,
+) {
+    members.sort_by_key(|member| member["pid"].as_u64());
+    if *published == members {
+        return;
+    }
     let seq = handle.started.elapsed().as_millis() as u64;
     let parts: Vec<&[Value]> = if members.is_empty() {
-        vec![members]
+        vec![&members[..]]
     } else {
         members.chunks(OWNERSHIP_PART).collect()
     };
@@ -410,6 +423,7 @@ fn publish_ownership<H: Host>(runtime: &Runtime<H>, handle: &SessionHandle<H>, m
         meta["descendants"] = json!(values);
         runtime.wire.out.event(code::SESSION_OWNERSHIP, meta);
     }
+    *published = members;
 }
 
 pub fn session_thread<H: Host>(
@@ -452,7 +466,10 @@ pub fn session_thread<H: Host>(
                         return finish(&runtime, &handle, outcome);
                     }
                     if state.settle_deadline.is_none() {
-                        state.settle_deadline = host.settle_window().map(|window| Instant::now() + window);
+                        if let Some((window, unsettled)) = host.settle_window() {
+                            state.settle_deadline = Some(Instant::now() + window);
+                            state.unsettled = Some(unsettled);
+                        }
                     }
                 }
             }
@@ -479,11 +496,11 @@ pub fn session_thread<H: Host>(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
-                if state.settle_deadline.is_some_and(|deadline| now >= deadline)
-                    && !host.stream_settled(&cx!())
-                {
-                    let outcome = host.cleanup(&mut cx!(), Cleanup::Unsettled);
-                    return finish(&runtime, &handle, outcome);
+                if let (Some(deadline), Some(unsettled)) = (state.settle_deadline, state.unsettled) {
+                    if now >= deadline && !host.stream_settled(&cx!()) {
+                        let outcome = host.cleanup(&mut cx!(), Cleanup::Unsettled(unsettled));
+                        return finish(&runtime, &handle, outcome);
+                    }
                 }
                 if state.eof_deadline.is_some_and(|deadline| now >= deadline) {
                     state.eof_deadline = None;
@@ -497,14 +514,13 @@ pub fn session_thread<H: Host>(
                 }
                 if now >= state.next_snapshot {
                     let due = state.next_snapshot;
-                    let began = Instant::now();
                     if let Some(members) = host.snapshot(&mut cx!(), due) {
-                        publish_ownership(&runtime, &handle, &members);
+                        publish_ownership(&runtime, &handle, &mut state.published, members);
                     }
-                    let ended = Instant::now();
-                    state.next_snapshot = host
-                        .next_snapshot(ended + snapshot_cadence(handle.started))
-                        .max(ended + snapshot_cost_gap(ended - began));
+                    // The host decides how soon it may be asked again: a host whose snapshots can be costly
+                    // spaces them by what they actually cost (see `scan_board`), not by how long this session
+                    // waited for them.
+                    state.next_snapshot = host.next_snapshot(Instant::now() + snapshot_cadence(handle.started));
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -512,85 +528,69 @@ pub fn session_thread<H: Host>(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod ownership_tests {
     use super::*;
-    use crate::control::{Config, Wire};
-    use crate::frame::{self, Direction};
-    use crate::posix::{PosixHost, PosixSession};
-    use crate::session_pty::SessionPty;
-    use crate::wire::Sender;
-    use std::os::fd::RawFd;
+    use crate::testing::{self, MockHost};
 
-    struct Collect(Vec<u8>);
-    impl Sender for Collect {
-        fn send_first(&mut self, data: &[u8], _: Option<RawFd>) -> std::io::Result<usize> {
-            self.0.extend_from_slice(data);
-            Ok(data.len())
+    /// Every `SESSION_OWNERSHIP` event the snapshots in `rounds` make a session publish, in order, as metas. Each
+    /// round is one snapshot's member set.
+    fn published(rounds: &[Vec<Value>]) -> Vec<Value> {
+        let runtime = testing::runtime(MockHost::default());
+        let (handle, _mailbox) = testing::handle::<MockHost>(());
+        let mut state = State::<MockHost>::new((), Instant::now());
+        for members in rounds {
+            publish_ownership(&runtime, &handle, &mut state.published, members.clone());
         }
-        fn send_more(&mut self, data: &[u8]) -> std::io::Result<usize> {
-            self.0.extend_from_slice(data);
-            Ok(data.len())
-        }
+        testing::sent(&runtime)
+            .into_iter()
+            .map(|frame| {
+                assert_eq!(frame.code, code::SESSION_OWNERSHIP);
+                frame.meta
+            })
+            .collect()
     }
 
-    /// Every `SESSION_OWNERSHIP` event `members` makes the session publish, as decoded metas.
-    fn published(members: &[Value]) -> Vec<Value> {
-        let config = Config::for_test();
-        let tag = frame::runtime_tag(&config.generation).unwrap();
-        let runtime = Runtime::new(PosixHost::default(), Wire::new(&config, tag));
-        let (tx, _mailbox, exit) = mailbox();
-        let handle = SessionHandle::<PosixHost> {
-            id: "s".into(),
-            generation: "g".into(),
-            pane: "p".into(),
-            workspace: "w".into(),
-            agent_key: String::new(),
-            platform: PosixSession {
-                pty: Arc::new(SessionPty::open(24, 80).unwrap().0),
-                spec: None,
-            },
-            tx,
-            exit,
-            done: (Mutex::new(None), Condvar::new()),
-            adopted: AtomicBool::new(false),
-            started: Instant::now(),
-            survivors: Mutex::new(Vec::new()),
-        };
-        publish_ownership(&runtime, &handle, members);
-        runtime.wire.out.finish();
-        let mut sink = Collect(Vec::new());
-        runtime.wire.out.run_writer(&mut sink).unwrap();
-        let (mut metas, mut at) = (Vec::new(), 0);
-        while at < sink.0.len() {
-            let header = frame::parse_header(
-                sink.0[at..at + frame::HEADER_LEN].try_into().unwrap(),
-                Direction::RustToPython,
-                tag,
-            )
-            .unwrap();
-            let end = at + frame::HEADER_LEN + header.body_len();
-            let decoded = frame::decode_body(header, &sink.0[at + frame::HEADER_LEN..end]).unwrap();
-            assert_eq!(decoded.code, code::SESSION_OWNERSHIP);
-            metas.push(decoded.meta);
-            at = end;
-        }
-        metas
+    fn member(pid: u64) -> Value {
+        json!({"pid":pid,"pgid":pid,"start_kind":"mock","start_value":"x"})
     }
 
     /// R9: with no members `chunks` yields nothing, so the last descendant exiting was never announced.
     #[test]
-    fn an_empty_member_set_is_published_as_one_final_part() {
-        let metas = published(&[]);
-        assert_eq!(metas.len(), 1, "an empty set is still announced");
-        assert_eq!(metas[0]["descendants"], json!([]));
-        assert_eq!((metas[0]["part"].clone(), metas[0]["final"].clone()), (json!(0), json!(true)));
+    fn a_change_to_the_empty_set_is_published_as_one_final_part() {
+        let metas = published(&[vec![member(7)], vec![]]);
+        assert_eq!(metas.len(), 2, "the member, then its going away");
+        assert_eq!(metas[1]["descendants"], json!([]));
+        assert_eq!((metas[1]["part"].clone(), metas[1]["final"].clone()), (json!(0), json!(true)));
+    }
+
+    /// K2: an idle session costs the peer nothing: no event, so no registry reload for it.
+    #[test]
+    fn an_unchanged_set_is_not_published_again_and_a_session_with_no_member_never_publishes() {
+        let metas = published(&[vec![], vec![], vec![member(7)], vec![member(7)], vec![member(7)], vec![]]);
+        let sets: Vec<Value> = metas.iter().map(|meta| meta["descendants"].clone()).collect();
+        assert_eq!(sets, vec![json!([member(7)]), json!([])], "one event per change: {metas:?}");
+    }
+
+    /// The hosts list members out of hash maps: the same set in another order is not a change.
+    #[test]
+    fn the_same_members_in_another_order_are_not_a_change() {
+        let metas = published(&[vec![member(9), member(3)], vec![member(3), member(9)]]);
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0]["descendants"], json!([member(3), member(9)]), "published in pid order");
+    }
+
+    #[test]
+    fn a_member_that_changes_is_published_again() {
+        let mut moved = member(7);
+        moved["pgid"] = json!(8);
+        assert_eq!(published(&[vec![member(7)], vec![moved]]).len(), 2);
     }
 
     #[test]
     fn a_large_member_set_travels_in_parts_and_only_the_last_is_final() {
-        let members: Vec<Value> = (0..OWNERSHIP_PART + 2).map(|n| json!({"pid":n})).collect();
-        let metas = published(&members);
+        let members: Vec<Value> = (0..OWNERSHIP_PART as u64 + 2).map(member).collect();
+        let metas = published(&[members]);
         assert_eq!(metas.len(), 2);
         assert_eq!(metas[0]["descendants"].as_array().unwrap().len(), OWNERSHIP_PART);
         assert_eq!(metas[0]["final"], json!(false));
@@ -715,19 +715,20 @@ mod tests {
         assert_eq!(bounded_survivors(vec![json!({"pid":1})]).len(), 1);
     }
 
+    /// K7: a host with no settle window has `Infallible` for its token, so an unsettled cleanup of it cannot be built.
+    /// This only compiles because that arm is uninhabited.
     #[test]
-    fn an_expensive_snapshot_stretches_the_next_one_to_a_bounded_duty() {
-        let cadence = Duration::from_millis(SNAPSHOT_YOUNG_MS);
-        // A few milliseconds stays under the cadence: the cadence decides.
-        assert!(snapshot_cost_gap(Duration::from_millis(3)) < cadence);
-        // 100 ms of scanning stays within 0.1% of a core only if the next one waits 100 s.
-        let spent = Duration::from_millis(100);
-        assert_eq!(snapshot_cost_gap(spent), spent * SNAPSHOT_COST_FACTOR);
-        // A pathological scan is capped, so sampling never stops for good.
-        assert_eq!(
-            snapshot_cost_gap(Duration::from_secs(60)),
-            Duration::from_millis(SNAPSHOT_STRETCH_MAX_MS)
-        );
-        assert_eq!(snapshot_cost_gap(Duration::ZERO), Duration::ZERO);
+    fn an_unsettled_cleanup_cannot_be_built_for_a_host_without_a_settle_window() {
+        use crate::testing::MockHost;
+        fn handled(how: Cleanup<<MockHost as Host>::Unsettled>) -> &'static str {
+            match how {
+                Cleanup::Natural => "natural",
+                Cleanup::Kill { .. } => "kill",
+                Cleanup::Shutdown { .. } => "shutdown",
+                Cleanup::Unsettled(never) => match never {},
+            }
+        }
+        assert_eq!(handled(Cleanup::Natural), "natural");
+        assert!(MockHost::default().settle_window().is_none());
     }
 }

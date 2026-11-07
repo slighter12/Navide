@@ -1,5 +1,4 @@
 // Generated from shared/agent-cli/*.json by scripts/generate-agent-cli-facts.py; do not edit.
-#![allow(dead_code)]
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -26,6 +25,8 @@ pub struct Capabilities {
     pub login: Status,
 }
 
+// No vendor table is composed in Python today, so nothing constructs `Python`; `compose::admit` still matches it.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Composition {
     Rust,
