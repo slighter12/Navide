@@ -52,7 +52,7 @@ from pathlib import Path
 
 import re
 
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, session_root
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -311,20 +311,16 @@ class OpencodeLogReader(LogReader):
     # subclasses this reader and overrides only these location attributes.
     _dir_name: str = "opencode"
     _db_name: str = _DB_NAME
-    _logs = FACTS["opencode"].logs
 
     def _opencode_dirs(self) -> list[Path]:
-        """The single shared data dir (as a list for callers that iterate it)."""
-        return [_data_dir(self._dir_name)]
+        """The single shared data dir (as a list for callers that iterate it): the declared session root."""
+        return [session_root(FACTS[self.vendor].session_root)]
 
     def _db_paths(self) -> list[Path]:
         return [d / self._db_name for d in self._opencode_dirs()]
 
-    def project_dirs(self) -> list[Path]:
-        return [d for d in self._opencode_dirs() if d.is_dir()]
-
-    def session_files(self) -> list[Path]:
-        return declared_log_files(self._logs, self._opencode_dirs())
+    def declared_roots(self) -> list[Path]:
+        return self._opencode_dirs()
 
     def session_id_from_path(self, path: Path) -> str:
         """Only the shared db is a session source. Sibling files under the
@@ -1096,7 +1092,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same XDG database/auth root as _data_dir("opencode").
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("XDG_DATA_HOME",),
     supports_model=FACT.model_flag is not None,
     skills_supported=True,
     # skills.paths registers extra roots; opencode deep-merges this document

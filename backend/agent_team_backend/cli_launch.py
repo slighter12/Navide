@@ -10,7 +10,7 @@ and the rewriters make the words; nothing here reads a command line back into wo
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, NamedTuple
 
 from . import osplat
 from .cli_vendors import _vendor_facts as facts
@@ -190,6 +190,104 @@ def _as_command(text: object) -> Command:
     return text if isinstance(text, Command) else Command.literal(str(text))
 
 
+# ---------------------------------------------------------------------------------------------
+# Literal commands
+#
+# `read_literal` is the one place that reads text a user entered (a `lit` word: a persisted command, a stored
+# override, a plugin's string) into tokens. Every decision about a command (its program, a flag it already holds,
+# the id it resumes) reads the words first (`command_tokens`) and comes here only for the text of a `lit` word.
+# ---------------------------------------------------------------------------------------------
+
+_FIRST_TOKEN = re.compile(r"^\s*(?:'[^']*'|\"[^\"]*\"|\S+)")
+
+
+class Literal(NamedTuple):
+    """One line of user text read once: its tokens, and where its first token sits."""
+
+    tokens: tuple[str, ...]
+    head: tuple[int, int] | None
+
+
+def read_literal(text: str) -> Literal:
+    """`text` read the way the platform's command-line grammar reads it; an unbalanced quote reads as whitespace
+    separated words, which is wrong only for a line that would not run anyway."""
+    try:
+        tokens = tuple(osplat.terminal_backend.parse_command(text))
+    except (ValueError, OSError):
+        tokens = tuple(text.split())
+    first = _FIRST_TOKEN.match(text)
+    return Literal(tokens, (first.start(), first.end()) if first else None)
+
+
+def command_line(command: Any) -> Command:
+    """The line a command runs, as a `Command`: the last element of a `[shell, flag, line]` list, else the command."""
+    last = command[-1] if isinstance(command, list) and command else command
+    return _as_command("" if last is None else last)
+
+
+def command_tokens(command: Any) -> list[str]:
+    """The tokens of a command's line, read from its words: a program or an argument is one token as it stands, an
+    option reads as its spelling, and only the text of a literal goes through `read_literal` (consecutive literals
+    are one text, as the line spells them)."""
+    tokens: list[str] = []
+    pending = ""
+    for word in command_line(command).words:
+        if "lit" in word:
+            pending += word["lit"]
+            continue
+        if pending:
+            tokens.extend(read_literal(pending).tokens)
+            pending = ""
+        if "opt" in word:
+            tokens.extend(read_literal(word["text"]).tokens)
+        else:
+            tokens.append(word["exe"] if "exe" in word else word["arg"])
+    if pending:
+        tokens.extend(read_literal(pending).tokens)
+    return tokens
+
+
+def spell_option(agent_key: str, option: str, value: str | None, quote: Callable[[str], str]) -> str:
+    """The text of one `opt` word, with its leading space, spelled from the subject's declared facts: the spelling the
+    sidecar renders. A refusal when the subject declares no such option, or it is not integrated."""
+    vendor = facts.FACTS.get(agent_key)
+    if vendor is None:
+        raise _refused(f"{option}: the subject declares no options")
+    status = {
+        "model": vendor.capabilities.model, "effort": vendor.capabilities.effort,
+        "skip_permissions": vendor.capabilities.skip_permissions, "resume": vendor.capabilities.resume_by_id,
+        "session_id": vendor.capabilities.session_id_at_launch, "login": vendor.capabilities.login,
+    }.get(option)
+    if status is None:
+        raise _refused(f"{option}: unknown option")
+    if status != "integrated":
+        raise _refused(f"{option}: not integrated for this subject")
+
+    def need() -> str:
+        if value is None:
+            raise _refused(f"{option}: a value is required")
+        return value
+
+    def declared(flag: str | None) -> str:
+        if flag is None:
+            raise _refused(f"{option}: no flag declared")
+        return flag
+
+    if option == "model":
+        return f" {declared(vendor.model_flag)} {quote(need())}"
+    if option == "effort":
+        if vendor.known_efforts is None or need() not in vendor.known_efforts:
+            raise _refused(f"effort: {value!r} is not a declared effort")
+        return f" {declared(vendor.effort_flag)} {quote(need())}"
+    if option == "skip_permissions":
+        return f" {declared(vendor.permission_flag)}"
+    if option == "resume":
+        return " " + declared(vendor.resume_args).replace("{id}", quote(need()))
+    if option == "session_id":
+        return f" {declared(vendor.session_id_flag)} {quote(need())}"
+    return f" {declared(vendor.login_args)}"
+
+
 def append_args(command: Any, *args: str) -> Any:
     """`command` with `args` appended as plain arguments to the real command line.
 
@@ -202,15 +300,11 @@ def append_args(command: Any, *args: str) -> Any:
     return _as_command(command).appended(*args)
 
 
-_FIRST_TOKEN = re.compile(r"^\s*(?:'[^']*'|\"[^\"]*\"|\S+)")
-
-
 def _head_and_rest(command: Command) -> tuple[dict, str, tuple[dict, ...]] | None:
-    """The first word, the first token of a literal head, and the words after the head."""
+    """The first word, the text of a literal head, and the words after the head."""
     first, rest = command.words[0], command.words[1:]
     if "lit" in first:
-        match = _FIRST_TOKEN.match(first["lit"])
-        return (first, first["lit"], rest) if match else None
+        return (first, first["lit"], rest) if read_literal(first["lit"]).head else None
     return (first, "", rest) if "exe" in first else None
 
 
@@ -229,9 +323,9 @@ def with_executable(command: Any, executable: str) -> Any:
     if "exe" in first:
         head = {"exe": executable}
     else:
-        match = _FIRST_TOKEN.match(lit)
+        start, end = read_literal(lit).head
         quoted = (built._quote if hasattr(built, "_quote") else osplat.paths.quote_arg)(executable)
-        head = {"lit": f"{lit[:match.start()]}{quoted}{lit[match.end():]}"}
+        head = {"lit": f"{lit[:start]}{quoted}{lit[end:]}"}
     return Command.from_words([head, *rest], quote=getattr(built, "_quote", None))
 
 
@@ -266,25 +360,50 @@ def with_login(command: Any, login_args: str) -> Any:
         return command
     first, lit, _ = parts
     if "lit" in first:
-        match = _FIRST_TOKEN.match(lit)
-        first = {"lit": match.group(0).strip()}
+        start, end = read_literal(lit).head
+        first = {"lit": lit[start:end].strip()}
     words: list[dict] = [first]
     if login_args:
         words.append({"opt": "login", "text": f" {login_args}"})
     return Command.from_words(words, quote=getattr(built, "_quote", None))
 
 
-def attach_words(command: Any, words: object) -> Any:
+def rewritten(command: Any, change: Callable[[str], str]) -> Any:
+    """`command` with `change` applied to the text of its line, as a `Command` again: the words that still spell
+    the start of the new line are kept as they are and the rest of it is one literal. For a rewrite that only a
+    text edit can express (a flag dropped out of the line, a mode put in after the program)."""
+    if isinstance(command, list):
+        return [*command[:-1], rewritten(command[-1], change)] if command else command
+    built = _as_command("" if command is None else command)
+    new = change(str(built))
+    kept: list[dict] = []
+    spelled = ""
+    for word in built.words:
+        text = _text_of(word, getattr(built, "_quote", osplat.paths.quote_arg))
+        if not new.startswith(spelled + text):
+            break
+        kept.append(word)
+        spelled += text
+    if spelled != new:
+        kept.append({"lit": new[len(spelled):]})
+    return Command.from_words(kept, quote=getattr(built, "_quote", None))
+
+
+def attach_words(command: Any, words: object, agent_key: str = "") -> Any:
     """`command` carrying `words`, the structure its composer sent beside the text.
 
     The text must be what the words compose to: a renderer whose two outputs disagree is refused before
-    CREATE instead of running one thing on one runtime and another on the other. `words` of `None` leaves the
-    command as the text it is."""
+    CREATE instead of running one thing on one runtime and another on the other. Each `opt` word must also carry
+    the spelling the subject's facts give it, the one the sidecar renders: a forged `text` is refused. `words` of
+    `None` leaves the command as the text it is."""
     if words is None:
         return command
     if not isinstance(words, list):
         raise _refused("words must be a list")
     built = Command.from_words(words)
+    for word in built.words:
+        if "opt" in word and word["text"] != spell_option(agent_key, word["opt"], word.get("value"), built._quote):
+            raise _refused(f"{word['opt']}: the text is not the declared spelling")
     line = command[-1] if isinstance(command, list) and command else command
     if not isinstance(line, str) or str(line) != str(built):
         raise _refused("the words do not compose to the command text")

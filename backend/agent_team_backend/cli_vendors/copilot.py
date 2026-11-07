@@ -112,7 +112,7 @@ import sys
 import time
 
 from .. import osplat
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_vendor_session_path, session_root
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -239,8 +239,7 @@ def _warn_db_once(path: Path, err: object) -> None:
 
 def copilot_root() -> Path:
     """Copilot CLI's config/session root ($COPILOT_HOME, default ~/.copilot)."""
-    env = os.environ.get("COPILOT_HOME")
-    return Path(env) if env else Path.home() / ".copilot"
+    return session_root(FACT.session_root)
 
 
 def _same_path(a: str, b: str) -> bool:
@@ -365,19 +364,9 @@ class CopilotLogReader(LogReader):
         """The store's rollback journal: its deletion is the commit (see watcher._Handler.on_deleted)."""
         return path_str.endswith(f"{_DB_NAME}-journal")
 
-    def project_dirs(self) -> list[Path]:
-        """The CLI root itself (empty list when it doesn't exist).
-
-        NOT session-state: the 1.0.78 store sits one level above it, and
-        claims_path()/watch_dirs() derive from this list — scoping to
-        session-state would leave session-store.db unclaimed and unwatched.
-        """
-        default = copilot_root()
-        return [default] if default.is_dir() else []
-
-    def session_files(self) -> list[Path]:
-        """The central store (1.0.78+) plus every events.jsonl (1.0.75)."""
-        return declared_log_files(FACT.logs, [copilot_root()])
+    # The declared root is the CLI root itself, NOT session-state: the 1.0.78 store sits one level above it, and
+    # claims_path()/watch_dirs() derive from the roots — scoping to session-state would leave session-store.db
+    # unclaimed and unwatched. The declared files are the central store (1.0.78+) plus every events.jsonl (1.0.75).
 
     def _query(self, path: Path, sql: str, params: tuple = ()) -> list[tuple] | None:
         """Short-lived read-only query. None = store unreadable this cycle
@@ -1370,12 +1359,9 @@ async def fetch_copilot(home: Path, env: dict | None = None) -> dict:
 # silently starts a blank NEW session under that UUID when it does not — so
 # the id names this pane's session either way and preflight matters.
 
-def _session_path(workspace_path: str, session_id: str) -> Path:
-    # Sessions live at <root>/session-state/<id>/events.jsonl, so the id
-    # alone names the path. A stale id would not fail — it silently starts a
-    # blank NEW session under that UUID — which is why preflight matters.
-    return declared_session_path(FACT.session_path, copilot_root(), workspace_path, session_id)
-
+# Sessions live at <root>/session-state/<id>/events.jsonl (the declared `session_path`), so the id alone names the
+# path. A stale id would not fail — it silently starts a blank NEW session under that UUID — which is why preflight
+# matters.
 
 def _session_has_turns(session_id: str) -> bool:
     """True when <root>/session-store.db records a conversation turn for the id.
@@ -1418,8 +1404,8 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
     events.jsonl, and read-only inspection could not rule out that 1.0.78
     creates it lazily at the first user message.
     """
-    return _session_has_turns(session_id) or _session_path(
-        workspace_path, session_id
+    return _session_has_turns(session_id) or declared_vendor_session_path(
+        FACT, workspace_path, session_id
     ).is_file()
 
 
@@ -1451,7 +1437,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same root as copilot_root, using the captured child environment.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("COPILOT_HOME",),
     supports_model=FACT.model_flag is not None,
     supports_effort=FACT.effort_flag is not None,
     known_efforts=FACT.known_efforts or (),
@@ -1521,7 +1506,6 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_copilot(home),
     resume_id_from_command=resume_reader_of(FACT),
-    session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=("COPILOT_HOME",),
     make_log_reader=CopilotLogReader,

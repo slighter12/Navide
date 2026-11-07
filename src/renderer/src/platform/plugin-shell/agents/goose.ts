@@ -19,7 +19,6 @@ export const SPEC = {
   // at launch, so the pane binds through the kickoff marker. An unknown id
   // exits with "no such session exists", which the backend preflight checks.
   ...factOptions(FACT),
-  resumeCommandPattern: /^goose\s+session\s+-r\s+--session-id\s+\S+/,
   needsSessionMarker: true,
   supportsRebuild: true,
   // Measured on a real PTY (1.55.0): `ESC[?2004h` at startup, never

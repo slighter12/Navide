@@ -23,7 +23,7 @@ from pathlib import Path
 
 import re
 
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, session_root
 from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, data_dirs_of, resume_reader_of
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
@@ -138,21 +138,10 @@ class KimiLogReader(LogReader):
     activity_resumes_by_line: bool = True
 
     def _sessions_root(self) -> Path:
-        return _kimi_home() / "sessions"
-
-    def project_dirs(self) -> list[Path]:
-        """The single default sessions root (empty list when it doesn't exist).
-
-        Managed-account panes run with KIMI_CODE_HOME pointed at an isolated
-        home, but that home's ``sessions`` is symlinked back to the real home
-        (credential_vault), so every account's sessions resolve into this one
-        root — no separate profile-home scan is needed. Returned as a list for
-        the callers that iterate it."""
-        default = self._sessions_root()
-        return [default] if default.is_dir() else []
-
-    def session_files(self) -> list[Path]:
-        return declared_log_files(FACT.logs, self.project_dirs())
+        """The declared sessions root. Managed-account panes run with KIMI_CODE_HOME pointed at an isolated
+        home, but that home's ``sessions`` is symlinked back to the real home (credential_vault), so every
+        account's sessions resolve into this one root — no separate profile-home scan is needed."""
+        return session_root(FACT.session_root)
 
     def has_session(self, session_id: str) -> bool:
         """True if a session dir named `session_id` exists under any workspace
@@ -613,7 +602,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same runtime root as _kimi_home.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("KIMI_CODE_HOME",),
     supports_model=FACT.model_flag is not None,
     skills_supported=True,
     # --skills-dir is repeatable but replaces auto-discovery outright, so the

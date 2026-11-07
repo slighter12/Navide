@@ -47,8 +47,8 @@ from typing import Any
 import httpx
 
 from .applog import app_data_dir
-from .cli_launch import append_args
-from .osplat import secret_files, terminal_backend
+from .cli_launch import append_args, command_tokens
+from .osplat import secret_files
 from .cli_vendors import registry
 from .cli_vendors.base import PushChannel
 from .pending_registry import TIMEOUT, PendingRegistry
@@ -168,28 +168,17 @@ def _free_port(host: str) -> int:
         return int(sock.getsockname()[1])
 
 
-def _has_flag(text: str, flag: str) -> bool:
+def _has_flag(command: Any, flag: str) -> bool:
     """Whether the command already carries this flag, as a whole argument.
 
     Token-level rather than substring: `--portable` contains `--port`, and a
     substring test would read a pane's own unrelated flag as "the user wired
-    this themselves" and silently leave it without a channel. An unparseable
-    command (an unbalanced quote) falls back to whitespace splitting, which is
-    wrong only for a command that would not run anyway.
+    this themselves" and silently leave it without a channel. The tokens come
+    from the command's words; only the text of a literal is read back.
     """
     if not flag:
         return False
-    try:
-        tokens = terminal_backend.parse_command(text)
-    except (ValueError, OSError):
-        tokens = text.split()
-    return any(token == flag or token.startswith(f"{flag}=") for token in tokens)
-
-
-def _command_text(command: Any) -> str:
-    if isinstance(command, list):
-        return str(command[-1]) if command else ""
-    return str(command or "")
+    return any(token == flag or token.startswith(f"{flag}=") for token in command_tokens(command))
 
 
 def wire_spawn(
@@ -218,10 +207,9 @@ def wire_spawn(
         return command, None
 
     state = PaneChannel(pane_id=pane_id, agent_key=agent_key, kind=kind, channel=channel)
-    text = _command_text(command)
     try:
         if kind == KIND_HTTP:
-            if _has_flag(text, channel.port_flag):
+            if _has_flag(command, channel.port_flag):
                 return command, None
             state.port = _free_port(channel.host)
             command = append_args(command, channel.port_flag, str(state.port))
@@ -235,7 +223,7 @@ def wire_spawn(
                     channel.password_env, secrets.token_urlsafe(24)
                 )
         elif kind == KIND_FILE:
-            if _has_flag(text, channel.input_file_flag):
+            if _has_flag(command, channel.input_file_flag):
                 return command, None
             path = _prepare_input_file(pane_id, channel)
             state.input_file = str(path)

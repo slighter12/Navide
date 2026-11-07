@@ -48,7 +48,6 @@ export const SPEC = {
   // real session files: it is the session DIRECTORY's name, which equals the
   // `stream.id` every record carries — NOT the internal command id that also
   // appears in the log under `owner.session_id` / `command_id`.
-  resumeCommandPattern: /^muse\s+resume\s+\S+/,
   // Muse can't be told a session id at launch, and its session directory is
   // named by a uuid it coins itself — so a fresh pane embeds the `at-pane:`
   // marker in its kickoff and the reader matches the resulting session file

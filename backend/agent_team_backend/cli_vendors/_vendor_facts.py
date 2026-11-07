@@ -115,9 +115,23 @@ class DataDirs(NamedTuple):
     tilde: bool
 
 
+class SessionRoot(NamedTuple):
+    root_env: tuple[str, ...]
+    base_env: tuple[str, ...]
+    home: tuple[str, ...]
+    fallbacks: tuple[str, ...]
+    sub: tuple[str, ...]
+
+
 class SessionPath(NamedTuple):
     segments: tuple[str, ...]
     cwd: CwdEncoding
+
+
+class PermissionAliases(NamedTuple):
+    spellings: tuple[str, ...]
+    mode_flags: tuple[str, ...]
+    config_keys: tuple[str, ...]
 
 
 class Logs(NamedTuple):
@@ -139,7 +153,9 @@ class VendorFacts(NamedTuple):
     resume_aliases: ResumeAliases | None
     subcommand: Subcommand | None
     data_dirs: DataDirs | None
+    session_root: SessionRoot | None
     session_path: SessionPath | None
+    permission_aliases: PermissionAliases | None
     logs: Logs | None
     supports_session_resume: bool
     shutdown: ShutdownFacts | None
@@ -162,8 +178,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=None,
+        session_root=None,
         session_path=None,
         logs=None,
+        permission_aliases=None,
         supports_session_resume=False,
         shutdown=None,
         capabilities=CapabilityStatus(model='not-yet-integrated', effort='unknown', skip_permissions='integrated', resume_by_id='vendor-unsupported', session_id_at_launch='vendor-unsupported', login='unknown'),
@@ -183,8 +201,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=DataDirs(env=(), home=('.gemini', 'antigravity-cli'), append=(), extra_env=(), tilde=False),
-        session_path=SessionPath(segments=('conversations', '{id}.db'), cwd=CwdEncoding.ABSENT),
+        session_root=SessionRoot(root_env=(), base_env=(), home=('.gemini', 'antigravity-cli'), fallbacks=(), sub=('conversations',)),
+        session_path=SessionPath(segments=('{id}.db',), cwd=CwdEncoding.ABSENT),
         logs=Logs(files=('*.db',), cwd=CwdEncoding.ABSENT),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
@@ -204,8 +224,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=DataDirs(env=('CLAUDE_CONFIG_DIR',), home=('.claude',), append=(), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('CLAUDE_CONFIG_DIR',), home=('.claude',), fallbacks=('.config/claude',), sub=('projects',)),
         session_path=SessionPath(segments=('{cwd}', '{id}.jsonl'), cwd=CwdEncoding.CLAUDE),
         logs=Logs(files=('{cwd}/*.jsonl',), cwd=CwdEncoding.CLAUDE),
+        permission_aliases=PermissionAliases(spellings=('--allow-dangerously-skip-permissions', '--permission-mode bypassPermissions'), mode_flags=('--permission-mode',), config_keys=()),
         supports_session_resume=True,
         shutdown=ShutdownFacts(graceful=True, grace_s=3.0, defer_master_close=True),
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='integrated', login='integrated'),
@@ -225,8 +247,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=DataDirs(env=('CODEX_HOME',), home=('.codex',), append=(), extra_env=('CODEX_SQLITE_HOME',), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=(), home=('.codex',), fallbacks=(), sub=('sessions',)),
         session_path=None,
         logs=Logs(files=('**/rollout-*.jsonl',), cwd=CwdEncoding.ABSENT),
+        permission_aliases=PermissionAliases(spellings=('--yolo', '--full-auto'), mode_flags=('-a', '--ask-for-approval', '-s', '--sandbox'), config_keys=('approval_policy', 'sandbox_mode')),
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='not-yet-integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -246,8 +270,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=DataDirs(env=('COPILOT_HOME',), home=('.copilot',), append=(), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('COPILOT_HOME',), home=('.copilot',), fallbacks=(), sub=()),
         session_path=SessionPath(segments=('session-state', '{id}', 'events.jsonl'), cwd=CwdEncoding.ABSENT),
         logs=Logs(files=('session-store.db', 'session-state/*/events.jsonl'), cwd=CwdEncoding.ABSENT),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='not-yet-integrated', login='integrated'),
@@ -267,8 +293,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=ResumeAliases(programs=('cursor-agent',), flags=()),
         subcommand=None,
         data_dirs=DataDirs(env=(), home=('.cursor', 'chats'), append=(), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=(), home=('.cursor', 'chats'), fallbacks=(), sub=()),
         session_path=None,
         logs=Logs(files=('{cwd}/*/store.db',), cwd=CwdEncoding.MD5),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
@@ -288,8 +316,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=ResumeAliases(programs=(), flags=('-r',)),
         subcommand=None,
         data_dirs=DataDirs(env=('FACTORY_HOME_OVERRIDE',), home=('.factory',), append=(), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('FACTORY_HOME_OVERRIDE',), home=('.factory',), fallbacks=(), sub=('sessions',)),
         session_path=SessionPath(segments=('{cwd}', '{id}.jsonl'), cwd=CwdEncoding.DROID),
         logs=Logs(files=('*.jsonl', '{cwd}/*.jsonl'), cwd=CwdEncoding.DROID),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='vendor-unsupported', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
@@ -309,8 +339,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=Subcommand(word='session', aliases=('s',)),
         data_dirs=None,
+        session_root=None,
         session_path=None,
         logs=Logs(files=('sessions.db',), cwd=CwdEncoding.ABSENT),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='unknown', effort='unknown', skip_permissions='vendor-unsupported', resume_by_id='integrated', session_id_at_launch='vendor-unsupported', login='unknown'),
@@ -330,8 +362,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=ResumeAliases(programs=(), flags=('--resume',)),
         subcommand=None,
         data_dirs=DataDirs(env=('GROK_HOME',), home=('.grok',), append=(), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('GROK_HOME',), home=('.grok',), fallbacks=(), sub=('sessions',)),
         session_path=SessionPath(segments=('{cwd}', '{id}', 'updates.jsonl'), cwd=CwdEncoding.URL_QUOTE),
         logs=Logs(files=('{cwd}/*/updates.jsonl',), cwd=CwdEncoding.URL_QUOTE),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='not-yet-integrated', resume_by_id='integrated', session_id_at_launch='integrated', login='integrated'),
@@ -351,8 +385,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=ResumeAliases(programs=(), flags=('-s',)),
         subcommand=None,
         data_dirs=DataDirs(env=('XDG_DATA_HOME',), home=('.local', 'share'), append=('kilo',), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('XDG_DATA_HOME',), home=('.local', 'share'), fallbacks=(), sub=('kilo',)),
         session_path=None,
         logs=Logs(files=('kilo.db',), cwd=CwdEncoding.ABSENT),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -372,8 +408,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=ResumeAliases(programs=(), flags=('-S',)),
         subcommand=None,
         data_dirs=DataDirs(env=('KIMI_CODE_HOME',), home=('.kimi-code',), append=(), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('KIMI_CODE_HOME',), home=('.kimi-code',), fallbacks=(), sub=('sessions',)),
         session_path=None,
         logs=Logs(files=('wd_*/session_*/agents/main/wire.jsonl',), cwd=CwdEncoding.ABSENT),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -393,8 +431,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=DataDirs(env=('MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR'), home=('.minimax',), append=(), extra_env=(), tilde=False),
+        session_root=None,
         session_path=None,
         logs=None,
+        permission_aliases=None,
         supports_session_resume=False,
         shutdown=None,
         capabilities=CapabilityStatus(model='vendor-unsupported', effort='vendor-unsupported', skip_permissions='vendor-unsupported', resume_by_id='not-yet-integrated', session_id_at_launch='unknown', login='integrated'),
@@ -414,8 +454,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=DataDirs(env=('XDG_DATA_HOME',), home=('.local', 'share'), append=('muse',), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('XDG_DATA_HOME',), home=('.local', 'share'), fallbacks=(), sub=('muse', 'sessions')),
         session_path=None,
         logs=Logs(files=('*/*/*/*/session.jsonl',), cwd=CwdEncoding.ABSENT),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='vendor-unsupported', login='integrated'),
@@ -435,8 +477,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=ResumeAliases(programs=(), flags=('-s',)),
         subcommand=None,
         data_dirs=DataDirs(env=('XDG_DATA_HOME',), home=('.local', 'share'), append=('opencode',), extra_env=(), tilde=False),
+        session_root=SessionRoot(root_env=(), base_env=('XDG_DATA_HOME',), home=('.local', 'share'), fallbacks=(), sub=('opencode',)),
         session_path=None,
         logs=Logs(files=('opencode.db',), cwd=CwdEncoding.ABSENT),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='vendor-unsupported', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -456,8 +500,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=None,
         subcommand=None,
         data_dirs=DataDirs(env=('PI_CODING_AGENT_DIR',), home=('.pi', 'agent'), append=(), extra_env=('PI_CODING_AGENT_SESSION_DIR',), tilde=False),
+        session_root=SessionRoot(root_env=('PI_CODING_AGENT_SESSION_DIR',), base_env=('PI_CODING_AGENT_DIR',), home=('.pi', 'agent'), fallbacks=(), sub=('sessions',)),
         session_path=None,
         logs=Logs(files=('{cwd}/*.jsonl',), cwd=CwdEncoding.PI),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='vendor-unsupported', resume_by_id='integrated', session_id_at_launch='not-yet-integrated', login='unknown'),
@@ -477,8 +523,10 @@ FACTS: dict[str, VendorFacts] = {
         resume_aliases=ResumeAliases(programs=(), flags=('-r',)),
         subcommand=None,
         data_dirs=DataDirs(env=('QWEN_HOME',), home=('.qwen',), append=(), extra_env=('QWEN_RUNTIME_DIR',), tilde=True),
-        session_path=SessionPath(segments=('projects', '{cwd}', 'chats', '{id}.jsonl'), cwd=CwdEncoding.CLAUDE),
+        session_root=SessionRoot(root_env=(), base_env=('QWEN_RUNTIME_DIR',), home=('.qwen',), fallbacks=(), sub=('projects',)),
+        session_path=SessionPath(segments=('{cwd}', 'chats', '{id}.jsonl'), cwd=CwdEncoding.CLAUDE),
         logs=Logs(files=('{cwd}/chats/*.jsonl', '{cwd}/chats/archive/*.jsonl'), cwd=CwdEncoding.CLAUDE),
+        permission_aliases=None,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),

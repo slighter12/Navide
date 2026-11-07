@@ -21,10 +21,7 @@ modules — those import the registry, and a back-edge would be a cycle.
 
 from __future__ import annotations
 
-import glob
-import hashlib
 import json
-import logging
 import re
 import shlex
 from collections.abc import Iterable, Mapping, Sequence
@@ -33,17 +30,22 @@ from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import quote
 
 # Vendor modules may import `base` but not the application, so the platform
 # seam is re-exported here: a vendor that needs to find another product's
 # state directory asks for the convention rather than spelling out one
 # platform's layout (which is how the Cursor reader ended up macOS-only).
+from ..cli_launch import command_line, command_tokens
 from ..osplat import paths as platform_paths  # noqa: F401
 from ..osplat import platform_id as _platform_id
-
-log = logging.getLogger("agent_team_backend.cli_vendors.base")
-
+from ._vendor_facts import FACTS
+from .session_layout import (  # noqa: F401
+    declared_log_files,
+    declared_session_path,
+    declared_vendor_session_path,
+    encoded_cwd,
+    session_root,
+)
 
 def command_text(command: Any) -> str:
     """Actual CLI command string from a terminal.create payload.
@@ -57,13 +59,19 @@ def command_text(command: Any) -> str:
     return str(command or "")
 
 
-def _launched_text(command: Any) -> str | None:
-    """The command line of a launch: a string as it stands, or the last element of a known shell's argv.
+#: The shell syntax that makes a command line name no single process (see `simple_command_args`).
+SHELL_SYNTAX = ";&|<>`$%#()\n\r"
 
-    None for any other list, which is never read as a launch of a CLI."""
+
+def simple_command_args(command: Any) -> list[str]:
+    """Parse a literal CLI invocation for destructive resume deduplication.
+
+    Unlike command_text, only unwrap known shell command argv. Complex shell
+    overrides remain unclaimed rather than guessing which process they start.
+    """
     if isinstance(command, list):
         if len(command) < 3:
-            return None
+            return []
         shell = str(command[0]).replace("\\", "/").rsplit("/", 1)[-1].lower()
         flags = tuple(str(arg) for arg in command[1:-1])
         posix = shell in {"sh", "bash", "zsh", "dash", "ksh", "fish"} and flags in {
@@ -77,18 +85,9 @@ def _launched_text(command: Any) -> str | None:
             ("-command",), ("-nologo", "-noexit", "-command"),
         }
         if not (posix or windows or powershell):
-            return None
-    return command_text(command)
-
-
-def simple_command_args(command: Any) -> list[str]:
-    """Parse a literal CLI invocation for destructive resume deduplication.
-
-    Unlike command_text, only unwrap known shell command argv. Complex shell
-    overrides remain unclaimed rather than guessing which process they start.
-    """
-    text = _launched_text(command)
-    if text is None or any(char in text for char in ";&|<>`$%#()\n\r"):
+            return []
+    text = command_text(command)
+    if any(char in text for char in ";&|<>`$%#()\n\r"):
         return []
     try:
         return shlex.split(text)
@@ -106,25 +105,22 @@ def resume_id_from_command(command: Any, facts: Any, *, plain_only: bool = False
     `resume_aliases.flags`) anywhere after, as `<flag> <id>` or `<flag>=<id>`, up to a bare `--`.
 
     `plain_only` is the named compatibility rule of the vendors whose id decides a destructive resume
-    deduplication (Antigravity, Grok): text with shell syntax in it (`;`, `&`, `|`, `$`, a newline, ...) names no
-    resume at all."""
+    deduplication (Antigravity, Grok): a literal with shell syntax in it (`;`, `&`, `|`, `$`, a newline, ...) names no
+    resume at all, whether or not the command also carries a `resume` option word.
+
+    A bare `--` ends the flag search (the baseline's regexes read past it: a disclosed fix)."""
     template = facts.resume_args
     if template is None:
         return ""
-    last = command[-1] if isinstance(command, list) and command else command
-    for word in getattr(last, "words", ()):
+    words = command_line(command).words
+    if plain_only and any(char in word["lit"] for word in words if "lit" in word for char in SHELL_SYNTAX):
+        return ""
+    for word in words:
         if word.get("opt") == "resume" and word.get("value"):
             return str(word["value"])
-    if plain_only:
-        tokens = simple_command_args(command)
-    else:
-        text = _launched_text(command)
-        if text is None:
-            return ""
-        try:
-            tokens = shlex.split(text)
-        except ValueError:
-            tokens = text.split()
+    # A command that is only text and must be plain keeps the baseline rule: only a known shell's argv is a launch.
+    text_only = all("lit" in word for word in words)
+    tokens = simple_command_args(command) if plain_only and text_only else command_tokens(command)
     aliases = facts.resume_aliases
     if not tokens or tokens[0] not in (facts.command, *(aliases.programs if aliases else ())):
         return ""
@@ -184,68 +180,20 @@ def declared_data_dirs(record: Any, ctx: "VendorRuntimeContext") -> tuple[Path, 
     return tuple(dict.fromkeys(roots))
 
 
+class DeclaredDataDirs:
+    """The `data_dirs` of a `VendorSpec` for a vendor's declaration. `env_vars` are the variables it reads."""
+
+    def __init__(self, record: Any) -> None:
+        self.record = record
+        self.env_vars: tuple[str, ...] = (*record.env, *record.extra_env)
+
+    def __call__(self, ctx: "VendorRuntimeContext") -> tuple[Path, ...]:
+        return declared_data_dirs(self.record, ctx)
+
+
 def data_dirs_of(record: Any) -> "Callable[[VendorRuntimeContext], tuple[Path, ...]] | None":
     """The `data_dirs` of a `VendorSpec` for a vendor's declaration: None when it declares none."""
-    return None if record is None else partial(declared_data_dirs, record)
-
-
-def encoded_cwd(encoding: Any, workspace_path: str) -> str:
-    """The workspace path spelled as one directory name, the way a CLI declared by `encoding` spells it."""
-    # The two encoders live with the code that reads those logs; they import this module, so the import is deferred.
-    if encoding == "claude":
-        from ..log_readers.base import encode_claude_cwd
-        return encode_claude_cwd(workspace_path)
-    if encoding == "droid":
-        from .droid import encode_droid_cwd
-        return encode_droid_cwd(workspace_path)
-    if encoding == "url_quote":
-        return quote(workspace_path.rstrip("/"), safe="")
-    if encoding == "pi":
-        from .pi import encode_pi_cwd
-        return encode_pi_cwd(workspace_path)
-    if encoding == "md5":
-        return hashlib.md5(workspace_path.encode("utf-8")).hexdigest() if workspace_path else ""
-    raise ValueError(f"a workspace path has no spelling as a directory name under {encoding!r}")
-
-
-def declared_session_path(record: Any, root: Path, workspace_path: str, session_id: str) -> Path:
-    """Where one session's transcript lives under `root`, by the vendor's `session_path` declaration.
-
-    Each segment is joined onto `root` with `{id}` the session id and `{cwd}` the workspace path as the vendor spells
-    it. A vendor that cannot name the path (no root on this machine, no workspace) answers None before it calls this."""
-    cwd = encoded_cwd(record.cwd, workspace_path) if "{cwd}" in "/".join(record.segments) else ""
-    return root.joinpath(*(segment.replace("{cwd}", cwd).replace("{id}", session_id) for segment in record.segments))
-
-
-def declared_log_files(
-    record: Any,
-    roots: Iterable[Path],
-    workspace_path: str | None = None,
-    *,
-    accept: Callable[[Path], bool] | None = None,
-) -> list[Path]:
-    """The session log files under `roots`, by the vendor's `logs` declaration.
-
-    Every pattern of `record.files` is globbed under each root, in the declared order. All sessions
-    (`workspace_path` None): `{cwd}` matches any directory name. One workspace: only the patterns that hold `{cwd}`
-    apply, with the workspace's directory name in its place. Only files count; `accept` is a vendor's extra test of a
-    path the pattern cannot say (an id's shape). A root that cannot be listed gives nothing, as a missing one does."""
-    patterns = record.files
-    if workspace_path is None:
-        patterns = tuple(pattern.replace("{cwd}", "*") for pattern in patterns)
-    else:
-        name = glob.escape(encoded_cwd(record.cwd, workspace_path))
-        patterns = tuple(pattern.replace("{cwd}", name) for pattern in patterns if "{cwd}" in pattern)
-    out: list[Path] = []
-    for root in roots:
-        for pattern in patterns:
-            try:
-                out.extend(
-                    sorted(path for path in root.glob(pattern) if path.is_file() and (accept is None or accept(path)))
-                )
-            except OSError as err:
-                log.debug("glob %s under %s failed: %s", pattern, root, err)
-    return out
+    return None if record is None else DeclaredDataDirs(record)
 
 
 @dataclass(frozen=True)
@@ -1244,3 +1192,14 @@ class VendorSpec:
     # override disables this vendor's default network profile; it is never
     # interpreted as a trusted endpoint or persisted as a credential URL.
     network_override_env_vars: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # What the vendor's declaration already says is not restated per vendor: the variables of its `data_dirs`
+        # are the ones that may enter the risk context, and its `session_path` names the transcript. A vendor passes
+        # its own only where it cannot be declared (goose's platform layout, grok's shortened groups).
+        declared = getattr(self.data_dirs, "env_vars", None)
+        if declared is not None and not self.data_dir_env_vars:
+            object.__setattr__(self, "data_dir_env_vars", declared)
+        vendor = FACTS.get(self.key)
+        if self.session_path is None and vendor is not None and vendor.session_path and vendor.session_root:
+            object.__setattr__(self, "session_path", partial(declared_vendor_session_path, vendor))

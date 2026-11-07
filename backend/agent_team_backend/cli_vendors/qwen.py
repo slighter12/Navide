@@ -39,7 +39,7 @@ from ..log_readers.base import (
     user_prompt_text,
 )
 from ..log_readers.base import encode_claude_cwd
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec
 from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
@@ -207,25 +207,8 @@ class QwenLogReader(LogReader):
     #: lines rather than replaying it (log_readers.base).
     activity_resumes_by_line: bool = True
 
-    def _projects_root(self) -> Path:
-        return qwen_root() / "projects"
-
-    def project_dirs(self) -> list[Path]:
-        """The single projects root (empty list when it doesn't exist)."""
-        default = self._projects_root()
-        return [default] if default.is_dir() else []
-
-    def session_files(self) -> list[Path]:
-        """All session jsonl files of every project's chats dir, archive/ included."""
-        return declared_log_files(FACT.logs, self.project_dirs())
-
-    def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
-        """Only the jsonl files under this workspace's project chats dir.
-
-        Qwen names each project dir after the Claude-encoded cwd, so one
-        workspace maps to exactly one folder — enumerate just that folder.
-        """
-        return declared_log_files(FACT.logs, self.project_dirs(), workspace_path)
+    # The declared roots and files: all session jsonl files of every project's chats dir, archive/ included. Qwen
+    # names each project dir after the Claude-encoded cwd, so one workspace maps to exactly one folder.
 
     def _in_chats_dir(self, path: Path) -> bool:
         parent = path.parent
@@ -892,11 +875,8 @@ async def fetch_qwen(home: Path, env: dict | None = None) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-def _session_path(workspace_path: str, session_id: str) -> Path:
-    # Qwen Code reuses Claude's cwd encoding for its per-project dirs; the
-    # session file is named after the id `qwen --resume <id>` accepts.
-    return declared_session_path(FACT.session_path, qwen_root(), workspace_path, session_id)
-
+# Qwen Code reuses Claude's cwd encoding for its per-project dirs; the session file is named after the id
+# `qwen --resume <id>` accepts (the declared `session_path`).
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # Ask the reader (which also scans chats/archive/ and other project dirs)
@@ -932,7 +912,6 @@ SPEC = VendorSpec(
     # Verified in installed @qwen-code/qwen-code Storage.getRuntimeBaseDir: QWEN_RUNTIME_DIR overrides runtime output,
     # otherwise QWEN_HOME is used; config remains at QWEN_HOME. Storage.resolvePath expands ~/ itself (`tilde`).
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),
     supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: QWEN_HOME *is* the .qwen directory (its
     # resolveQwenHome falls back to ~/.qwen), so skills sit one level in.
@@ -1004,7 +983,6 @@ SPEC = VendorSpec(
         todo="a Coding Plan key in the pane environment outranks both files and cannot be switched; no real-account round-trip recorded",
     ),
     resume_id_from_command=resume_reader_of(FACT),
-    session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),
     make_log_reader=QwenLogReader,

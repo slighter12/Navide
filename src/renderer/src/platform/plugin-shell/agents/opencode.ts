@@ -33,7 +33,6 @@ export const SPEC = {
   // spawned `opencode --auto ...`, never reached the TUI, and died on startup.
   // The resume id is `ses_`-prefixed.
   needsSessionMarker: true,
-  resumeCommandPattern: /^opencode\s+(?:--session|-s)\s+\S+/,
   supportsRebuild: true,
   // Measured on a real PTY: the CLI itself emits `ESC[?1049h` during startup
   // (probe read 8626 bytes of startup output) and keeps the conversation there.

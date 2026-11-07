@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { VENDOR_FACTS } from './vendorFacts'
+import { VENDOR_FACTS, fillId } from './vendorFacts'
 import {
   argWord,
   factOptions,
@@ -8,6 +8,8 @@ import {
   optionText,
   optionWord,
   programWord,
+  resumeIdForAgent,
+  resumeIdFromCommand,
   verifiedWords,
   withSessionIdWords,
   wordsText,
@@ -54,6 +56,70 @@ describe('options are spelled from the generated facts', () => {
     expect('resumeArgs' in options).toBe(Boolean(facts.resume_args))
     if (facts.model_flag) expect(options.modelArgs!('m')).toBe(`${facts.model_flag} m`)
     if (facts.resume_args) expect(options.resumeArgs!('abc')).toBe(facts.resume_args.replace('{id}', 'abc'))
+  })
+})
+
+describe('an effort the facts do not know is text, never an option word', () => {
+  it.each(ALL.filter((facts) => facts.effort_flag && facts.known_efforts).map((facts) => [facts.key, facts] as const))(
+    '%s: a declared effort is an option word and any other is a literal the backend takes as written',
+    (_key, facts) => {
+      const known = facts.known_efforts as readonly string[]
+      expect(optionWord(facts, 'effort', known[0])).toMatchObject({ opt: 'effort', value: known[0] })
+      expect(optionWord(facts, 'effort', 'not-an-effort')).toEqual({ lit: ` ${facts.effort_flag} not-an-effort` })
+    },
+  )
+
+  it('leaves the other options as they were', () => {
+    expect(optionWord(VENDOR_FACTS.claude, 'model', 'anything')).toMatchObject({ opt: 'model', value: 'anything' })
+  })
+
+  it('a fresh launch with an unknown effort still spells the command, and its words stay verified', () => {
+    const words = freshLaunchWords({ agentKey: 'claude', program: 'claude', skipPermissions: false, effort: 'turbo' })
+    expect(wordsText(words)).toBe('claude --effort turbo')
+    expect(words.some((word) => 'opt' in word && word.opt === 'effort')).toBe(false)
+  })
+})
+
+describe('the id a command resumes is read from the facts', () => {
+  const RESUMING = ALL.filter((facts) => facts.resume_args)
+  const spelled = (facts: VendorFacts, id: string) => `${facts.command} ${fillId(facts.resume_args as string, id)}`
+
+  it.each(RESUMING.map((facts) => [facts.key, facts] as const))('%s: its own resume spelling reads back its id', (_key, facts) => {
+    expect(resumeIdFromCommand(facts, spelled(facts, 'abc-123'))).toBe('abc-123')
+    expect(resumeIdFromCommand(facts, `${spelled(facts, 'abc-123')} --extra`)).toBe('abc-123')
+    expect(resumeIdFromCommand(facts, facts.command)).toBe('')
+  })
+
+  it.each(RESUMING.map((facts) => [facts.key, facts] as const))('%s: a bare -- ends the flag search', (_key, facts) => {
+    const subcommand = facts.subcommand as { word: string } | null
+    const flagged = (facts.resume_args as string).split(' ').slice(-2)[0].startsWith('-')
+    if (!flagged || subcommand) return
+    expect(resumeIdFromCommand(facts, `${facts.command} -- ${fillId(facts.resume_args as string, 'abc')}`)).toBe('')
+  })
+
+  it('reads every spelling the facts declare for the program and the flag', () => {
+    expect(resumeIdFromCommand(VENDOR_FACTS.cursor, 'cursor-agent --resume=abc')).toBe('abc')
+    expect(resumeIdFromCommand(VENDOR_FACTS.cursor, 'cursor-agent --resume abc')).toBe('abc')
+    expect(resumeIdFromCommand(VENDOR_FACTS.cursor, 'agent --resume=abc --force')).toBe('abc')
+    expect(resumeIdFromCommand(VENDOR_FACTS.cursor, 'cursor-agent --resume')).toBe('')
+    expect(resumeIdFromCommand(VENDOR_FACTS.kimi, 'kimi -S session_abc')).toBe('session_abc')
+    expect(resumeIdFromCommand(VENDOR_FACTS.kimi, 'kimi --session session_abc')).toBe('session_abc')
+    expect(resumeIdFromCommand(VENDOR_FACTS.kimi, 'kimi -s session_abc')).toBe('')
+    expect(resumeIdFromCommand(VENDOR_FACTS.goose, 'goose session -r --session-id abc')).toBe('abc')
+    expect(resumeIdFromCommand(VENDOR_FACTS.codex, 'codex resume abc --disable-approval')).toBe('abc')
+    expect(resumeIdFromCommand(VENDOR_FACTS.codex, 'codex exec resume abc')).toBe('')
+  })
+
+  it('reads another program or an empty line as no resume', () => {
+    expect(resumeIdFromCommand(VENDOR_FACTS.claude, 'codex --resume abc')).toBe('')
+    expect(resumeIdFromCommand(VENDOR_FACTS.claude, '   ')).toBe('')
+    expect(resumeIdFromCommand(VENDOR_FACTS.claude, 'claude --resume --model x')).toBe('')
+  })
+
+  it('a vendor that declares no resume spelling reads none, and an unknown agent reads none', () => {
+    expect(resumeIdFromCommand(VENDOR_FACTS.aider, 'aider --restore-chat-history')).toBe('')
+    expect(resumeIdForAgent('nobody', 'nobody --resume abc')).toBe('')
+    expect(resumeIdForAgent('claude', 'claude --resume abc')).toBe('abc')
   })
 })
 

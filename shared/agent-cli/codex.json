@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": null,
   "data_dirs": {"env": ["CODEX_HOME"], "home": [".codex"], "append": [], "extra_env": ["CODEX_SQLITE_HOME"], "tilde": false},
+  "session_root": {"root_env": [], "base_env": [], "home": [".codex"], "fallbacks": [], "sub": ["sessions"]},
   "session_path": null,
   "logs": {"files": ["**/rollout-*.jsonl"], "cwd": "absent"},
+  "permission_aliases": {"spellings": ["--yolo", "--full-auto"], "mode_flags": ["-a", "--ask-for-approval", "-s", "--sandbox"], "config_keys": ["approval_policy", "sandbox_mode"]},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

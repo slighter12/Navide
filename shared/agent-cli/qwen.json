@@ -12,8 +12,10 @@
   "resume_aliases": {"programs": [], "flags": ["-r"]},
   "subcommand": null,
   "data_dirs": {"env": ["QWEN_HOME"], "home": [".qwen"], "append": [], "extra_env": ["QWEN_RUNTIME_DIR"], "tilde": true},
-  "session_path": {"segments": ["projects", "{cwd}", "chats", "{id}.jsonl"], "cwd": "claude"},
+  "session_root": {"root_env": [], "base_env": ["QWEN_RUNTIME_DIR"], "home": [".qwen"], "fallbacks": [], "sub": ["projects"]},
+  "session_path": {"segments": ["{cwd}", "chats", "{id}.jsonl"], "cwd": "claude"},
   "logs": {"files": ["{cwd}/chats/*.jsonl", "{cwd}/chats/archive/*.jsonl"], "cwd": "claude"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

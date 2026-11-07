@@ -21,6 +21,38 @@ def test_claude_settings_are_appended_as_two_arg_words_after_the_existing_words(
     assert final[2].words == (*base.words, {"arg": "--settings"}, {"arg": "/p a/s.json"})
 
 
+def test_every_rewrite_the_create_handler_runs_hands_back_a_command_that_keeps_its_words(monkeypatch):
+    """t39f M2: a plain `str` reaching CREATE would lose the words, and the sidecar would then render the text. Each
+    rewrite goes through the words API, so what it returns is a `Command` whose words still hold the options."""
+    from agent_team_backend import onboarding_deps, webhook_service
+
+    flag = "--dangerously-skip-permissions"
+    base = Command.from_words([
+        {"exe": "claude"},
+        {"opt": "resume", "value": "abc", "text": " --resume abc"},
+        {"opt": "skip_permissions", "text": f" {flag}"},
+    ])
+    wrapped = [SHELL, "-ilc", base]
+
+    monkeypatch.setattr(onboarding_deps, "cli_binary_override", lambda key: "/opt/c l/claude")
+    rebound = app._command_with_persisted_cli_binary("claude", wrapped)
+    assert isinstance(rebound[2], Command) and rebound[2].words[1:] == base.words[1:]
+    assert rebound[2] == f"'/opt/c l/claude' --resume abc {flag}"
+
+    dropped = webhook_service._dropped_bypass(wrapped)
+    assert isinstance(dropped[2], Command) and dropped[2] == "claude --resume abc"
+    assert dropped[2].words[:2] == base.words[:2]  # the program and the resume option survive the rewrite
+
+    held = webhook_service.without_bypass("claude", wrapped)
+    assert isinstance(held[2], Command) and held[2].words[:2] == base.words[:2]
+
+    moded = webhook_service._rewrite(wrapped, lambda text: webhook_service._with_mode("claude", text, unattended=False))
+    assert isinstance(moded[2], Command) and "--permission-mode default" in moded[2]
+
+    assert isinstance(webhook_service._rewrite("claude", str.upper), Command)
+    assert isinstance(webhook_service._rewrite(None, lambda text: text), Command)
+
+
 def test_the_codex_session_hooks_are_two_config_arg_pairs(monkeypatch, tmp_path):
     monkeypatch.setattr(codex_session_hooks, "trust_gate_blocks_injection", lambda: False)
     base = Command.literal("codex resume abc")

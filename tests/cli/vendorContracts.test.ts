@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CLI_AGENT_SPECS } from '../../src/renderer/src/platform/plugin-shell/agents'
 import { agentUsesBracketedPaste, encodeShiftEnter } from '../../src/renderer/src/platform/plugin-shell/agentProfile'
-import { buildResumeCommand, normalizeResumeSessionId, paneRebuildVisible, sessionHomeIdFor } from '../../src/renderer/src/platform/plugin-shell/lib/resume-command'
+import { buildResumeCommand, looksLikeResumeCommand, normalizeResumeSessionId, paneRebuildVisible, sessionHomeIdFor } from '../../src/renderer/src/platform/plugin-shell/lib/resume-command'
 import { modelArgsFor } from '../../src/renderer/src/platform/plugin-shell/lib/cliModel'
 import { awaitingClearsOnMiss, hasAwaitingPattern, matchAwaitingInput } from '../../src/renderer/src/lib/cliAwaitingInput'
 
@@ -92,13 +92,11 @@ describe('vendor specific frontend session and prompt contracts', () => {
   })
 
   it('recognizes Cursor aliases and Kimi uppercase short resume flag', () => {
-    const cursor = CLI_AGENT_SPECS.find((spec) => spec.agentKey === 'cursor')!
-    expect(cursor.resumeCommandPattern!.test('agent --resume=session-123')).toBe(true)
-    expect(cursor.resumeCommandPattern!.test('cursor-agent --resume session-123')).toBe(true)
-    expect(cursor.resumeCommandPattern!.test('grok --resume session-123')).toBe(false)
-    const kimi = CLI_AGENT_SPECS.find((spec) => spec.agentKey === 'kimi')!
-    expect(kimi.resumeCommandPattern!.test('kimi -S session-123')).toBe(true)
-    expect(kimi.resumeCommandPattern!.test('kimi -s session-123')).toBe(false)
+    expect(looksLikeResumeCommand('cursor', 'agent --resume=session-123')).toBe(true)
+    expect(looksLikeResumeCommand('cursor', 'cursor-agent --resume session-123')).toBe(true)
+    expect(looksLikeResumeCommand('cursor', 'grok --resume session-123')).toBe(false)
+    expect(looksLikeResumeCommand('kimi', 'kimi -S session-123')).toBe(true)
+    expect(looksLikeResumeCommand('kimi', 'kimi -s session-123')).toBe(false)
   })
 
   it('gives aider a quoted per-pane history file and ID-less restore', () => {

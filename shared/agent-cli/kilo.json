@@ -12,8 +12,10 @@
   "resume_aliases": {"programs": [], "flags": ["-s"]},
   "subcommand": null,
   "data_dirs": {"env": ["XDG_DATA_HOME"], "home": [".local", "share"], "append": ["kilo"], "extra_env": [], "tilde": false},
+  "session_root": {"root_env": [], "base_env": ["XDG_DATA_HOME"], "home": [".local", "share"], "fallbacks": [], "sub": ["kilo"]},
   "session_path": null,
   "logs": {"files": ["kilo.db"], "cwd": "absent"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

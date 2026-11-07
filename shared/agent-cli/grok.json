@@ -12,8 +12,10 @@
   "resume_aliases": {"programs": [], "flags": ["--resume"]},
   "subcommand": null,
   "data_dirs": {"env": ["GROK_HOME"], "home": [".grok"], "append": [], "extra_env": [], "tilde": false},
+  "session_root": {"root_env": [], "base_env": ["GROK_HOME"], "home": [".grok"], "fallbacks": [], "sub": ["sessions"]},
   "session_path": {"segments": ["{cwd}", "{id}", "updates.jsonl"], "cwd": "url_quote"},
   "logs": {"files": ["{cwd}/*/updates.jsonl"], "cwd": "url_quote"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

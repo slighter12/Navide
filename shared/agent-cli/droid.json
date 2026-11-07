@@ -12,8 +12,10 @@
   "resume_aliases": {"programs": [], "flags": ["-r"]},
   "subcommand": null,
   "data_dirs": {"env": ["FACTORY_HOME_OVERRIDE"], "home": [".factory"], "append": [], "extra_env": [], "tilde": false},
+  "session_root": {"root_env": [], "base_env": ["FACTORY_HOME_OVERRIDE"], "home": [".factory"], "fallbacks": [], "sub": ["sessions"]},
   "session_path": {"segments": ["{cwd}", "{id}.jsonl"], "cwd": "droid"},
   "logs": {"files": ["*.jsonl", "{cwd}/*.jsonl"], "cwd": "droid"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

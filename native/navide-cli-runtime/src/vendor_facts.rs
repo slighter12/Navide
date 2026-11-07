@@ -75,9 +75,29 @@ pub struct DataDirs {
 // The sidecar composes a launch from words; these records are read by the Python and TypeScript sides.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionRoot {
+    pub root_env: &'static [&'static str],
+    pub base_env: &'static [&'static str],
+    pub home: &'static [&'static str],
+    pub fallbacks: &'static [&'static str],
+    pub sub: &'static [&'static str],
+}
+
+// The sidecar composes a launch from words; these records are read by the Python and TypeScript sides.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionPath {
     pub segments: &'static [&'static str],
     pub cwd: CwdEncoding,
+}
+
+// The sidecar composes a launch from words; these records are read by the Python and TypeScript sides.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PermissionAliases {
+    pub spellings: &'static [&'static str],
+    pub mode_flags: &'static [&'static str],
+    pub config_keys: &'static [&'static str],
 }
 
 // The sidecar composes a launch from words; these records are read by the Python and TypeScript sides.
@@ -107,7 +127,11 @@ pub struct VendorFacts {
     #[allow(dead_code)]
     pub data_dirs: Option<DataDirs>,
     #[allow(dead_code)]
+    pub session_root: Option<SessionRoot>,
+    #[allow(dead_code)]
     pub session_path: Option<SessionPath>,
+    #[allow(dead_code)]
+    pub permission_aliases: Option<PermissionAliases>,
     #[allow(dead_code)]
     pub logs: Option<Logs>,
     pub shutdown: Option<Shutdown>,
@@ -129,7 +153,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: None,
+        session_root: None,
         session_path: None,
+        permission_aliases: None,
         logs: None,
         shutdown: None,
         capabilities: Capabilities { model: Status::NotYetIntegrated, effort: Status::Unknown, skip_permissions: Status::Integrated, resume_by_id: Status::VendorUnsupported, session_id_at_launch: Status::VendorUnsupported, login: Status::Unknown },
@@ -148,7 +174,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: Some(DataDirs { env: &[], home: &[".gemini", "antigravity-cli"], append: &[], extra_env: &[], tilde: false }),
-        session_path: Some(SessionPath { segments: &["conversations", "{id}.db"], cwd: CwdEncoding::Absent }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &[], home: &[".gemini", "antigravity-cli"], fallbacks: &[], sub: &["conversations"] }),
+        session_path: Some(SessionPath { segments: &["{id}.db"], cwd: CwdEncoding::Absent }),
+        permission_aliases: None,
         logs: Some(Logs { files: &["*.db"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::Integrated, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Unknown },
@@ -167,7 +195,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["CLAUDE_CONFIG_DIR"], home: &[".claude"], append: &[], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["CLAUDE_CONFIG_DIR"], home: &[".claude"], fallbacks: &[".config/claude"], sub: &["projects"] }),
         session_path: Some(SessionPath { segments: &["{cwd}", "{id}.jsonl"], cwd: CwdEncoding::Claude }),
+        permission_aliases: Some(PermissionAliases { spellings: &["--allow-dangerously-skip-permissions", "--permission-mode bypassPermissions"], mode_flags: &["--permission-mode"], config_keys: &[] }),
         logs: Some(Logs { files: &["{cwd}/*.jsonl"], cwd: CwdEncoding::Claude }),
         shutdown: Some(Shutdown { graceful: true, grace_ms: 3000, defer_master_close: true }),
         capabilities: Capabilities { model: Status::Integrated, effort: Status::Integrated, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Integrated, login: Status::Integrated },
@@ -186,7 +216,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["CODEX_HOME"], home: &[".codex"], append: &[], extra_env: &["CODEX_SQLITE_HOME"], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &[], home: &[".codex"], fallbacks: &[], sub: &["sessions"] }),
         session_path: None,
+        permission_aliases: Some(PermissionAliases { spellings: &["--yolo", "--full-auto"], mode_flags: &["-a", "--ask-for-approval", "-s", "--sandbox"], config_keys: &["approval_policy", "sandbox_mode"] }),
         logs: Some(Logs { files: &["**/rollout-*.jsonl"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::NotYetIntegrated, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Integrated },
@@ -205,7 +237,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["COPILOT_HOME"], home: &[".copilot"], append: &[], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["COPILOT_HOME"], home: &[".copilot"], fallbacks: &[], sub: &[] }),
         session_path: Some(SessionPath { segments: &["session-state", "{id}", "events.jsonl"], cwd: CwdEncoding::Absent }),
+        permission_aliases: None,
         logs: Some(Logs { files: &["session-store.db", "session-state/*/events.jsonl"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::Integrated, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::NotYetIntegrated, login: Status::Integrated },
@@ -224,7 +258,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: Some(ResumeAliases { programs: &["cursor-agent"], flags: &[] }),
         subcommand: None,
         data_dirs: Some(DataDirs { env: &[], home: &[".cursor", "chats"], append: &[], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &[], home: &[".cursor", "chats"], fallbacks: &[], sub: &[] }),
         session_path: None,
+        permission_aliases: None,
         logs: Some(Logs { files: &["{cwd}/*/store.db"], cwd: CwdEncoding::Md5 }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::VendorUnsupported, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Unknown },
@@ -243,7 +279,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: Some(ResumeAliases { programs: &[], flags: &["-r"] }),
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["FACTORY_HOME_OVERRIDE"], home: &[".factory"], append: &[], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["FACTORY_HOME_OVERRIDE"], home: &[".factory"], fallbacks: &[], sub: &["sessions"] }),
         session_path: Some(SessionPath { segments: &["{cwd}", "{id}.jsonl"], cwd: CwdEncoding::Droid }),
+        permission_aliases: None,
         logs: Some(Logs { files: &["*.jsonl", "{cwd}/*.jsonl"], cwd: CwdEncoding::Droid }),
         shutdown: None,
         capabilities: Capabilities { model: Status::VendorUnsupported, effort: Status::VendorUnsupported, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Unknown },
@@ -262,7 +300,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: Some(Subcommand { word: "session", aliases: &["s"] }),
         data_dirs: None,
+        session_root: None,
         session_path: None,
+        permission_aliases: None,
         logs: Some(Logs { files: &["sessions.db"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Unknown, effort: Status::Unknown, skip_permissions: Status::VendorUnsupported, resume_by_id: Status::Integrated, session_id_at_launch: Status::VendorUnsupported, login: Status::Unknown },
@@ -281,7 +321,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: Some(ResumeAliases { programs: &[], flags: &["--resume"] }),
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["GROK_HOME"], home: &[".grok"], append: &[], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["GROK_HOME"], home: &[".grok"], fallbacks: &[], sub: &["sessions"] }),
         session_path: Some(SessionPath { segments: &["{cwd}", "{id}", "updates.jsonl"], cwd: CwdEncoding::UrlQuote }),
+        permission_aliases: None,
         logs: Some(Logs { files: &["{cwd}/*/updates.jsonl"], cwd: CwdEncoding::UrlQuote }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::VendorUnsupported, skip_permissions: Status::NotYetIntegrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Integrated, login: Status::Integrated },
@@ -300,7 +342,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: Some(ResumeAliases { programs: &[], flags: &["-s"] }),
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["XDG_DATA_HOME"], home: &[".local", "share"], append: &["kilo"], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["XDG_DATA_HOME"], home: &[".local", "share"], fallbacks: &[], sub: &["kilo"] }),
         session_path: None,
+        permission_aliases: None,
         logs: Some(Logs { files: &["kilo.db"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::VendorUnsupported, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Integrated },
@@ -319,7 +363,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: Some(ResumeAliases { programs: &[], flags: &["-S"] }),
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["KIMI_CODE_HOME"], home: &[".kimi-code"], append: &[], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["KIMI_CODE_HOME"], home: &[".kimi-code"], fallbacks: &[], sub: &["sessions"] }),
         session_path: None,
+        permission_aliases: None,
         logs: Some(Logs { files: &["wd_*/session_*/agents/main/wire.jsonl"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::VendorUnsupported, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Integrated },
@@ -338,7 +384,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"], home: &[".minimax"], append: &[], extra_env: &[], tilde: false }),
+        session_root: None,
         session_path: None,
+        permission_aliases: None,
         logs: None,
         shutdown: None,
         capabilities: Capabilities { model: Status::VendorUnsupported, effort: Status::VendorUnsupported, skip_permissions: Status::VendorUnsupported, resume_by_id: Status::NotYetIntegrated, session_id_at_launch: Status::Unknown, login: Status::Integrated },
@@ -357,7 +405,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["XDG_DATA_HOME"], home: &[".local", "share"], append: &["muse"], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["XDG_DATA_HOME"], home: &[".local", "share"], fallbacks: &[], sub: &["muse", "sessions"] }),
         session_path: None,
+        permission_aliases: None,
         logs: Some(Logs { files: &["*/*/*/*/session.jsonl"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::Integrated, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::VendorUnsupported, login: Status::Integrated },
@@ -376,7 +426,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: Some(ResumeAliases { programs: &[], flags: &["-s"] }),
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["XDG_DATA_HOME"], home: &[".local", "share"], append: &["opencode"], extra_env: &[], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["XDG_DATA_HOME"], home: &[".local", "share"], fallbacks: &[], sub: &["opencode"] }),
         session_path: None,
+        permission_aliases: None,
         logs: Some(Logs { files: &["opencode.db"], cwd: CwdEncoding::Absent }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::VendorUnsupported, skip_permissions: Status::VendorUnsupported, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Integrated },
@@ -395,7 +447,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: None,
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["PI_CODING_AGENT_DIR"], home: &[".pi", "agent"], append: &[], extra_env: &["PI_CODING_AGENT_SESSION_DIR"], tilde: false }),
+        session_root: Some(SessionRoot { root_env: &["PI_CODING_AGENT_SESSION_DIR"], base_env: &["PI_CODING_AGENT_DIR"], home: &[".pi", "agent"], fallbacks: &[], sub: &["sessions"] }),
         session_path: None,
+        permission_aliases: None,
         logs: Some(Logs { files: &["{cwd}/*.jsonl"], cwd: CwdEncoding::Pi }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::Integrated, skip_permissions: Status::VendorUnsupported, resume_by_id: Status::Integrated, session_id_at_launch: Status::NotYetIntegrated, login: Status::Unknown },
@@ -414,7 +468,9 @@ pub const VENDORS: &[VendorFacts] = &[
         resume_aliases: Some(ResumeAliases { programs: &[], flags: &["-r"] }),
         subcommand: None,
         data_dirs: Some(DataDirs { env: &["QWEN_HOME"], home: &[".qwen"], append: &[], extra_env: &["QWEN_RUNTIME_DIR"], tilde: true }),
-        session_path: Some(SessionPath { segments: &["projects", "{cwd}", "chats", "{id}.jsonl"], cwd: CwdEncoding::Claude }),
+        session_root: Some(SessionRoot { root_env: &[], base_env: &["QWEN_RUNTIME_DIR"], home: &[".qwen"], fallbacks: &[], sub: &["projects"] }),
+        session_path: Some(SessionPath { segments: &["{cwd}", "chats", "{id}.jsonl"], cwd: CwdEncoding::Claude }),
+        permission_aliases: None,
         logs: Some(Logs { files: &["{cwd}/chats/*.jsonl", "{cwd}/chats/archive/*.jsonl"], cwd: CwdEncoding::Claude }),
         shutdown: None,
         capabilities: Capabilities { model: Status::Integrated, effort: Status::VendorUnsupported, skip_permissions: Status::Integrated, resume_by_id: Status::Integrated, session_id_at_launch: Status::Unknown, login: Status::Unknown },

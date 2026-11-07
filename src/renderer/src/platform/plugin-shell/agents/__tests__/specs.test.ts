@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 
 import { AGENT_SPECS, CLI_AGENT_SPECS, type AgentKey } from '../index'
 import type { AgentSpec } from '../types'
-import { buildResumeCommand } from '../../lib/resume-command'
+import { buildResumeCommand, looksLikeResumeCommand } from '../../lib/resume-command'
 import { modelArgsFor } from '../../lib/cliModel'
 
 // ── compile-time invariant ─────────────────────────────────────────────────
@@ -79,18 +79,15 @@ describe('resume contract', () => {
     }
   })
 
-  it('matches its own resumeCommandPattern against the command it builds', () => {
-    // A pattern that does not recognize this vendor's own resume invocation
+  it('recognizes the resume command it builds', () => {
+    // A reader that does not recognize this vendor's own resume invocation
     // makes a restore replay it as if the user had typed a custom command.
     const id = '00000000-1111-2222-3333-444444444444'
-    for (const spec of CLI_AGENT_SPECS.filter((s) => s.resumeCommandPattern)) {
+    for (const spec of CLI_AGENT_SPECS.filter((s) => s.resumeArgs || s.resumeWithoutId)) {
       const command = buildResumeCommand(spec.agentKey, id, '', '/tmp/history.md')
 
       expect(command, `${spec.agentKey} builds nothing`).not.toBe('')
-      expect(
-        spec.resumeCommandPattern!.test(command),
-        `${spec.agentKey}: ${spec.resumeCommandPattern} does not match ${command}`,
-      ).toBe(true)
+      expect(looksLikeResumeCommand(spec.agentKey, command), `${spec.agentKey} does not read ${command} as a resume`).toBe(true)
     }
   })
 

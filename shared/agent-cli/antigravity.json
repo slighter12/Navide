@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": null,
   "data_dirs": {"env": [], "home": [".gemini", "antigravity-cli"], "append": [], "extra_env": [], "tilde": false},
-  "session_path": {"segments": ["conversations", "{id}.db"], "cwd": "absent"},
+  "session_root": {"root_env": [], "base_env": [], "home": [".gemini", "antigravity-cli"], "fallbacks": [], "sub": ["conversations"]},
+  "session_path": {"segments": ["{id}.db"], "cwd": "absent"},
   "logs": {"files": ["*.db"], "cwd": "absent"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

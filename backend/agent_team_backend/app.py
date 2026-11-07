@@ -3741,10 +3741,7 @@ def _spawn_execs_the_cli_directly(command: Any, known_names: "tuple[str, ...]") 
     if isinstance(command, list):
         head = str(command[0]) if command else ""
     else:
-        try:
-            parts = osplat.terminal_backend.parse_command(str(command or ""))
-        except (ValueError, OSError):
-            return False
+        parts = cli_launch.command_tokens(command)
         head = parts[0] if parts else ""
     return bool(head) and _names_a_known_command(head, known_names)
 
@@ -3779,11 +3776,7 @@ def _command_with_persisted_cli_binary(agent_key: str, command: Any) -> Any:
     dep = onboarding_deps.DEPS_BY_ID.get(agent_key)
     if not selected or dep is None:
         return command
-    text = _command_text(command)
-    try:
-        parts = osplat.terminal_backend.parse_command(text)
-    except (ValueError, OSError):
-        return command
+    parts = cli_launch.command_tokens(command)
     if not parts or not _names_a_known_command(parts[0], (dep.check_cmd[0],)):
         return command
     return cli_launch.with_executable(command, selected)
@@ -3800,11 +3793,7 @@ def _command_with_installed_cli_alias(agent_key: str, command: Any) -> Any:
     dep = onboarding_deps.DEPS_BY_ID.get(agent_key)
     if dep is None or not dep.alt_commands:
         return command
-    text = _command_text(command)
-    try:
-        parts = osplat.terminal_backend.parse_command(text)
-    except (ValueError, OSError):
-        return command
+    parts = cli_launch.command_tokens(command)
     if not parts or not _names_a_known_command(parts[0], (dep.check_cmd[0], *dep.alt_commands)):
         return command
     if osplat.paths.resolve_program(parts[0]):
@@ -4024,10 +4013,7 @@ def _probe_agent_cli_for_spawn(agent_key: str, requested_command: Any = None) ->
     if dep is None or dep.group != "agent_cli":
         return None
     executable = None
-    try:
-        command_parts = osplat.terminal_backend.parse_command(_command_text(requested_command))
-    except (ValueError, OSError):
-        command_parts = []
+    command_parts = cli_launch.command_tokens(requested_command)
     requested_executable = command_parts[0] if command_parts else ""
     known_names = (dep.check_cmd[0], *dep.alt_commands)
     if requested_executable and _names_a_known_command(requested_executable, known_names):

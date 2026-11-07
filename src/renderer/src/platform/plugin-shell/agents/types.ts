@@ -198,9 +198,9 @@ export interface AgentSpec {
    *  into one submission, so delivering mid-turn there merges two senders'
    *  messages into a single turn (see agents/qwen.ts). */
   acceptsMidTurnInput?: boolean
-  /** Recognizes a saved command as this vendor's resume invocation (so a
-   *  restore doesn't replay it as a user-custom base command). Undefined =
-   *  the generic `<agentKey> --resume <id>` shape. */
+  /** A named hook for a vendor whose resume the facts cannot spell (an id-less resume, aider's
+   *  `--restore-chat-history`): recognizes a saved command as this vendor's resume invocation. Undefined =
+   *  the command is read from the vendor's facts (`resumeIdFromCommand`). */
   resumeCommandPattern?: RegExp
   /** Builds this vendor's ID-LESS resume arguments (aider: the lossy
    *  `--restore-chat-history`, optionally pointed at the pane's own

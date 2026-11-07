@@ -62,11 +62,11 @@ from urllib.parse import quote
 
 from agent_team_backend import log_redaction
 from agent_team_backend.applog import app_data_dir, backend_port_file
-from agent_team_backend.cli_launch import append_args
+from agent_team_backend.cli_launch import append_args, command_tokens
 from agent_team_backend.cli_vendors import registry
 from agent_team_backend.cli_vendors.base import McpWiring, mcp_document, mcp_entry
 from agent_team_backend.mcp_server import auth, pane_home
-from agent_team_backend.osplat import secret_files, terminal_backend
+from agent_team_backend.osplat import secret_files
 
 log = logging.getLogger("agent_team_backend.mcp_server.wiring")
 
@@ -337,23 +337,20 @@ def _command_text(command: Any) -> str:
     return str(command or "")
 
 
-def _already_wired(text: str, marker: str) -> bool:
-    """Whether ``marker`` (a flag, or a quoted server name) is in ``text``.
+def _already_wired(command: Any, marker: str) -> bool:
+    """Whether ``marker`` (a flag, or a quoted server name) is in ``command``.
 
     Checked against the command as typed and against its argv words: the
     marker is written in the unquoted form (``"navide"`` inside inline JSON),
     and the platform's quoting can hide it from a substring test — Windows
     escapes the inner quotes (``\\"navide\\"``), POSIX only wraps the word.
     Without the second look a wired command reads as unwired and gets the
-    flag appended again on every spawn.
+    flag appended again on every spawn. The words come from the command's own
+    words; only the text of a literal is read back.
     """
-    if marker in text:
+    if marker in _command_text(command):
         return True
-    try:
-        words = terminal_backend.parse_command(text)
-    except ValueError:
-        return False
-    return any(marker in word for word in words)
+    return any(marker in word for word in command_tokens(command))
 
 
 def project_config_path(agent_key: str, cwd: str | Path) -> Path | None:
@@ -675,9 +672,9 @@ def wire_command(
     if wiring is None:
         return command
     if wiring.flag:
-        if _already_wired(text, wiring.already_wired.format(flag=wiring.flag, name=SERVER_NAME)):
+        if _already_wired(command, wiring.already_wired.format(flag=wiring.flag, name=SERVER_NAME)):
             return command
-        if wiring.flag_file_prefix is not None and _already_wired(text, PANE_CONFIG_DIRNAME):
+        if wiring.flag_file_prefix is not None and _already_wired(command, PANE_CONFIG_DIRNAME):
             return command
         extra: tuple[str, ...] = ()
         if wiring.flag_value:

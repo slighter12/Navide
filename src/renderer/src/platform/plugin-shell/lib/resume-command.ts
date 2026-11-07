@@ -43,6 +43,7 @@ import { VENDOR_FACTS } from '@shared/vendorFacts'
 import {
   optionWord,
   programWord,
+  resumeIdForAgent,
   type LaunchOption,
   type LaunchWord,
   type VendorFacts,
@@ -53,6 +54,16 @@ export { REBUILD_CAPABLE_AGENTS, RESTORE_PIN_AGENTS }
 /** The registered spec for an agent key, if any. */
 function specFor(agentKey: string): AgentSpec | undefined {
   return AGENT_SPECS.find((s) => s.agentKey === agentKey)
+}
+
+/** Whether a saved command is this vendor's resume invocation, so a restore does not replay it as a user-custom
+ *  base command. Read from the vendor's facts (`resumeIdFromCommand`); only a vendor whose resume the facts cannot
+ *  spell (aider's id-less resume) names its own `resumeCommandPattern`. */
+export function looksLikeResumeCommand(agentKey: string, command: string): boolean {
+  const cmd = command.trim()
+  if (!cmd) return false
+  const pattern = specFor(agentKey)?.resumeCommandPattern
+  return pattern ? pattern.test(cmd) : resumeIdForAgent(agentKey, cmd) !== ''
 }
 
 /** Canonical id accepted by the vendor resume command.
@@ -234,26 +245,7 @@ export function buildResumeCommand(
   chatHistoryFile = '',
   modelRequest: CliModelRequest = { model: '', effort: '' }
 ): string {
-  const launch = buildResumeLaunch(agentKey, sessionId, skipFlag, chatHistoryFile, modelRequest)
-  if (launch.command) rememberResumeWords(launch.command, launch.words)
-  return launch.command
-}
-
-/** Resume commands are handed on as text (a `commandOverride` through many callers); the words they were
- *  composed from wait here, by the exact text, for the spawn to ask for them. The words are only ever used when
- *  they spell the command (`verifiedWords`), so a stale or missing entry costs the structure, never a launch. */
-const RESUME_WORDS_KEPT = 64
-const resumeWords = new Map<string, LaunchWord[]>()
-
-function rememberResumeWords(command: string, words: LaunchWord[]): void {
-  resumeWords.delete(command)
-  resumeWords.set(command, words)
-  if (resumeWords.size > RESUME_WORDS_KEPT) resumeWords.delete(resumeWords.keys().next().value as string)
-}
-
-/** The words a resume command was built from, or `undefined` when `command` is not one this module built. */
-export function resumeWordsFor(command: string): LaunchWord[] | undefined {
-  return resumeWords.get(command)
+  return buildResumeLaunch(agentKey, sessionId, skipFlag, chatHistoryFile, modelRequest).command
 }
 
 /** One flag of a resume command as a word: the vendor's declared option when the text is exactly its spelling,

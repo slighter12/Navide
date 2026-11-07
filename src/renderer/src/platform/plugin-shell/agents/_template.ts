@@ -27,7 +27,7 @@ export const SPEC = {
   // knownEfforts: ['low', 'medium', 'high'],  // required if the CLI only warns
   // ── Session resume (see types.ts for full field docs) ──
   // resumeArgs: (id) => `--resume ${id}`,  // args only; binary = defaultCommand
-  // resumeCommandPattern: /^mycli\s+--resume\s+\S+/, // only if non-generic shape
+  // resumeCommandPattern: /^mycli\s+--restore\b/,  // only if the facts cannot spell the resume (id-less)
   // resumeWithoutId: (file) => '...',  // id-less vendors only (see aider)
   // supportsRebuild: true,
   // supportsRestorePin: true,

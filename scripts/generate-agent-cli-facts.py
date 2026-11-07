@@ -32,8 +32,14 @@ STATUSES = ("integrated", "vendor-unsupported", "not-yet-integrated", "unknown")
 CAPABILITIES = ("model", "effort", "skip_permissions", "resume_by_id", "session_id_at_launch", "login")
 FIELDS = (
     "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
-    "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_path", "logs",
-    "supports_session_resume", "shutdown", "capabilities", "observer",
+    "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_root", "session_path", "logs",
+    "permission_aliases", "supports_session_resume", "shutdown", "capabilities", "observer",
+)
+# A launch option's flag is declared only for a capability the sidecar renders: the renderer and the backend spell an
+# option from the flag without looking at the status, so a flag next to any other status would be refused by the sidecar.
+FLAG_CAPABILITIES = (
+    ("model_flag", "model"), ("effort_flag", "effort"), ("permission_flag", "skip_permissions"),
+    ("resume_args", "resume_by_id"), ("session_id_flag", "session_id_at_launch"), ("login_args", "login"),
 )
 
 # ---- typed command and path records ---------------------------------------------------------------------------------
@@ -49,10 +55,19 @@ RECORDS = {
     # The CLI's data directory: the first non-empty variable of `env`, else the home directory plus `home`; `append` is
     # joined onto it; each non-empty variable of `extra_env` adds one more directory; `tilde`: a leading `~` is the home.
     "data_dirs": ("DataDirs", (("env", "strs"), ("home", "strs"), ("append", "strs"), ("extra_env", "strs"), ("tilde", "bool"))),
+    # The CLI's session root, where `session_path` and `logs` start. `root_env`: the first non-empty variable names the
+    # root itself. Else the root is `sub` joined onto a base: the first non-empty variable of `base_env`, else (with
+    # `fallbacks`) the first existing of the home-relative bases `fallbacks`, else the home directory plus `home`.
+    # With `fallbacks` the default stands in when none exists.
+    "session_root": ("SessionRoot", (("root_env", "strs"), ("base_env", "strs"), ("home", "strs"), ("fallbacks", "strs"), ("sub", "strs"))),
     # Where one session's transcript lives under the CLI's session root: `segments` joined onto the root, with `{id}` the
     # session id and `{cwd}` the workspace path spelled by `cwd` (`absent` when the path has no workspace in it).
     "session_path": ("SessionPath", (("segments", "strs"), ("cwd", "cwd_encoding"))),
-    # Where the CLI's session logs are under its log root (the root itself is the reader's: it follows the live environment):
+    # Spellings beyond `permission_flag` that set the CLI's permission mode: `spellings` skip permissions (a spelling with a
+    # space is a flag and its value), `mode_flags` take a mode as their value, `config_keys` are `-c` settings that hold one.
+    # A command that must not skip permissions (a webhook run) takes all of them out.
+    "permission_aliases": ("PermissionAliases", (("spellings", "strs"), ("mode_flags", "strs"), ("config_keys", "strs"))),
+    # Where the CLI's session logs are under its session root:
     # `files` are glob patterns relative to the root, `{cwd}` the one path segment named after the workspace, spelled by
     # `cwd` (`absent` when no segment is). All sessions: `{cwd}` matches any segment; one workspace: only the patterns that
     # hold `{cwd}` apply, with its spelling.
@@ -625,6 +640,8 @@ def validate_record(file: str, name: str, value: object) -> None:
             raise SystemExit(f"{file}: {name}.{field} must be one of {CWD_ENCODINGS}")
     if name == "data_dirs" and not (value["env"] or value["home"]):
         raise SystemExit(f"{file}: data_dirs must name a variable or a home path")
+    if name == "session_root" and not value["home"]:
+        raise SystemExit(f"{file}: session_root must name the default base under the home directory")
     if name == "logs":
         joined = "/".join(value["files"])
         if not value["files"] or any(p.startswith("/") or ".." in p.split("/") for p in value["files"]):
@@ -676,6 +693,12 @@ def load(root: Path) -> list[dict]:
             raise SystemExit(f"{path.name}: capabilities must name {CAPABILITIES} with a status from {STATUSES}")
         if item["resume_args"] is not None and "{id}" not in item["resume_args"]:
             raise SystemExit(f"{path.name}: resume_args must contain {{id}}")
+        for flag, capability in FLAG_CAPABILITIES:
+            if item[flag] is not None and item["capabilities"][capability] != "integrated":
+                raise SystemExit(f"{path.name}: {flag} is declared, so capability {capability} must be integrated "
+                                 f"(it is {item['capabilities'][capability]!r})")
+        if item["effort_flag"] is not None and item["known_efforts"] is None:
+            raise SystemExit(f"{path.name}: effort_flag is declared, so known_efforts must be too")
         if item["composition"] not in COMPOSITIONS:
             raise SystemExit(f"{path.name}: composition must be one of {COMPOSITIONS}")
         for name in RECORDS:

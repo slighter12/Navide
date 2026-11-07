@@ -13,8 +13,10 @@ export const VENDOR_FACTS = {
     "resume_aliases": null,
     "subcommand": null,
     "data_dirs": null,
+    "session_root": null,
     "session_path": null,
-    "logs": null
+    "logs": null,
+    "permission_aliases": null
   },
   "antigravity": {
     "key": "antigravity",
@@ -42,9 +44,20 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [],
+      "home": [
+        ".gemini",
+        "antigravity-cli"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "conversations"
+      ]
+    },
     "session_path": {
       "segments": [
-        "conversations",
         "{id}.db"
       ],
       "cwd": "absent"
@@ -54,7 +67,8 @@ export const VENDOR_FACTS = {
         "*.db"
       ],
       "cwd": "absent"
-    }
+    },
+    "permission_aliases": null
   },
   "claude": {
     "key": "claude",
@@ -85,6 +99,21 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "CLAUDE_CONFIG_DIR"
+      ],
+      "home": [
+        ".claude"
+      ],
+      "fallbacks": [
+        ".config/claude"
+      ],
+      "sub": [
+        "projects"
+      ]
+    },
     "session_path": {
       "segments": [
         "{cwd}",
@@ -97,6 +126,16 @@ export const VENDOR_FACTS = {
         "{cwd}/*.jsonl"
       ],
       "cwd": "claude"
+    },
+    "permission_aliases": {
+      "spellings": [
+        "--allow-dangerously-skip-permissions",
+        "--permission-mode bypassPermissions"
+      ],
+      "mode_flags": [
+        "--permission-mode"
+      ],
+      "config_keys": []
     }
   },
   "codex": {
@@ -124,12 +163,39 @@ export const VENDOR_FACTS = {
       ],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [],
+      "home": [
+        ".codex"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "sessions"
+      ]
+    },
     "session_path": null,
     "logs": {
       "files": [
         "**/rollout-*.jsonl"
       ],
       "cwd": "absent"
+    },
+    "permission_aliases": {
+      "spellings": [
+        "--yolo",
+        "--full-auto"
+      ],
+      "mode_flags": [
+        "-a",
+        "--ask-for-approval",
+        "-s",
+        "--sandbox"
+      ],
+      "config_keys": [
+        "approval_policy",
+        "sandbox_mode"
+      ]
     }
   },
   "copilot": {
@@ -163,6 +229,17 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "COPILOT_HOME"
+      ],
+      "home": [
+        ".copilot"
+      ],
+      "fallbacks": [],
+      "sub": []
+    },
     "session_path": {
       "segments": [
         "session-state",
@@ -177,7 +254,8 @@ export const VENDOR_FACTS = {
         "session-state/*/events.jsonl"
       ],
       "cwd": "absent"
-    }
+    },
+    "permission_aliases": null
   },
   "cursor": {
     "key": "cursor",
@@ -206,13 +284,24 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [],
+      "home": [
+        ".cursor",
+        "chats"
+      ],
+      "fallbacks": [],
+      "sub": []
+    },
     "session_path": null,
     "logs": {
       "files": [
         "{cwd}/*/store.db"
       ],
       "cwd": "md5"
-    }
+    },
+    "permission_aliases": null
   },
   "droid": {
     "key": "droid",
@@ -242,6 +331,19 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "FACTORY_HOME_OVERRIDE"
+      ],
+      "home": [
+        ".factory"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "sessions"
+      ]
+    },
     "session_path": {
       "segments": [
         "{cwd}",
@@ -255,7 +357,8 @@ export const VENDOR_FACTS = {
         "{cwd}/*.jsonl"
       ],
       "cwd": "droid"
-    }
+    },
+    "permission_aliases": null
   },
   "goose": {
     "key": "goose",
@@ -275,13 +378,15 @@ export const VENDOR_FACTS = {
       ]
     },
     "data_dirs": null,
+    "session_root": null,
     "session_path": null,
     "logs": {
       "files": [
         "sessions.db"
       ],
       "cwd": "absent"
-    }
+    },
+    "permission_aliases": null
   },
   "grok": {
     "key": "grok",
@@ -311,6 +416,19 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "GROK_HOME"
+      ],
+      "home": [
+        ".grok"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "sessions"
+      ]
+    },
     "session_path": {
       "segments": [
         "{cwd}",
@@ -324,7 +442,8 @@ export const VENDOR_FACTS = {
         "{cwd}/*/updates.jsonl"
       ],
       "cwd": "url_quote"
-    }
+    },
+    "permission_aliases": null
   },
   "kilo": {
     "key": "kilo",
@@ -357,13 +476,28 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "XDG_DATA_HOME"
+      ],
+      "home": [
+        ".local",
+        "share"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "kilo"
+      ]
+    },
     "session_path": null,
     "logs": {
       "files": [
         "kilo.db"
       ],
       "cwd": "absent"
-    }
+    },
+    "permission_aliases": null
   },
   "kimi": {
     "key": "kimi",
@@ -393,13 +527,27 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "KIMI_CODE_HOME"
+      ],
+      "home": [
+        ".kimi-code"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "sessions"
+      ]
+    },
     "session_path": null,
     "logs": {
       "files": [
         "wd_*/session_*/agents/main/wire.jsonl"
       ],
       "cwd": "absent"
-    }
+    },
+    "permission_aliases": null
   },
   "mcode": {
     "key": "mcode",
@@ -425,8 +573,10 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": null,
     "session_path": null,
-    "logs": null
+    "logs": null,
+    "permission_aliases": null
   },
   "muse": {
     "key": "muse",
@@ -463,13 +613,29 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "XDG_DATA_HOME"
+      ],
+      "home": [
+        ".local",
+        "share"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "muse",
+        "sessions"
+      ]
+    },
     "session_path": null,
     "logs": {
       "files": [
         "*/*/*/*/session.jsonl"
       ],
       "cwd": "absent"
-    }
+    },
+    "permission_aliases": null
   },
   "opencode": {
     "key": "opencode",
@@ -502,13 +668,28 @@ export const VENDOR_FACTS = {
       "extra_env": [],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "XDG_DATA_HOME"
+      ],
+      "home": [
+        ".local",
+        "share"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "opencode"
+      ]
+    },
     "session_path": null,
     "logs": {
       "files": [
         "opencode.db"
       ],
       "cwd": "absent"
-    }
+    },
+    "permission_aliases": null
   },
   "pi": {
     "key": "pi",
@@ -544,13 +725,30 @@ export const VENDOR_FACTS = {
       ],
       "tilde": false
     },
+    "session_root": {
+      "root_env": [
+        "PI_CODING_AGENT_SESSION_DIR"
+      ],
+      "base_env": [
+        "PI_CODING_AGENT_DIR"
+      ],
+      "home": [
+        ".pi",
+        "agent"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "sessions"
+      ]
+    },
     "session_path": null,
     "logs": {
       "files": [
         "{cwd}/*.jsonl"
       ],
       "cwd": "pi"
-    }
+    },
+    "permission_aliases": null
   },
   "qwen": {
     "key": "qwen",
@@ -582,9 +780,21 @@ export const VENDOR_FACTS = {
       ],
       "tilde": true
     },
+    "session_root": {
+      "root_env": [],
+      "base_env": [
+        "QWEN_RUNTIME_DIR"
+      ],
+      "home": [
+        ".qwen"
+      ],
+      "fallbacks": [],
+      "sub": [
+        "projects"
+      ]
+    },
     "session_path": {
       "segments": [
-        "projects",
         "{cwd}",
         "chats",
         "{id}.jsonl"
@@ -597,7 +807,8 @@ export const VENDOR_FACTS = {
         "{cwd}/chats/archive/*.jsonl"
       ],
       "cwd": "claude"
-    }
+    },
+    "permission_aliases": null
   }
 } as const
 

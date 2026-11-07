@@ -44,7 +44,8 @@ from pathlib import Path
 
 import re
 
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, session_root
+from .session_layout import encode_pi_cwd  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
@@ -112,20 +113,7 @@ def _write_sentinel(seen_keys: set[str], prefix: str, value: str) -> None:
 def pi_sessions_root() -> Path:
     """Pi's session root ($PI_CODING_AGENT_SESSION_DIR, else
     $PI_CODING_AGENT_DIR/sessions, default ~/.pi/agent/sessions)."""
-    env = os.environ.get("PI_CODING_AGENT_SESSION_DIR")
-    if env:
-        return Path(env)
-    home = os.environ.get("PI_CODING_AGENT_DIR")
-    base = Path(home) if home else Path.home() / ".pi" / "agent"
-    return base / "sessions"
-
-
-def encode_pi_cwd(cwd: str) -> str:
-    """Pi's cwd → session-dir-name encoding: drop the leading "/", replace
-    ONLY [/\\:] with "-", wrap in "--" (all other chars survive)."""
-    if cwd.startswith("/"):
-        cwd = cwd[1:]
-    return "--" + re.sub(r"[/\\:]", "-", cwd) + "--"
+    return session_root(FACT.session_root)
 
 
 def _int(v) -> int:  # noqa: ANN001
@@ -172,22 +160,9 @@ class PiLogReader(LogReader):
     #: lines rather than replaying it (log_readers.base).
     activity_resumes_by_line: bool = True
 
-    def project_dirs(self) -> list[Path]:
-        """The single sessions root (empty list when it doesn't exist)."""
-        default = pi_sessions_root()
-        return [default] if default.is_dir() else []
-
-    def session_files(self) -> list[Path]:
-        return declared_log_files(FACT.logs, self.project_dirs())
-
-    def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
-        """Only the jsonl files under this workspace's encoded session dir.
-
-        Pi names each session dir after the encoded cwd, so one workspace
-        maps to exactly one folder — enumerate just that folder. A missing
-        folder is normal (lazy flush: no file exists until the first
-        assistant reply completes)."""
-        return declared_log_files(FACT.logs, self.project_dirs(), workspace_path)
+    # The roots and files are the declared ones. Pi names each session dir after the encoded cwd, so one workspace
+    # maps to exactly one folder; a missing folder is normal (lazy flush: no file exists until the first assistant
+    # reply completes).
 
     def _in_session_dir(self, path: Path) -> bool:
         name = path.parent.name
@@ -827,7 +802,6 @@ SPEC = VendorSpec(
     # Open-ended provider/model config; OpenRouter quota is not a CLI host set.
     expected_hosts=(),
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"),
     supports_model=FACT.model_flag is not None,
     supports_effort=FACT.effort_flag is not None,
     known_efforts=FACT.known_efforts or (),

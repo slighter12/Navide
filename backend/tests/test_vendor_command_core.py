@@ -82,10 +82,19 @@ def test_a_vendor_without_a_resume_spelling_resumes_nothing() -> None:
         assert resume(key, f"{FACTS[key].command} --resume abc-123") == ""
 
 
-def test_a_list_that_is_not_a_known_shell_wrapper_is_not_a_launch() -> None:
+def test_a_list_names_its_launch_by_its_last_element_whatever_the_shell() -> None:
+    # As at the baseline: the real command is the last element of the argv the frontend wrapped.
     assert resume("claude", ["claude", "--resume", "abc-123"]) == ""
-    assert resume("claude", ["/bin/zsh", "-x", "claude --resume abc-123"]) == ""
+    assert resume("claude", ["/bin/zsh", "-x", "claude --resume abc-123"]) == "abc-123"
     assert resume("claude", ["cmd.exe", "/c", "claude --resume abc-123"]) == "abc-123"
+
+
+@pytest.mark.parametrize("vendor", ["grok", "antigravity"])
+def test_plain_only_vendors_still_read_only_a_known_shells_argv(vendor: str) -> None:
+    facts = FACTS[vendor]
+    line = f"{facts.command} {facts.resume_args.split()[0]} abc-123"
+    assert resume_id_from_command(["/bin/zsh", "-ilc", line], facts, plain_only=True) == "abc-123"
+    assert resume_id_from_command(["/bin/tcsh", "-ilc", line], facts, plain_only=True) == ""
 
 
 def test_an_unbalanced_quote_falls_back_to_whitespace_splitting() -> None:
@@ -206,9 +215,9 @@ def test_the_resume_id_swap_is_a_plain_text_replace() -> None:
         ("claude", "/Users/me/proj", ("-Users-me-proj", "sid.jsonl")),
         ("droid", "/Users/me/proj", ("-Users-me-proj", "sid.jsonl")),
         ("grok", "/Users/me/my proj", ("%2FUsers%2Fme%2Fmy%20proj", "sid", "updates.jsonl")),
-        ("qwen", "/Users/me/proj", ("projects", "-Users-me-proj", "chats", "sid.jsonl")),
+        ("qwen", "/Users/me/proj", ("-Users-me-proj", "chats", "sid.jsonl")),
         ("copilot", "/Users/me/proj", ("session-state", "sid", "events.jsonl")),
-        ("antigravity", "/Users/me/proj", ("conversations", "sid.db")),
+        ("antigravity", "/Users/me/proj", ("sid.db",)),
     ],
 )
 def test_the_session_path_is_composed_from_the_declaration(

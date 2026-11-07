@@ -4,10 +4,11 @@ import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { AGENT_SPECS, RESTORE_PIN_AGENTS } from '../../platform/plugin-shell/agents'
 import {
-  buildResumeCommand, normalizeResumeSessionId, sessionHomeIdFor,
+  buildResumeCommand, buildResumeLaunch, looksLikeResumeCommand, normalizeResumeSessionId, sessionHomeIdFor,
   shouldPreserveMissingSessionOnRestore, shouldWarnMissingResume,
 } from '../../platform/plugin-shell/lib/resume-command'
 import { pinFreshSessionAtLaunch, shouldAttemptResume } from '../../lib/sessionHeal'
+import { composeLaunch, spawnLaunch } from '../../lib/spawnLaunch'
 import { literalWords, verifiedWords, withSessionIdWords } from '@shared/launchWords'
 import { accountSpawnPin, restoreSpawnPin } from '../../lib/accountFollowPanes'
 import { WakeClaims, sessionHeldElsewhere } from '../../lib/paneOpenAnswer'
@@ -27,7 +28,7 @@ const markerSetsEnd = source.indexOf('/** Trailing line', markerSetsStart)
 const declarations = [source.slice(markerSetsStart, markerSetsEnd), ...[
   'sessionMarkerLine', 'sendSessionMarkerBootstrap', 'spawnPane', 'onManualSpawn',
   'rebuildPaneClean', 'spawnRestoredPane', 'performRealizeRestoredPane',
-  'looksLikeResumeCommand', 'paneWaitingForSessionId',
+  'paneWaitingForSessionId',
 ].map(fn)].join('\n')
 const javascript = ts.transpileModule(declarations, {
   compilerOptions: { target: ts.ScriptTarget.ES2022 },
@@ -57,16 +58,15 @@ function harness() {
   let nextId = 0
   const deps = {
     agentSpecs: AGENT_SPECS, RESTORE_PIN_AGENTS,
-    pinFreshSessionAtLaunch, sessionHomeIdFor, buildResumeCommand,
-    literalWords, verifiedWords, withSessionIdWords,
+    pinFreshSessionAtLaunch, sessionHomeIdFor, buildResumeCommand, buildResumeLaunch, looksLikeResumeCommand,
+    literalWords, verifiedWords, withSessionIdWords, spawnLaunch,
+    // The real composer. A spawn the tests open without a command (the product always passes one) has none.
+    composeLaunch: (input: Parameters<typeof composeLaunch>[0]) =>
+      composeLaunch({ ...input, commandOverride: input.commandOverride ?? '' }),
     normalizeResumeSessionId, shouldPreserveMissingSessionOnRestore,
     shouldWarnMissingResume, shouldAttemptResume,
     panes, paneRefs, backend: { shell: { value: 'bash' }, send }, sendQuiet,
     crypto: { randomUUID: () => `pane-${++nextId}` },
-    resolveCommand: (agent: string, override: string) => {
-      const command = override || AGENT_SPECS.find((spec) => spec.agentKey === agent)?.defaultCommand
-      return { command, words: literalWords(command ?? ''), source: 'default' }
-    },
     focusPaneId: { value: '' }, currentWorkspace: { value: '/workspace' },
     spawnHistory: { value: [] }, runGroups: { value: [] },
     activeTab: { value: '' }, runGroupsReady: { value: true },
@@ -82,8 +82,8 @@ function harness() {
         paneRefs[pane.id] ??= { spawn: terminalSpawn, status: 'running', sessionId: `pty-${pane.id}` }
       }
     },
-    shellCommandArgv: (_shell: string, command: string) => ['bash', '-ilc', command],
-    spawnEnvOverride: () => undefined, settingsGet: () => null, cliEnvKey: () => '',
+    spawnEnvOverride: () => undefined, settingsGet: (_key: string, fallback: unknown = null) => fallback,
+    cliEnvKey: () => '', cliCommandKey: () => '',
     startPaneHealthWatcher: vi.fn(), scheduleInjection: vi.fn(), syncViews: vi.fn(),
     setPrepStatus: (pane: Pane, status: string) => { pane.preparationStatus = status },
     normWs: (path: string) => path, resolveReadySpawnGroupId: () => '',
@@ -211,7 +211,8 @@ describe('Codex session identity without a bootstrap turn', () => {
       sessionHomeId: 'original-home', commandOverride: buildResumeCommand('codex', sessionId),
     })
     expect(h.terminalSpawn).toHaveBeenCalledWith(expect.objectContaining({
-      command: ['bash', '-ilc', `codex resume ${sessionId}`], resumeKey: sessionId,
+      // The spawn seam renders the argv with the real helper: a bash login shell reads `-lc`.
+      command: ['bash', '-lc', `codex resume ${sessionId}`], resumeKey: sessionId,
       metadata: expect.objectContaining({ explicit_session_id: sessionId, session_home_id: 'original-home', session_marker: '' }),
     }))
     expect(h.backend.send).not.toHaveBeenCalled()

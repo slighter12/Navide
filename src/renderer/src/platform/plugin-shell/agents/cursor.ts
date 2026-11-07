@@ -22,9 +22,8 @@ export const SPEC = {
   ...factOptions(FACT),
   needsSessionMarker: true,
   // Executable is `agent` (the installer also creates the legacy
-  // `cursor-agent`); accept both, `=` and space forms, so a command saved by
-  // an older build still reads as a resume rather than a custom command.
-  resumeCommandPattern: /^(?:cursor-)?agent\s+--resume(?:=|\s+)\S+/,
+  // `cursor-agent`); the facts declare both, and the `=` and space forms, so a
+  // command saved by an older build still reads as a resume.
   supportsRebuild: true,
   hint: 'generalist',
   // Quota failover: cursor.py reports the plan "cycle" and, when enabled, an

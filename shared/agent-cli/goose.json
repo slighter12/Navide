@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": {"word": "session", "aliases": ["s"]},
   "data_dirs": null,
+  "session_root": null,
   "session_path": null,
   "logs": {"files": ["sessions.db"], "cwd": "absent"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {
