@@ -1321,6 +1321,7 @@ class TerminalService(TerminalInterface):
             self._out_buf_bytes[session.id] = (
                 self._out_buf_bytes.get(session.id, 0) + len(chunk)
             )
+        self._note_handle_drops(session)
         # Discard any outstanding echo probe rather than let _flush_output
         # attribute this resize drain to the user's last keystroke.
         self._echo_probe.pop(session.id, None)
@@ -1942,6 +1943,18 @@ class TerminalService(TerminalInterface):
         for chunk in chunks:
             self._absorb_output(session, chunk, len(chunk))
 
+    def _note_handle_drops(self, session: TerminalSession) -> None:
+        """A handle that bounds its own buffer (the Windows pump keeps reading while delivery is paused) hands over the bytes it
+        dropped since the last time. They were taken from the master and never reached this stream, so the log marks the gap
+        and the observer hears one read and one drop, exactly as `hand_over` reports its own."""
+        take_dropped = getattr(session.handle, "take_dropped", None)
+        if take_dropped is None or not (lost := take_dropped()):
+            return
+        self.note_dropped(session.id, lost)
+        if self._observer is not None:
+            self._observer.read(session.id, lost)
+            self._observer.dropped(session.id, lost)
+
     def note_dropped(self, session_id: str, nbytes: int) -> None:
         """Count bytes that were discarded before the stream took them, so the log marks the gap."""
         self._out_dropped[session_id] = self._out_dropped.get(session_id, 0) + nbytes
@@ -2050,6 +2063,7 @@ class TerminalService(TerminalInterface):
                 self._observer.read(session.id, len(chunk))
             raw.append(chunk)
             nbytes += len(chunk)
+        self._note_handle_drops(session)  # after the reads: a stream that ends here has seen every drop the handle made
 
         # Whatever arrived before EOF still has to reach the client, and _close
         # flushes the output buffer — so absorb first, then close.

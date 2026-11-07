@@ -293,6 +293,14 @@ class WindowsMaster:
             self.buffered, self.dropped = 0, 0
             return chunks, dropped, self.eof, self.error
 
+    def take_dropped(self) -> int:
+        """The bytes the pump dropped for its bound since the last `take()` or `take_dropped()`. The pump keeps reading while
+        the Terminal Stream has paused delivery, so it can discard bytes after publication; the stream asks for them here and
+        reports them once (a gap in the log, a read and a drop for its observer)."""
+        with self._lock:
+            dropped, self.dropped = self.dropped, 0
+            return dropped
+
     def start_reading(self, loop: asyncio.AbstractEventLoop, callback: Callable[[], None]) -> None:
         with self._lock:
             if self._stopped:
