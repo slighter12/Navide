@@ -14,23 +14,6 @@ from pathlib import Path
 from types import MappingProxyType
 
 from .. import osplat
-from ..cli_runtime_adapters import (
-    aider_reference,
-    antigravity_reference,
-    claude_reference,
-    codex_reference,
-    copilot_reference,
-    cursor_reference,
-    droid_reference,
-    goose_reference,
-    grok_reference,
-    kilo_reference,
-    kimi_reference,
-    muse_reference,
-    opencode_reference,
-    pi_reference,
-    qwen_reference,
-)
 from .base import VendorRuntimeContext, VendorSpec
 from . import (
     aider,
@@ -52,22 +35,22 @@ from . import (
 )
 
 _ALL: tuple[VendorSpec, ...] = (
-    aider_reference(aider.SPEC),
-    antigravity_reference(antigravity.SPEC),
-    claude_reference(claude.SPEC),
-    codex_reference(codex.SPEC),
-    copilot_reference(copilot.SPEC),
-    cursor_reference(cursor.SPEC),
-    droid_reference(droid.SPEC),
-    goose_reference(goose.SPEC),
-    grok_reference(grok.SPEC),
-    kilo_reference(kilo.SPEC),
-    kimi_reference(kimi.SPEC),
+    aider.SPEC,
+    antigravity.SPEC,
+    claude.SPEC,
+    codex.SPEC,
+    copilot.SPEC,
+    cursor.SPEC,
+    droid.SPEC,
+    goose.SPEC,
+    grok.SPEC,
+    kilo.SPEC,
+    kimi.SPEC,
     mcode.SPEC,
-    muse_reference(muse.SPEC),
-    opencode_reference(opencode.SPEC),
-    pi_reference(pi.SPEC),
-    qwen_reference(qwen.SPEC),
+    muse.SPEC,
+    opencode.SPEC,
+    pi.SPEC,
+    qwen.SPEC,
 )
 
 VENDORS: dict[str, VendorSpec] = {spec.key: spec for spec in _ALL}

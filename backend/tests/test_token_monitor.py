@@ -12,6 +12,7 @@ import pytest
 from agent_team_backend import token_monitor as monitor
 from agent_team_backend import usage_service as usage
 from agent_team_backend.cli_vendors.claude import ClaudeLogReader
+from agent_team_backend.terminals import TerminalInterface
 
 
 def stamp(days=0):
@@ -207,7 +208,7 @@ def test_websocket_monitor_round_trip_without_startup_side_effects(tmp_path, mon
     reader = ClaudeLogReader()
     monkeypatch.setattr(reader, "session_files", lambda: [path])
     monkeypatch.setattr(app, "_readers", [reader])
-    monkeypatch.setattr(app, "get_terminals", lambda: SimpleNamespace())
+    monkeypatch.setattr(app, "get_terminals", lambda: TerminalInterface())
     monkeypatch.setattr(app, "version_change", lambda: None)
     monkeypatch.setattr(app.server_link, "roster_changed", lambda: None)
     monkeypatch.setattr(ws_auth, "_token", "monitor-test-token")

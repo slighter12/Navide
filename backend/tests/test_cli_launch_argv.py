@@ -29,7 +29,7 @@ from agent_team_backend import app, osplat
 from agent_team_backend.cli_vendors.registry import VENDORS
 from agent_team_backend.mcp_server import pane_home
 from agent_team_backend.mcp_server import wiring as mcp_wiring
-from agent_team_backend.terminals import TerminalService
+from agent_team_backend.terminals import TerminalInterface, TerminalService
 
 # Every CLI in the shared frontend/backend registry. This literal is the gate:
 # a new vendor must extend the launch coverage below; the inventory test fails
@@ -64,7 +64,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     """Test double at the ``TerminalService.create`` boundary, recording the
     exact command the production handler hands to a real service."""
 

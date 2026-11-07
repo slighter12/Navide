@@ -23,6 +23,7 @@ from agent_team_backend.db import WorkspaceDatabases
 from agent_team_backend.dev_time_store import DevTimeStore
 from agent_team_backend.log_readers.attribution import AttributedUsage
 from agent_team_backend.log_readers.base import ActivityEvent
+from agent_team_backend.terminals import TerminalInterface
 
 UTC = timezone.utc
 
@@ -196,7 +197,7 @@ class _FakeWebSocket:
         self.sent.append(payload)
 
 
-class _FakeTerminals:
+class _FakeTerminals(TerminalInterface):
     def __init__(self, sessions: dict) -> None:
         self._sessions = sessions
         self.written: list[tuple[str, str]] = []

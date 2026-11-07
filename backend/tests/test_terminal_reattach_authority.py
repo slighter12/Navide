@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from agent_team_backend import app
+from agent_team_backend.terminals import TerminalInterface
 
 
 class Socket:
@@ -19,7 +20,7 @@ class Socket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self, *entries: Any) -> None:
         self._sessions = {entry.id: entry for entry in entries}
         self.redraws: list[tuple[Any, ...]] = []
@@ -28,6 +29,9 @@ class FakeTerminals:
         # The merged quota-failover bookkeeping probes the owner's terminals
         # through the same dict-shaped lookup the production registry exposes.
         return self._sessions.get(term_id)
+
+    async def drain_output(self, session_id: str) -> None:
+        return None
 
     def force_redraw(self, *args: Any, **kwargs: Any) -> None:
         self.redraws.append((*args, *kwargs.values()))

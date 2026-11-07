@@ -13,9 +13,11 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import IO, Any, Awaitable, Callable
+from enum import StrEnum
+from typing import IO, Any, AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
 from . import login_panes, osplat, pty_registry
@@ -488,7 +490,91 @@ async def _to_thread_and_drain_on_cancel(func: Callable[..., Any], *args: Any) -
         raise
 
 
-class TerminalService:
+class CreateCancelled(RuntimeError):
+    """The caller cancelled this create while it was still being coordinated; nothing was sent."""
+
+
+class CreateCancel(StrEnum):
+    """What a service can prove about a create whose caller has cancelled it."""
+
+    PROVEN = "proven"  # the program can never run: nothing was dispatched, or the dispatch was prevented atomically
+    PENDING = "pending"  # not proven: the caller waits for the create's own disposition
+    ROLLBACK = "rollback"  # the create has no dispatch fence: its own rollback kills what it made
+
+
+class TerminalInterface:
+    """The async surface every handler calls on a terminal service, written once over the synchronous primitives of
+    the service (`create`, `write`, `resize`, ...). The in-process service uses it as it is. The Rust service overrides
+    what it does differently (`create_async`, `control_async`, `kill_verified`, `cancel_dispatched`, `observe`,
+    `prewarm`, `receipt_refused_create`) and inherits the rest, so no caller asks which service it holds."""
+
+    def prewarm(self) -> None:
+        """Called at each client connection. A service with something to start ahead of a create starts it here."""
+
+    async def create_async(
+        self,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+        cancel_record: dict[str, Any] | None = None,
+        base_command: str | list[str] | None = None,
+        login_subcommand: str | None = None,
+        credential: Any = None,
+        **launch: Any,
+    ) -> Any:
+        """Create a session. What this service has no use for is accepted and ignored: a cancellation fence, the native
+        launch's base command and login shape, and a credential helper (the in-process spawn reads `spawn_command`)."""
+        return self.create(**launch)
+
+    async def activate_async(self, session_id: str) -> None:
+        """Called once a created session is claimed. A reader that attaches at creation has nothing to activate."""
+
+    async def write_async(self, session_id: str, data: str) -> int:
+        return self.write(session_id, data)
+
+    async def shell_in_foreground_async(self, session_id: str) -> bool | None:
+        return self.shell_in_foreground(session_id)
+
+    async def interrupt_async(self, session_id: str) -> None:
+        self.interrupt(session_id)
+
+    @asynccontextmanager
+    async def control_async(
+        self, session_id: str, cols: int, rows: int, *, redraw: bool = False
+    ) -> AsyncIterator[None]:
+        """Resize (or, with `redraw`, nudge) a session after the output its old size produced has been sent. The
+        caller sends its own acknowledgement inside the block, so nothing old-width follows it."""
+        await self.drain_output(session_id)
+        (self.force_redraw if redraw else self.resize)(session_id, cols, rows)
+        yield
+
+    async def kill_verified(self, session_id: str) -> bool:
+        """`kill(force=True)`, reporting whether the process is verified gone. The in-process kill returns once the
+        child is reaped, so its return is the verification."""
+        await self.kill(session_id, force=True)
+        return True
+
+    async def cancel_dispatched(self, record: dict[str, Any]) -> CreateCancel:
+        """What this service can prove about the create `record` describes, whose caller has cancelled it."""
+        return CreateCancel.ROLLBACK
+
+    def receipt_refused_create(self, pane_id: str | None, failure: BaseException) -> None:
+        """A launch refused before the service was reached. This service keeps no record of it."""
+
+    async def observe(
+        self,
+        vendor: str,
+        parser: str,
+        args: dict[str, Any],
+        *,
+        match: Callable[..., Any],
+        validate: Callable[..., Any] | None = None,
+        receipt: Callable[..., Any] | None = None,
+    ) -> dict[str, Any]:
+        """One native vendor observation. Only the Rust runtime answers; there is no Python parser fallback."""
+        raise RuntimeError("Selected native observation unavailable; no Python parser fallback")
+
+
+class TerminalService(TerminalInterface):
     def __init__(
         self,
         emit: EventSink,
@@ -578,9 +664,6 @@ class TerminalService:
         # task waits (bounded) for the child to die before its cleanup.
         self._exit_settles: set[asyncio.Task[None]] = set()
         self._last_persisted: dict[int, dict[int, str]] = {}
-
-    def prewarm(self) -> None:
-        """Called at each client connection. This service has nothing to start ahead of a create."""
 
     def create(
         self,

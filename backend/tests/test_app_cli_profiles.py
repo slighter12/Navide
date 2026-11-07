@@ -24,6 +24,7 @@ from agent_team_backend import app
 from agent_team_backend import guard_hooks, ws_handlers
 from agent_team_backend.credential_vault import CredentialVault
 from agent_team_backend.profiles_store import CliProfilesStore
+from agent_team_backend.terminals import TerminalInterface
 
 
 class FakeWebSocket:
@@ -42,7 +43,7 @@ class FakeProc:
         return None if self.alive else 0
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.killed: list[str] = []

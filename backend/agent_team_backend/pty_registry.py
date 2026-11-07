@@ -629,13 +629,7 @@ def reap_stale(grace: float = 1.0, settle: float = 3.0, _retry: bool = True) -> 
             verify = {pid for pids in row_targets.values() for pid in pids}
             watched = [t for t in targets if str(t[0]) in journal_rows or t[0] in verify]
             if watched:
-                remaining = _recheck(watched, table)
-                deadline = time.monotonic() + settle
-                while remaining:
-                    time.sleep(0.02)
-                    remaining = _recheck(remaining, table)
-                    if remaining is None or time.monotonic() >= deadline:
-                        break
+                remaining = _wait_until_gone(_recheck(watched, table), table, settle)
                 if remaining is None:
                     unverifiable = True
                 else:
@@ -702,6 +696,28 @@ def _recheck(targets: "list[tuple[int, bool]]", table: dict[int, tuple[int, str]
     if fresh is None:
         return None
     return [(pid, group) for pid, group in targets if _survives(fresh, pid, group, table)]
+
+
+#: The first wait between two looks at a signalled process, and the longest one. Every look forks `ps`, so the wait
+#: doubles from the first to the last instead of polling at a fixed short interval for the whole window.
+_FIRST_LOOK_DELAY_S = 0.02
+_LONGEST_LOOK_DELAY_S = 0.5
+
+
+def _wait_until_gone(remaining, table: dict[int, tuple[int, str]], settle: float):
+    """Look again at `remaining` (see `_recheck`) until none survives or `settle` seconds have passed, waiting longer
+    between looks each time. Returns what survives, or None when a table read failed. Ends the moment the last
+    process is gone."""
+    deadline = time.monotonic() + settle
+    delay = _FIRST_LOOK_DELAY_S
+    while remaining:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        time.sleep(min(delay, left))
+        remaining = _recheck(remaining, table)
+        delay = min(delay * 2, _LONGEST_LOOK_DELAY_S)
+    return remaining
 
 
 def reap_runtime(runtime_generation: str, grace: float = 1.0, settle: float = 3.0,
@@ -775,12 +791,7 @@ def reap_runtime(runtime_generation: str, grace: float = 1.0, settle: float = 3.
             remaining = _recheck(targets, table)
             if remaining is not None and remaining:
                 _signal_each(remaining, force=True)
-                deadline = time.monotonic() + settle
-                while remaining:
-                    remaining = _recheck(remaining, table)
-                    if not remaining or time.monotonic() >= deadline:
-                        break
-                    time.sleep(0.02)
+                remaining = _wait_until_gone(remaining, table, settle)
             if remaining is None:
                 # A verification read that failed is not a negative observation:
                 # these identities may still be live, so keep every entry.

@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_team_backend import app as app_module
-from agent_team_backend.terminals import _INPUT_BLOCK_NOTIFY_MS, TerminalService
+from agent_team_backend.terminals import _INPUT_BLOCK_NOTIFY_MS, TerminalInterface, TerminalService
 
 
 class _BlockableHandle:
@@ -251,7 +251,7 @@ class _FakeWebSocket:
         self.sent.append(payload)
 
 
-class _FakeTerminals:
+class _FakeTerminals(TerminalInterface):
     def __init__(self, pending: int) -> None:
         self.pending = pending
 

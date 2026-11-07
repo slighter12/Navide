@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from agent_team_backend import app
-from agent_team_backend.terminals import TerminalService
+from agent_team_backend.terminals import TerminalInterface, TerminalService
 
 
 class FakeWebSocket:
@@ -17,7 +17,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     """Fake with one pre-existing live PTY resuming a known session id."""
 
     def __init__(self, live: list[SimpleNamespace] | None = None) -> None:

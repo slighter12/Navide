@@ -6,7 +6,6 @@ from collections import deque
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-import hashlib
 import json
 import logging
 import os
@@ -22,15 +21,15 @@ from uuid import uuid4
 
 import psutil
 
-from . import cli_launch, osplat, pty_registry
+from . import cli_launch, cli_runtime_hook, osplat, pty_registry
 from .applog import in_data_dir
 from . import cli_runtime_frames as wire
 from .cli_runtime_frames import ChannelEof, Direction, FrameType, ProtocolError, code
-from . import cli_runtime_receipts as evaluation
 from .cli_runtime_handoff import HandoffRejected, HandoffSlot, MasterHandle, check_master
 from . import cli_runtime_windows as winrt
 from .ipc import make_event
-from .terminals import _BUF_CAP, TerminalService, _clean_for_log, _forget_live_log, _register_live_log
+from .terminals import (
+    _BUF_CAP, CreateCancel, CreateCancelled, TerminalService, _clean_for_log, _forget_live_log, _register_live_log)
 
 log = logging.getLogger(__name__)
 _CAP = 5 * 1024 * 1024
@@ -68,11 +67,6 @@ _OPS = {"create": code.CREATE, "adopt": code.ADOPT, "resize": code.RESIZE, "kill
 # Set by create_async around its create request: told the request id and answer
 # future the moment the request is on the wire, so an abandoned create is traceable.
 _ON_DISPATCH: ContextVar = ContextVar("cli_runtime_on_dispatch", default=None)
-
-
-def prepare_native_launch(argv: list[str], *, cwd: str, env: dict[str, str]) -> dict[str, str]:
-    """Effective child launch boundary, also guarded by the disposable harness."""
-    return env
 
 
 def runtime_path() -> Path:
@@ -133,10 +127,6 @@ def refuse_foreign_binary(path: Path) -> None:
         raise RuntimeError(f"START_FAILED wrong architecture: the runtime is built for {built}, this host is {host}")
 
 
-class CreateCancelled(RuntimeError):
-    """The caller cancelled this create while it was still being coordinated; nothing was sent."""
-
-
 class _RuntimeRefused(RuntimeError):
     """The sidecar answered a request with an explicit error: it did not act on it."""
 
@@ -172,9 +162,6 @@ class RuntimeSession:
     output_log_fp: Any = None
     descendants: dict[int, str] = field(default_factory=dict)
     risk_context: Any = None
-    vendor_parser_state: dict = field(default_factory=dict)
-    received_seq: int = 0
-    raw_offset: int = 0
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     cleanup: asyncio.Event = field(default_factory=asyncio.Event)
     cleanup_error: str | None = None
@@ -212,8 +199,10 @@ class RustTerminalService(TerminalService):
     _sending: asyncio.Future | None = None  # the frame write in progress, finished even if its caller left
     _prewarming: asyncio.Task | None = None  # the background start of `prewarm`
 
-    def __init__(self, emit):
+    def __init__(self, emit, hook: cli_runtime_hook.HarnessHook | None = None):
         super().__init__(emit)
+        # The harness's hook under the isolated regression root, the product's (which does nothing) everywhere else.
+        self._hook = cli_runtime_hook.from_environment() if hook is None else hook
         self._runtime: asyncio.subprocess.Process | None = None
         self._runtime_generation = ""
         self._start_lock = asyncio.Lock()
@@ -234,8 +223,8 @@ class RustTerminalService(TerminalService):
         self._loss_t0 = 0.0
         self._loss_stages: list[dict] = []
         self._request_number = 0
-        self._receipt_root = os.environ.get("NAVIDE_REGRESSION_ROOT")
-        self._ledger = evaluation.ControlLedger()  # frames and bytes per type (E2 3 item 5); counts only
+        self._receipt = self._hook.receipt
+        self._ledger = self._hook.ledger  # frames and bytes per type (E2 3 item 5); counts only
         self._sock: socket.socket | None = None
         self._receiver: wire.FrameReceiver | None = None
         self._stdout_task: asyncio.Task | None = None
@@ -290,12 +279,6 @@ class RustTerminalService(TerminalService):
         self._ownership_gate = False
         # sid -> builder of the provisional session registered at the `owned` event
         self._provisional: dict[str, Any] = {}
-
-    def _receipt(self, record: dict) -> None:
-        root = self._receipt_root  # fixed at construction: a late task of this service never writes elsewhere
-        if root:
-            with (Path(root) / "runtime-receipts.jsonl").open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def _task(self, coroutine) -> asyncio.Task:
         task = asyncio.create_task(coroutine)
@@ -675,11 +658,7 @@ class RustTerminalService(TerminalService):
                     "--owner-pid", str(os.getpid()), "--ownership-journal", str(journal)]
             if child is not None:
                 argv.extend(["--control-fd", str(child.fileno())])
-            fault = os.environ.get("NAVIDE_ACR_FAULT")
-            if fault == "startup":
-                argv.append("--fail-startup")
-            elif fault == "protocol":
-                argv.extend(["--ready-wire", "999"])
+            argv.extend(self._hook.runtime_argv())
             self._ready = self._loop.create_future()
             try:
                 self._runtime = await asyncio.create_subprocess_exec(
@@ -708,7 +687,7 @@ class RustTerminalService(TerminalService):
                         # Reaped before its identity could be read: the handshake below still reads its fatal line
                         # (START_FAILED), and a ready line from an identity-less process is refused.
                         created, executable = None, str(path)
-                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                    digest = self._hook.executable_digest(path)
                 except (OSError, psutil.Error) as error:
                     raise RuntimeError(f"START_FAILED at identity: {error}") from error
                 self._runtime_identity = {"pid": self._runtime.pid, "created": created, "executable": executable,
@@ -1063,9 +1042,11 @@ class RustTerminalService(TerminalService):
         entry = self._dispatched.get(sid)
         if entry is not None:
             entry["identity"] = {"pid": root["pid"], "lstart": root.get("start_value")}
-        if self._receipt_root and not WINDOWS:  # the per-create kernel checkpoint, inline, before any later step can run
-            self._receipt(evaluation.checkpoint(fd, str(sid), launch["pane_id"], launch["session_generation"],
-                                                str(pty.get("tty")), root))
+        # The harness's per-create kernel checkpoint, inline, before any later step can run.
+        kernel_facts = self._hook.create_checkpoint(fd, str(sid), launch["pane_id"], launch["session_generation"],
+                                                    str(pty.get("tty")), root)
+        if kernel_facts is not None:
+            self._receipt(kernel_facts)
         if not WINDOWS:
             try:
                 slot.tty = check_master(fd, pty.get("tty"), self._claimed_ttys)
@@ -1302,7 +1283,8 @@ class RustTerminalService(TerminalService):
                     future.exception()
 
     def control_ledger(self) -> dict:
-        """The control-plane ledger so far (counts only); a receipt `control_ledger` is written with it."""
+        """The control-plane ledger so far (counts only; empty without a harness); a receipt `control_ledger` is
+        written with it."""
         snapshot = self._ledger.snapshot()
         self._receipt({"event": "control_ledger", "runtime_generation": self._runtime_generation, **snapshot})
         return snapshot
@@ -1422,7 +1404,7 @@ class RustTerminalService(TerminalService):
         if pane_mark:
             env[detached_servers.MARK_ENV] = pane_mark
             metadata["pane_mark"] = pane_mark
-        env = prepare_native_launch(argv, cwd=cwd, env=env)
+        env = self._hook.launch_env(argv, cwd=cwd, env=env)
         subject = kwargs.get("agent_key") or ""
         composition = cli_launch.admit_composition(
             subject, platform="windows" if WINDOWS else "posix",
@@ -1753,15 +1735,15 @@ class RustTerminalService(TerminalService):
             # Any other outcome leaves the barrier to the runtime invalidation, which
             # opens it only together with the explicit fence (`_lost`).
 
-    async def cancel_dispatched(self, record: dict) -> str:
+    async def cancel_dispatched(self, record: dict) -> CreateCancel:
         """The renderer's cancel for a create whose transaction is `record` (its flag is
-        already set). "proven" only when the target can never execute: nothing went on the
+        already set). PROVEN only when the target can never execute: nothing went on the
         wire (the dispatch boundary checks the flag in the step that records the dispatch),
-        or the sidecar decided `prevented` atomically with its gate. Otherwise "pending":
+        or the sidecar decided `prevented` atomically with its gate. Otherwise PENDING:
         the caller waits for the transaction's own disposition (see `create_async`)."""
         native = record.get("native")
         if not native:
-            return "proven"
+            return CreateCancel.PROVEN
         if native["outcome"] is None and not native["future"].done() and not self._lost:
             try:
                 state = (await self._request("cancel", {"target_id": native["request_id"]})).get("state")
@@ -1769,8 +1751,8 @@ class RustTerminalService(TerminalService):
                 log.warning("native cancel for create failed: %s", type(error).__name__)
                 state = None
             if state == "prevented" and native["gated"]:
-                return "proven"
-        return "pending"
+                return CreateCancel.PROVEN
+        return CreateCancel.PENDING
 
     async def _clean_verified(self, session: RuntimeSession) -> bool:
         """End a session's root and report whether the sidecar verified its cleanup."""
@@ -1788,21 +1770,9 @@ class RustTerminalService(TerminalService):
         await self.kill(sid, force=True)
         return session.cleanup.is_set() and not session.cleanup_error
 
-    # The Terminal Stream is the baseline's: the existing `isinstance(..., RustTerminalService)`
-    # branches in the handlers reach it through these thin shims (the baseline files stay
-    # unmodified, E2 9). Input, interrupt and foreground queries run over the handed-off master.
-    async def activate_async(self, sid: str) -> None:
-        return None  # the reader attaches at publication (E1 8); there is nothing to activate
-
-    async def write_async(self, sid: str, data: str) -> int:
-        self._require(sid)
-        return self.write(sid, data)
-
-    async def shell_in_foreground_async(self, sid: str) -> bool | None:
-        return self.shell_in_foreground(sid)
-
-    async def interrupt_async(self, sid: str) -> None:
-        self.interrupt(sid)
+    # The Terminal Stream is the baseline's: input, interrupt, foreground queries and activation run over the
+    # handed-off master through the interface's own methods (`TerminalInterface`), which this class inherits.
+    # The reader attaches at publication (E1 8), so there is nothing to activate.
 
     @asynccontextmanager
     async def control_async(self, sid: str, cols: int, rows: int, *, redraw: bool = False):

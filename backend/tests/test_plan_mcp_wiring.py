@@ -13,6 +13,7 @@ from agent_team_backend import app, osplat
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
 from agent_team_backend.plugins import wiring as plugin_wiring
 from agent_team_backend.mcp_server import auth as plan_mcp_auth, pane_home, wiring as plan_mcp_wiring
+from agent_team_backend.terminals import TerminalInterface
 
 
 # ---- write_claude_config ----
@@ -599,7 +600,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
 

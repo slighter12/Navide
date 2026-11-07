@@ -21,6 +21,8 @@ from agent_team_backend import cli_runtime
 from agent_team_backend import cli_runtime_frames as wire
 from agent_team_backend.cli_runtime import RuntimeProcessView, RuntimeSession, RustTerminalService
 from agent_team_backend.cli_runtime_frames import FrameType, code
+from agent_team_backend.cli_runtime_hook import HarnessHook
+from agent_team_backend.cli_runtime_receipts import ControlLedger
 from tests.cli_regression.support.cli_shim import base_python_executable
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT, FramePeer
 from tests.test_cli_runtime_lifecycle import LifeRig, alive
@@ -34,7 +36,9 @@ pytestmark = [
 
 
 def new_service(**limits) -> RustTerminalService:
-    service = RustTerminalService(lambda frame: asyncio.sleep(0))
+    hook = HarnessHook()
+    hook.ledger = ControlLedger()  # these tests read the harness's frame counts; the product's hook counts nothing
+    service = RustTerminalService(lambda frame: asyncio.sleep(0), hook=hook)
     service._runtime_generation = GENERATION
     service._limits = {**service._limits, **limits}
     return service

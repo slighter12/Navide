@@ -16,6 +16,7 @@ from agent_team_backend.guard import runtime, terminal_policy
 from agent_team_backend.guard.store import GuardStore
 from agent_team_backend.mcp_server import server as mcp
 from agent_team_backend.mcp_server import wiring as mcp_wiring
+from agent_team_backend.terminals import TerminalInterface
 
 
 @pytest.fixture(autouse=True)
@@ -154,7 +155,7 @@ async def test_bare_line_route_refuses_for_a_terminal(captured, decisions, guard
 
 
 # ── guarded terminal.input (the renderer's own injections) ─────────────────
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self, agent_key: str = "terminal") -> None:
         self.written: list[str] = []
         self.term = SimpleNamespace(agent_key=agent_key, pane_id="pt", cwd="/Users/tester/proj",

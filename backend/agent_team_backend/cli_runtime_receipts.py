@@ -1,13 +1,18 @@
-"""Evaluation-only receipts of the Rust runtime path (E3 S13; E2 v10 section 3 items 2 and 5).
+"""Evaluation-only: the harness's implementation of the hook the Rust runtime bridge calls (E3 S13; E2 v10 section 3 items
+2 and 5), with the receipts, the control ledger and the kernel checkpoint it writes.
 
-Everything that writes a file is gated by `NAVIDE_REGRESSION_ROOT` (the evaluation receipt directory), like the
-runtime's other receipts, and is a no-op otherwise. **No receipt carries a descriptor number** (E1 5.2): the CK
-records kernel facts about the descriptor (mode, device identity, slave name), never its integer.
+Nothing here runs in the product. `cli_runtime_hook.from_environment` returns `RegressionHook` only under the isolated
+regression root (`NAVIDE_REGRESSION_ROOT`, set by the harness alone), and the bridge reaches everything below through
+that hook. **No receipt carries a descriptor number** (E1 5.2): the CK records kernel facts about the descriptor (mode,
+device identity, slave name), never its integer.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import stat
+from pathlib import Path
 from typing import Any
 
 import psutil
@@ -15,15 +20,21 @@ import psutil
 from . import cli_runtime_frames as wire
 from . import osplat
 from .cli_runtime_handoff import slave_name_of
+from .cli_runtime_hook import HarnessHook
+from .log_readers.watcher import rescan_interval_from_env
+from .osplat import controlling_tty
+
+#: A process's controlling-terminal device read from the kernel's own record, per platform.
+_CONTROLLING_TTY = {
+    "darwin": controlling_tty.from_libproc,
+    "linux": controlling_tty.from_proc,
+    "win32": controlling_tty.unsupported,
+}[osplat.platform_id]
 
 
 def controlling_terminal_device(pid: int) -> int | None:
     """Read the root's controlling-terminal device directly, or return None when it has none."""
-    return osplat.controlling_terminal_device(pid)
-
-
-def enabled() -> bool:
-    return bool(os.environ.get("NAVIDE_REGRESSION_ROOT"))
+    return _CONTROLLING_TTY(pid)
 
 
 def checkpoint(fd: int, session_id: str, pane_id: str, generation: str, sidecar_tty: str, root: dict) -> dict:
@@ -114,3 +125,45 @@ class ControlLedger:
                 "unknown_types": sorted(k for k in (*self.tx, *self.rx) if k not in known),
                 "tx_bytes": sum(v[1] for v in self.tx.values()), "rx_bytes": sum(v[1] for v in self.rx.values()),
                 "late_observation_parts": self.late_parts, "late_observation_bytes": self.late_bytes, "late_answers": self.late_answers}
+
+
+class RegressionHook(HarnessHook):
+    """The hook the isolated harness runs the bridge with: receipts under its root, the control ledger, the sidecar's
+    fault switch, the launch guard its isolation module installs, the kernel checkpoint, the binary digest and the
+    rescan override. The root is fixed at construction: a late task of one service never writes elsewhere."""
+
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self._receipts = root / "runtime-receipts.jsonl"
+        self.ledger = ControlLedger()  # frames and bytes per type (E2 3 item 5); counts only
+
+    def receipt(self, record: dict) -> None:
+        with self._receipts.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def create_checkpoint(self, fd: int, session_id: str, pane_id: str, generation: str, sidecar_tty: str,
+                          root: dict) -> dict | None:
+        if osplat.platform_id != "win32":  # a ConPTY has no master descriptor to take kernel facts of
+            return checkpoint(fd, session_id, pane_id, generation, sidecar_tty, root)
+        return None
+
+    def launch_env(self, argv: list[str], *, cwd: str, env: dict[str, str]) -> dict[str, str]:
+        from . import cli_runtime
+
+        # `tests/cli_regression/support/isolation.py` assigns its guard here; without one the environment is unchanged.
+        guard = getattr(cli_runtime, "prepare_native_launch", None)
+        return env if guard is None else guard(argv, cwd=cwd, env=env)
+
+    def runtime_argv(self) -> list[str]:
+        fault = os.environ.get("NAVIDE_ACR_FAULT")
+        if fault == "startup":
+            return ["--fail-startup"]
+        if fault == "protocol":
+            return ["--ready-wire", "999"]
+        return []
+
+    def executable_digest(self, path: Path) -> str | None:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def rescan_interval_s(self) -> float:
+        return rescan_interval_from_env(os.environ.get("NAVIDE_LOG_RESCAN_S"))

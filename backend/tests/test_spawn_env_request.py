@@ -17,6 +17,7 @@ from agent_team_backend import app, osplat
 from agent_team_backend.cli_vendors.registry import VENDORS
 from agent_team_backend.osplat import _posix_paths, _windows
 from agent_team_backend.profiles_store import CLAUDE_ENV_OVERRIDES
+from agent_team_backend.terminals import TerminalInterface
 
 
 class FakeWebSocket:
@@ -27,7 +28,7 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(TerminalInterface):
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
 

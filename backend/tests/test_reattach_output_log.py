@@ -23,12 +23,15 @@ class RecordingSocket:
         self.sent.append(payload)
 
 
-class FakeTerminals:
+class FakeTerminals(terminals_module.TerminalInterface):
     def __init__(self, ids: list[str]) -> None:
         self._sessions = {i: SimpleNamespace(id=i, closed=False) for i in ids}
 
     def get(self, session_id: str) -> SimpleNamespace | None:
         return self._sessions.get(session_id)
+
+    async def drain_output(self, session_id: str) -> None:
+        return None
 
     def force_redraw(self, *_args: Any, **_kwargs: Any) -> None:
         return None
