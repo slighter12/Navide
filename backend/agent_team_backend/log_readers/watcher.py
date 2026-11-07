@@ -903,7 +903,7 @@ class LogWatcher:
                     # records after it are unread. A single write raises one watch event,
                     # so without a follow-up poll they wait for the next file change.
                     # Progress is strictly forward, so the follow-up chain terminates.
-                    self._queue.put_nowait((path, ""))
+                    self._enqueue_realtime(path)
                 return False
             if (
                 activity_events

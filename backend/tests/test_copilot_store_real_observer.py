@@ -2,7 +2,8 @@
 
 Real SQLite commits drive real file events (FSEvents on macOS, inotify on Linux); nothing is injected by hand. A touch of
 the store while a writer transaction holds the marker row uncommitted makes the sink miss it first; the commit that
-follows must still bind the pane through the events it raises (the `.db-wal` write, or the `-journal` deletion).
+follows must still bind the pane: through the `-journal` deletion event (DELETE), or the sweep's `-wal` signature
+(WAL; FSEvents does not report the commit's `-wal` write).
 """
 from __future__ import annotations
 
@@ -65,7 +66,11 @@ async def test_a_real_commit_binds_the_pane_after_a_pass_that_missed_it(journal_
         else:
             missed.set()
 
-    watcher = LogWatcher(sink=_noop, session_sink=session_sink, seen_path=tmp_path / "seen.json")
+    # macOS FSEvents raises no event for a WAL commit's `-wal` write once the writer has the file open (the raw
+    # callback stayed silent for 15 s after COMMIT), so a WAL store is seen by the sweep's `-wal` signature
+    # (`_file_signature`). A short sweep makes the commit's visibility the thing proved, not a walk in flight.
+    watcher = LogWatcher(sink=_noop, session_sink=session_sink, seen_path=tmp_path / "seen.json",
+                         rescan_interval_s=0.5 if journal_mode == "WAL" else 30.0)
     watcher.add_reader(reader)
     watcher.start()
     # start() returns before the OS stream is delivering: a write made in that gap raises no event at all
@@ -90,6 +95,8 @@ async def test_a_real_commit_binds_the_pane_after_a_pass_that_missed_it(journal_
         writer.execute("BEGIN")
         writer.execute("INSERT INTO turns VALUES (1,?,0,?,?,?)",
                        (SESSION, f"{MARKER} work", "reply", "2026-09-29T10:00:00Z"))
+        # Drop a startup-sweep miss from before BEGIN: only the utime below may set it.
+        missed.clear()
         os.utime(store)  # a real modify event while the row is uncommitted: the sink misses the marker
         async with asyncio.timeout(15):
             await missed.wait()

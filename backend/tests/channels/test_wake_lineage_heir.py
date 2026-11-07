@@ -79,6 +79,31 @@ async def test_a_late_successor_record_still_inherits_the_children(heir) -> None
         "workspace_path": heir.ws, "old_pane_id": "old-1", "new_pane_id": "new-1"})]
 
 
+async def test_a_record_retired_between_selection_and_store_call_is_not_announced(heir, monkeypatch) -> None:
+    heir.record_after = 0.0
+    real = heir.store.record_pane_unspawn_by_id
+    handed_over: list[str] = []
+
+    def retired_by_someone_else_first(ws, *, pane_id, successor=""):
+        # Another path retires the record after _superseded() chose it and before this call.
+        real(ws, pane_id=pane_id)
+        return real(ws, pane_id=pane_id, successor=successor)
+
+    async def rebind(previous, *args):
+        handed_over.append(previous)
+        return []
+
+    from agent_team_backend import scheduler
+
+    monkeypatch.setattr(heir.store, "record_pane_unspawn_by_id", retired_by_someone_else_first)
+    monkeypatch.setattr(scheduler, "get_service", lambda: SimpleNamespace(rebind_after_rebuild=rebind))
+    result = await channels_pkg._open_onto_session(_record(), heir.ws, "sess-1")
+    assert result == {"ok": True, "pane_id": "new-1"}
+    # The store made no hand-off, so the window is told none and no job follows one.
+    assert heir.broadcasts == []
+    assert handed_over == []
+
+
 async def test_a_successor_that_never_records_is_not_announced(heir, caplog) -> None:
     caplog.set_level(logging.WARNING, logger=channels_pkg.log.name)
     result = await channels_pkg._open_onto_session(_record(), heir.ws, "sess-1")
