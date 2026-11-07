@@ -261,6 +261,25 @@ def declarations_with(tmp_path: Path, key: str, change, adapters: tuple[str, ...
     return generator
 
 
+def observer_sources(tmp_path: Path, generator: object) -> str:
+    """The two generated observer files together: the shared vocabulary and dispatch, then the declaration data."""
+    return "".join((tmp_path / path).read_text() for path in (generator.RUST_OBSERVERS_OUTPUT, generator.RUST_DECLARATIONS_OUTPUT))
+
+
+def test_the_roster_data_is_its_own_generated_file_and_every_shared_function_stays_in_the_scanned_one(tmp_path: Path) -> None:
+    """K1: the G1-E locality scan leaves out only the declaration data (by the exact path of the one file that holds it); `find`,
+    `dispatch`, `Mode::parse` and the layout lookups are in the file it scans."""
+    generator = declarations_with(tmp_path, "pi", lambda facts: None)
+    generator.write_all(tmp_path)
+    shared = (tmp_path / generator.RUST_OBSERVERS_OUTPUT).read_text()
+    data = (tmp_path / generator.RUST_DECLARATIONS_OUTPUT).read_text()
+    for name in ("fn find(", "fn dispatch(", "fn parse(", "fn candidates", "fn slot(", "fn layout_for("):
+        assert name in shared and name not in data, name
+    assert "pub const OBSERVERS: &[ObserverFacts]" in data and "OBSERVERS: &[" not in shared
+    assert "fn " not in data and "match " not in data and "if " not in data, "the data file has no function and no branch"
+    assert data.startswith(f"// {generator.HEADER}\n") and shared.startswith(f"// {generator.HEADER}\n")
+
+
 @pytest.mark.parametrize("name", ["Codex", "2fast", "open_code", "open-code", ""])
 def test_a_parser_name_outside_the_lowercase_alphanumeric_form_is_refused(tmp_path: Path, name: str) -> None:
     generator = declarations_with(tmp_path, "pi", lambda facts: facts["observer"].update(parser=name))
@@ -342,7 +361,22 @@ def test_a_changed_declaration_fails_the_check_until_regenerated(tmp_path: Path)
     assert run_generator("--check", "--root", str(tmp_path)).returncode == 0
     assert "codex-renamed" in (tmp_path / generator.PYTHON_OUTPUT).read_text()
     assert "codex-renamed" in (tmp_path / generator.SHARED_TYPESCRIPT_OUTPUT).read_text()
-    assert "codex-renamed" in (tmp_path / generator.RUST_OUTPUT).read_text()
+    assert "codex-renamed" in (tmp_path / generator.RUST_VENDOR_DECLARATIONS_OUTPUT).read_text()
+
+
+def test_the_vendor_table_is_its_own_generated_file_and_every_vendor_function_stays_in_the_scanned_one(tmp_path: Path) -> None:
+    """K1, same rule as the observer roster: only declaration data leaves the G1-E locality scan, by the exact path of the one
+    file that holds it; `Opt::flag`, `find` and `is_fault_declaration` are in the file it scans."""
+    generator = load_generator()
+    copy_declarations(tmp_path)
+    generator.write_all(tmp_path)
+    shared = (tmp_path / generator.RUST_OUTPUT).read_text()
+    data = (tmp_path / generator.RUST_VENDOR_DECLARATIONS_OUTPUT).read_text()
+    for name in ("fn find(", "fn is_fault_declaration(", "fn flag("):
+        assert name in shared and name not in data, name
+    assert "pub const VENDORS: &[VendorFacts]" in data and "VENDORS: &[" not in shared
+    assert "fn " not in data and "match " not in data and "if " not in data, "the data file has no function and no branch"
+    assert data.startswith(f"// {generator.HEADER}\n") and shared.startswith(f"// {generator.HEADER}\n")
 
 
 @pytest.mark.parametrize("key", sorted(registry.VENDORS))
@@ -403,7 +437,7 @@ def _second_schema(facts: dict, **changes) -> None:
 def test_two_schemas_of_one_store_file_are_one_dispatch_arm_and_one_layout_each(tmp_path: Path) -> None:
     generator = declarations_with(tmp_path, "goose", _second_schema, adapters=("goose",))
     generator.write_all(tmp_path)
-    source = (tmp_path / generator.RUST_OBSERVERS_OUTPUT).read_text()
+    source = observer_sources(tmp_path, generator)
     assert len(re.findall(r"observe::<goose::", source)) == 1, "the arm is chosen by file name, the schema by the connection"
     assert source.count('applies_when: &["session_message"]') == 1
     assert "has_table" not in source, "choosing a layout never opens a second connection"
@@ -421,14 +455,14 @@ def test_a_layout_asks_for_the_request_fields_its_adapter_reads_and_no_others(tm
     assert layouts == {"goose": [], "antigravity": ["cwd", "session"], "cursor": ["cwd", "session", "base_epoch"]}
     generator = declarations_with(tmp_path, "cursor", lambda facts: None)
     generator.write_all(tmp_path)
-    source = (tmp_path / generator.RUST_OBSERVERS_OUTPUT).read_text()
+    source = observer_sources(tmp_path, generator)
     assert "request: &[RequestField::Cwd, RequestField::Session, RequestField::BaseEpoch]" in source
 
 
 def test_a_log_layout_that_defers_to_a_store_is_generated_with_its_ownership_rule(tmp_path: Path) -> None:
     generator = declarations_with(tmp_path, "copilot", lambda facts: None)
     generator.write_all(tmp_path)
-    source = (tmp_path / generator.RUST_OBSERVERS_OUTPUT).read_text()
+    source = observer_sources(tmp_path, generator)
     assert 'defers_to: Some(Defers { file: "session-store.db", up: 3 })' in source
     assert source.count("defers_to: Some(") == 1, "only the log layout yields; the store layout owns"
 
@@ -542,7 +576,7 @@ def test_a_parser_on_a_row_store_gets_one_typed_walk_variant_per_mark_table(tmp_
     distinct mark table across the parser's layouts, in declaration order; every declared walk names its variant."""
     generator = declarations_with(tmp_path, "pi", lambda facts: None)
     generator.write_all(tmp_path)
-    source = (tmp_path / generator.RUST_OBSERVERS_OUTPUT).read_text()
+    source = observer_sources(tmp_path, generator)
     assert "pub enum OpencodeWalk {\n    SessionMessage,\n    Part,\n}" in source
     assert "pub enum CopilotWalk {\n    AssistantUsageEvents,\n    Turns,\n}" in source
     assert "impl super::WalkId for OpencodeWalk {\n    type Marked<'a> = OpencodeMark<'a>;\n\n    fn of(walk: Walk) -> Option<Self> {\n        match walk {\n            Walk::Opencode(own) => Some(own),\n" in source
@@ -559,7 +593,7 @@ def test_a_walks_declared_cells_are_a_typed_column_enum_and_a_reply_names_its_co
     """Q5: an adapter reads a cell of a walk by a generated column variant, in the order the declaration lists the cells."""
     generator = declarations_with(tmp_path, "pi", lambda facts: None)
     generator.write_all(tmp_path)
-    source = (tmp_path / generator.RUST_OBSERVERS_OUTPUT).read_text()
+    source = observer_sources(tmp_path, generator)
     assert "pub enum OpencodeSessionMessageColumn {\n    Type,\n    Seq,\n}" in source
     assert "impl super::ColumnId for OpencodeSessionMessageColumn {" in source
     assert "pub enum CopilotTurnsColumn {\n    UserMessage,\n    AssistantResponse,\n    Timestamp,\n}" in source
@@ -574,7 +608,7 @@ def test_a_walk_that_waits_for_an_earlier_walk_is_generated_as_its_typed_id_and_
     """P2: `after` names an earlier walk of the same store; the generated declaration carries its typed walk id."""
     generator = declarations_with(tmp_path, "copilot", lambda facts: None)
     generator.write_all(tmp_path)
-    source = (tmp_path / generator.RUST_OBSERVERS_OUTPUT).read_text()
+    source = observer_sources(tmp_path, generator)
     assert source.count("after: Some(Walk::Copilot(CopilotWalk::AssistantUsageEvents))") == 1 and "after: None" in source
     assert "page: 1000000" not in source, "Copilot's walks are bounded by the default page again"
 

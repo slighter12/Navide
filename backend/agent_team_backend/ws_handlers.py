@@ -9336,6 +9336,8 @@ async def _terminal_create_impl(
                 # One decision (delta 10.2): the Rust runtime renders the plan itself, the in-process arm spawns its rendering.
                 plan = wrap_plan(payload["command"], vendor_spec, helper_argv, env=wrap_env)
                 wrapped = None if plan is None else render_wrapper(payload["command"], vendor_spec, plan, env=wrap_env)
+                if wrapped is None:
+                    plan = None  # the program is gone: neither arm wraps (the Rust arm would render a plan the in-process arm cannot)
                 if wrapped is None and is_login:
                     raise quota_failover.FailoverRefused("CREDENTIAL_STORE_UNVERIFIED", "this login command cannot verify its credential store")
                 if wrapped is not None:

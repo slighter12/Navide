@@ -116,6 +116,47 @@ async def test_regular_handler_binds_actual_post_rc_store_without_changing_envir
     assert not case.rig.vault.switch_lock(case.vendor).locked()
 
 
+def record_launches(case) -> list[dict]:
+    """What the handler hands to the terminal service of either arm: the in-process arm spawns `spawn_command`, the Rust arm
+    renders the `credential` plan itself."""
+    seen: list[dict] = []
+    original = case.owner.terminals.create_async
+
+    async def create_async(**kwargs):
+        seen.append({"spawn_command": kwargs.get("spawn_command"), "credential": kwargs.get("credential")})
+        return await original(**kwargs)
+
+    case.owner.terminals.create_async = create_async
+    return seen
+
+
+async def test_a_decided_wrap_reaches_both_arms_as_the_rendered_command_and_as_the_plan(launch_rig):
+    case = launch_rig
+    seen = record_launches(case)
+    result = await call(case.owner, "terminal.create", case.payload)
+    assert result["ok"], result
+    assert await asyncio.to_thread(case.processes[0].wait, 15) == 0
+    [launch] = seen
+    assert launch["spawn_command"] is not None, "the in-process arm spawns the rendering"
+    assert launch["credential"] is not None and launch["credential"]["helper"], "the Rust arm renders the plan itself"
+
+
+async def test_a_program_that_vanishes_after_the_decision_is_run_unchanged_by_both_arms(launch_rig, monkeypatch):
+    """K4: `wrap_plan` decided to wrap and `render_wrapper` then finds no program. The launch is then unwrapped for the in-process arm
+    (no `spawn_command`) and for the Rust arm (no `credential` plan): neither arm wraps what the other would not."""
+    from agent_team_backend import credential_launch
+
+    case = launch_rig
+    seen = record_launches(case)
+    monkeypatch.setattr(credential_launch, "render_wrapper", lambda *args, **kwargs: None)
+    result = await call(case.owner, "terminal.create", case.payload)
+    assert result["ok"], result
+    assert await asyncio.to_thread(case.processes[0].wait, 15) == 0
+    [launch] = seen
+    assert launch == {"spawn_command": None, "credential": None}, launch
+    assert case.owner.terminals.get("term-1").metadata["credential_store_verified"] is False
+
+
 async def test_public_create_then_first_login_common_xdg_parks_and_switches(launch_rig, monkeypatch):
     from agent_team_backend.cli_vendors.registry import VENDORS
 

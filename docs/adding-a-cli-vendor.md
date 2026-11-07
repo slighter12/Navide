@@ -17,8 +17,8 @@ read or modify the shared orchestration code.
    ```
 
    The generator writes `cli_vendors/_vendor_facts.py`, `src/shared/vendorFacts.ts`,
-   `native/navide-cli-runtime/src/vendor_facts.rs` and `observe/adapters/mod.rs`
-   from every declaration. Never edit those four by hand. The launch options
+   `native/navide-cli-runtime/src/vendor_facts.rs` and `vendor_facts/declarations.rs`, `observe/adapters/mod.rs` and
+   `observe/adapters/declarations.rs` from every declaration. Never edit those six by hand. The launch options
    (`model`, `effort`, `skip_permissions`, `resume`, `session_id`, `login`) are spelled from one generated option
    table that the Python backend, the renderer and the Rust sidecar all read, so a flag is written once.
 

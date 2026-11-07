@@ -1536,12 +1536,10 @@ class RustTerminalService(TerminalInterface):
             # reader had read it (same absorb, same log mirror, same 5 MiB drop-oldest accounting), and a
             # stream that already ended is closed the way `_on_readable` would have closed it.
             chunks, dropped, eof, errored = slot.take()
-            if dropped:
-                self.stream.note_dropped(session.id, dropped)
-            handed = 0
-            for chunk in chunks:  # one absorb per read, exactly as `_on_readable` would have done
-                self.stream.absorb(session, chunk, len(chunk))
-                handed += len(chunk)
+            # One absorb per read, exactly as `_on_readable` would have done; the stream reports the hand-over to its observer
+            # once, from this batch (the Windows pump keeps reading after `take()`, so `slot.read_total` is not it).
+            self.stream.hand_over(session, chunks, dropped)
+            handed = sum(len(chunk) for chunk in chunks)
             if eof or errored:
                 self._close(session, reason="error" if errored else "exit")
             self._receipt(lambda: {"event": "preread_handed_over", "session_id": sid, "session_generation": generation,

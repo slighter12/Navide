@@ -692,7 +692,9 @@ class TerminalService(TerminalInterface):
         # what happens when a session's stream ends: it is called as `end_stream(session, reason=...)` in place of
         # this service's own close.
         self._end_stream = end_stream
-        self._observer = StreamObserver()
+        # Nobody observes until `observe_stream`: the stream then holds none, and every notification is guarded, so an
+        # unobserved stream does no notification work on its read, absorb and emit paths.
+        self._observer: StreamObserver | None = None
         self._loop = asyncio.get_event_loop()
         # The crash-recovery registry lives in the data dir this service was
         # started under. Registry jobs run on worker threads and can still be
@@ -1313,7 +1315,8 @@ class TerminalService(TerminalInterface):
                 break
             if not chunk:
                 break
-            self._observer.read(session.id, len(chunk))
+            if self._observer is not None:
+                self._observer.read(session.id, len(chunk))
             self._out_buffers.setdefault(session.id, []).append(chunk)
             self._out_buf_bytes[session.id] = (
                 self._out_buf_bytes.get(session.id, 0) + len(chunk)
@@ -1332,7 +1335,8 @@ class TerminalService(TerminalInterface):
             return
         combined = b"".join(chunks)
         for piece in self._split_chunks(combined):
-            self._observer.emitted(session.id, len(piece))
+            if self._observer is not None:
+                self._observer.emitted(session.id, len(piece))
             await self._emit(self._build_output_frame(session, piece))
         self._mirror_flush_to_log(session, combined)
 
@@ -1923,9 +1927,20 @@ class TerminalService(TerminalInterface):
         """The session's master is readable: drain it into the output buffer and end the stream on EOF or error."""
         self._on_readable(session)
 
-    def absorb(self, session: TerminalSession, chunk: bytes, nbytes: int) -> None:
-        """Buffer one drained batch of raw bytes, exactly as a read of the session's own master would."""
-        self._absorb_output(session, chunk, nbytes)
+    def hand_over(self, session: TerminalSession, chunks: list[bytes], dropped: int) -> None:
+        """Take what a reader that ran before this stream attached collected: `chunks` as its reads returned them, and the
+        `dropped` bytes its own bound discarded. They enter exactly as if this stream's reader had read them (one absorb per
+        chunk), and the observer hears them once: the bytes taken from the master (`chunks` and `dropped`) as a read, and the
+        discarded ones as a drop, so `read == emitted + dropped` holds for a session that was handed over."""
+        handed = sum(len(chunk) for chunk in chunks)
+        if self._observer is not None and (handed or dropped):
+            self._observer.read(session.id, handed + dropped)
+        if dropped:
+            self.note_dropped(session.id, dropped)
+            if self._observer is not None:
+                self._observer.dropped(session.id, dropped)
+        for chunk in chunks:
+            self._absorb_output(session, chunk, len(chunk))
 
     def note_dropped(self, session_id: str, nbytes: int) -> None:
         """Count bytes that were discarded before the stream took them, so the log marks the gap."""
@@ -1938,7 +1953,8 @@ class TerminalService(TerminalInterface):
     async def drain_behind_barrier(self, session: TerminalSession) -> None:
         """Emit everything the session has buffered or the kernel still holds. The caller holds `barrier(session)`."""
         await self._drain_output_behind_barrier(session)
-        self._observer.drained(session.id)
+        if self._observer is not None:
+            self._observer.drained(session.id)
 
     def observe_stream(self, observer: StreamObserver) -> None:
         self._observer = observer
@@ -2030,7 +2046,8 @@ class TerminalService(TerminalInterface):
             if not chunk:
                 close_reason = "exit"
                 break
-            self._observer.read(session.id, len(chunk))
+            if self._observer is not None:
+                self._observer.read(session.id, len(chunk))
             raw.append(chunk)
             nbytes += len(chunk)
 
@@ -2091,9 +2108,10 @@ class TerminalService(TerminalInterface):
                 session,
             )
             self._out_handles[session.id] = handle
-        self._observer.absorbed(session.id, len(chunk))
-        if dropped:
-            self._observer.dropped(session.id, dropped)
+        if self._observer is not None:
+            self._observer.absorbed(session.id, len(chunk))
+            if dropped:
+                self._observer.dropped(session.id, dropped)
 
     def _window_bytes(self, session_id: str, *, now: float | None = None) -> int:
         """Bytes read from this PTY within the last _FAST_PATH_WINDOW_S,
@@ -2180,7 +2198,8 @@ class TerminalService(TerminalInterface):
         async def _drain() -> None:
             try:
                 for piece in self._split_chunks(combined):
-                    self._observer.emitted(session.id, len(piece))
+                    if self._observer is not None:
+                        self._observer.emitted(session.id, len(piece))
                     await self._emit(self._build_output_frame(session, piece))
             finally:
                 timer = self._pause_timers.pop(session.id, None)

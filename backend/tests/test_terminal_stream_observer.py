@@ -119,10 +119,10 @@ async def test_bytes_dropped_under_a_stalled_drain_are_reported_after_the_absorb
     sink.gate.clear()
     stream, recorder, session = stream_with(sink)
     chunk = b"x" * (256 * 1024)
-    stream.absorb(session, b"x" * terminals._BUF_CAP, terminals._BUF_CAP)  # a full buffer flushes at once, and that drain stalls on the sink
+    stream.hand_over(session, [b"x" * terminals._BUF_CAP], 0)  # a full buffer flushes at once, and that drain stalls on the sink
     await asyncio.sleep(0)
     for _ in range(40):
-        stream.absorb(session, chunk, len(chunk))
+        stream.hand_over(session, [chunk], 0)
     assert recorder.total("dropped") > 0
     first_drop = recorder.kinds().index("dropped")
     assert recorder.kinds()[first_drop - 1] == "absorbed", "the absorb is recorded first, then the drop it caused"
@@ -131,12 +131,60 @@ async def test_bytes_dropped_under_a_stalled_drain_are_reported_after_the_absorb
     assert recorder.total("absorbed") == recorder.total("emitted") + recorder.total("dropped")
 
 
-async def test_a_stream_nobody_observes_does_nothing_extra():
+async def test_a_hand_over_reports_the_bytes_taken_and_the_bytes_dropped_once_and_what_it_absorbs():
+    """K2: a reader that ran before the stream attached handed over three reads (6 bytes) and 7 dropped bytes: the observer hears
+    one read of everything the master gave up (6 + 7 = 13), one drop of 7, one absorb per chunk, then the emit of the 6 kept."""
+    stream, recorder, session = stream_with(Sink())
+    stream.hand_over(session, [b"abc", b"de", b"f"], 7)
+    await stream.quiesce_output(session)
+    assert recorder.events[:2] == [("read", "s1", 13), ("dropped", "s1", 7)]
+    assert recorder.kinds() == ["read", "dropped", "absorbed", "absorbed", "absorbed", "emitted"]
+    assert recorder.total("read") == recorder.total("emitted") + recorder.total("dropped")
+
+
+async def test_a_hand_over_of_nothing_reports_nothing():
+    stream, recorder, session = stream_with(Sink())
+    stream.hand_over(session, [], 0)
+    await stream.quiesce_output(session)
+    assert recorder.events == []
+
+
+async def test_a_stream_nobody_observes_holds_no_observer_and_still_emits_every_byte():
+    """K3: with no observer attached the stream does no notification work at all (it holds none to call), and its output is the
+    same. No throughput claim: this shows the state and the behavior, not a measurement."""
+    sink = Sink()
+    stream = TerminalService(sink)
+    session = session_with(Handle(b"abc", b"de"))
+    stream.adopt_session(session)
+    assert stream._observer is None, "nothing attached: nothing to notify"
+    stream.read_ready(session)
+    await stream.quiesce_output(session)
+    async with stream.barrier(session):
+        await stream.drain_behind_barrier(session)
+    stream.hand_over(session, [b"fg"], 3)
+    await stream.quiesce_output(session)
+    assert [len(frame) - terminals_frame_header_size() for frame in sink.frames] == [5, 2]
+    assert stream._observer is None
+
+
+async def test_an_observer_attached_late_hears_only_what_moves_after_it():
     stream = TerminalService(Sink())
     session = session_with(Handle(b"abc"))
     stream.adopt_session(session)
     stream.read_ready(session)
     await stream.quiesce_output(session)
+    recorder = Recorder()
+    stream.observe_stream(recorder)
+    assert recorder.events == [], "there is no replay of what moved before"
+    session.handle.chunks.append(b"de")
+    stream.read_ready(session)
+    await stream.quiesce_output(session)
+    assert (recorder.total("read"), recorder.total("emitted")) == (2, 2)
+
+
+def terminals_frame_header_size() -> int:
+    """The bytes a binary output frame carries before its payload (the frame is the header and the payload)."""
+    return len(TerminalService(Sink())._build_output_frame(session_with(Handle()), b""))
 
 
 async def test_the_rust_service_presents_the_seam_of_the_stream_it_composes():

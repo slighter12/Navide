@@ -2,8 +2,8 @@
 //! observer shares.
 //!
 //! The declaration (`shared/agent-cli/<vendor>.json`, `observer` block) names a vendor's layouts, the modes it answers,
-//! the record pointers or table names of its source and its compatibility rules; `adapters/mod.rs` (generated) turns that
-//! into typed facts and a static dispatch. The core owns everything that is not a vendor's record vocabulary:
+//! the record pointers or table names of its source and its compatibility rules; `adapters/mod.rs` and
+//! `adapters/declarations.rs` (generated) turn that into typed facts and a static dispatch. The core owns everything that is not a vendor's record vocabulary:
 //!
 //! - the bounded open (`os.rs`, the one place the operating system shows: a regular file only, never through a link, never
 //!   blocking the open or the writer, identity and positioned reads, one arm per platform; `jsonl.rs`: byte and line caps;

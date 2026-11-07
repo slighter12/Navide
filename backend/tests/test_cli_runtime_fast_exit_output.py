@@ -24,6 +24,7 @@ import pytest
 from agent_team_backend.cli_runtime_frames import code
 from tests.cli_regression.support.cli_shim import base_python_executable
 from tests.cli_regression.support.frame_peer import HARNESS, PRODUCT, FramePeer
+from tests.cli_regression.support.reader_counters_v2 import ReaderCountersV2
 from tests.test_cli_runtime_lifecycle import LifeRig
 
 pytestmark = pytest.mark.skipif(
@@ -116,9 +117,32 @@ async def test_f1_a_create_answer_held_far_beyond_the_drain_window_still_deliver
 
 
 @pytest.mark.asyncio
+async def test_f1_a_short_command_whose_whole_output_came_before_publication_is_counted_as_read_through_the_stream_seam(harness):
+    """K2: what the slot read before publication enters the stream at the hand-over, and the stream reports it as read (the
+    bytes `take()` returned), so `read == emitted + dropped` and a reader-counters v2 snapshot does not say "never read"."""
+    service = harness.service()
+    counters = ReaderCountersV2().attach(service)
+    release = harness.root / "release-answer-short"
+    task = asyncio.create_task(service.create_async(
+        pane_id=f"fault:delay-response:{release}", agent_key="terminal", cwd=str(harness.workspace), env=harness.env,
+        cols=100, rows=30,
+        command=[base_python_executable(), "-c", "import sys; sys.stdout.write('SHORT\\n'); sys.stdout.flush()"]))
+    await harness.until(lambda: harness.receipts_of("exit"), "SESSION_EXITED arrived while the answer is still held")
+    release.touch()
+    session = await asyncio.wait_for(task, 20)
+    await harness.until(lambda: harness.sink.exits(session.id), "terminal.exit", 20)
+    handed = harness.receipts_of("preread_handed_over", session_id=session.id)[0]
+    assert handed["bytes"] == len("SHORT\r\n") and handed["dropped"] == 0, handed
+    snapshot = counters.snapshot(session.id)  # raises ReaderCounterNotInstalled when the stream never reported a read
+    assert snapshot == {"read_total": handed["bytes"], "emitted_total": handed["bytes"], "dropped_oldest_total": 0}
+    assert counters.equalities_hold(session.id)
+
+
+@pytest.mark.asyncio
 async def test_f1_the_pre_publication_buffer_is_bounded_and_its_drops_are_accounted(harness):
     from agent_team_backend.terminals import _BUF_CAP
     service = harness.service()
+    counters = ReaderCountersV2().attach(service)
     release = harness.root / "release-answer-flood"
     log = harness.root / "flood.log"
     total_lines = 120_000  # ~ 12 MB of output: more than twice the 5 MiB bound
@@ -141,6 +165,10 @@ async def test_f1_the_pre_publication_buffer_is_bounded_and_its_drops_are_accoun
     got = harness.sink.raw(session.id)
     # Exact accounting: every byte the slot took from the master was delivered or counted as dropped.
     assert handed["read_total"] == handed["bytes"] + handed["dropped"], handed  # E1 v8b P12: on the receipt's own fields
+    # K2: the stream's observer hears the same bytes: the hand-over is a read of `bytes + dropped` and a drop of `dropped`.
+    assert counters.equalities_hold(session.id), counters.snapshot(session.id)
+    assert counters.snapshot(session.id)["read_total"] >= handed["read_total"]
+    assert counters.snapshot(session.id)["dropped_oldest_total"] >= handed["dropped"] > 0
     assert delivered <= handed["bytes"], "the renderer cannot have received more than the slot handed over"
     # Content: what was delivered is the newest part of the output, in order, with nothing missing after the cut.
     numbers = [int(n) for n in _re.findall(rb"FLOOD (\d{6}) ", got)]

@@ -24,7 +24,9 @@ COMPOSITIONS = ("rust", "python")
 PYTHON_OUTPUT = Path("backend/agent_team_backend/cli_vendors/_vendor_facts.py")
 SHARED_TYPESCRIPT_OUTPUT = Path("src/shared/vendorFacts.ts")  # the one TypeScript copy (renderer and main process)
 RUST_OUTPUT = Path("native/navide-cli-runtime/src/vendor_facts.rs")
-RUST_OBSERVERS_OUTPUT = Path("native/navide-cli-runtime/src/observe/adapters/mod.rs")
+RUST_VENDOR_DECLARATIONS_OUTPUT = Path("native/navide-cli-runtime/src/vendor_facts/declarations.rs")  # the `VENDORS` data only
+RUST_OBSERVERS_OUTPUT = Path("native/navide-cli-runtime/src/observe/adapters/mod.rs")  # the shared types, `find` and the dispatch
+RUST_DECLARATIONS_OUTPUT = Path("native/navide-cli-runtime/src/observe/adapters/declarations.rs")  # the `OBSERVERS` data only
 RUST_ADAPTERS = Path("native/navide-cli-runtime/src/observe/adapters")
 
 HEADER = "Generated from shared/agent-cli/*.json by scripts/generate-agent-cli-facts.py; do not edit."
@@ -227,7 +229,8 @@ TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilit
 
 
 def output_paths() -> tuple[Path, ...]:
-    return (PYTHON_OUTPUT, SHARED_TYPESCRIPT_OUTPUT, RUST_OUTPUT, RUST_OBSERVERS_OUTPUT)
+    return (PYTHON_OUTPUT, SHARED_TYPESCRIPT_OUTPUT, RUST_OUTPUT, RUST_VENDOR_DECLARATIONS_OUTPUT, RUST_OBSERVERS_OUTPUT,
+            RUST_DECLARATIONS_OUTPUT)
 
 
 def check_request_names() -> None:
@@ -1100,6 +1103,28 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
         "",
         *rust_options(),
         "",
+        "// The declaration data, in its own generated file; the types and the functions stay here.",
+        "mod declarations;",
+        "pub use declarations::{SUBJECT_ALIASES, SUBJECT_COMPOSITION, VENDORS};",
+        "",
+        "pub fn find(key: &str) -> Option<&'static VendorFacts> {",
+        "    VENDORS.iter().find(|facts| facts.key == key)",
+        "}",
+        *RUST_FAULT_DECLARATION,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def rust_vendor_declarations_source(facts: list[dict], subjects: dict) -> str:
+    """The `VENDORS` table and the subject constants: declaration data and nothing else (no function, no branch). It is
+    excluded from the G1-E locality scan by its exact path; `rust_source` keeps every function in a scanned file."""
+    variants = {"integrated": "Integrated", "vendor-unsupported": "VendorUnsupported",
+                "not-yet-integrated": "NotYetIntegrated", "unknown": "Unknown"}
+    lines = [
+        f"// {HEADER}",
+        "//! The vendor declaration table and the non-vendor subjects.",
+        "use super::*;",
+        "",
         "pub const VENDORS: &[VendorFacts] = &[",
     ]
     for item in facts:
@@ -1133,14 +1158,9 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
     lines += [
         "];",
         "",
-        "pub fn find(key: &str) -> Option<&'static VendorFacts> {",
-        "    VENDORS.iter().find(|facts| facts.key == key)",
-        "}",
-        "",
         "/// Non-vendor subjects (the ordinary shell): how their launch is composed.",
         f"pub const SUBJECT_ALIASES: &[&str] = &[{aliases}];",
         f"pub const SUBJECT_COMPOSITION: Composition = Composition::{subjects['composition'].capitalize()};",
-        *RUST_FAULT_DECLARATION,
     ]
     return "\n".join(lines) + "\n"
 
@@ -1414,8 +1434,8 @@ def capabilities(parser: str, kind: str, core: dict) -> str:
 
 
 def rust_observers_source(facts: list[dict]) -> str:
-    """The typed observer roster and the static dispatch. A parser runs with the source, usage and capability types its
-    declaration names."""
+    """The typed observer vocabulary, `find` and the static dispatch (the shared functions; the roster data is in
+    `rust_declarations_source`). A parser runs with the source, usage and capability types its declaration names."""
     observers = [(item["key"], item["observer"]) for item in facts if item["observer"]]
     parsers, core = observer_parsers(facts)
     first_observer: dict[str, dict] = {}
@@ -1425,13 +1445,16 @@ def rust_observers_source(facts: list[dict]) -> str:
     usage_types = {"per_turn": "super::PerTurn", "cumulative": "super::Cumulative", "none": "super::NoUsage"}
     lines = [
         f"// {HEADER}",
-        "//! The observer roster: which parser reads which vendor's logs, in which layout, answering which modes.",
+        "//! The observer vocabulary and dispatch: how a parser, a layout and a mode are typed, and which parser answers which vendor.",
         "use super::{observe, Request};",
         "use serde_json::Value;",
         "use std::io;",
         "use std::path::Path;",
         "",
         *(f"pub mod {name};" for name in core),
+        "// The `OBSERVERS` declaration data, in its own generated file; the types, `find` and the dispatch stay here.",
+        "mod declarations;",
+        "use declarations::OBSERVERS;",
         "",
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub enum Parser {",
@@ -1863,41 +1886,6 @@ def rust_observers_source(facts: list[dict]) -> str:
         "    }",
         "}",
         "",
-        "pub const OBSERVERS: &[ObserverFacts] = &[",
-    ]
-    for key, observer in observers:
-        platforms = ", ".join(f"Platform::{pascal(p)}" for p in observer["platforms"])
-        lines += [
-            "    ObserverFacts {",
-            f"        vendor: {rust_string(key)},",
-            f"        parser: Parser::{pascal(observer['parser'])},",
-            f"        parser_id: {rust_string(observer['parser_id'])},",
-            f"        platforms: &[{platforms}],",
-            "        layouts: &[",
-        ]
-        for layout in observer["layouts"]:
-            lines += [
-                "            Layout {",
-                f"                source: SourceKind::{pascal(layout['source'])},",
-                f"                usage: UsageMode::{mode_variant(layout['usage'])},",
-                f"                store_file: {rust_option(layout['store_file'])},",
-                f"                applies_when: {rust_strs(layout['applies_when'])},",
-                f"                modes: &[{', '.join(f'Mode::{mode_variant(m)}' for m in layout_modes(layout, observer['core']))}],",
-                f"                request: &[{', '.join(f'RequestField::{mode_variant(f)}' for f in layout['request'])}],",
-                f"                usage_fields: {rust_usage_fields(layout['usage_fields'])},",
-                f"                store: {rust_store(layout['store'], observer['parser'])},",
-                f"                rules: {rust_rules(layout['rules'])},",
-                f"                defers_to: {rust_defers(layout['defers_to'])},",
-                "            },",
-            ]
-        lines += [
-            "        ],",
-            f"        core: {rust_core(observer['core'])},",
-            "    },",
-        ]
-    lines += [
-        "];",
-        "",
         "/// The observer declared for `vendor` on this platform.",
         "pub fn find(vendor: &str) -> Option<&'static ObserverFacts> {",
         "    OBSERVERS.iter().find(|facts| facts.vendor == vendor && facts.platforms.contains(&CURRENT))",
@@ -1943,14 +1931,63 @@ def rust_observers_source(facts: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def rust_declarations_source(facts: list[dict]) -> str:
+    """The `OBSERVERS` roster: declaration data and nothing else (no function, no branch). It is the one generated Rust file the
+    G1-E locality scan leaves out, by its exact path; `rust_observers_source` keeps every shared function in a scanned file."""
+    lines = [
+        f"// {HEADER}",
+        "//! The observer declarations: which parser reads which vendor's logs, in which layout, answering which modes.",
+        "use super::*;",
+        "",
+        "pub const OBSERVERS: &[ObserverFacts] = &[",
+    ]
+    for item in facts:
+        observer = item["observer"]
+        if not observer:
+            continue
+        platforms = ", ".join(f"Platform::{pascal(p)}" for p in observer["platforms"])
+        lines += [
+            "    ObserverFacts {",
+            f"        vendor: {rust_string(item['key'])},",
+            f"        parser: Parser::{pascal(observer['parser'])},",
+            f"        parser_id: {rust_string(observer['parser_id'])},",
+            f"        platforms: &[{platforms}],",
+            "        layouts: &[",
+        ]
+        for layout in observer["layouts"]:
+            lines += [
+                "            Layout {",
+                f"                source: SourceKind::{pascal(layout['source'])},",
+                f"                usage: UsageMode::{mode_variant(layout['usage'])},",
+                f"                store_file: {rust_option(layout['store_file'])},",
+                f"                applies_when: {rust_strs(layout['applies_when'])},",
+                f"                modes: &[{', '.join(f'Mode::{mode_variant(m)}' for m in layout_modes(layout, observer['core']))}],",
+                f"                request: &[{', '.join(f'RequestField::{mode_variant(f)}' for f in layout['request'])}],",
+                f"                usage_fields: {rust_usage_fields(layout['usage_fields'])},",
+                f"                store: {rust_store(layout['store'], observer['parser'])},",
+                f"                rules: {rust_rules(layout['rules'])},",
+                f"                defers_to: {rust_defers(layout['defers_to'])},",
+                "            },",
+            ]
+        lines += [
+            "        ],",
+            f"        core: {rust_core(observer['core'])},",
+            "    },",
+        ]
+    lines += ["];"]
+    return "\n".join(lines) + "\n"
+
+
 def outputs(root: Path = ROOT) -> dict[Path, str]:
     facts = load(root)
     subjects = load_subjects(root)
     return {
         RUST_OBSERVERS_OUTPUT: rust_observers_source(facts),
+        RUST_DECLARATIONS_OUTPUT: rust_declarations_source(facts),
         PYTHON_OUTPUT: python_source(facts, subjects),
         SHARED_TYPESCRIPT_OUTPUT: typescript_source(facts),
         RUST_OUTPUT: rust_source(facts, subjects),
+        RUST_VENDOR_DECLARATIONS_OUTPUT: rust_vendor_declarations_source(facts, subjects),
     }
 
 

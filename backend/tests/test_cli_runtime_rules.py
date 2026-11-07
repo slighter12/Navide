@@ -35,7 +35,7 @@ HARNESS = Path(os.environ.get("NAVIDE_CLI_RUNTIME_HARNESS_BIN") or ROOT / "nativ
 
 #: The Rust files that may name a vendor: the declarations' output and the vendor adapters (the generic core in
 #: `observe/` is scanned like any shared code, so a vendor key there is a failure).
-VENDOR_MODULES = {"vendor_facts.rs", "adapters.rs", "observe/adapters/mod.rs", "observe/adapters/claude.rs",
+VENDOR_MODULES = {"vendor_facts/declarations.rs", "adapters.rs", "observe/adapters/declarations.rs", "observe/adapters/claude.rs",
                   "observe/adapters/codex.rs", "observe/adapters/opencode.rs"}
 PY_RUNTIME = ["cli_runtime.py", "cli_runtime_frames.py", "cli_runtime_handoff.py", "cli_runtime_observation.py"]
 PY_VENDOR = ["cli_runtime_native.py", "cli_runtime_adapters.py"]
