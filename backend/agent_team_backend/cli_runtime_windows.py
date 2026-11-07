@@ -253,6 +253,8 @@ class WindowsMaster:
                 break
             chunk = buffer.raw[: got.value]
             with self._lock:
+                if self._closing:  # a close began while this read was in flight: nobody reads it, and `dropped` stays final
+                    break
                 self.read_total += len(chunk)
                 self._chunks.append(chunk)
                 self.buffered += len(chunk)
@@ -296,7 +298,8 @@ class WindowsMaster:
     def take_dropped(self) -> int:
         """The bytes the pump dropped for its bound since the last `take()` or `take_dropped()`. The pump keeps reading while
         the Terminal Stream has paused delivery, so it can discard bytes after publication; the stream asks for them here and
-        reports them once (a gap in the log, a read and a drop for its observer)."""
+        reports them once (a gap in the log, a read and a drop for its observer). After `begin_close` the pump adds nothing,
+        so the call that follows it is the last one."""
         with self._lock:
             dropped, self.dropped = self.dropped, 0
             return dropped

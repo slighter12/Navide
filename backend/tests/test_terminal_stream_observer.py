@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_team_backend import cli_runtime_windows, terminals
+from agent_team_backend import cli_runtime, cli_runtime_windows, terminals
 from agent_team_backend.cli_runtime import RustTerminalService
 from agent_team_backend.terminals import StreamObserver, TerminalInterface, TerminalService
 
@@ -205,12 +205,14 @@ async def test_the_rust_service_presents_the_seam_of_the_stream_it_composes():
 
 
 class PipeKernel:
-    """The two Win32 entry points the pump uses, over a list of reads. When the last one has been handed out the pump is told
-    to close, so it ends without an EOF (the stream then keeps the session open, as it does for a CLI that is still running)."""
+    """The two Win32 entry points the pump uses, over a list of reads. When the last one has been handed out the pump is left
+    without a handle to read, so it ends without an EOF (the stream then keeps the session open, as it does for a CLI that is
+    still running). `close_during_last_read` is a close that begins while that read is in flight."""
 
-    def __init__(self, master, *reads: bytes) -> None:
+    def __init__(self, master, *reads: bytes, close_during_last_read: bool = False) -> None:
         self.master = master
         self.reads = list(reads)
+        self.close_during_last_read = close_during_last_read
         self.wintypes = SimpleNamespace(DWORD=ctypes.c_ulong)
 
     def thread_id(self) -> int:
@@ -221,27 +223,32 @@ class PipeKernel:
         ctypes.memmove(buffer, data, len(data))
         got._obj.value = len(data)
         if not self.reads:
-            self.master._closing = True
+            if self.close_during_last_read:
+                self.master._closing = True  # what `begin_close` sets while the pump is inside `ReadFile`
+            self.master.output_handle = None
         return 1
 
 
-def run_pump(monkeypatch, master, *reads: bytes) -> None:
+def run_pump(monkeypatch, master, *reads: bytes, close_during_last_read: bool = False) -> None:
     """Run the real `_pump_main` to the end of `reads` over a fake kernel (no Windows needed for the pump's own bookkeeping)."""
-    monkeypatch.setattr(cli_runtime_windows, "api", lambda: PipeKernel(master, *reads))
+    monkeypatch.setattr(cli_runtime_windows, "api", lambda: PipeKernel(master, *reads, close_during_last_read=close_during_last_read))
     master._closing = False
+    master.output_handle = 1
     pump = threading.Thread(target=master._pump_main)
     pump.start()
     pump.join(10)
     assert not pump.is_alive()
 
 
-def windows_stream(sink: Sink, cap: int) -> tuple[TerminalService, Recorder, SimpleNamespace, cli_runtime_windows.WindowsMaster]:
-    """A stream attached to a Windows master whose pump bound is `cap`; the stream has paused the pump's delivery."""
+def windows_stream(sink: Sink, cap: int, *, observed: bool = True) -> tuple[TerminalService, Recorder, SimpleNamespace, cli_runtime_windows.WindowsMaster]:
+    """A stream attached to a Windows master whose pump bound is `cap`; the stream has paused the pump's delivery. Production
+    attaches no observer, so `observed=False` is the stream a Windows session really has."""
     master = cli_runtime_windows.WindowsMaster(session_id="s1", input_handle=None, output_handle=1, cap=cap)
     master._loop = asyncio.get_running_loop()
     stream = TerminalService(sink)
     recorder = Recorder()
-    stream.observe_stream(recorder)
+    if observed:
+        stream.observe_stream(recorder)
     session = session_with(master)
     session.output_log_fp = io.StringIO()
     stream.adopt_session(session)
@@ -293,6 +300,111 @@ async def test_l1_a_drop_before_publication_and_a_drop_after_it_are_each_counted
     assert recorder.total("read") == recorder.total("emitted") + recorder.total("dropped")
     marked = [int(n) for n in re.findall(r"\[navide: (\d+) bytes of output dropped\]", session.output_log_fp.getvalue())]
     assert sum(marked) == 8 * chunk, "the log's gaps add up to every dropped byte"
+
+
+def windows_rust_service(sink: Sink, cap: int) -> tuple[RustTerminalService, Recorder, cli_runtime.RuntimeSession, cli_runtime_windows.WindowsMaster]:
+    """The Rust service over a Windows master (the service believes it runs on Windows), its stream attached and observed. Only the
+    sidecar request that ends a stream is stubbed: the stream end itself (`_close`, `_finish_stream`) is the real code."""
+    service = RustTerminalService(sink)
+    recorder = Recorder()
+    service.observe_stream(recorder)
+
+    async def request(*_args, **_kwargs) -> None:
+        return None
+
+    service._request = request  # type: ignore[method-assign]
+    master = cli_runtime_windows.WindowsMaster(session_id="s1", input_handle=None, output_handle=1, cap=cap)
+    master._loop = asyncio.get_running_loop()
+    session = cli_runtime.RuntimeSession(id="s1", pane_id="p", agent_key="terminal", command=["x"], cwd=".", generation="", metadata={}, root={},
+                                         proc=cli_runtime.RuntimeProcessView(pid=1), handle=master)
+    session.output_log_fp = io.StringIO()
+    service.stream.adopt_session(session)
+    master.start_reading(master._loop, lambda: service.stream.read_ready(session))
+    return service, recorder, session, master
+
+
+class KeptLog(io.StringIO):
+    def close(self) -> None:  # a closed StringIO cannot be read back
+        pass
+
+
+def marked(session) -> list[int]:
+    return [int(n) for n in re.findall(r"\[navide: (\d+) bytes of output dropped\]", session.output_log_fp.getvalue())]
+
+
+async def until(predicate, what: str) -> None:
+    for _ in range(500):
+        if predicate():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"never happened: {what}")
+
+
+async def test_m1_a_pump_drop_during_the_final_barrier_emit_is_reported_once_before_the_stream_closes(monkeypatch):
+    """M1 (normal end): the hang-up stops the reader, but the pump keeps reading and can drop while the final barrier's emit is
+    stalled on the sink. The stream ends only after the pump can add nothing, then reports that drop: one read, one drop, the gap."""
+    monkeypatch.setattr(cli_runtime, "WINDOWS", True)
+    chunk = 64 * 1024
+    sink = Sink()
+    service, recorder, session, master = windows_rust_service(sink, cap=2 * chunk)
+    master._chunks.append(b"hi")  # unread: the final barrier's slurp reads it and its emit stalls on the sink
+    master.buffered = 2
+    sink.gate.clear()
+    service._close(session, reason="exit")
+    await until(lambda: sink.frames, "the final barrier emit reaches the sink")
+    run_pump(monkeypatch, master, *[bytes([65 + n]) * chunk for n in range(10)])  # the pump overflows during the stall
+    assert master.dropped == 8 * chunk
+    sink.gate.set()
+    await until(lambda: session.stream_done, "the stream ended")
+    assert master.dropped == 0, "the stream took the drop"
+    assert recorder.total("dropped") == 8 * chunk and recorder.kinds().count("dropped") == 1, "one drop event for the batch"
+    assert recorder.total("read") == 2 + 8 * chunk, "the barrier's read, and the bytes the pump took and dropped"
+    assert marked(session) == [8 * chunk], "the log has the gap, once"
+    assert session.closed and recorder.total("emitted") == 2
+
+
+async def test_m1_a_pump_drop_pending_when_the_runtime_is_lost_is_reported_by_the_settlement(monkeypatch):
+    """M1 (runtime loss): `_lose` begins the close of every master, then settles each stream. A drop the pump still holds
+    reaches the log and the observer there, before the stream's own untaken bytes are counted."""
+    monkeypatch.setattr(cli_runtime, "WINDOWS", True)
+    chunk = 64 * 1024
+    service, recorder, session, master = windows_rust_service(Sink(), cap=2 * chunk)
+    master.pause_reading()
+    run_pump(monkeypatch, master, *[bytes([65 + n]) * chunk for n in range(10)])
+    log = session.output_log_fp = KeptLog()  # the settlement closes the log; the test reads it afterwards
+    master.begin_close()  # `_lose` step 1: reading stops and the pump is cancelled
+    settled = service._settle_stream(session)
+    assert settled["untaken_dropped"] == 0
+    assert recorder.total("dropped") == 8 * chunk and recorder.total("read") == 8 * chunk
+    assert [int(n) for n in re.findall(r"\[navide: (\d+) bytes of output dropped\]", log.getvalue())] == [8 * chunk]
+    assert master.dropped == 0 and session.closed
+
+
+async def test_m1_a_pump_that_is_inside_a_read_when_the_close_begins_adds_nothing_afterwards(monkeypatch):
+    """The final collection is final only if the pump can add no drop after `begin_close`: a read that returns after it
+    is discarded, never buffered, never dropped."""
+    chunk = 64 * 1024
+    master = cli_runtime_windows.WindowsMaster(session_id="s1", input_handle=None, output_handle=1, cap=chunk)
+    master._loop = asyncio.get_running_loop()
+    run_pump(monkeypatch, master, *[b"a" * chunk for _ in range(3)], close_during_last_read=True)
+    assert master.dropped == chunk and master.read_total == 2 * chunk, "the two reads before the close count; the third does not"
+    assert master.take_dropped() == chunk
+    assert master.take_dropped() == 0
+
+
+async def test_m2_a_stream_with_no_observer_reports_the_pump_drops_in_the_log_and_still_emits_what_the_pump_kept(monkeypatch):
+    """M2: production attaches no observer, so on Windows the post-publication path through `_note_handle_drops` runs with
+    `_observer is None`. It must mark the gap and deliver the kept bytes without touching an observer."""
+    chunk = 64 * 1024
+    sink = Sink()
+    stream, _recorder, session, master = windows_stream(sink, cap=2 * chunk, observed=False)
+    assert stream._observer is None
+    run_pump(monkeypatch, master, *[bytes([65 + n]) * chunk for n in range(10)])
+    await delivered(stream, session, master)
+    assert stream._observer is None
+    assert marked(session) == [8 * chunk], "the gap is in the log"
+    emitted = sum(len(frame) - terminals_frame_header_size() for frame in sink.frames)
+    assert emitted == 2 * chunk, "and the two chunks the pump kept reached the sink"
 
 
 def test_the_stream_observer_has_one_method_per_event_and_no_more():

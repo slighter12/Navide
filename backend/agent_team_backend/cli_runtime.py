@@ -1852,6 +1852,10 @@ class RustTerminalService(TerminalInterface):
                 if self._retired_generation(generation):
                     return
                 # `closed` is still false until here, so none of the baseline's discard paths ran.
+                if WINDOWS:
+                    # From here the pump adds nothing (it keeps reading after `stop_reading`, so it can drop during the barrier's
+                    # emit): the stream's last collection of its drops, in `close_stream_state`, is final.
+                    session.handle.begin_close()
                 self.stream.close_stream_state(session)
                 if WINDOWS:
                     # The join waits on worker threads: off the loop, bounded by THREAD_CLOSE_S.

@@ -1998,7 +1998,9 @@ class TerminalService(TerminalInterface):
 
     def abandon_output(self, session: TerminalSession) -> tuple[bool, int]:
         """Count the bytes no one took and mark the gap in the log, synchronously, and ask an in-flight drain to stop
-        (requested, not awaited). Returns (a drain or barrier was in flight, the bytes not taken)."""
+        (requested, not awaited). Returns (a drain or barrier was in flight, the bytes not taken). The caller has begun the
+        handle's close, so the drops it still holds are final and are reported here with the rest."""
+        self._note_handle_drops(session)
         drain = self._drain_tasks.get(session.id)
         barrier = self._resize_barriers.get(session.id)
         in_flight = drain is not None or (barrier is not None and barrier.locked())
@@ -2015,7 +2017,11 @@ class TerminalService(TerminalInterface):
 
     def close_stream_state(self, session: TerminalSession) -> None:
         """The stream half of a close, in the in-process service's order: mark closed, drop input state, cancel the
-        batch and pause timers, flush the log decoder's tail into the log. The handle is closed by the caller."""
+        batch and pause timers, flush the log decoder's tail into the log. The handle is closed by the caller, who has begun
+        that close (so its reader can add no more drops) before this: the drops it still holds are collected here, last."""
+        self._note_handle_drops(session)
+        if self._out_dropped.get(session.id):
+            self._mirror_flush_to_log(session, b"")  # the gap, ahead of the decoder's tail
         session.closed = True
         self._unwatch_writable(session)
         self._in_buffers.pop(session.id, None)
