@@ -65,6 +65,30 @@ async def _tokens(_usage: object) -> None:
     return None
 
 
+class _PartialThenRaiseReader(_CountingReader):
+    def parse_activity(self, path: Path, seen_keys: set[str]) -> list[ActivityEvent]:
+        self.parse_calls += 1
+        seen_keys.add("read-before-the-bad-record")
+        raise ValueError("bad record")
+
+
+@pytest.mark.asyncio
+async def test_the_parse_error_follow_up_is_one_coalesced_entry(tmp_path: Path) -> None:
+    root = tmp_path / "claude"
+    root.mkdir()
+    busy = root / "busy.jsonl"
+    busy.write_text("{}\n", encoding="utf-8")
+    reader = _PartialThenRaiseReader(root)
+    watcher = LogWatcher(sink=_tokens, activity_sink=_activity)  # type: ignore[arg-type]
+    watcher.add_reader(reader)
+    watcher._loop = asyncio.get_running_loop()  # noqa: SLF001
+    await watcher._process_realtime_path(busy)  # noqa: SLF001
+    assert watcher._queue.qsize() == 1  # noqa: SLF001
+    # An append event while the follow-up waits is covered by it, as for any queued file.
+    watcher._enqueue_realtime(busy)  # noqa: SLF001
+    assert watcher._queue.qsize() == 1  # noqa: SLF001
+
+
 @pytest.mark.asyncio
 async def test_appends_while_a_file_waits_are_walked_once(tmp_path: Path) -> None:
     root = tmp_path / "claude"

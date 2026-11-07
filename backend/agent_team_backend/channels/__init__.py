@@ -430,8 +430,11 @@ def _retire_superseded(workspace_path: str, session_id: str, keep: str,
         if pane_id == keep or pane_id not in idle:
             continue
         # Its children follow the conversation to `keep`; a plain retire would make them roots.
-        after, _ = app.project_store.record_pane_unspawn_by_id(
+        after, did_retire = app.project_store.record_pane_unspawn_by_id(
             workspace_path, pane_id=pane_id, successor=keep)
+        if not did_retire:
+            # Retired by someone else since _superseded() chose it: no hand-off was made here.
+            continue
         retired.append(pane_id)
         # The store chose the heir under its lock against this same state.
         if any(p.pane_id == keep and getattr(p, "spawn_status", "") != "removed" for p in after.panes):
