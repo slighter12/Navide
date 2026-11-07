@@ -50,7 +50,7 @@ NON_VENDOR_AGENT_KEYS = {"terminal"}
 # platform seam from a vendor cannot form a cycle.
 ALLOWED_LOCAL_IMPORTS = {
     "base", "_protocols", "applog", "log_readers.base", "osplat", "skills_store",
-    "usage_common", "_vendor_facts",
+    "usage_common", "_vendor_facts", "session_layout",
 }
 # Cursor's Python reader and the sidecar's reader share one activity bag (t36b W1: switching between them keeps the walks and the stamp
 # floor), so the reader decodes the bag's `native_state` entry with the state module's own `pack` / `unpack`.

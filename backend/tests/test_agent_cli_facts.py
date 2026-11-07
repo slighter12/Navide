@@ -27,8 +27,8 @@ STATUSES = {"integrated", "vendor-unsupported", "not-yet-integrated", "unknown"}
 CAPABILITIES = {"model", "effort", "skip_permissions", "resume_by_id", "session_id_at_launch", "login"}
 REQUIRED = {
     "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
-    "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_path", "logs",
-    "supports_session_resume", "shutdown", "capabilities", "observer",
+    "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_root", "session_path", "logs",
+    "permission_aliases", "supports_session_resume", "shutdown", "capabilities", "observer",
 }
 #: The typed records a declaration may carry (each is null or exactly these fields): what the generic core routines read
 #: instead of per-vendor code.
@@ -36,6 +36,8 @@ RECORDS = {
     "resume_aliases": {"programs", "flags"},
     "subcommand": {"word", "aliases"},
     "data_dirs": {"env", "home", "append", "extra_env", "tilde"},
+    "session_root": {"root_env", "base_env", "home", "fallbacks", "sub"},
+    "permission_aliases": {"spellings", "mode_flags", "config_keys"},
     "session_path": {"segments", "cwd"},
     "logs": {"files", "cwd"},
 }
@@ -122,6 +124,28 @@ def test_a_session_path_without_the_id_is_refused(tmp_path: Path) -> None:
     generator = declarations_with(tmp_path, "claude", lambda facts: facts["session_path"].update(segments=["{cwd}", "x.jsonl"]))
     with pytest.raises(SystemExit, match="session_path must hold"):
         generator.load(tmp_path)
+
+
+def test_a_session_root_without_a_default_base_is_refused(tmp_path: Path) -> None:
+    generator = declarations_with(tmp_path, "droid", lambda facts: facts["session_root"].update(home=[]))
+    with pytest.raises(SystemExit, match="default base"):
+        generator.load(tmp_path)
+
+
+def test_a_flag_whose_capability_is_not_integrated_is_refused_by_the_generator(tmp_path: Path) -> None:
+    """t39f M7: a non-null flag requires capability `integrated`, so the launch composer can never be handed a flag
+    the sidecar would refuse."""
+    generator = declarations_with(tmp_path, "claude", lambda facts: facts["capabilities"].update(effort="unknown"))
+    with pytest.raises(SystemExit, match="effort_flag is declared, so capability effort must be integrated"):
+        generator.load(tmp_path)
+
+
+def test_every_flag_capability_pair_is_enforced(tmp_path: Path) -> None:
+    for flag, capability in load_generator().FLAG_CAPABILITIES:
+        owner = next(key for key, facts in declarations().items() if facts[flag] is not None)
+        generator = declarations_with(tmp_path / flag, owner, lambda facts: facts["capabilities"].update({capability: "not-yet-integrated"}))
+        with pytest.raises(SystemExit, match=f"{flag} is declared"):
+            generator.load(tmp_path / flag)
 
 
 def test_a_subcommand_that_is_not_the_first_word_of_the_resume_is_refused(tmp_path: Path) -> None:

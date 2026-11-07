@@ -74,7 +74,6 @@ export const SPEC = {
   // Accepted for every pane Navide spawns, a resumed one included (#402), and
   // only for the pane's own workspace.
   startupTrust: { pattern: TRUST_PROMPT, keys: 'y' },
-  resumeCommandPattern: /^grok\s+-r\s+\S+/,
   supportsRebuild: true,
   hint: 'generalist',
   // Quota failover: grok.py reports one "Monthly credits" window.

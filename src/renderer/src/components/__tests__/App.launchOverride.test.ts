@@ -29,48 +29,16 @@ function handler(event: string): string {
   return appSource.slice(start, end)
 }
 
-describe('resolveCommand — the stored launch-command override', () => {
-  const body = fn('resolveCommand')
-
-  // The precedence itself (caller > stored > none, login skips stored) is
-  // pinned executably in cliLaunchOverride.test.ts; these pin that resolveCommand
-  // delegates to it with the right inputs.
-  it('asks chooseLaunchCommand, with the caller override, the stored setting and the login flag', () => {
-    expect(body).toMatch(
-      /chooseLaunchCommand\(\{\s*callerCommand: override,\s*storedCommand: settingsGet\(cliCommandKey\(agentKey\), ''\),\s*isLogin,\s*\}\)/,
-    )
-  })
-
-  it('still returns an override verbatim, so model and effort are skipped', () => {
-    // This is what the settings page has to warn about: an override means the
-    // user writes the whole line and nothing below is appended.
-    const overrideIdx = body.indexOf("if (launch.source !== 'none') {")
-    expect(overrideIdx).toBeGreaterThan(-1)
-    expect(body.indexOf('modelArgsFor(')).toBeGreaterThan(overrideIdx)
-    expect(body).toContain('return { command: launch.command, words: words ?? literalWords(launch.command), source: launch.source }')
-  })
-
-  it('takes the words of an override only from a rebuilt resume command the caller passed, never from the stored one', () => {
-    expect(body).toContain("const words = launch.source === 'caller' ? resumeWordsFor(launch.command) : undefined")
-  })
-
-  it('leaves the custom binary to the backend on the no-override path — the one a login pane takes', () => {
-    // A login pane gets source 'none', so it falls through to the vendor's own
-    // default command. The custom binary is swapped in by terminal.create
-    // (backend cli_binary_overrides), for logins too.
-    expect(body).toMatch(/return \{\s*command: parts\.join\(' '\),\s*words: freshLaunchWords\(\{[^}]*\}\),\s*source: 'none',\s*\}/)
-  })
-})
-
+// What a launch is composed to (the caller's override, the stored command, the fresh launch and its words) is proved
+// executably through the spawn seam in src/renderer/src/lib/spawnLaunch.test.ts, with a fake terminal port; the types
+// bind spawnPane to that seam. Only the one input a type cannot tell apart stays pinned here.
 describe('spawnPane — a login pane never launches on the stored command', () => {
   const body = fn('spawnPane')
 
   it('passes isLogin for both login shapes (isolated profile and live)', () => {
     // The backend keeps only the first token of a login command and appends the
     // sign-in subcommand, so `npx …` would become `npx auth login`.
-    expect(body).toMatch(
-      /resolveCommand\(opts\.agentKey, opts\.commandOverride, paneArgCtx, \{[^}]*\}, !!\(opts\.isLogin \|\| opts\.loginProfileId\)\)/,
-    )
+    expect(body).toContain('isLogin: !!(opts.isLogin || opts.loginProfileId)')
   })
 })
 

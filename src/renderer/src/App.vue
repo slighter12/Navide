@@ -223,18 +223,18 @@ import { quickClassify } from './lib/quick-classify'
 import type { DirLister } from '@navide/plugin-shell'
 import {
   buildResumeCommand,
+  buildResumeLaunch,
   acquirePaneRebuildLock,
   cancelStalePendingCreate,
   dedupeRestorablePanes,
   isShellSafeSessionId,
-  modelArgsFor,
+  looksLikeResumeCommand,
   type CliModelRequest,
   normalizeResumeSessionId,
   sessionHomeIdFor,
   paneBusyForRebuild,
   paneCanRebuild,
   paneRebuildVisible,
-  resumeWordsFor,
   RESTORE_PIN_AGENTS,
   shouldPreserveMissingSessionOnRestore,
   shouldWarnMissingResume,
@@ -247,7 +247,6 @@ import {
   createGhostHealGate,
   createUiStateSeqGuard,
   mapOrphanSession,
-  pinFreshSessionAtLaunch,
   pinsSessionAtLaunch,
   supportsGhostReconnect,
   reconnectCandidateSessionIds,
@@ -256,6 +255,7 @@ import {
   shouldAttemptResume,
   type RawOrphanSession,
 } from './lib/sessionHeal'
+import { composeLaunch, spawnLaunch } from './lib/spawnLaunch'
 import {
   gridPageCount,
   gridPageOf,
@@ -307,7 +307,7 @@ import { isRepeatCrash, planBackendRestartResume, planRuntimeLossResume, type Ba
 import { WakeClaims, joinedRealizeOutcome, paneOpenAnswer, sessionHeldElsewhere, type SessionHolder } from './lib/paneOpenAnswer'
 import { flushSettingsOnExit, initSettingsBackend, onSettingsChanged, settingsGet, settingsRemove, settingsSet } from '@navide/plugin-ui/shared'
 import { cliPermissionKey, parseCliPermissionMode, skipPermissionFlagFor } from '@navide/plugin-shell'
-import { chooseLaunchCommand, cliCommandKey, cliEnvKey, spawnEnvOverride, type LaunchCommandSource } from '@navide/plugin-shell'
+import { chooseLaunchCommand, cliCommandKey, cliEnvKey, spawnEnvOverride } from '@navide/plugin-shell'
 import { useLayoutStore } from './layout/useLayoutStore'
 import { RAIL_SIZE } from './layout/slots'
 import SlotContainer from './layout/SlotContainer.vue'
@@ -483,14 +483,7 @@ import PairingPrompt from './components/PairingPrompt.vue'
 import ShutdownOverlay, { type QuitStage } from './components/ShutdownOverlay.vue'
 import BrandLoader from './components/BrandLoader.vue'
 import NavideCloudMark from './components/NavideCloudMark.vue'
-import { shellCommandArgv } from '../../shared/osplat'
-import {
-  freshLaunchWords,
-  literalWords,
-  verifiedWords,
-  withSessionIdWords,
-  type LaunchWord,
-} from '../../shared/launchWords'
+import type { LaunchWord } from '../../shared/launchWords'
 const OnboardingWizard = defineAsyncComponent(() => import('./components/OnboardingWizard.vue'))
 const WhatsNewModal = defineAsyncComponent(() => import('./components/WhatsNewModal.vue'))
 const GuidedTour = defineAsyncComponent(() => import('./components/GuidedTour.vue'))
@@ -1746,11 +1739,6 @@ async function savedHistoryFile(
   return resolve(workspacePath, paneId, listPaneDir)
 }
 
-/** The model/effort a pane was asked to launch on. `{ model: '', effort: '' }`
- *  means "not requested" and is what every caller that never heard of a model
- *  passes, so their command comes out byte-for-byte as before. */
-const NO_MODEL_REQUEST: CliModelRequest = { model: '', effort: '' }
-
 /** Whether a fresh, non-login pane of this agent would launch on the stored
  *  launch command — the question the spawn gate asks before accepting a model. */
 function storedLaunchCommandApplies(agentKey: string): boolean {
@@ -1759,69 +1747,6 @@ function storedLaunchCommandApplies(agentKey: string): boolean {
     storedCommand: settingsGet(cliCommandKey(agentKey), ''),
     isLogin: false,
   }).source === 'stored'
-}
-
-function resolveCommand(
-  agentKey: string,
-  override: string,
-  paneArgCtx?: PaneArgContext,
-  modelRequest: CliModelRequest = NO_MODEL_REQUEST,
-  isLogin = false
-): { command: string; words: LaunchWord[]; source: LaunchCommandSource } {
-  const spec = agentSpecs.find((s) => s.agentKey === agentKey)
-  // A caller's override (a rebuilt resume command, an MCP-supplied command)
-  // outranks the stored one: it is this launch's command, while the setting is
-  // only what a launch that names none should start from. A login pane skips
-  // the setting — see chooseLaunchCommand.
-  const launch = chooseLaunchCommand({
-    callerCommand: override,
-    storedCommand: settingsGet(cliCommandKey(agentKey), ''),
-    isLogin,
-  })
-  // If user supplied an override, trust it verbatim. Nothing below runs — the
-  // permission flag, the pane argument and the model/effort are all things
-  // Navide adds, and an override means the user is writing the line instead.
-  // Settings → CLI Agents says so where the override is typed.
-  if (launch.source !== 'none') {
-    // A rebuilt resume command comes with the words it was composed from; any other override is one literal.
-    const words = launch.source === 'caller' ? resumeWordsFor(launch.command) : undefined
-    return { command: launch.command, words: words ?? literalWords(launch.command), source: launch.source }
-  }
-  const parts = [spec?.defaultCommand ?? agentKey]
-  const paneArg = paneArgCtx && spec?.paneArg ? spec.paneArg(paneArgCtx) : ''
-  if (paneArg) parts.push(paneArg)
-  const skipFlag = skipFlagFor(agentKey, spec)
-  if (skipFlag) parts.push(skipFlag)
-  // Model/effort last, the same order buildResumeCommand uses, so a resumed
-  // pane and a fresh one carry the same argv shape.
-  //
-  // This function returns a string and has no error channel, so a request the
-  // vendor cannot honour is DROPPED here, not refused. That is safe only
-  // because the authoritative refusal happens before a spawn ever reaches
-  // this point (the spawn gate for user actions, the MCP tool for agents) —
-  // reaching here with an unsupported request means one of those let it past,
-  // which the warning below makes visible instead of silent.
-  const chosen = modelArgsFor({ spec, request: modelRequest })
-  if (chosen.ok) {
-    if (chosen.args) parts.push(chosen.args)
-  } else {
-    console.warn(
-      `[resolveCommand] ${agentKey} cannot take model="${modelRequest.model}" `
-      + `effort="${modelRequest.effort}" (${chosen.refusal.kind}); launching on the vendor default`
-    )
-  }
-  return {
-    command: parts.join(' '),
-    words: freshLaunchWords({
-      agentKey,
-      program: spec?.defaultCommand ?? agentKey,
-      paneArg,
-      skipPermissions: Boolean(skipFlag),
-      model: chosen.ok ? modelRequest.model.trim() : '',
-      effort: chosen.ok ? modelRequest.effort.trim() : '',
-    }),
-    source: 'none',
-  }
 }
 
 interface RunGroup {
@@ -3335,9 +3260,9 @@ function mcpSpawnCommandOverride(req: {
   model?: string
   effort?: string
   sessionId?: string
-}): string {
+}): { command: string; words?: LaunchWord[] } {
   const sessionId = (req.sessionId ?? '').trim()
-  if (!sessionId) return ''
+  if (!sessionId) return { command: '' }
   // Second layer of the backend's shape check: the id goes into a shell
   // command string, so anything that could split into more words is refused
   // here too rather than trusted to have been refused upstream.
@@ -3347,14 +3272,14 @@ function mcpSpawnCommandOverride(req: {
       code: 'spawn.resume-unsafe-id',
       message: `session id refused — not shell-safe, opening a fresh pane instead`,
     })
-    return ''
+    return { command: '' }
   }
   const spec = agentSpecs.find((s) => s.agentKey === req.agentKey)
-  const resume = buildResumeCommand(req.agentKey, sessionId, skipFlagFor(req.agentKey, spec), '', {
+  const resume = buildResumeLaunch(req.agentKey, sessionId, skipFlagFor(req.agentKey, spec), '', {
     model: req.model ?? '',
     effort: req.effort ?? '',
   })
-  if (!resume) {
+  if (!resume.command) {
     // Defensive: the tool refuses a vendor with no session store before it gets
     // here, so this is a spec that changed under us. Fresh is the only thing
     // left to open, but it must be recorded — a pane that silently starts empty
@@ -3366,7 +3291,7 @@ function mcpSpawnCommandOverride(req: {
       code: 'spawn.resume-unavailable',
       message: `${req.agentKey} has no id-based resume — opening a fresh pane instead of session ${sessionId}`,
     })
-    return ''
+    return { command: '' }
   }
   return resume
 }
@@ -3396,7 +3321,7 @@ async function createRequestedPane(
 ): Promise<string | null> {
   assertRequestedSpawnGroup(parent.workspacePath, req.runGroupId)
   const mcpCommand = mcpSpawnCommandOverride(req)
-  const mcpResumeId = mcpCommand ? (req.sessionId ?? '').trim() : ''
+  const mcpResumeId = mcpCommand.command ? (req.sessionId ?? '').trim() : ''
   // Resuming is not opening a new pane under the caller — it is putting a
   // conversation back where it was. A pane's record outlives the pane, so the
   // backend read the parent and tab group this conversation last sat in; both
@@ -3417,7 +3342,8 @@ async function createRequestedPane(
     roleKey: '' as RoleKey,
     stageId: '' as StageId,
     customName: req.name,
-    commandOverride: mcpCommand,
+    commandOverride: mcpCommand.command,
+    commandWords: mcpCommand.words,
     // A pane opened onto an existing conversation has to SAY it is a resume:
     // spawnPane otherwise pins a fresh Claude --session-id on top of the
     // `--resume <id>` this override already carries, and the CLI refuses both
@@ -3517,7 +3443,7 @@ async function createStandaloneRequestedPane(
 ): Promise<string | null> {
   assertRequestedSpawnGroup(workspacePath, req.runGroupId)
   const mcpCommand = mcpSpawnCommandOverride(req)
-  const mcpResumeId = mcpCommand ? (req.sessionId ?? '').trim() : ''
+  const mcpResumeId = mcpCommand.command ? (req.sessionId ?? '').trim() : ''
   // Same rule as createRequestedPane: a resumed conversation goes back to the
   // group it sat in and under the parent it had. A standalone spawn has no
   // requesting pane, so a fresh one is a root in the active tab's group — but
@@ -3533,7 +3459,8 @@ async function createStandaloneRequestedPane(
     roleKey: '' as RoleKey,
     stageId: '' as StageId,
     customName: req.name,
-    commandOverride: mcpCommand,
+    commandOverride: mcpCommand.command,
+    commandWords: mcpCommand.words,
     // A pane opened onto an existing conversation has to SAY it is a resume:
     // spawnPane otherwise pins a fresh Claude --session-id on top of the
     // `--resume <id>` this override already carries, and the CLI refuses both
@@ -7681,8 +7608,12 @@ interface SpawnInternal {
    *  header for downstream stages can identify which agent produced which output. */
   slotLabel?: string
   commandOverride: string
+  /** The words `commandOverride` was composed from, when a rebuilt resume launch built it
+   *  (`buildResumeLaunch`). Any other override (a stored or handwritten line) has none and
+   *  is sent as one literal. */
+  commandWords?: LaunchWord[]
   /** Model id to launch on ('' / absent = the vendor default). Only reaches
-   *  the command line on a FRESH spawn — resolveCommand hands a
+   *  the command line on a FRESH spawn — composeLaunch hands a
    *  commandOverride back untouched, so a resume path must have rebuilt the
    *  flag into the override itself (buildResumeCommand does). Carried anyway
    *  so the pane records what it is running and later rebuilds can reproduce it. */
@@ -7845,39 +7776,33 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
   if (opts.requestedRunGroupId !== undefined) {
     assertRequestedSpawnGroup(opts.workspacePath, opts.requestedRunGroupId)
   }
-  const launch = resolveCommand(opts.agentKey, opts.commandOverride, paneArgCtx, {
-    model: opts.model ?? '',
-    effort: opts.effort ?? '',
-  }, !!(opts.isLogin || opts.loginProfileId))
-  let command = launch.command
-  let words = launch.words
-  // A stored launch command is the user's whole line, so no model or effort
-  // reached argv. Recording the request anyway would make the pane (and every
-  // record and rebuild built from it) claim a model the CLI never received.
-  const launchedModel: CliModelRequest = launch.source === 'stored'
-    ? NO_MODEL_REQUEST
-    : { model: opts.model ?? '', effort: opts.effort ?? '' }
   const userShell = backend.shell.value || 'bash'
-
-  if (opts.agentKey === 'terminal' && !command) {
-    command = userShell
-    words = literalWords(command)
-  }
-
-  // For Claude, pin a unique --session-id so backend attribution maps THIS
+  // For Claude, the launch pins a unique --session-id so backend attribution maps THIS
   // pane's CLI events (turn_complete / agent_active / JSONL) precisely. Without
   // it, panes sharing one workspace are matched by a first-come-claim heuristic
   // that mis-routed a pane's turn_complete to a sibling (the Stage 01 bug).
   // freshSessionId (restore fallback of a not-resumable session) reuses the
   // saved id instead of minting a new one — see pinFreshSessionAtLaunch.
-  const pinned = pinFreshSessionAtLaunch(
-    opts.agentKey, opts.isResume ?? false, command, opts.freshSessionId,
-    () => crypto.randomUUID()
-  )
-  const explicitSessionId = pinned.explicitSessionId
-  // The pin appends one `--session-id <id>` option; a handwritten one is already in the text.
-  if (pinned.command !== command) words = withSessionIdWords(opts.agentKey, words, explicitSessionId)
-  command = pinned.command
+  // A caller's resume override brings the words it was composed from (commandWords);
+  // the stored launch command is the user's whole line, so no model or effort
+  // reached argv and `launchedModel` claims none (see composeLaunch).
+  const spawnPlan = composeLaunch({
+    agentKey: opts.agentKey,
+    commandOverride: opts.commandOverride,
+    commandWords: opts.commandWords,
+    storedCommand: settingsGet(cliCommandKey(opts.agentKey), ''),
+    isLogin: !!(opts.isLogin || opts.loginProfileId),
+    isResume: opts.isResume ?? false,
+    freshSessionId: opts.freshSessionId,
+    skipFlag: skipFlagFor(opts.agentKey, spec),
+    paneArg: paneArgCtx && spec.paneArg ? spec.paneArg(paneArgCtx) : '',
+    model: { model: opts.model ?? '', effort: opts.effort ?? '' },
+    userShell,
+    newSessionId: () => crypto.randomUUID(),
+  })
+  const command = spawnPlan.command
+  const launchedModel: CliModelRequest = spawnPlan.launchedModel
+  const explicitSessionId = spawnPlan.explicitSessionId
   const sessionHomeId = sessionHomeIdFor(opts.agentKey, id, opts.sessionHomeId)
   const pinnedSessionId = opts.isResume
     ? (opts.resumeSessionId?.trim() || undefined)
@@ -8073,14 +7998,12 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
       : undefined
     pane.outputLogFile = outputLogFile
 
-    await ref.spawn({
-      // zsh reads ~/.zshrc (where installers add PATH, e.g. Claude Code's
-      // ~/.local/bin) only in interactive mode — plain -lc misses it; the
-      // helper picks that or the PowerShell/cmd.exe equivalent per platform.
-      // A Windows agent pane skips the PowerShell wrapper entirely (agentPane):
-      // `-Command` would re-parse a `--mcp-config {…}` payload as PowerShell.
-      command: shellCommandArgv(userShell, command, { agentPane: opts.agentKey !== 'terminal' }),
-      words: verifiedWords(command, words),
+    // The launch's command and words reach the terminal through spawnLaunch: zsh reads ~/.zshrc
+    // (where installers add PATH, e.g. Claude Code's ~/.local/bin) only in interactive mode —
+    // plain -lc misses it, so the helper picks that or the PowerShell/cmd.exe equivalent per
+    // platform. A Windows agent pane skips the PowerShell wrapper entirely (agentPane):
+    // `-Command` would re-parse a `--mcp-config {…}` payload as PowerShell.
+    await spawnLaunch(ref, spawnPlan, userShell, {
       cwd: opts.workspacePath,
       agentKey: opts.agentKey,
       // Settings → CLI Agents → this vendor's env table. Undefined when the
@@ -8494,7 +8417,8 @@ async function onManualResume(payload: { agentKey: string, workspacePath: string
   }
   // The custom-binary override applies to resume too: terminal.create swaps it
   // in on the backend.
-  const commandOverride = buildResumeCommand(agentKey, sessionId, skipFlag, chatHistoryFile, modelRequest)
+  const resumeLaunch = buildResumeLaunch(agentKey, sessionId, skipFlag, chatHistoryFile, modelRequest)
+  const commandOverride = resumeLaunch.command
   const spawnGroupId = resolveReadySpawnGroupId(runGroups.value, activeTab.value, runGroupsReady.value)
   // Resuming is putting a conversation back where it was, and where it was
   // includes who opened it. Only Agent History knows which pane the session
@@ -8509,6 +8433,7 @@ async function onManualResume(payload: { agentKey: string, workspacePath: string
     nameLocked: payload.nameLocked,
     autoName: payload.autoName,
     commandOverride,
+    commandWords: resumeLaunch.words,
     workspacePath,
     origin: 'manual',
     spawnedBy: resumeSpawnedBy || undefined,
@@ -9315,10 +9240,13 @@ async function rebuildPaneViaResume(
     }
     const spec = agentSpecs.find((s) => s.agentKey === pane.agentKey)
     const skipFlag = skipFlagFor(pane.agentKey, spec)
-    const resumeCmd = fresh ? '' : buildResumeCommand(pane.agentKey, sessionId, skipFlag, '', {
-      model: pane.model ?? '',
-      effort: pane.effort ?? '',
-    })
+    const resumeLaunch = fresh
+      ? { command: '', words: [] as LaunchWord[] }
+      : buildResumeLaunch(pane.agentKey, sessionId, skipFlag, '', {
+        model: pane.model ?? '',
+        effort: pane.effort ?? '',
+      })
+    const resumeCmd = resumeLaunch.command
     if (!fresh && !resumeCmd) {
       if (!opts?.suppressBusyToast) {
         notifyRestore.toast(i18n.global.t('pane.terminal.rebuild-no-session'), { type: 'error' })
@@ -9391,6 +9319,7 @@ async function rebuildPaneViaResume(
       stageId: snap.stageId,
       slotLabel: snap.slotLabel,
       commandOverride: resumeCmd,
+      commandWords: resumeLaunch.words,
       workspacePath: snap.workspacePath,
       origin: snap.origin,
       spawnedBy: snap.spawnedBy,
@@ -13081,6 +13010,8 @@ interface RestoredPaneSpawnOptions {
   /** Persisted CLI account pin; restores must stay on the same isolated home. */
   profileId?: string
   commandOverride: string
+  /** The words a rebuilt resume launch composed `commandOverride` from; none for a fallback command. */
+  commandWords?: LaunchWord[]
   fallbackCommand: string
   isResume: boolean
   resumeSessionId: string
@@ -13137,6 +13068,7 @@ async function spawnRestoredPane(opts: RestoredPaneSpawnOptions): Promise<Restor
     autoName: saved.auto_name || undefined,
     autoNameSource: autoNameSourceOf(saved.auto_name_source),
     commandOverride: opts.commandOverride,
+    commandWords: opts.commandWords,
     workspacePath: opts.workspacePath,
     origin: saved.origin,
     // Live value first — see RestoredPaneSpawnOptions.spawnedBy.
@@ -13220,14 +13152,6 @@ async function spawnRestoredPane(opts: RestoredPaneSpawnOptions): Promise<Restor
 
 interface SessionExistsPayload {
   exists: boolean
-}
-
-function looksLikeResumeCommand(agentKey: string, command: string): boolean {
-  const cmd = command.trim()
-  if (!cmd) return false
-  const pattern = agentSpecs.find((spec) => spec.agentKey === agentKey)?.resumeCommandPattern
-  if (pattern) return pattern.test(cmd)
-  return new RegExp(`^${agentKey}\\s+--resume\\s+\\S+`).test(cmd)
 }
 
 /** Tri-state: true = transcript exists, false = definitively absent, null =
@@ -13950,12 +13874,13 @@ async function restoreWorkspacePanes(payload: ProjectPayload, workspacePath: str
       const attemptResume = shouldAttemptResume(canResume)
       const chatHistoryFile = await savedHistoryFile(saved.agent, workspacePath, saved.pane_id)
       if (isStale?.() || !isLocalWorkspace(workspacePath)) return
-      const resumeCmd = attemptResume
-        ? buildResumeCommand(saved.agent, sessionId, skipFlag, chatHistoryFile, {
+      const resumeLaunch = attemptResume
+        ? buildResumeLaunch(saved.agent, sessionId, skipFlag, chatHistoryFile, {
             model: saved.model ?? '',
             effort: saved.effort ?? '',
           })
-        : ''
+        : { command: '', words: [] as LaunchWord[] }
+      const resumeCmd = resumeLaunch.command
       const isResume = !!resumeCmd
       const effectiveResumeId = sessionId
       const savedFallbackCommand = saved.command && !looksLikeResumeCommand(saved.agent, saved.command)
@@ -13971,6 +13896,7 @@ async function restoreWorkspacePanes(payload: ProjectPayload, workspacePath: str
         sessionHomeId,
         profileId: restorePin,
         commandOverride,
+        commandWords: resumeCmd ? resumeLaunch.words : undefined,
         fallbackCommand,
         isResume,
         resumeSessionId: effectiveResumeId,
@@ -14461,12 +14387,12 @@ async function performRealizeRestoredPane(
     const attemptResume = !forceFresh && shouldAttemptResume(canResume)
     const chatHistoryFile = await savedHistoryFile(saved.agent, batch.workspacePath, saved.pane_id)
     if (!deferredPaneStillCurrent(paneId, deferred)) return 'superseded'
-    let resumeCmd = attemptResume
-      ? buildResumeCommand(saved.agent, sessionId, skipFlag, chatHistoryFile, {
+    let resumeLaunch = attemptResume
+      ? buildResumeLaunch(saved.agent, sessionId, skipFlag, chatHistoryFile, {
           model: saved.model ?? '',
           effort: saved.effort ?? '',
         })
-      : ''
+      : { command: '', words: [] as LaunchWord[] }
     const ghostConfirmed = !forceFresh && shouldWarnMissingResume(
       saved.agent, sessionId, canResume, looksLikeResumeCommand(saved.agent, saved.command || ''),
     )
@@ -14485,7 +14411,7 @@ async function performRealizeRestoredPane(
       })
       if (!deferredPaneStillCurrent(paneId, deferred)) return 'superseded'
       if (repointed) {
-        resumeCmd = buildResumeCommand(saved.agent, reconnectId, skipFlag, '', {
+        resumeLaunch = buildResumeLaunch(saved.agent, reconnectId, skipFlag, '', {
           model: saved.model ?? '',
           effort: saved.effort ?? '',
         })
@@ -14498,6 +14424,7 @@ async function performRealizeRestoredPane(
         reconnectId = ''
       }
     }
+    const resumeCmd = resumeLaunch.command
     // A chat's wake asks for the pane's own conversation or nothing.
     if (opts?.requireResume && !resumeCmd) return forceFresh ? 'fresh-refused' : 'resume-unavailable'
     if (ghostConfirmed && !reconnectId) {
@@ -14524,6 +14451,7 @@ async function performRealizeRestoredPane(
       sessionHomeId: placeholder.sessionHomeId,
       profileId: restorePin,
       commandOverride,
+      commandWords: resumeCmd ? resumeLaunch.words : undefined,
       fallbackCommand,
       isResume,
       resumeSessionId: effectiveResumeId,

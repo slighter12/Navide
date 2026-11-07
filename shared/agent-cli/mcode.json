@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": null,
   "data_dirs": {"env": ["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"], "home": [".minimax"], "append": [], "extra_env": [], "tilde": false},
+  "session_root": null,
   "session_path": null,
   "logs": null,
+  "permission_aliases": null,
   "supports_session_resume": false,
   "shutdown": null,
   "capabilities": {

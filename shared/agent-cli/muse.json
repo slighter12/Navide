@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": null,
   "data_dirs": {"env": ["XDG_DATA_HOME"], "home": [".local", "share"], "append": ["muse"], "extra_env": [], "tilde": false},
+  "session_root": {"root_env": [], "base_env": ["XDG_DATA_HOME"], "home": [".local", "share"], "fallbacks": [], "sub": ["muse", "sessions"]},
   "session_path": null,
   "logs": {"files": ["*/*/*/*/session.jsonl"], "cwd": "absent"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

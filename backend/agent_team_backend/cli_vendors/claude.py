@@ -35,7 +35,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import osplat
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_vendor_session_path, session_root
 from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
@@ -234,16 +234,8 @@ def claude_projects_root() -> Path | None:
     Module-level so the log reader and the resume preflight resolve the root
     the same way — the preflight used to hardcode ~/.claude.
     """
-    env_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    candidates: list[Path] = []
-    if env_dir:
-        candidates.append(Path(env_dir) / "projects")
-    candidates.append(Path.home() / ".config" / "claude" / "projects")
-    candidates.append(Path.home() / ".claude" / "projects")
-    for p in candidates:
-        if p.is_dir():
-            return p
-    return None
+    root = session_root(CLAUDE.session_root)
+    return root if root.is_dir() else None
 
 
 #: A transcript's first lines carry its cwd; anything past these never will.
@@ -272,28 +264,17 @@ class ClaudeLogReader(LogReader):
     def _default_root(self) -> Path | None:
         return claude_projects_root()
 
-    def project_dirs(self) -> list[Path]:
+    def declared_roots(self) -> list[Path]:
         """The single default projects root (empty list when none exists).
 
         Managed-account panes run with CLAUDE_CONFIG_DIR pointed at an isolated
         home, but that home's ``projects`` is symlinked back to the real home
         (credential_vault), so every account's sessions resolve into this one
-        root — no separate profile-home scan is needed. Returned as a list for
-        the callers that iterate it."""
+        root — no separate profile-home scan is needed. Claude names each project
+        dir after the encoded cwd, so the declared scoping (``logs.cwd``) lists
+        just one workspace's folder. ``_default_root`` is the seam tests replace."""
         default = self._default_root()
         return [default] if default is not None else []
-
-    def session_files(self) -> list[Path]:
-        return declared_log_files(CLAUDE.logs, self.project_dirs())
-
-    def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
-        """Only the jsonl files under this workspace's project subdirectory.
-
-        Claude names each project dir after the encoded cwd, so one
-        workspace maps to exactly one folder — we can enumerate just that
-        folder instead of the entire (potentially multi-GB) projects root.
-        """
-        return declared_log_files(CLAUDE.logs, self.project_dirs(), workspace_path)
 
     def own_session_files(self, workspace_path: str) -> list[Path]:
         """session_files_for_workspace without a neighbour's sessions: the folder can
@@ -1393,16 +1374,11 @@ async def fetch_claude_account_dir(config_dir: Path) -> dict:
 CLAUDE = FACTS["claude"]
 
 
-def _session_path(workspace_path: str, session_id: str) -> Path:
-    # A managed-account pane resumes inside its profile's isolated config
-    # home, but that home's ``projects`` is symlinked back to the real home
-    # (credential_vault), so the session jsonl always resolves to the default
-    # location — one check covers every account.
-    # Stays a SINGLE path: it is what _session_lookup_path reports for
-    # diagnostics ("this is where we looked"). The wider search that mirrors
-    # the CLI lives in _session_exists below.
-    root = claude_projects_root() or Path.home() / ".claude" / "projects"
-    return declared_session_path(CLAUDE.session_path, root, workspace_path, session_id)
+# The session path is the declared one (`VendorSpec` derives it): a managed-account pane resumes inside its
+# profile's isolated config home, but that home's ``projects`` is symlinked back to the real home
+# (credential_vault), so the session jsonl always resolves to the default location — one check covers every
+# account. It stays a SINGLE path, which `_session_lookup_path` reports for diagnostics ("this is where we looked");
+# the wider search that mirrors the CLI lives in `_session_exists` below.
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -1422,7 +1398,7 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
     """
     if not session_id or "/" in session_id or session_id.startswith("."):
         return False  # ids are filename stems; never let one walk the tree
-    if _session_path(workspace_path, session_id).is_file():
+    if declared_vendor_session_path(CLAUDE, workspace_path, session_id).is_file():
         return True  # this workspace's own project — the common case
     root = claude_projects_root()
     if root is None:
@@ -1482,7 +1458,6 @@ SPEC = VendorSpec(
     # Same config home as install_dep; never use the backend reader's fallback
     # search across other accounts when this pane has an isolated config dir.
     data_dirs=data_dirs_of(CLAUDE.data_dirs),
-    data_dir_env_vars=("CLAUDE_CONFIG_DIR",),
     supports_model=CLAUDE.model_flag is not None,
     supports_effort=CLAUDE.effort_flag is not None,
     known_efforts=CLAUDE.known_efforts or (),
@@ -1586,7 +1561,6 @@ SPEC = VendorSpec(
     # wiped guard, login CLAUDE_CONFIG_DIR + env removals) are the documented
     # exemption list and are NOT routed through this spec.
     resume_id_from_command=resume_reader_of(CLAUDE),
-    session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=(
         "CLAUDE_CONFIG_DIR",

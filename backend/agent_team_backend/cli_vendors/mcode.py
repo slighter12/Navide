@@ -331,7 +331,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Relocation and legacy fallback verified against mcode 0.4.12 above.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"),
     label="MiniMax Code",
     # `--session <id>` exists on the interactive command, but resume also
     # needs something able to NAME the id of a session Navide started, and

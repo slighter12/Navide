@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from . import osplat
-from .cli_launch import append_args
+from .cli_launch import append_args, command_tokens
 
 log = logging.getLogger("agent_team_backend.claude_hooks")
 
@@ -670,10 +670,10 @@ def wire_spawn(command: Any) -> Any:
     that file, and Claude Code reads only one. A pane file gone missing is
     written again first; when it cannot be, the pane starts without it rather
     than not at all."""
-    from .push_delivery import _command_text, _has_flag
+    from .push_delivery import _has_flag
 
-    if _has_flag(_command_text(command), SETTINGS_FLAG):
-        if str(pane_settings_path()) not in _command_text(command):
+    if _has_flag(command, SETTINGS_FLAG):
+        if not any(str(pane_settings_path()) in token for token in command_tokens(command)):
             log.warning("claude pane names its own %s; Navide's hooks are not added", SETTINGS_FLAG)
         return command
     if not pane_settings_path().is_file():

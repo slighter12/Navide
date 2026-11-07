@@ -8691,7 +8691,7 @@ async def _terminal_create_impl(
     agent_key = payload.get("agent_key") or ""
     try:
         # The structure the renderer composed the command from, when it sent one beside the text.
-        payload["command"] = cli_launch.attach_words(payload.get("command"), payload.get("words"))
+        payload["command"] = cli_launch.attach_words(payload.get("command"), payload.get("words"), agent_key)
     except cli_launch.LaunchRefused as refused:
         session.terminals.receipt_refused_create(str(payload.get("pane_id") or ""), refused)
         raise

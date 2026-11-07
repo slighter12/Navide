@@ -361,7 +361,8 @@ def test_grok_first_session_is_visible_outside_the_home_shim(home: Path, monkeyp
     transcript.parent.mkdir(parents=True)
     transcript.write_text("{}\n")
     reader = GrokLogReader()
-    monkeypatch.setattr(reader, "_home", lambda: real)
+    monkeypatch.delenv("GROK_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     assert reader.session_files() == [real / "sessions" / "%2Fworkspace" / "session-id" / "updates.jsonl"]
 
 

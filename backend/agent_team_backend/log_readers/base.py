@@ -14,6 +14,10 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, BinaryIO
 
+# The cwd encoders live with the rest of the session layout; this name stays the import point of the log readers.
+from ..cli_vendors._vendor_facts import FACTS
+from ..cli_vendors.session_layout import declared_log_files, encode_claude_cwd, session_root  # noqa: F401
+
 log = logging.getLogger("agent_team_backend.log_readers")
 
 
@@ -312,21 +316,6 @@ def read_jsonl_tail(
         {"kind": "jsonl", "offset": committed, "identity": identity, "anchor": anchor}
     )
     return records, next_checkpoint, rotated
-
-
-def encode_claude_cwd(cwd: str) -> str:
-    """Claude Code's project-dir name for a cwd — the single source of truth.
-
-    Claude replaces EVERY non-alphanumeric char with "-" (dots, underscores,
-    spaces, unicode — not just "/"). It encodes its *normalized* cwd, which
-    never carries a trailing separator, so strip one before encoding:
-    otherwise the extra "-" makes the encoded dir miss the real one.
-
-    Lives here rather than in claude's vendor module because qwen reuses the
-    same encoding for its per-project dirs — shared infrastructure, not
-    claude-only knowledge.
-    """
-    return re.sub(r"[^A-Za-z0-9]", "-", cwd.rstrip("/\\"))
 
 
 # ── activity dedup: line-scan high-water mark ─────────────────────────────
@@ -681,17 +670,28 @@ class LogReader(ABC):
         a cheap string check."""
         return False
 
-    @abstractmethod
+    def declared_roots(self) -> list[Path]:
+        """The directories the vendor's `session_root` declaration names (empty when it declares none)."""
+        root = FACTS[self.vendor].session_root
+        return [session_root(root)] if root is not None else []
+
     def project_dirs(self) -> list[Path]:
         """Return all existing root directories under which session jsonl files live.
 
+        Default: the declared session root, when it exists. A reader whose roots the disk or the
+        platform decides (codex's pane homes, goose's layout, aider's workspace history) overrides this.
         Implementations should silently skip non-existent paths (e.g. a user
         without the CLI installed). Returns empty list when nothing exists.
         """
+        return [root for root in self.declared_roots() if root.is_dir()]
 
-    @abstractmethod
+    def accepts_declared_file(self, path: Path) -> bool:
+        """A reader's extra test of a path the declared `logs` pattern matched (an id's shape); default: every one."""
+        return True
+
     def session_files(self) -> list[Path]:
-        """Enumerate every JSONL session file under project_dirs(), recursively."""
+        """Enumerate every session file under project_dirs(), by the vendor's `logs` declaration."""
+        return declared_log_files(FACTS[self.vendor].logs, self.project_dirs(), accept=self.accepts_declared_file)
 
     @abstractmethod
     def parse_session_file(
@@ -748,9 +748,14 @@ class LogReader(ABC):
         return just that subset, so a per-workspace rescan never has to touch
         unrelated files. Return None to signal "can't scope by path" (e.g.
         Codex stores sessions by date), letting the caller fall back to
-        session_files(). Default: None.
+        session_files(). Default: the declared scoping, which only a layout with the workspace in its paths
+        (`logs.cwd` not `absent`) has; None otherwise.
         """
-        return None
+        fact = FACTS.get(self.vendor)
+        logs = fact.logs if fact is not None else None
+        if logs is None or logs.cwd == "absent":
+            return None
+        return declared_log_files(logs, self.project_dirs(), workspace_path, accept=self.accepts_declared_file)
 
     def watch_dirs(self) -> list[Path]:
         """Return directories the watcher should subscribe to.

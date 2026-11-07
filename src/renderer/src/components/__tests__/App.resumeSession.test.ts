@@ -54,7 +54,8 @@ describe('cli_open_agent(session_id) — the MCP resume path, station by station
     // hardcoded that, the session id would arrive and do nothing at all.
     for (const name of ['createRequestedPane', 'createStandaloneRequestedPane']) {
       expect(fn(name), name).toContain('const mcpCommand = mcpSpawnCommandOverride(req)')
-      expect(fn(name), name).toContain('commandOverride: mcpCommand')
+      expect(fn(name), name).toContain('commandOverride: mcpCommand.command')
+      expect(fn(name), name).toContain('commandWords: mcpCommand.words')
       expect(fn(name), name).toContain('sessionId?: string')
       // A resumed pane must SAY it is a resume, or spawnPane pins a fresh
       // Claude --session-id on top of the --resume the override already
@@ -68,13 +69,13 @@ describe('cli_open_agent(session_id) — the MCP resume path, station by station
     // One builder owns every vendor's resume syntax — `claude --resume <id>`,
     // `codex resume <id>`, `opencode --session <id>`. Inlining one here would
     // be correct for exactly one CLI.
-    expect(body).toContain('buildResumeCommand(')
+    expect(body).toContain('buildResumeLaunch(')
     expect(body).toContain('skipFlagFor(req.agentKey, spec)')
     // A custom binary override still survives a resume: terminal.create swaps
     // it in on the backend for every spawn, so the command goes out as built.
     expect(body).toMatch(/\n  return resume$/)
     // No session asked for = an ordinary fresh spawn, byte for byte.
-    expect(body).toContain("if (!sessionId) return ''")
+    expect(body).toContain("if (!sessionId) return { command: '' }")
   })
 
   it('refuses a session id that is not shell-safe before building any command', () => {
@@ -83,13 +84,13 @@ describe('cli_open_agent(session_id) — the MCP resume path, station by station
     // fresh pane and a diagnostic, never that string on a command line.
     const body = fn('mcpSpawnCommandOverride')
     const guardAt = body.indexOf('if (!isShellSafeSessionId(sessionId))')
-    const buildAt = body.indexOf('buildResumeCommand(')
+    const buildAt = body.indexOf('buildResumeLaunch(')
     expect(guardAt).toBeGreaterThan(-1)
     expect(buildAt).toBeGreaterThan(guardAt)
     expect(body).toContain("code: 'spawn.resume-unsafe-id'")
-    // The refusal returns '' — an ordinary fresh spawn, byte for byte.
+    // The refusal returns an empty command — an ordinary fresh spawn, byte for byte.
     const refusal = body.slice(guardAt, buildAt)
-    expect(refusal).toContain("return ''")
+    expect(refusal).toContain("return { command: '' }")
   })
 
   it('a vendor that cannot resume by id is recorded, never silently opened fresh', () => {

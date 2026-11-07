@@ -124,18 +124,72 @@ def test_a_payload_without_words_leaves_the_command_as_text():
 
 def test_a_payload_with_words_that_agree_with_its_text_carries_them():
     words = [{"exe": "claude"}, {"opt": "model", "value": "m", "text": " --model m"}]
-    attached = cli_launch.attach_words([SHELL, "-ilc", "claude --model m"], words)
+    attached = cli_launch.attach_words([SHELL, "-ilc", "claude --model m"], words, "claude")
     assert attached == [SHELL, "-ilc", "claude --model m"]
     assert attached[2].words == ({"exe": "claude"}, {"opt": "model", "value": "m", "text": " --model m"})
-    assert cli_launch.attach_words("claude --model m", words).words == attached[2].words
+    assert cli_launch.attach_words("claude --model m", words, "claude").words == attached[2].words
 
 
 @pytest.mark.parametrize("command", ["claude --model other", [SHELL, "-lc", "claude --model other"]])
 def test_words_that_disagree_with_the_command_text_are_refused_before_create(command):
     words = [{"exe": "claude"}, {"opt": "model", "value": "m", "text": " --model m"}]
     with pytest.raises(cli_launch.LaunchRefused) as refused:
-        cli_launch.attach_words(command, words)
+        cli_launch.attach_words(command, words, "claude")
     assert (refused.value.code, refused.value.stage) == ("COMPOSITION_UNREPRESENTABLE", "words")
+
+
+FORGED = [{"lit": "claude"}, {"opt": "model", "value": "other", "text": " --model safe"}]
+
+
+def test_an_opt_whose_text_is_not_its_declared_spelling_is_refused_though_the_command_agrees_with_the_text():
+    with pytest.raises(cli_launch.LaunchRefused) as refused:
+        cli_launch.attach_words("claude --model safe", FORGED, "claude")
+    assert (refused.value.code, refused.value.stage) == ("COMPOSITION_UNREPRESENTABLE", "words")
+
+
+@pytest.mark.parametrize(
+    ("agent_key", "word"),
+    [
+        ("claude", {"opt": "effort", "value": "bogus", "text": " --effort bogus"}),  # not a declared effort
+        ("codex", {"opt": "effort", "value": "high", "text": " --effort high"}),  # not integrated
+        ("claude", {"opt": "model", "text": " --model"}),  # a value is required
+        ("", {"opt": "model", "value": "m", "text": " --model m"}),  # a subject that declares no options
+        ("claude", {"opt": "nonsense", "value": "m", "text": " --x m"}),
+    ],
+)
+def test_an_opt_the_sidecar_would_refuse_is_refused_before_create(agent_key, word):
+    text = f"claude{word['text']}"
+    with pytest.raises(cli_launch.LaunchRefused):
+        cli_launch.attach_words(text, [{"lit": "claude"}, word], agent_key)
+
+
+def test_every_option_is_checked_against_the_spelling_the_sidecar_renders():
+    words = [
+        {"exe": "claude"},
+        {"opt": "skip_permissions", "text": " --dangerously-skip-permissions"},
+        {"opt": "model", "value": "m", "text": " --model m"},
+        {"opt": "effort", "value": "high", "text": " --effort high"},
+        {"opt": "resume", "value": "abc", "text": " --resume abc"},
+        {"opt": "session_id", "value": "abc", "text": " --session-id abc"},
+    ]
+    text = "claude --dangerously-skip-permissions --model m --effort high --resume abc --session-id abc"
+    assert cli_launch.attach_words(text, words, "claude") == text
+
+
+def test_the_create_handler_refuses_a_forged_option_text_before_anything_else(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent_team_backend import ws_handlers
+
+    refused: list = []
+    session = SimpleNamespace(terminals=SimpleNamespace(
+        receipt_refused_create=lambda pane, why: refused.append((pane, why.code))))
+    payload = {"agent_key": "claude", "pane_id": "p1", "command": "claude --model safe", "words": FORGED}
+    with pytest.raises(cli_launch.LaunchRefused):
+        asyncio.run(ws_handlers._terminal_create_impl(session, "m1", "terminal.create", payload, {}, "g"))
+    assert refused == [("p1", "COMPOSITION_UNREPRESENTABLE")]
+    assert payload["command"] == "claude --model safe"
 
 
 def test_words_that_are_not_a_list_are_refused():

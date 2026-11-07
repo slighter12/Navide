@@ -132,7 +132,7 @@ from ..log_readers.base import (
     set_activity_high_water,
     user_prompt_text,
 )
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, session_root
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -188,7 +188,7 @@ def muse_data_root() -> Path:
 
 def muse_sessions_root() -> Path:
     """Root holding the ``<YYYY>/<MM>/<DD>/<session-id>/`` session tree."""
-    return muse_data_root() / "sessions"
+    return session_root(FACT.session_root)
 
 
 def _is_main_session_file(path: Path) -> bool:
@@ -345,10 +345,6 @@ class MuseLogReader(LogReader):
     #: lines rather than replaying it (log_readers.base).
     activity_resumes_by_line: bool = True
 
-    def project_dirs(self) -> list[Path]:
-        root = muse_sessions_root()
-        return [root] if root.is_dir() else []
-
     def watch_dirs(self) -> list[Path]:
         """Watch the stable ancestor that exists.
 
@@ -366,7 +362,7 @@ class MuseLogReader(LogReader):
         parent = root.parent
         return [parent] if parent.is_dir() else []
 
-    def session_files(self) -> list[Path]:
+    def accepts_declared_file(self, path: Path) -> bool:
         """Every MAIN session log: exactly ``<Y>/<M>/<D>/<id>/session.jsonl``.
 
         The four-level glob already stops at the session directory, so the
@@ -374,7 +370,7 @@ class MuseLogReader(LogReader):
         the explicit filter keeps that intent visible (counting a child log
         would double-count its tokens, which the parent already attributes).
         """
-        return declared_log_files(FACT.logs, self.project_dirs(), accept=_is_main_session_file)
+        return _is_main_session_file(path)
 
     def _metadata_record(self, path: Path) -> dict | None:
         """The ``runtime.session.metadata`` record (the log's first row)."""
@@ -760,7 +756,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same dedicated XDG root as muse_data_root, with the pane's HOME shim.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("XDG_DATA_HOME",),
     supports_model=FACT.model_flag is not None,
     supports_effort=FACT.effort_flag is not None,
     known_efforts=FACT.known_efforts or (),

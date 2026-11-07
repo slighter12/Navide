@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_team_backend.cli_vendors import droid
+from agent_team_backend.cli_vendors import droid, session_layout
 from agent_team_backend.cli_vendors.droid import (
     DroidLogReader,
     encode_droid_cwd,
@@ -103,10 +103,10 @@ def test_default_encoder_follows_the_platform_seam(
     encodes a Windows cwd with no test-side override."""
     from agent_team_backend import osplat
 
-    assert droid._platform_id == osplat.platform_id
-    monkeypatch.setattr(droid, "_platform_id", "win32")
+    assert session_layout._platform_id == osplat.platform_id
+    monkeypatch.setattr(session_layout, "_platform_id", "win32")
     assert encode_droid_cwd(r"C:\Users\me\proj") == "-C-Users-me-proj"
-    monkeypatch.setattr(droid, "_platform_id", "linux")
+    monkeypatch.setattr(session_layout, "_platform_id", "linux")
     assert encode_droid_cwd("/Users/me/proj") == "-Users-me-proj"
 
 
@@ -239,7 +239,7 @@ def test_windows_workspace_session_is_discovered(
 ) -> None:
     """The reader must look where droid actually writes on Windows: the drive
     letter, no colon, and backslashes flattened to ``-``."""
-    monkeypatch.setattr(droid, "_platform_id", "win32")
+    monkeypatch.setattr(session_layout, "_platform_id", "win32")
     cwd = r"C:\Users\me\Agent-Team"
     path = _write_session(sessions_root, cwd, "abc", [_session_start("abc", cwd)])
     assert path.parent.name == "-C-Users-me-Agent-Team"
@@ -250,7 +250,7 @@ def test_windows_workspace_session_is_discovered(
 def test_windows_cwd_is_read_back_verbatim(
     sessions_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(droid, "_platform_id", "win32")
+    monkeypatch.setattr(session_layout, "_platform_id", "win32")
     cwd = r"C:\Users\me\proj"
     path = _write_session(sessions_root, cwd, "abc", [_session_start("abc", cwd)])
     assert DroidLogReader().cwd_from_file(path) == cwd
@@ -545,7 +545,7 @@ def test_session_path_points_at_the_workspace_directory(
     sessions_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Pin the POSIX spelling so this assertion is the same on a Windows runner.
-    monkeypatch.setattr(droid, "_platform_id", "darwin")
+    monkeypatch.setattr(session_layout, "_platform_id", "darwin")
     got = droid.SPEC.session_path("/w/proj", "abc")
     assert got == sessions_root / "-w-proj" / "abc.jsonl"
 
@@ -553,7 +553,7 @@ def test_session_path_points_at_the_workspace_directory(
 def test_windows_session_path_points_at_the_windows_directory(
     sessions_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(droid, "_platform_id", "win32")
+    monkeypatch.setattr(session_layout, "_platform_id", "win32")
     got = droid.SPEC.session_path(r"C:\Users\me\proj", "abc")
     assert got == sessions_root / "-C-Users-me-proj" / "abc.jsonl"
 
@@ -561,7 +561,7 @@ def test_windows_session_path_points_at_the_windows_directory(
 def test_windows_session_exists_finds_the_workspace_file(
     sessions_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(droid, "_platform_id", "win32")
+    monkeypatch.setattr(session_layout, "_platform_id", "win32")
     cwd = r"C:\Users\me\proj"
     assert droid.SPEC.session_exists(cwd, "abc") is False
     _write_session(sessions_root, cwd, "abc", [_session_start("abc", cwd)])

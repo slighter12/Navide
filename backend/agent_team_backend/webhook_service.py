@@ -36,7 +36,16 @@ import time
 from collections.abc import Callable
 from typing import Any, NamedTuple, Protocol
 
-from . import guard_fail_closed, pipeline_graph, pipeline_liveness, webhook_keystore, webhook_payload, webhook_triggers
+from . import (
+    cli_launch,
+    guard_fail_closed,
+    pipeline_graph,
+    pipeline_liveness,
+    webhook_keystore,
+    webhook_payload,
+    webhook_triggers,
+)
+from .cli_vendors import _vendor_facts as facts
 from .db import Database
 
 log = logging.getLogger(__name__)
@@ -68,26 +77,32 @@ RUN_CAP_S = 4 * 60 * 60
 SETTLE_S = 3.0
 
 _SHELL_SYNTAX = re.compile(r"[;&|`<>]|\$\(|\$\{")
-_FIRST_TOKEN = re.compile(r"^\s*(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
 
-_DROP = {
-    "claude": (
-        re.compile(r"(?<!\S)--(?:allow-)?dangerously-skip-permissions(?!\S)"),
-        re.compile(r"(?<!\S)--permission-mode(?:=|\s+)\S+"),
-    ),
-    "codex": (
-        re.compile(r"(?<!\S)--(?:dangerously-bypass-approvals-and-sandbox|yolo|full-auto)(?!\S)"),
-        re.compile(r"(?<!\S)(?:-a|--ask-for-approval)(?:=|\s+)\S+"),
-        re.compile(r"(?<!\S)(?:-s|--sandbox)(?:=|\s+)\S+"),
-        re.compile(r"(?<!\S)(?:-c|--config)(?:=|\s+)['\"]?(?:approval_policy|sandbox_mode)\s*=\S*"),
-    ),
-}
+
+def _spelled(spelling: str) -> str:
+    """A pattern for one declared spelling: its words, a value joined by `=` or a space, a quote tolerated."""
+    flag, _, value = spelling.partition(" ")
+    return re.escape(flag) + (r"(?:=|\s+)['\"]?" + re.escape(value) if value else "")
+
+
+def _drop_patterns(agent_key: str) -> tuple[re.Pattern[str], ...]:
+    """What the CLI's declaration says sets its permission mode, as patterns to take out of a command line: the
+    flag that skips permissions and its other spellings, each flag that takes a mode, each `-c` key that sets one."""
+    declared = facts.FACTS[agent_key]
+    aliases = declared.permission_aliases
+    bare = [declared.permission_flag, *(s for s in aliases.spellings if " " not in s)]
+    patterns = [re.compile(r"(?<!\S)(?:" + "|".join(re.escape(flag) for flag in bare) + r")(?!\S)")]
+    patterns += [re.compile(rf"(?<!\S){re.escape(flag)}(?:=|\s+)\S+") for flag in aliases.mode_flags]
+    if aliases.config_keys:
+        keys = "|".join(re.escape(key) for key in aliases.config_keys)
+        patterns.append(re.compile(r"(?<!\S)(?:-c|--config)(?:=|\s+)['\"]?(?:" + keys + r")\s*=\S*"))
+    return tuple(patterns)
+
+
+_DROP = {key: _drop_patterns(key) for key in ("claude", "codex")}
 #: Named rather than left to the default: a CLI's default mode can change, and
 #: its settings file can set a bypass the command line has to outrank.
-_BYPASS = {
-    "claude": "--dangerously-skip-permissions",
-    "codex": "--dangerously-bypass-approvals-and-sandbox",
-}
+_BYPASS = {key: facts.FACTS[key].permission_flag for key in ("claude", "codex")}
 _ASK = {
     "claude": "--permission-mode default",
     # Codex 0.166 has no ask-every-call mode: the flag takes only on-request and
@@ -98,9 +113,14 @@ _ASK = {
 }
 
 
-#: Quotes count as a boundary: `bash -lc 'claude --resume x'` has the flag next to one.
+#: Quotes count as a boundary: `bash -lc 'claude --resume x'` has the flag next to one. Every spelling that skips
+#: permissions, for the vendors a webhook run may use, comes from their declarations.
 _BYPASS_FLAG = re.compile(
-    r"""\s*(?<![^\s'"])(?:--(?:allow-)?dangerously-skip-permissions|--permission-mode(?:=|\s+)['"]?bypassPermissions)(?![^\s'"])"""
+    r"""\s*(?<![^\s'"])(?:""" + "|".join(
+        _spelled(spelling)
+        for key in sorted(VENDORS)
+        for spelling in (facts.FACTS[key].permission_flag, *facts.FACTS[key].permission_aliases.spellings)
+    ) + r""")(?![^\s'"])"""
 )
 _TOKEN = re.compile(r"""'[^']*'|"[^"]*"|\S+""")
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
@@ -279,10 +299,9 @@ def _seconds_to_midnight() -> int:
 
 def _rewrite(command: Any, change: Callable[[str], str]) -> Any:
     """`change` applied to the line a [shell, -lc, line] wrapper runs, or to a
-    plain string."""
-    if isinstance(command, list):
-        return [*command[:-1], change(str(command[-1]))] if command else command
-    return change(str(command or ""))
+    plain string. The result is a `Command` again: the words that still spell
+    the start of the line are kept."""
+    return cli_launch.rewritten(command, change)
 
 
 def _line(command: Any) -> str:
@@ -294,8 +313,8 @@ def _with_mode(agent_key: str, line: str, *, unattended: bool) -> str:
     right after the program, where `codex resume` still accepts it."""
     for flag in _DROP[agent_key]:
         line = flag.sub(" ", line)
-    head = _FIRST_TOKEN.match(line)
-    end = head.end() if head else 0
+    head = cli_launch.read_literal(line).head
+    end = head[1] if head else 0
     rest = " ".join(line[end:].split())
     mode = _BYPASS[agent_key] if unattended else _ASK[agent_key]
     return " ".join(part for part in (line[:end].strip(), mode, rest) if part)
@@ -613,8 +632,8 @@ class WebhookService:
         if agent_key not in VENDORS:
             raise LaunchRefused(f"a webhook run cannot start {agent_key or 'this CLI'}: it has no tested Guard hook")
         line = _line(command)
-        head = _FIRST_TOKEN.match(line)
-        program = next((g for g in head.groups() if g), "") if head else ""
+        tokens = cli_launch.command_tokens(command)
+        program = tokens[0] if tokens else ""
         if _SHELL_SYNTAX.search(line) or not self._known_program(agent_key, program):
             # A custom launch command: whatever it runs is out of sight here.
             raise LaunchRefused(f"a webhook run needs the standard {agent_key} command, not a custom launch command")

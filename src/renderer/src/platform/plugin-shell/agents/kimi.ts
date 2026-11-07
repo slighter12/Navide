@@ -15,8 +15,7 @@ export const SPEC = {
   // The resume id is the `session_<uuid>` dir name.
   ...factOptions(FACT),
   // Short flag is uppercase `-S` (verified with `kimi --help`); kimi does not
-  // accept a lowercase `-s`, so it is not matched here.
-  resumeCommandPattern: /^kimi\s+(?:--session|-S)\s+\S+/,
+  // accept a lowercase `-s`, so the facts do not list it as a resume flag.
   // wire.jsonl carries no turn-end record: a turn is closed by the NEXT
   // turn.prompt, and the latest one only after an 8s quiet window
   // (_TURN_IDLE_MS in cli_vendors/kimi.py). The newest turn — the one the

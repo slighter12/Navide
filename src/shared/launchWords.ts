@@ -69,11 +69,13 @@ export function optionText(facts: VendorFacts, option: LaunchOption, value?: str
 }
 
 /** The word for one option, or `null` when the vendor declares none. A value that needs quoting
- *  becomes a literal of the same text. */
+ *  becomes a literal of the same text, and so does an effort the facts do not list: the sidecar refuses an
+ *  `effort` option outside `known_efforts`, so such an effort travels as the text the user chose. */
 export function optionWord(facts: VendorFacts, option: LaunchOption, value?: string): LaunchWord | null {
   const text = optionText(facts, option, value)
   if (text === null) return null
   if (value !== undefined && !UNQUOTED.test(value)) return { lit: text }
+  if (option === 'effort' && !(facts.known_efforts as readonly string[] | null)?.includes(value ?? '')) return { lit: text }
   return value === undefined ? { opt: option, text } : { opt: option, value, text }
 }
 
@@ -110,6 +112,62 @@ export function withSessionIdWords(agentKey: string, words: readonly LaunchWord[
   const facts = factsFor(agentKey)
   const word = facts && optionWord(facts, 'session_id', id)
   return word ? [...words, word] : [...words]
+}
+
+type ResumeAliases = { programs: readonly string[]; flags: readonly string[] } | null
+type Subcommand = { word: string; aliases: readonly string[] } | null
+
+/** A line split into its words, the quotes around a word taken off. The renderer has no quoting rules of its
+ *  own: this reads the plain shapes a resume command has and nothing more. */
+function lineTokens(text: string): string[] {
+  return (text.match(/'[^']*'|"[^"]*"|\S+/g) ?? []).map((token) =>
+    token.length > 1 && (token[0] === "'" || token[0] === '"') && token.endsWith(token[0]) ? token.slice(1, -1) : token,
+  )
+}
+
+/** The session id a command line resumes, by the vendor's declared spelling; '' when it resumes none.
+ *
+ *  The one reader the renderer has for that (the backend's `resume_id_from_command` reads the same facts the same
+ *  way): the program (`command`, or one of `resume_aliases.programs`) first, then the `subcommand` if declared, then
+ *  the resume word right after them (`codex resume <id>`) or the resume flag (the one `resume_args` ends on, or one of
+ *  `resume_aliases.flags`) anywhere after, as `<flag> <id>` or `<flag>=<id>`, up to a bare `--`. */
+export function resumeIdFromCommand(facts: VendorFacts, text: string): string {
+  const template = facts.resume_args as string | null
+  if (!template) return ''
+  const tokens = lineTokens(text)
+  const aliases = facts.resume_aliases as ResumeAliases
+  if (!tokens.length || ![facts.command as string, ...(aliases?.programs ?? [])].includes(tokens[0])) return ''
+  let rest = tokens.slice(1)
+  const subcommand = facts.subcommand as Subcommand
+  if (subcommand) {
+    if (!rest.length || ![subcommand.word, ...subcommand.aliases].includes(rest[0])) return ''
+    rest = rest.slice(1)
+  }
+  const spelled = template.split(' ')
+  const marker = spelled[spelled.length - 1]
+  let flags: string[]
+  if (marker === '{id}') {
+    const lead = spelled[spelled.length - 2]
+    if (!lead.startsWith('-')) return rest.length > 1 && rest[0] === lead ? rest[1] : ''
+    flags = [lead, ...(aliases?.flags ?? [])]
+  } else {
+    flags = [marker.replace(/=\{id\}$/, ''), ...(aliases?.flags ?? [])]
+  }
+  for (let index = 0; index < rest.length; index += 1) {
+    const token = rest[index]
+    if (token === '--') break
+    let value = ''
+    if (flags.includes(token) && index + 1 < rest.length) value = rest[index + 1]
+    else for (const flag of flags) if (token.startsWith(`${flag}=`)) value = token.slice(flag.length + 1)
+    if (value) return value.startsWith('-') ? '' : value
+  }
+  return ''
+}
+
+/** `resumeIdFromCommand` for an agent by key; '' for an agent the facts do not describe. */
+export function resumeIdForAgent(agentKey: string, text: string): string {
+  const facts = factsFor(agentKey)
+  return facts ? resumeIdFromCommand(facts, text) : ''
 }
 
 /** The words when they spell exactly the command, else `undefined`: the backend then takes the

@@ -205,10 +205,7 @@ class CodexLogReader(LogReader):
     def project_dirs(self) -> list[Path]:
         # Adapter hook: the roots are the default home plus one per pane-isolated home found at run time, so they are
         # found by listing `~/.codex-panes`, which a declaration cannot say. The files under each root are `logs`.
-        roots: list[Path] = []
-        default_root = Path.home() / ".codex" / "sessions"
-        if default_root.is_dir():
-            roots.append(default_root)
+        roots: list[Path] = [root for root in self.declared_roots() if root.is_dir()]
         panes_root = Path.home() / ".codex-panes"
         if panes_root.is_dir():
             try:
@@ -222,10 +219,7 @@ class CodexLogReader(LogReader):
         return _dedupe_resolved(roots)
 
     def watch_dirs(self) -> list[Path]:
-        roots: list[Path] = []
-        default_root = Path.home() / ".codex" / "sessions"
-        if default_root.is_dir():
-            roots.append(default_root)
+        roots: list[Path] = [root for root in self.declared_roots() if root.is_dir()]
         panes_root = Path.home() / ".codex-panes"
         if panes_root.is_dir():
             roots.append(panes_root)
@@ -1871,7 +1865,6 @@ SPEC = VendorSpec(
     network_override_env_vars=("OPENAI_BASE_URL", "CODEX_OSS_BASE_URL", "CODEX_OSS_PORT"),
     # CODEX_HOME is assigned per pane, including resumes in an existing home.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("CODEX_HOME", "CODEX_SQLITE_HOME"),
     supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: codex resolves its skills from $CODEX_HOME/skills.
     skills_supported=True,

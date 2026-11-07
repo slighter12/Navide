@@ -72,7 +72,7 @@ describe('ACP hooks in App.vue', () => {
     expect(claim).toBeGreaterThan(spawn.indexOf('const pane: ActivePane = {'))
     expect(claim).toBeLessThan(spawn.indexOf('panes.value.push(pane)'))
     expect(start).toBeLessThan(spawn.indexOf('const ref = paneRefs[id]'))
-    expect(start).toBeLessThan(spawn.indexOf('command: shellCommandArgv('))
+    expect(start).toBeLessThan(spawn.indexOf('await spawnLaunch(ref, spawnPlan'))
   })
 
   it('mounts AcpPane only for an ACP pane, and the TerminalPane block unchanged otherwise', () => {

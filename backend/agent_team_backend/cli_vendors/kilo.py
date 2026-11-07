@@ -52,7 +52,6 @@ class KiloLogReader(OpencodeLogReader):
     vendor: str = "kilo"
     _dir_name: str = "kilo"
     _db_name: str = "kilo.db"
-    _logs = FACTS["kilo"].logs
 
 
 # ---- attribution/watch hooks ----------------------------------------------
@@ -334,7 +333,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same XDG database/auth root as KiloLogReader and _kilo_auth_file.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("XDG_DATA_HOME",),
     # Confirmed in source (Kilo-Org/kilocode): the root command declares
     # --model and applies it at the highest priority. No effort flag —
     # --variant exists only on `kilo run`. Details in agents/kilo.ts, which

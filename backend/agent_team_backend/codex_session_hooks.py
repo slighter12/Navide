@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from . import osplat
-from .cli_launch import append_args
+from .cli_launch import append_args, command_tokens
 from .cli_vendors.codex import is_subagent_session_meta
 
 LAUNCH_ENV = 'NAVIDE_CODEX_LAUNCH'
@@ -167,16 +167,34 @@ def _toml_literal(value: str) -> str:
     return "'''" + value + "'''"
 
 
+def _sets_hooks(command: Any) -> bool:
+    """Whether the command already carries a `-c hooks...` / `--config hooks...` override of its own, as
+    `-c hooks.x=..`, `-chooks.x`, `-c=hooks.x`, `--config hooks.x` or `--config=hooks.x`. Read from the command's
+    words; only the text of a literal is read back."""
+    tokens = command_tokens(command)
+    for index, token in enumerate(tokens):
+        if token in ('-c', '--config'):
+            value = tokens[index + 1] if index + 1 < len(tokens) else ''
+        elif token.startswith('--config='):
+            value = token[len('--config='):]
+        elif token.startswith('-c') and not token.startswith('--'):
+            value = token[2:].removeprefix('=')
+        else:
+            continue
+        if re.match(r"[\"']?hooks(?:[.=\s]|$)", value):
+            return True
+    return False
+
+
 def wire(command: Any, env: dict, metadata: dict, home: Path, port_file: Path, auth_file: Path) -> Any:
     """Append a session-layer hook; Codex appends lower-layer user hooks too."""
     # A Codex that gates this hook behind its trust screen would stop the pane
     # on a modal instead of starting it. Seen once, never injected again.
     if trust_gate_blocks_injection():
         return command
-    text = str(command[-1]) if isinstance(command, list) and command else str(command or '')
     # A custom session-layer SessionStart override belongs to the user. Adding
     # the same override twice would replace that layer's array, so leave it.
-    if re.search(r"(?:^|\s)(?:-c(?:=|\s*)|--config(?:=|\s+))[\"']?hooks(?:[.=\s]|$)", text):
+    if _sets_hooks(command):
         return command
     nonce = secrets.token_urlsafe(32)
     metadata['codex_launch_token'] = nonce

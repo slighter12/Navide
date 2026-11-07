@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": null,
   "data_dirs": {"env": ["PI_CODING_AGENT_DIR"], "home": [".pi", "agent"], "append": [], "extra_env": ["PI_CODING_AGENT_SESSION_DIR"], "tilde": false},
+  "session_root": {"root_env": ["PI_CODING_AGENT_SESSION_DIR"], "base_env": ["PI_CODING_AGENT_DIR"], "home": [".pi", "agent"], "fallbacks": [], "sub": ["sessions"]},
   "session_path": null,
   "logs": {"files": ["{cwd}/*.jsonl"], "cwd": "pi"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

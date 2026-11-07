@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { VENDOR_FACTS } from '@shared/vendorFacts'
 import { verifiedWords, wordsText } from '@shared/launchWords'
 import { AGENT_SPECS } from '../agents'
-import { buildResumeCommand, buildResumeLaunch, resumeWordsFor } from './resume-command'
+import { buildResumeCommand, buildResumeLaunch } from './resume-command'
 
 const ID = '019f6155-a2ae-72a2-a455-bf454b8f9f90'
 const resumable = AGENT_SPECS.filter((s) => s.resumeArgs && !s.resumeWithoutId).map((s) => s.agentKey)
@@ -41,16 +41,16 @@ describe('the words of a resume command', () => {
     expect(wordsText(words)).toBe(command)
   })
 
-  it('are found again by the exact command text that buildResumeCommand returned', () => {
-    const command = buildResumeCommand('codex', ID)
-    expect(command).toBe(`codex resume ${ID}`)
-    expect(resumeWordsFor(command)).toEqual(buildResumeLaunch('codex', ID).words)
-    expect(resumeWordsFor(`${command} --extra`)).toBeUndefined()
+  it('travel on the launch object, and the text builder is the launch object\'s command', () => {
+    const launch = buildResumeLaunch('codex', ID)
+    expect(launch.command).toBe(`codex resume ${ID}`)
+    expect(buildResumeCommand('codex', ID)).toBe(launch.command)
+    expect(wordsText(launch.words)).toBe(launch.command)
   })
 
   it('are not made for a resume that has no id', () => {
     expect(buildResumeCommand('claude', '')).toBe('')
-    expect(resumeWordsFor('')).toBeUndefined()
+    expect(buildResumeLaunch('claude', '')).toEqual({ command: '', words: [] })
   })
 })
 

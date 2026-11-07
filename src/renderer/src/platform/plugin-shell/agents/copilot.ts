@@ -26,8 +26,6 @@ export const SPEC = {
   // without a live session, so supportsRestorePin stays off — a stale pin has
   // no documented guarantee of self-healing on this flag.
   needsSessionMarker: true,
-  // The `=` form, which the generic --resume shape would not match.
-  resumeCommandPattern: /^copilot\s+--resume(?:=|\s+)\S+/,
   supportsRebuild: true,
   // Measured on a real PTY: the CLI itself emits `ESC[?1049h` during startup
   // (probe read 333 bytes of startup output) and keeps the conversation there.

@@ -39,7 +39,7 @@ function harness(sessionOnDisk: boolean | undefined) {
     canResumeSession: vi.fn(async (): Promise<boolean | null> => false),
     agentSpecs: [],
     skipFlagFor: () => '',
-    buildResumeCommand: (_agent: string, sid: string) => `claude --resume ${sid}`,
+    buildResumeLaunch: (_agent: string, sid: string) => ({ command: `claude --resume ${sid}`, words: [] }),
     stagesApi: { stages: ref([]) },
     isPaneMuted: () => false,
     accountFollow: { has: () => false, remove: vi.fn(), add: vi.fn() },

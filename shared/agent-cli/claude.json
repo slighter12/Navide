@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": null,
   "data_dirs": {"env": ["CLAUDE_CONFIG_DIR"], "home": [".claude"], "append": [], "extra_env": [], "tilde": false},
+  "session_root": {"root_env": [], "base_env": ["CLAUDE_CONFIG_DIR"], "home": [".claude"], "fallbacks": [".config/claude"], "sub": ["projects"]},
   "session_path": {"segments": ["{cwd}", "{id}.jsonl"], "cwd": "claude"},
   "logs": {"files": ["{cwd}/*.jsonl"], "cwd": "claude"},
+  "permission_aliases": {"spellings": ["--allow-dangerously-skip-permissions", "--permission-mode bypassPermissions"], "mode_flags": ["--permission-mode"], "config_keys": []},
   "supports_session_resume": true,
   "shutdown": {"graceful": true, "grace_s": 3.0, "defer_master_close": true},
   "capabilities": {

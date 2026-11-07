@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { composeLaunch, type LaunchInput } from '../../lib/spawnLaunch'
 
 // The App.vue half of "a pane launches on the model it was asked for".
 //
@@ -28,52 +29,51 @@ function iface(name: string): string {
   return appSource.slice(start, end)
 }
 
-describe('resolveCommand — model/effort on a fresh spawn', () => {
-  const body = fn('resolveCommand')
-
-  it('takes the request as a parameter that defaults to "not requested"', () => {
-    expect(body).toContain('modelRequest: CliModelRequest = NO_MODEL_REQUEST')
-    expect(appSource).toContain("const NO_MODEL_REQUEST: CliModelRequest = { model: '', effort: '' }")
+// The launch composer is a module the spawn calls, so what it composes is proved by running it (the stored-command and
+// caller-override cases are in lib/spawnLaunch.test.ts); here is the model/effort half.
+describe('composeLaunch — model/effort on a fresh spawn', () => {
+  const launch = (over: Partial<LaunchInput>) => composeLaunch({
+    agentKey: 'claude', commandOverride: '', storedCommand: '', isLogin: false, isResume: true, skipFlag: '',
+    paneArg: '', model: { model: '', effort: '' }, userShell: '/bin/zsh', newSessionId: () => 'id', ...over,
   })
 
-  it('derives the flags from the shared helper, never by inlining a vendor flag', () => {
-    // The whole point of cliModel.ts: one branch answers both "may this vendor
-    // be told a model?" and "what does that look like?", so a refusal and the
-    // argv cannot disagree.
-    expect(body).toContain('modelArgsFor({ spec, request: modelRequest })')
+  it('appends the model and effort after the permission flag, matching buildResumeCommand', () => {
+    const plan = launch({ skipFlag: '--dangerously-skip-permissions', model: { model: 'opus', effort: 'high' } })
+    expect(plan.command).toBe('claude --dangerously-skip-permissions --model opus --effort high')
+    expect(plan.launchedModel).toEqual({ model: 'opus', effort: 'high' })
   })
 
-  it('appends them after the permission flag, matching buildResumeCommand', () => {
-    const skipIdx = body.indexOf('if (skipFlag) parts.push(skipFlag)')
-    const modelIdx = body.indexOf('modelArgsFor(')
-    expect(skipIdx).toBeGreaterThan(-1)
-    expect(modelIdx).toBeGreaterThan(skipIdx)
+  it('leaves the command on the vendor default when nothing is requested', () => {
+    expect(launch({}).command).toBe('claude')
   })
 
   it('still returns a user command override verbatim, untouched by any flag', () => {
     // An override is trusted literally; the resume paths rebuild their own
     // flags into the override before it gets here.
-    const overrideIdx = body.indexOf("if (launch.source !== 'none') {")
-    expect(overrideIdx).toBeGreaterThan(-1)
-    expect(body.indexOf('modelArgsFor(')).toBeGreaterThan(overrideIdx)
+    const plan = launch({ commandOverride: 'claude --resume abc', skipFlag: '--x', model: { model: 'opus', effort: '' } })
+    expect(plan.command).toBe('claude --resume abc')
   })
 
   it('leaves the command on the vendor default when the request is refused, and says so', () => {
-    // resolveCommand returns a string and has no error channel, so it can only
-    // drop a refused request. The console warning is what keeps that from
-    // being silent if the spawn gate or the MCP tool ever lets one through.
-    expect(body).toContain('if (chosen.args) parts.push(chosen.args)')
-    expect(body).toContain('console.warn(')
-    expect(body).toContain('chosen.refusal.kind')
+    // The composer has no error channel, so it can only drop a refused request. The console warning is what keeps
+    // that from being silent if the spawn gate or the MCP tool ever lets one through.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const plan = launch({ agentKey: 'droid', model: { model: 'opus', effort: '' } })
+      expect(plan.command).toBe('droid')
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0][0])).toContain('launching on the vendor default')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
 describe('spawnPane — the one place argv is assembled', () => {
-  it('hands the pane\'s model and effort to resolveCommand', () => {
+  it('hands the pane\'s model and effort to composeLaunch', () => {
     const body = fn('spawnPane')
-    expect(body).toContain('resolveCommand(opts.agentKey, opts.commandOverride, paneArgCtx, {')
-    expect(body).toContain("model: opts.model ?? ''")
-    expect(body).toContain("effort: opts.effort ?? ''")
+    expect(body).toContain('composeLaunch({')
+    expect(body).toContain("model: { model: opts.model ?? '', effort: opts.effort ?? '' }")
   })
 
   it('records them on the pane so a later rebuild can reproduce the launch', () => {
@@ -82,23 +82,22 @@ describe('spawnPane — the one place argv is assembled', () => {
     expect(body).toContain('effort: launchedModel.effort || undefined')
   })
 
-  it('records none when the stored launch command kept them off argv', () => {
+  it('records what the composed launch says reached argv — none when a stored command kept them off', () => {
     // The pane, every record read back from it and every rebuild built on it
-    // must say what the CLI runs on — a stored launch command appends nothing.
+    // must say what the CLI runs on — a stored launch command appends nothing
+    // (proved in lib/spawnLaunch.test.ts through `launchedModel`).
     const body = fn('spawnPane')
-    expect(body).toMatch(
-      /const launchedModel: CliModelRequest = launch\.source === 'stored'\s*\?\s*NO_MODEL_REQUEST\s*:\s*\{ model: opts\.model \?\? '', effort: opts\.effort \?\? '' \}/,
-    )
+    expect(body).toContain('const launchedModel: CliModelRequest = spawnPlan.launchedModel')
   })
 })
 
-describe('every buildResumeCommand call site carries the model', () => {
+describe('every buildResumeLaunch call site carries the model', () => {
   // A resume command is passed to spawnPane as a commandOverride, and
-  // resolveCommand hands an override straight back — so a call site that
+  // composeLaunch hands an override straight back — so a call site that
   // forgets the request silently reopens the pane on the vendor default.
   // This walks ALL call sites rather than listing today's five, so a new one
   // added later fails here instead of shipping the bug.
-  /** Top-level arguments of the call starting at `at` ("buildResumeCommand("). */
+  /** Top-level arguments of the call starting at `at` ("buildResumeLaunch("). */
   function argsOf(at: number): string[] {
     let i = appSource.indexOf('(', at) + 1
     let depth = 0
@@ -115,8 +114,8 @@ describe('every buildResumeCommand call site carries the model', () => {
   }
 
   const callSites: number[] = []
-  for (let i = appSource.indexOf('buildResumeCommand('); i > -1;
-       i = appSource.indexOf('buildResumeCommand(', i + 1)) {
+  for (let i = appSource.indexOf('buildResumeLaunch('); i > -1;
+       i = appSource.indexOf('buildResumeLaunch(', i + 1)) {
     callSites.push(i)
   }
 
@@ -139,7 +138,7 @@ describe('every rebuild/restore spawnPane call site carries the model', () => {
   // goes through a resume command string. The other half is spawnPane's own
   // model/effort options: a call that reconstructs an EXISTING pane must relaunch
   // it on the model it was already running. Omitting them there is a LEGAL shape
-  // — resolveCommand reads it as "no model requested" and returns the vendor
+  // — composeLaunch reads it as "no model requested" and returns the vendor
   // default without even a console.warn — so nothing but this guard notices.
   //
   // A reconstruction is identified by the options only an already-existing pane
@@ -385,7 +384,7 @@ describe('a remote caller cannot supply a raw command', () => {
       expect(site, `${owner} no longer calls spawnPane`).toBeDefined()
       // A variable, not the call inline — so the binding is pinned separately
       // below. What matters is that the value is one this window computed.
-      expect(site?.override, `${owner} (App.vue:${site?.line})`).toBe('mcpCommand')
+      expect(site?.override, `${owner} (App.vue:${site?.line})`).toBe('mcpCommand.command')
       expect(fn(owner), `${owner} must derive its override from the builder`)
         .toContain('const mcpCommand = mcpSpawnCommandOverride(req)')
     }
@@ -394,7 +393,7 @@ describe('a remote caller cannot supply a raw command', () => {
     // A `command`/`commandOverride` reaching it would mean a caller-supplied
     // string had found a way through after all.
     const builder = fn('mcpSpawnCommandOverride')
-    expect(builder).toContain('buildResumeCommand(')
+    expect(builder).toContain('buildResumeLaunch(')
     expect(builder).not.toMatch(/\breq\.command\b/)
     expect(builder).not.toMatch(/\breq\.commandOverride\b/)
 

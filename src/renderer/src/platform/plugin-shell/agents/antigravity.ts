@@ -15,7 +15,6 @@ export const SPEC = {
   ...factOptions(FACT),
   needsSessionMarker: true,
   bracketedPaste: true,
-  resumeCommandPattern: /^agy\s+--conversation\s+\S+/,
   supportsRebuild: true,
   // Measured on a real PTY (agy 1.1.13): the CLI itself emits `ESC[?1049h`
   // during startup and keeps the conversation there. The probe only read 82

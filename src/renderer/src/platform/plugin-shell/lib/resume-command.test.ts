@@ -13,7 +13,10 @@ import {
   shouldPreserveMissingSessionOnRestore,
   shouldWarnMissingResume,
   isShellSafeSessionId,
+  looksLikeResumeCommand,
 } from './resume-command'
+import { resumeIdForAgent } from '@shared/launchWords'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
 import { TERMINAL_CREATE_TIMEOUT_MS } from '@navide/terminal'
 
 describe('sessionHomeIdFor', () => {
@@ -396,14 +399,39 @@ describe('buildResumeCommand', () => {
   })
 })
 
-describe('resumeCommandPattern', () => {
-  // Mirrors App.vue's looksLikeResumeCommand: the spec pattern when there is
-  // one, else the generic `<agentKey> --resume <id>` shape.
-  const looksLikeResume = (agentKey: string, command: string): boolean => {
-    const pattern = AGENT_SPECS.find((s) => s.agentKey === agentKey)?.resumeCommandPattern
-    if (pattern) return pattern.test(command.trim())
-    return new RegExp(`^${agentKey}\\s+--resume\\s+\\S+`).test(command.trim())
-  }
+describe('looksLikeResumeCommand', () => {
+  // The function App.vue itself calls: the facts' own spelling of the resume, and a named hook only for the one
+  // vendor whose resume they cannot spell.
+  const looksLikeResume = looksLikeResumeCommand
+
+  it('reads every vendor that resumes by id from its facts, with no pattern of its own', () => {
+    for (const spec of AGENT_SPECS.filter((s) => s.resumeArgs || s.resumeWithoutId)) {
+      const command = buildResumeCommand(spec.agentKey, '00000000-1111-2222-3333-444444444444', '', '/tmp/history.md')
+      expect(command, `${spec.agentKey} builds nothing`).not.toBe('')
+      expect(looksLikeResume(spec.agentKey, command), `${spec.agentKey}: ${command}`).toBe(true)
+      if (spec.resumeCommandPattern === undefined) {
+        expect(resumeIdForAgent(spec.agentKey, command), spec.agentKey).toBe('00000000-1111-2222-3333-444444444444')
+      }
+    }
+  })
+
+  it('leaves the named hook to the one vendor that resumes without an id', () => {
+    expect(AGENT_SPECS.filter((spec) => spec.resumeCommandPattern).map((spec) => spec.agentKey)).toEqual(['aider'])
+    expect(looksLikeResume('aider', 'aider --chat-history-file /tmp/h.md --restore-chat-history')).toBe(true)
+    expect(looksLikeResume('aider', 'aider')).toBe(false)
+  })
+
+  it('a vendor whose facts declare no resume by id reads none (the old generic --resume shape no longer stands in)', () => {
+    expect(VENDOR_FACTS.mcode.resume_args).toBeNull()
+    expect(looksLikeResume('mcode', 'mcode --resume abc')).toBe(false)
+  })
+
+  it('reads the generic claude shape, and nothing for an agent or a line it does not know', () => {
+    expect(looksLikeResume('claude', 'claude --resume abc')).toBe(true)
+    expect(looksLikeResume('claude', 'claude')).toBe(false)
+    expect(looksLikeResume('claude', '')).toBe(false)
+    expect(looksLikeResume('nobody', 'nobody --resume abc')).toBe(false)
+  })
 
   it('recognizes the resume command each subcommand-style vendor builds', () => {
     for (const agentKey of ['codex', 'muse']) {

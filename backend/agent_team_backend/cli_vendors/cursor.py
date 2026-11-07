@@ -58,7 +58,6 @@ resume: `agent --resume=<chatId>` (session id = the <session-uuid> dir name).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import sqlite3
@@ -81,7 +80,7 @@ from ..log_readers.base import (
     join_text_blocks,
     user_prompt_text,
 )
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, encoded_cwd, session_root
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -251,7 +250,7 @@ def _json_message(data) -> dict | None:
 
 def cursor_chats_root() -> Path:
     """Cursor CLI's per-session chat-store root (fixed, no env override)."""
-    return Path.home() / ".cursor" / "chats"
+    return session_root(FACT.session_root)
 
 
 def cursor_project_hash(cwd: str) -> str:
@@ -260,9 +259,7 @@ def cursor_project_hash(cwd: str) -> str:
     UNCONFIRMED upstream — callers must treat a non-match as "unknown", never
     as proof a session belongs elsewhere.
     """
-    if not cwd:
-        return ""
-    return hashlib.md5(cwd.encode("utf-8")).hexdigest()
+    return encoded_cwd(FACT.logs.cwd, cwd)
 
 
 def _has_session_dir_name(path: Path) -> bool:
@@ -279,13 +276,11 @@ class CursorLogReader(LogReader):
     def _chats_root(self) -> Path:
         return cursor_chats_root()
 
-    def project_dirs(self) -> list[Path]:
-        """The single chats root (empty list when it doesn't exist)."""
-        root = self._chats_root()
-        return [root] if root.is_dir() else []
+    def declared_roots(self) -> list[Path]:
+        return [self._chats_root()]
 
-    def session_files(self) -> list[Path]:
-        return declared_log_files(FACT.logs, self.project_dirs(), accept=_has_session_dir_name)
+    def accepts_declared_file(self, path: Path) -> bool:
+        return _has_session_dir_name(path)
 
     def session_id_from_path(self, path: Path) -> str:
         """Id is the session dir name (the chatId `agent --resume=<id>`
@@ -828,11 +823,8 @@ async def fetch_cursor(home: Path) -> dict:
 # Cursor CLI's binary is `agent` (legacy installs: `cursor-agent`, a declared program alias); both take
 # --resume=<id> / --resume <id>.
 
-def _session_path(workspace_path: str, session_id: str) -> Path | None:
-    # The session path has a project-hash segment the id alone can't name —
-    # no single stable path for the preflight to report.
-    return None
-
+# The session path has a project-hash segment the id alone can't name, so Cursor declares no `session_path`: no
+# single stable path for the preflight to report.
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # Ask the reader so a stale persisted id fails preflight instead of
@@ -914,7 +906,6 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_cursor(home),
     resume_id_from_command=resume_reader_of(FACT),
-    session_path=_session_path,
     session_exists=_session_exists,
     make_log_reader=CursorLogReader,
     # Cursor CLI (closed source; binary `agent`, legacy installs `cursor-agent`)

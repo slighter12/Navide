@@ -12,8 +12,10 @@
   "resume_aliases": null,
   "subcommand": null,
   "data_dirs": {"env": ["COPILOT_HOME"], "home": [".copilot"], "append": [], "extra_env": [], "tilde": false},
+  "session_root": {"root_env": [], "base_env": ["COPILOT_HOME"], "home": [".copilot"], "fallbacks": [], "sub": []},
   "session_path": {"segments": ["session-state", "{id}", "events.jsonl"], "cwd": "absent"},
   "logs": {"files": ["session-store.db", "session-state/*/events.jsonl"], "cwd": "absent"},
+  "permission_aliases": null,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

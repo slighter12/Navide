@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { AGENT_SPECS } from '../../platform/plugin-shell/agents'
-import { buildResumeCommand, normalizeResumeSessionId } from '../../platform/plugin-shell/lib/resume-command'
+import { buildResumeLaunch, normalizeResumeSessionId } from '../../platform/plugin-shell/lib/resume-command'
 
 const source = readFileSync(resolve(process.cwd(), 'src/renderer/src/App.vue'), 'utf8')
 
@@ -18,7 +18,7 @@ function resumeHarness(record?: Record<string, unknown>, live?: Record<string, u
     ? { project: { panes: record ? [record] : [] } } : {})
   const spawnPane = vi.fn(async () => 'new-pane')
   const deps = {
-    normalizeResumeSessionId, buildResumeCommand, sendQuiet, spawnPane,
+    normalizeResumeSessionId, buildResumeLaunch, sendQuiet, spawnPane,
     canResumeSession: async () => true,
     agentSpecs: AGENT_SPECS,
     skipFlagFor: () => '',

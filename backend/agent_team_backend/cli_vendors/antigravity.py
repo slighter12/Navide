@@ -31,7 +31,7 @@ import os
 import sys
 import time
 
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -252,12 +252,7 @@ class AntigravityLogReader(LogReader):
     def __init__(self) -> None:
         self._cwd_cache: dict[str, tuple[float, str]] = {}  # path → (mtime, cwd)
 
-    def project_dirs(self) -> list[Path]:
-        root = Path.home() / ".gemini" / "antigravity-cli" / "conversations"
-        return [root] if root.is_dir() else []
-
-    def session_files(self) -> list[Path]:
-        return declared_log_files(FACT.logs, self.project_dirs())  # `*.db` skips -wal / -shm
+    # The declared roots and files (`*.db` skips -wal / -shm); one workspace is a filter by the cwd read from the file.
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
         return [
@@ -794,11 +789,8 @@ async def fetch_antigravity(home: Path) -> dict:
 # ---- session ---------------------------------------------------------------
 
 
-def _session_path(workspace_path: str, session_id: str) -> Path:
-    # Each conversation is a SQLite db; the id is the filename stem accepted
-    # by `agy --conversation <id>`.
-    root = Path.home().joinpath(*FACT.data_dirs.home)
-    return declared_session_path(FACT.session_path, root, workspace_path, session_id)
+# Each conversation is a SQLite db; the id is the filename stem accepted by `agy --conversation <id>` (the declared
+# `session_path`).
 
 
 # ---- vendor spec -----------------------------------------------------------
@@ -870,7 +862,6 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_antigravity(home),
     resume_id_from_command=resume_reader_of(FACT, plain_only=True),
-    session_path=_session_path,
     make_log_reader=AntigravityLogReader,
     install_dep=Dep("antigravity", "Antigravity CLI (Google)", "Google Antigravity CLI", "agent_cli",
         ["agy", "--version"], r"(\d+\.\d+\.\d+)",

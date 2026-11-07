@@ -47,7 +47,8 @@ import os
 import re
 from pathlib import Path
 
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, session_root
+from .session_layout import encode_droid_cwd
 from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, data_dirs_of, resume_reader_of
 from ..osplat import platform_id as _platform_id
@@ -63,41 +64,6 @@ from ..log_readers.base import (
 )
 
 log = logging.getLogger("agent_team_backend.log_readers.droid")
-
-
-def _encode_posix_droid_cwd(cwd: str) -> str:
-    """The macOS/Linux spelling, read from droid's own encoder: strip trailing
-    separators, strip the leading ``/`` run, collapse each remaining ``/`` run
-    to a single ``-``, prepend ``-``. Only separators are touched."""
-    text = re.sub(r"[\\/]+$", "", cwd)
-    text = re.sub(r"^/+", "", text)
-    return "-" + re.sub(r"/+", "-", text)
-
-
-def _encode_windows_droid_cwd(cwd: str) -> str:
-    """The Windows spelling, read from droid's own encoder: strip trailing
-    separators, drop the drive letter's colon (``C:`` -> ``C``), collapse each
-    run of ``\\`` or ``/`` to a single ``-``, prepend ``-``. A UNC path keeps
-    its leading separator run, so ``\\\\server\\share`` names the directory
-    ``--server-share``."""
-    text = re.sub(r"[\\/]+$", "", cwd)
-    text = re.sub(r"^([A-Za-z]):", r"\1", text)
-    return "-" + re.sub(r"[\\/]+", "-", text)
-
-
-def encode_droid_cwd(cwd: str, platform: str | None = None) -> str:
-    """Droid's session-directory name for a cwd on ``platform``.
-
-    Droid ships a different encoder per OS, so the spelling is not shared:
-    macOS/Linux strips the leading slash and rewrites only ``/``, while Windows
-    drops the drive-letter colon and rewrites both separators. ``platform``
-    defaults to this process's platform (``osplat.platform_id``) and is
-    overridable so both spellings can be exercised on any host, including on a
-    native Windows runner.
-    """
-    if (platform or _platform_id) == "win32":
-        return _encode_windows_droid_cwd(cwd)
-    return _encode_posix_droid_cwd(cwd)
 
 
 # Credential store (droid 0.206.0 bundle, class XlH): the login is an
@@ -153,9 +119,7 @@ def identity_from_secret(secret):
 
 def droid_sessions_root() -> Path | None:
     """The sessions root, or None when droid has never run on this machine."""
-    override = os.environ.get("FACTORY_HOME_OVERRIDE")
-    home = Path(override) if override else Path.home() / ".factory"
-    root = home / "sessions"
+    root = session_root(FACT.session_root)
     return root if root.is_dir() else None
 
 
@@ -223,24 +187,9 @@ class DroidLogReader(LogReader):
     #: lines rather than replaying it (log_readers.base).
     activity_resumes_by_line: bool = True
 
-    def _default_root(self) -> Path | None:
-        return droid_sessions_root()
-
-    def project_dirs(self) -> list[Path]:
-        root = self._default_root()
-        return [root] if root is not None else []
-
-    def session_files(self) -> list[Path]:
-        """Every session file under the sessions root.
-
-        Covers all three layouts droid's own ``findSessionFile`` looks in: the
-        per-cwd subdirectory, the flat root, and ``btw/`` for forks.
-        """
-        return declared_log_files(FACT.logs, self.project_dirs())
-
-    def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
-        """Only the files under this workspace's own session directory."""
-        return declared_log_files(FACT.logs, self.project_dirs(), workspace_path)
+    # The roots and session files are the declared ones (`session_root`, `logs`): the files cover all three layouts
+    # droid's own ``findSessionFile`` looks in (the per-cwd subdirectory, the flat root and ``btw/`` for forks), and
+    # one workspace is only the files under its own session directory.
 
     def cwd_from_file(self, path: Path) -> str:
         """The session's working directory, read from its ``session_start``.
@@ -472,13 +421,6 @@ DroidLogReader.pane_cwd_match = _pane_cwd_match
 # ---- resume / session ------------------------------------------------------
 
 
-def _session_path(workspace_path: str, session_id: str) -> Path | None:
-    root = droid_sessions_root()
-    if root is None:
-        return None
-    return declared_session_path(FACT.session_path, root, workspace_path, session_id)
-
-
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     """True when this workspace's session file is on disk.
 
@@ -513,7 +455,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # FACTORY_HOME_OVERRIDE relocates the whole tree (droid_sessions_root).
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("FACTORY_HOME_OVERRIDE",),
     label="Droid CLI (Factory)",
     # Quota exhaustion, read from the 0.206.0 bundle (not reproduced live):
     # the structured ``agent_turn_outcome.reason`` value (the reader passes
@@ -548,7 +489,6 @@ SPEC = VendorSpec(
         todo="key/blob layout read from the 0.206.0 bundle (machine-wide keyring key, no path binding); identity unreadable; keytar branch (Linux/Windows) not seen running; no real-account round-trip recorded",
     ),
     resume_id_from_command=resume_reader_of(FACT),
-    session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=(
         # Relocates the whole ~/.factory tree.

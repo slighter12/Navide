@@ -36,6 +36,10 @@ class _FilesReader(_Reader):
     def session_files(self) -> list[Path]:
         return list(self._files)
 
+    def session_files_for_workspace(self, workspace_path: str) -> list[Path] | None:
+        # These files carry no workspace in their paths: the rescan falls back to session_files().
+        return None
+
 
 def _noop(_usage):  # pragma: no cover - unused token sink
     return None

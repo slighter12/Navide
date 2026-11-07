@@ -46,7 +46,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from .base import Dep, ExtensionsSpec, PlatformInstall, VendorSpec, declared_log_files, resume_reader_of
+from .base import Dep, ExtensionsSpec, PlatformInstall, VendorSpec, resume_reader_of
 from ._vendor_facts import FACTS
 from ..osplat import platform_id as _platform_id
 from ..usage_common import _epoch_to_iso
@@ -161,12 +161,9 @@ class GooseLogReader(LogReader):
     def _db_path(self) -> Path:
         return self._sessions_dir() / _DB_NAME
 
-    def project_dirs(self) -> list[Path]:
-        d = self._sessions_dir()
-        return [d] if d.is_dir() else []
-
-    def session_files(self) -> list[Path]:
-        return declared_log_files(FACT.logs, [self._sessions_dir()])
+    def declared_roots(self) -> list[Path]:
+        # Adapter hook: goose's data directory depends on the platform (see `_data_dir`), which `session_root` cannot say.
+        return [self._sessions_dir()]
 
     def session_id_from_path(self, path: Path) -> str:
         """Only the shared db is a session source; its -wal/-shm siblings and

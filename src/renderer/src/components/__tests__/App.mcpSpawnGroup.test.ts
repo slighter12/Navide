@@ -41,7 +41,7 @@ function harness() {
     currentWorkspace: { value: '/alpha' }, workspaceOrder: { value: ['/alpha', '/beta'] },
     activeTab: { value: 'rg-active' }, runGroupsReady: { value: true },
     normWs: (path: string) => path.replace(/\/+$/, ''), resolveReadySpawnGroupId,
-    mcpSpawnCommandOverride: (req: { sessionId?: string }) => req.sessionId ? `codex resume ${req.sessionId}` : '',
+    mcpSpawnCommandOverride: (req: { sessionId?: string }) => ({ command: req.sessionId ? `codex resume ${req.sessionId}` : '' }),
     standaloneTaskDeps: () => ({}),
     evaluateSpawnRequest: (req: Record<string, unknown>) => ({ ok: true, ...req, agentKey: req.agent }),
     spawnGateContextFor: () => ({}), standaloneSpawnGateContext: () => ({}),
@@ -167,7 +167,7 @@ describe('explicit group validation after asynchronous spawn preparation', () =>
     { requested: '', deleted: true, error: 'command-resolution-reached' },
   ])('checks $requested after preparation (deleted=$deleted)', async ({ requested, deleted, error }) => {
     let groups = [{ id: 'rg-beta' }]
-    const resolveCommand = vi.fn(() => { throw new Error('command-resolution-reached') })
+    const composeLaunch = vi.fn(() => { throw new Error('command-resolution-reached') })
     const deps = {
       crypto: { randomUUID: () => 'child' },
       agentSpecs: [{ agentKey: 'aider', paneArg: () => '' }],
@@ -175,7 +175,8 @@ describe('explicit group validation after asynchronous spawn preparation', () =>
         if (deleted) groups = []
         return '/history'
       }),
-      runGroupsOf: () => groups, resolveCommand,
+      runGroupsOf: () => groups, composeLaunch,
+      backend: { shell: { value: 'bash' } }, skipFlagFor: () => '', settingsGet: () => '', cliCommandKey: () => 'key',
     }
     const javascript = ts.transpileModule(
       ['assertRequestedSpawnGroup', 'spawnPane'].map(appFunction).join('\n'),
@@ -185,7 +186,7 @@ describe('explicit group validation after asynchronous spawn preparation', () =>
     await expect(spawn({ agentKey: 'aider', workspacePath: '/beta', runGroupId: 'rg-beta',
       requestedRunGroupId: requested })).rejects.toThrow(error)
     expect(deps.paneHistoryRootFor).toHaveBeenCalledOnce()
-    if (error === 'unknown run group') expect(resolveCommand).not.toHaveBeenCalled()
-    else expect(resolveCommand).toHaveBeenCalledOnce()
+    if (error === 'unknown run group') expect(composeLaunch).not.toHaveBeenCalled()
+    else expect(composeLaunch).toHaveBeenCalledOnce()
   })
 })

@@ -54,11 +54,11 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 from uuid import UUID
 
 from .. import osplat
-from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path, encoded_cwd, session_root
 from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, data_dirs_of, resume_id_from_command
 from ..usage_common import _num, _snapshot, _window
@@ -222,26 +222,13 @@ class GrokLogReader(LogReader):
 
     # ---- layout ------------------------------------------------------------
 
-    def _home(self) -> Path:
-        """grok's home. ``GROK_HOME`` relocates the whole tree (sessions and
-        credentials alike), which is how a pane is isolated."""
-        env = os.environ.get("GROK_HOME")
-        return Path(env) if env else Path.home() / ".grok"
-
     def _sessions_root(self) -> Path:
-        return self._home() / _SESSIONS_DIRNAME
+        """The declared root: ``GROK_HOME`` relocates the whole tree (sessions and credentials alike), which is how a
+        pane is isolated."""
+        return session_root(FACT.session_root)
 
-    def project_dirs(self) -> list[Path]:
-        root = self._sessions_root()
-        return [root] if root.is_dir() else []
-
-    def watch_dirs(self) -> list[Path]:
-        # The per-cwd groups and per-session dirs below are created as sessions
-        # start, so the stable parent is what can actually be subscribed to.
-        return self.project_dirs()
-
-    def session_files(self) -> list[Path]:
-        return declared_log_files(FACT.logs, self.project_dirs())
+    # The roots and the files are the declared ones; the per-cwd groups and per-session dirs are created as sessions
+    # start, so the stable parent root is what the watcher subscribes to.
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path] | None:
         """Only the sessions of one workspace — the group directory IS the
@@ -255,7 +242,7 @@ class GrokLogReader(LogReader):
             return None
         # The `None` answers below are an adapter hook: whether a group name was shortened is a fact about the disk
         # (a `.cwd` file), not about the layout, so `logs` cannot declare it.
-        group = self._sessions_root() / quote(workspace_path.rstrip("/"), safe="")
+        group = self._sessions_root() / encoded_cwd(FACT.logs.cwd, workspace_path)
         if not group.is_dir():
             # Either no sessions yet, or a shortened group name. Distinguishing
             # them costs a full scan of the root either way.
@@ -787,9 +774,8 @@ SPEC = VendorSpec(
     key=FACT.key,
     # auth.x.ai proves login routing only; grok-build service hosts unverified.
     expected_hosts=(),
-    # GrokLogReader._home layout, including GROK_HOME and the HOME shim.
+    # The declared layout, including GROK_HOME and the HOME shim.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    data_dir_env_vars=("GROK_HOME",),
     supports_model=FACT.model_flag is not None,
     # ~/.agents/skills is still a scanned tier on the official CLI (docs
     # 08-skills.md lists .agents/skills alongside .grok/skills at every level),
