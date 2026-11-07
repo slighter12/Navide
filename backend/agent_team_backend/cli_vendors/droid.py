@@ -47,9 +47,9 @@ import os
 import re
 from pathlib import Path
 
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
 from ._vendor_facts import FACTS
-from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, command_text
+from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, data_dirs_of, resume_reader_of
 from ..osplat import platform_id as _platform_id
 from ..log_readers.base import (
     ActivityLines,
@@ -236,40 +236,11 @@ class DroidLogReader(LogReader):
         Covers all three layouts droid's own ``findSessionFile`` looks in: the
         per-cwd subdirectory, the flat root, and ``btw/`` for forks.
         """
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                for child in root.iterdir():
-                    if child.is_file() and child.suffix == ".jsonl":
-                        out.append(child)
-                        continue
-                    if not child.is_dir():
-                        continue
-                    try:
-                        for f in child.iterdir():
-                            if f.is_file() and f.suffix == ".jsonl":
-                                out.append(f)
-                    except OSError as err:
-                        log.debug("enumerate %s failed: %s", child, err)
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", root, err)
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs())
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
         """Only the files under this workspace's own session directory."""
-        encoded = encode_droid_cwd(workspace_path)
-        out: list[Path] = []
-        for root in self.project_dirs():
-            d = root / encoded
-            if not d.is_dir():
-                continue
-            try:
-                for f in d.iterdir():
-                    if f.is_file() and f.suffix == ".jsonl":
-                        out.append(f)
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", d, err)
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs(), workspace_path)
 
     def cwd_from_file(self, path: Path) -> str:
         """The session's working directory, read from its ``session_start``.
@@ -500,20 +471,12 @@ DroidLogReader.pane_cwd_match = _pane_cwd_match
 
 # ---- resume / session ------------------------------------------------------
 
-# `-r` and `--resume` are the same option (droid --help, 0.204.0).
-_RESUME_RE = re.compile(r"^droid\s+(?:\S+\s+)*(?:--resume|-r)\s+(\S+)")
-
-
-def _resume_id_from_command(command) -> str:  # noqa: ANN001
-    match = _RESUME_RE.match(command_text(command).strip())
-    return match.group(1) if match else ""
-
 
 def _session_path(workspace_path: str, session_id: str) -> Path | None:
     root = droid_sessions_root()
     if root is None:
         return None
-    return root / encode_droid_cwd(workspace_path) / f"{session_id}.jsonl"
+    return declared_session_path(FACT.session_path, root, workspace_path, session_id)
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -549,7 +512,7 @@ SPEC = VendorSpec(
     # Factory/custom model service destinations have not been verified here.
     expected_hosts=(),
     # FACTORY_HOME_OVERRIDE relocates the whole tree (droid_sessions_root).
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("FACTORY_HOME_OVERRIDE") or ctx.home / ".factory"),),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("FACTORY_HOME_OVERRIDE",),
     label="Droid CLI (Factory)",
     # Quota exhaustion, read from the 0.206.0 bundle (not reproduced live):
@@ -584,7 +547,7 @@ SPEC = VendorSpec(
         resume="native",
         todo="key/blob layout read from the 0.206.0 bundle (machine-wide keyring key, no path binding); identity unreadable; keytar branch (Linux/Windows) not seen running; no real-account round-trip recorded",
     ),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=(

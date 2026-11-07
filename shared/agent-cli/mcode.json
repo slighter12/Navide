@@ -9,6 +9,11 @@
   "resume_args": null,
   "session_id_flag": null,
   "login_args": "login",
+  "resume_aliases": null,
+  "subcommand": null,
+  "data_dirs": {"env": ["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"], "home": [".minimax"], "append": [], "extra_env": [], "tilde": false},
+  "session_path": null,
+  "logs": null,
   "supports_session_resume": false,
   "shutdown": null,
   "capabilities": {

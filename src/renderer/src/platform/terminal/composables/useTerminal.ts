@@ -3060,6 +3060,7 @@ export function useTerminal(paneId: string, terminalPort: TerminalDockPort, opts
         createGeneration,
         agentKey: opts.agentKey ?? null,
         command: opts.command,
+        ...(opts.words ? { words: opts.words } : {}),
         cwd: opts.cwd,
         env: opts.env ?? null,
         // Visible panes carry the real, measured width (so a resume's reprint

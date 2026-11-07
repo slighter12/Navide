@@ -98,7 +98,7 @@ from pathlib import Path
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
 from ._vendor_facts import FACTS
-from .base import AccountSwitchSpec, Dep, VendorSpec
+from .base import AccountSwitchSpec, Dep, VendorSpec, data_dirs_of
 
 MCODE_BUILD_ENV = "prod"
 MCODE_REGIONS = ("cn", "en")
@@ -330,7 +330,7 @@ SPEC = VendorSpec(
     # Region/environment auth routing is known; service hosts are not verified.
     expected_hosts=(),
     # Relocation and legacy fallback verified against mcode 0.4.12 above.
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("MINIMAX_DATA_DIR") or ctx.env.get("MAVIS_DATA_DIR") or ctx.home / ".minimax"),),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"),
     label="MiniMax Code",
     # `--session <id>` exists on the interactive command, but resume also

@@ -586,13 +586,11 @@ class TerminalInterface:
         *,
         cancelled: Callable[[], bool] | None = None,
         cancel_record: dict[str, Any] | None = None,
-        base_command: str | list[str] | None = None,
-        login_subcommand: str | None = None,
         credential: Any = None,
         **launch: Any,
     ) -> Any:
-        """Create a session. What this service has no use for is accepted and ignored: a cancellation fence, the native
-        launch's base command and login shape, and a credential helper (the in-process spawn reads `spawn_command`)."""
+        """Create a session. What this service has no use for is accepted and ignored: a cancellation fence and a
+        credential helper (the in-process spawn reads `spawn_command`)."""
         return self.create(**launch)
 
     async def activate_async(self, session_id: str) -> None:

@@ -9,6 +9,11 @@
   "resume_args": "--session-id {id}",
   "session_id_flag": null,
   "login_args": null,
+  "resume_aliases": null,
+  "subcommand": null,
+  "data_dirs": {"env": ["PI_CODING_AGENT_DIR"], "home": [".pi", "agent"], "append": [], "extra_env": ["PI_CODING_AGENT_SESSION_DIR"], "tilde": false},
+  "session_path": null,
+  "logs": {"files": ["{cwd}/*.jsonl"], "cwd": "pi"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

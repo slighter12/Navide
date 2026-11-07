@@ -9,6 +9,11 @@
   "resume_args": "--conversation {id}",
   "session_id_flag": null,
   "login_args": null,
+  "resume_aliases": null,
+  "subcommand": null,
+  "data_dirs": {"env": [], "home": [".gemini", "antigravity-cli"], "append": [], "extra_env": [], "tilde": false},
+  "session_path": {"segments": ["conversations", "{id}.db"], "cwd": "absent"},
+  "logs": {"files": ["*.db"], "cwd": "absent"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

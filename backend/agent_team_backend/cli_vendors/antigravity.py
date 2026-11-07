@@ -31,7 +31,7 @@ import os
 import sys
 import time
 
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -42,8 +42,9 @@ from .base import (
     McpWiring,
     SkillsWiring,
     VendorSpec,
+    data_dirs_of,
     keychain_payload_items,
-    simple_command_args,
+    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -256,16 +257,7 @@ class AntigravityLogReader(LogReader):
         return [root] if root.is_dir() else []
 
     def session_files(self) -> list[Path]:
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                out.extend(
-                    f for f in root.iterdir()
-                    if f.is_file() and f.suffix == ".db"  # skip -wal / -shm
-                )
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", root, err)
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs())  # `*.db` skips -wal / -shm
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
         return [
@@ -801,28 +793,12 @@ async def fetch_antigravity(home: Path) -> dict:
 
 # ---- session ---------------------------------------------------------------
 
-def _resume_id_from_command(command) -> str:
-    args = simple_command_args(command)
-    if not args or args[0] != "agy":
-        return ""
-    for index, arg in enumerate(args[1:], 1):
-        if arg == "--":
-            break
-        if arg == "--conversation" and index + 1 < len(args):
-            value = args[index + 1]
-        elif arg.startswith("--conversation="):
-            value = arg.partition("=")[2]
-        else:
-            continue
-        return value if value and not value.startswith("-") else ""
-    return ""
-
 
 def _session_path(workspace_path: str, session_id: str) -> Path:
     # Each conversation is a SQLite db; the id is the filename stem accepted
     # by `agy --conversation <id>`.
-    return (Path.home() / ".gemini" / "antigravity-cli" / "conversations"
-            / f"{session_id}.db")
+    root = Path.home().joinpath(*FACT.data_dirs.home)
+    return declared_session_path(FACT.session_path, root, workspace_path, session_id)
 
 
 # ---- vendor spec -----------------------------------------------------------
@@ -843,7 +819,7 @@ SPEC = VendorSpec(
     # Quota/OAuth constants above do not establish CLI service expectations.
     expected_hosts=(),
     # Conversation root from AntigravityLogReader; honor the pane HOME shim.
-    data_dirs=lambda ctx: (ctx.path(ctx.home / ".gemini" / "antigravity-cli"),),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     supports_model=FACT.model_flag is not None,
     supports_effort=FACT.effort_flag is not None,
     known_efforts=FACT.known_efforts or (),
@@ -893,7 +869,7 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_antigravity(home),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT, plain_only=True),
     session_path=_session_path,
     make_log_reader=AntigravityLogReader,
     install_dep=Dep("antigravity", "Antigravity CLI (Google)", "Google Antigravity CLI", "agent_cli",

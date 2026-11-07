@@ -112,7 +112,7 @@ import sys
 import time
 
 from .. import osplat
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -123,7 +123,8 @@ from .base import (
     McpWiring,
     SkillsWiring,
     VendorSpec,
-    command_text,
+    data_dirs_of,
+    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -376,18 +377,7 @@ class CopilotLogReader(LogReader):
 
     def session_files(self) -> list[Path]:
         """The central store (1.0.78+) plus every events.jsonl (1.0.75)."""
-        out: list[Path] = []
-        db = self._db_path()
-        if db.is_file():
-            out.append(db)
-        root = self._sessions_root()
-        try:
-            for f in root.glob("*/events.jsonl"):
-                if f.is_file():
-                    out.append(f)
-        except OSError as err:
-            log.debug("glob %s failed: %s", root, err)
-        return out
+        return declared_log_files(FACT.logs, [copilot_root()])
 
     def _query(self, path: Path, sql: str, params: tuple = ()) -> list[tuple] | None:
         """Short-lived read-only query. None = store unreadable this cycle
@@ -459,16 +449,11 @@ class CopilotLogReader(LogReader):
         """The store (it holds every workspace's sessions, so it can never be
         scoped away) plus the events.jsonl files whose workspace.yaml cwd
         matches — Copilot keys session dirs by uuid, not by cwd."""
-        out: list[Path] = []
-        db = self._db_path()
-        if db.is_file():
-            out.append(db)
-        out.extend(
+        return [
             p for p in self.session_files()
-            if p.name == "events.jsonl"
-            and _same_path(self.cwd_from_file(p), workspace_path)
-        )
-        return out
+            if p.name == _DB_NAME
+            or (p.name == "events.jsonl" and _same_path(self.cwd_from_file(p), workspace_path))
+        ]
 
     # ---- 1.0.78+ store ----------------------------------------------------
 
@@ -1384,23 +1369,12 @@ async def fetch_copilot(home: Path, env: dict | None = None) -> dict:
 # `copilot --resume=<id>` (or `--resume <id>`) resumes when the id exists and
 # silently starts a blank NEW session under that UUID when it does not — so
 # the id names this pane's session either way and preflight matters.
-_RESUME_RE = re.compile(
-    r"^copilot\s+(?:\S+\s+)*--resume(?:=(\S+)|\s+([^-\s]\S*))"
-)
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `copilot ... --resume=<id>` / `--resume <id>`
-    command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return (m.group(1) or m.group(2)) if m else ""
-
 
 def _session_path(workspace_path: str, session_id: str) -> Path:
     # Sessions live at <root>/session-state/<id>/events.jsonl, so the id
     # alone names the path. A stale id would not fail — it silently starts a
     # blank NEW session under that UUID — which is why preflight matters.
-    return copilot_root() / "session-state" / session_id / "events.jsonl"
+    return declared_session_path(FACT.session_path, copilot_root(), workspace_path, session_id)
 
 
 def _session_has_turns(session_id: str) -> bool:
@@ -1476,7 +1450,7 @@ SPEC = VendorSpec(
     # Enterprise hosts/model routing have no verified default CLI host set here.
     expected_hosts=(),
     # Same root as copilot_root, using the captured child environment.
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("COPILOT_HOME") or ctx.home / ".copilot"),),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("COPILOT_HOME",),
     supports_model=FACT.model_flag is not None,
     supports_effort=FACT.effort_flag is not None,
@@ -1546,7 +1520,7 @@ SPEC = VendorSpec(
     install_hooks=_install_hooks,
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_copilot(home),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=("COPILOT_HOME",),

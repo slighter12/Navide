@@ -47,14 +47,18 @@ describe('resolveCommand — the stored launch-command override', () => {
     const overrideIdx = body.indexOf("if (launch.source !== 'none') {")
     expect(overrideIdx).toBeGreaterThan(-1)
     expect(body.indexOf('modelArgsFor(')).toBeGreaterThan(overrideIdx)
-    expect(body).toContain('return { command: launch.command, source: launch.source }')
+    expect(body).toContain('return { command: launch.command, words: words ?? literalWords(launch.command), source: launch.source }')
+  })
+
+  it('takes the words of an override only from a rebuilt resume command the caller passed, never from the stored one', () => {
+    expect(body).toContain("const words = launch.source === 'caller' ? resumeWordsFor(launch.command) : undefined")
   })
 
   it('leaves the custom binary to the backend on the no-override path — the one a login pane takes', () => {
     // A login pane gets source 'none', so it falls through to the vendor's own
     // default command. The custom binary is swapped in by terminal.create
     // (backend cli_binary_overrides), for logins too.
-    expect(body).toContain("return { command: parts.join(' '), source: 'none' }")
+    expect(body).toMatch(/return \{\s*command: parts\.join\(' '\),\s*words: freshLaunchWords\(\{[^}]*\}\),\s*source: 'none',\s*\}/)
   })
 })
 

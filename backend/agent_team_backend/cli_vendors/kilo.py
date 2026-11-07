@@ -32,9 +32,10 @@ from .base import (
     McpWiring,
     PushChannel,
     VendorSpec,
-    command_text,
+    data_dirs_of,
     provider_map_extract,
     provider_map_merge,
+    resume_reader_of,
 )
 from .opencode import OpencodeLogReader  # vendor→vendor: sanctioned fork inheritance
 from ..usage_common import (
@@ -51,6 +52,7 @@ class KiloLogReader(OpencodeLogReader):
     vendor: str = "kilo"
     _dir_name: str = "kilo"
     _db_name: str = "kilo.db"
+    _logs = FACTS["kilo"].logs
 
 
 # ---- attribution/watch hooks ----------------------------------------------
@@ -304,17 +306,6 @@ async def fetch_kilo(home: Path, env: dict | None = None, *, bound_store: bool =
 
 # ---- resume / session ------------------------------------------------------
 
-# Kilo Code keeps OpenCode's resume flags — same optional-id guard so the
-# capture never swallows a following flag.
-_RESUME_RE = re.compile(r"^kilo\s+(?:\S+\s+)*(?:--session|-s)\s+([^-\s]\S*)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `kilo ... --session <id>` / `-s <id>` command
-    ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
-
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # One shared SQLite db, same as OpenCode; ask the reader so a stale
@@ -342,7 +333,7 @@ SPEC = VendorSpec(
     # OpenCode fork with arbitrary providers; quota base is not a CLI host set.
     expected_hosts=(),
     # Same XDG database/auth root as KiloLogReader and _kilo_auth_file.
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("XDG_DATA_HOME") or ctx.home / ".local" / "share") / "kilo",),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("XDG_DATA_HOME",),
     # Confirmed in source (Kilo-Org/kilocode): the root command declares
     # --model and applies it at the highest priority. No effort flag —
@@ -424,7 +415,7 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_kilo(home),
     fetch_usage_from_context=lambda ctx: fetch_kilo(ctx.home, dict(ctx.env), bound_store=True),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     # Only the env vars Kilo actually documents (kilo-config.md defines
     # KILO_CONFIG, KILO_CONFIG_DIR, KILO_CONFIG_CONTENT and

@@ -1,7 +1,8 @@
 /** OpenCode — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.opencode
 
@@ -18,7 +19,7 @@ export const SPEC = {
   // `opencode models` lists what that resolves to. Effort is not a flag here
   // either — it is part of the model id (`-high`, `-fast`) or a config
   // variant.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
+  ...factOptions(FACT),
   // No skipPermissionFlag: the opencode TUI has no permission-bypass flag —
   // only the `opencode run` subcommand does, as `--dangerously-skip-permissions`
   // (still listed under `opencode run --help` on 1.15.12).
@@ -30,8 +31,7 @@ export const SPEC = {
   // command REJECTS the flag — `opencode --auto models` prints the help banner
   // and exits 1, while bare `opencode models` exits 0 — so a YOLO-mode pane
   // spawned `opencode --auto ...`, never reached the TUI, and died on startup.
-  // id is `ses_`-prefixed.
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  // The resume id is `ses_`-prefixed.
   needsSessionMarker: true,
   resumeCommandPattern: /^opencode\s+(?:--session|-s)\s+\S+/,
   supportsRebuild: true,

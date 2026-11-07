@@ -1,7 +1,8 @@
 /** Copilot CLI — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.copilot
 
@@ -14,11 +15,8 @@ export const SPEC = {
   // and omits this flag entirely — the values come from the binary's own
   // --help, which exits 1 listing them. Individual models may still refuse
   // one of them.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
-  effortArgs: (e) => `${FACT.effort_flag} ${e}`,
-  knownEfforts: FACT.known_efforts,
   // --yolo ≡ --allow-all-tools --allow-all-paths --allow-all-urls
-  skipPermissionFlag: FACT.permission_flag,
+  ...factOptions(FACT),
   // NOTE the `=` form. Verified against 1.0.78 `--help`: this flag is scoped
   // to an id that already exists ("optionally specify existing session ID,
   // task ID, ID prefix, or name"), while the create-if-missing behaviour lives
@@ -27,7 +25,6 @@ export const SPEC = {
   // --resume= with creating on a miss; whether it still does cannot be settled
   // without a live session, so supportsRestorePin stays off — a stale pin has
   // no documented guarantee of self-healing on this flag.
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
   needsSessionMarker: true,
   // The `=` form, which the generic --resume shape would not match.
   resumeCommandPattern: /^copilot\s+--resume(?:=|\s+)\S+/,

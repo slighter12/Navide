@@ -28,6 +28,7 @@ from uvicorn.protocols.utils import ClientDisconnected
 
 from . import __version__
 from . import agent_messaging
+from . import cli_launch
 from . import cli_runtime_adapters
 from . import cli_runtime_hook
 from . import hook_auth
@@ -3754,20 +3755,6 @@ class AgentCliProbeError(RuntimeError):
         self.details = details
 
 
-def _with_replaced_executable(command: Any, text: str, executable: str) -> Any:
-    """Swap the command's first token, preserving flags and the list wrapper."""
-    first_token = re.match(r"^\s*(?:'[^']*'|\"[^\"]*\"|\S+)", text)
-    if first_token is None:
-        return command
-    replaced = f"{text[:first_token.start()]}{osplat.paths.quote_arg(executable)}{text[first_token.end():]}"
-    if isinstance(command, list):
-        updated = list(command)
-        if updated:
-            updated[-1] = replaced
-        return updated
-    return replaced
-
-
 def _names_a_known_command(program: str, names: "tuple[str, ...]") -> bool:
     """Whether `program` is one of `names`, as this platform spells them.
 
@@ -3799,7 +3786,7 @@ def _command_with_persisted_cli_binary(agent_key: str, command: Any) -> Any:
         return command
     if not parts or not _names_a_known_command(parts[0], (dep.check_cmd[0],)):
         return command
-    return _with_replaced_executable(command, text, selected)
+    return cli_launch.with_executable(command, selected)
 
 
 def _command_with_installed_cli_alias(agent_key: str, command: Any) -> Any:
@@ -3825,7 +3812,7 @@ def _command_with_installed_cli_alias(agent_key: str, command: Any) -> Any:
     installed = onboarding_deps.resolve_executable(dep)
     if not installed:
         return command
-    return _with_replaced_executable(command, text, installed)
+    return cli_launch.with_executable(command, installed)
 
 
 def _login_spawn_command(agent_key: str, command: Any) -> Any:
@@ -3844,19 +3831,7 @@ def _login_spawn_command(agent_key: str, command: Any) -> Any:
     args = spec.login_command_args if spec is not None else None
     if args is None:
         return command
-    text = _command_text(command)
-    first_token = re.match(r"^\s*(?:'[^']*'|\"[^\"]*\"|\S+)", text)
-    if first_token is None:
-        return command
-    replaced = first_token.group(0).strip()
-    if args:
-        replaced = f"{replaced} {args}"
-    if isinstance(command, list):
-        updated = list(command)
-        if updated:
-            updated[-1] = replaced
-        return updated
-    return replaced
+    return cli_launch.with_login(command, args)
 
 
 async def _remove_portable_credential_leftovers() -> None:

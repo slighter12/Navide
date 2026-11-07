@@ -9,6 +9,11 @@
   "resume_args": "--resume {id}",
   "session_id_flag": "--session-id",
   "login_args": "auth login",
+  "resume_aliases": null,
+  "subcommand": null,
+  "data_dirs": {"env": ["CLAUDE_CONFIG_DIR"], "home": [".claude"], "append": [], "extra_env": [], "tilde": false},
+  "session_path": {"segments": ["{cwd}", "{id}.jsonl"], "cwd": "claude"},
+  "logs": {"files": ["{cwd}/*.jsonl"], "cwd": "claude"},
   "supports_session_resume": true,
   "shutdown": {"graceful": true, "grace_s": 3.0, "defer_master_close": true},
   "capabilities": {

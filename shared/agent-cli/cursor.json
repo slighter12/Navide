@@ -9,6 +9,11 @@
   "resume_args": "--resume={id}",
   "session_id_flag": null,
   "login_args": null,
+  "resume_aliases": {"programs": ["cursor-agent"], "flags": []},
+  "subcommand": null,
+  "data_dirs": {"env": [], "home": [".cursor", "chats"], "append": [], "extra_env": [], "tilde": false},
+  "session_path": null,
+  "logs": {"files": ["{cwd}/*/store.db"], "cwd": "md5"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

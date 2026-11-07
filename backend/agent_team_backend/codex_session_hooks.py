@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from . import osplat
+from .cli_launch import append_args
 from .cli_vendors.codex import is_subagent_session_meta
 
 LAUNCH_ENV = 'NAVIDE_CODEX_LAUNCH'
@@ -189,7 +190,6 @@ def wire(command: Any, env: dict, metadata: dict, home: Path, port_file: Path, a
         + ',command=' + _toml_literal(hook_command())
         + ',timeout=3}]}]'
     )
-    text += ' -c ' + osplat.paths.quote_arg(definition)
     # Navide Guard. Behind the same trust gate and user-override check as
     # SessionStart: it is one more hook Codex may ask the user to trust.
     guard = (
@@ -197,8 +197,7 @@ def wire(command: Any, env: dict, metadata: dict, home: Path, port_file: Path, a
         + ',command=' + _toml_literal(guard_hook_command())
         + ',timeout=10}]}]'
     )
-    text += ' -c ' + osplat.paths.quote_arg(guard)
-    return [*command[:-1], text] if isinstance(command, list) else text
+    return append_args(command, '-c', definition, '-c', guard)
 
 
 class PendingStarts:

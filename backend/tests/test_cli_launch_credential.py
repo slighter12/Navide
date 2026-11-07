@@ -84,9 +84,10 @@ def test_a_direct_string_is_declined_exactly_when_wrap_command_declines_it(case,
 
 def test_build_launch_wraps_the_ordinary_launch_in_the_credential_shape():
     plan = {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": None}
-    base = ["/bin/bash", "-lc", "/x/bin/kilo --model fixture-model"]
-    final = ["/bin/bash", "-lc", "/x/bin/kilo --model fixture-model --port 4000 --hostname 127.0.0.1"]
-    launch = cli_launch.build_launch("kilo", base, final, credential=plan)
+    base = cli_launch.Command.from_words([
+        {"lit": "/x/bin/kilo"}, {"opt": "model", "value": "fixture-model", "text": " --model fixture-model"}])
+    final = ["/bin/bash", "-lc", cli_launch.append_args(base, "--port", "4000", "--hostname", "127.0.0.1")]
+    launch = cli_launch.build_launch(final, credential=plan)
     assert launch == {
         "shape": "credential", "helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV],
         "inner": {"shape": "wrapped", "shell": "/bin/bash", "flags": ["-lc"], "words": [
@@ -97,7 +98,7 @@ def test_build_launch_wraps_the_ordinary_launch_in_the_credential_shape():
 
 def test_build_launch_for_a_string_command_names_the_entrypoint():
     plan = {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": "/x/bin/kilo"}
-    launch = cli_launch.build_launch("kilo", "/x/bin/kilo", "/x/bin/kilo --port 4000", credential=plan)
+    launch = cli_launch.build_launch(cli_launch.append_args("/x/bin/kilo", "--port", "4000"), credential=plan)
     assert launch["shape"] == "credential" and launch["entrypoint"] == "/x/bin/kilo"
     assert launch["inner"] == {"shape": "direct", "form": "string",
                                "words": [{"lit": "/x/bin/kilo"}, {"arg": "--port"}, {"arg": "4000"}]}
@@ -108,7 +109,7 @@ def test_build_launch_for_a_string_command_names_the_entrypoint():
 def test_text_the_runtime_cannot_carry_is_refused_in_every_new_credential_field(field, bad):
     """Delta 2.7 covers the fields the credential shape adds: refused before dispatch (`pre-dispatch`)."""
     plan = {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": "/x/bin/kilo"}
-    launch = cli_launch.build_launch("kilo", "/x/bin/kilo", "/x/bin/kilo --port 4000", credential=plan)
+    launch = cli_launch.build_launch(cli_launch.append_args("/x/bin/kilo", "--port", "4000"), credential=plan)
     cli_launch.check_text(launch)  # the clean launch passes
     if field == "inner":
         launch["inner"]["words"].append({"arg": bad})
@@ -134,13 +135,15 @@ def test_a_managed_credential_launch_of_a_rust_subject_is_admitted():
 
 
 def test_the_wrapper_arguments_survive_the_credential_shape_exactly():
-    """The words of the inner launch render to the line the oracle embeds, whatever the quoting."""
+    """The line the oracle embeds is the text of the words the inner launch carries, whatever the quoting."""
     line = "/x/bin/kilo --note '世界 café' --port 4000"
-    base = ["/bin/bash", "-lc", "/x/bin/kilo"]
-    final = ["/bin/bash", "-lc", line]
+    command = cli_launch.append_args(cli_launch.Command.literal("/x/bin/kilo"), "--note", "世界 café", "--port", "4000")
+    final = ["/bin/bash", "-lc", command]
+    assert command == line
     plan = credential_launch.wrap_plan(final, KILO, HELPER)
-    launch = cli_launch.build_launch("kilo", base, final, credential=plan)
-    assert cli_launch.render(launch["inner"]["words"], "kilo") == line
+    launch = cli_launch.build_launch(final, credential=plan)
+    assert launch["inner"]["words"] == [
+        {"lit": "/x/bin/kilo"}, {"arg": "--note"}, {"arg": "世界 café"}, {"arg": "--port"}, {"arg": "4000"}]
     assert shlex.split(line)[0] == "/x/bin/kilo"
 
 
@@ -162,14 +165,14 @@ def test_the_credential_launch_attests_the_program_it_really_executes(form):
     """Script form: the inner shell. Entrypoint form: the helper's interpreter (HELPER[0])."""
     from agent_team_backend.cli_runtime import RustTerminalService
     if form == "script":
-        base = final = ["/bin/bash", "-lc", "/x/bin/kilo"]
+        final = ["/bin/bash", "-lc", "/x/bin/kilo"]
         plan = credential_launch.wrap_plan(final, KILO, HELPER)
         executed, other = "/bin/bash", HELPER[0]
     else:
-        base = final = "/x/bin/kilo"
+        final = "/x/bin/kilo"
         plan = {"helper": HELPER, "unset": [PORT_ENV, TOKEN_ENV], "entrypoint": "/x/bin/kilo"}
         executed, other = HELPER[0], "/x/bin/kilo"
-    launch = cli_launch.build_launch("kilo", base, final, credential=plan)
+    launch = cli_launch.build_launch(final, credential=plan)
     expected = RustTerminalService._expected_program(launch)
     assert expected == executed
     assert cli_launch.verify_argv0_attestation(_attested(executed), wrapped_shell=expected) == executed

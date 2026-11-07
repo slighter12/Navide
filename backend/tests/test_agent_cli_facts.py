@@ -27,8 +27,19 @@ STATUSES = {"integrated", "vendor-unsupported", "not-yet-integrated", "unknown"}
 CAPABILITIES = {"model", "effort", "skip_permissions", "resume_by_id", "session_id_at_launch", "login"}
 REQUIRED = {
     "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
-    "session_id_flag", "login_args", "supports_session_resume", "shutdown", "capabilities", "observer",
+    "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_path", "logs",
+    "supports_session_resume", "shutdown", "capabilities", "observer",
 }
+#: The typed records a declaration may carry (each is null or exactly these fields): what the generic core routines read
+#: instead of per-vendor code.
+RECORDS = {
+    "resume_aliases": {"programs", "flags"},
+    "subcommand": {"word", "aliases"},
+    "data_dirs": {"env", "home", "append", "extra_env", "tilde"},
+    "session_path": {"segments", "cwd"},
+    "logs": {"files", "cwd"},
+}
+CWD_ENCODINGS = {"absent", "claude", "droid", "url_quote", "pi", "md5"}
 OBSERVER = {"parser", "parser_id", "platforms", "layouts", "core"}
 #: A layout always names these; `rules` (a JSONL log's compatibility rules), `defers_to` (ownership), `request` (what the
 #: request carries for a file) and `applies_when` (the table that tells a schema variant) are optional.
@@ -83,6 +94,40 @@ def test_declarations_have_the_declared_shape() -> None:
             assert "{id}" in facts["resume_args"], key
         # Status stays internal: no evidence or verification text rides along in the declaration.
         assert all(isinstance(value, str) for value in facts["capabilities"].values()), key
+
+
+def test_a_typed_record_is_null_or_exactly_its_fields() -> None:
+    for key, facts in declarations().items():
+        for name, fields in RECORDS.items():
+            record = facts[name]
+            assert record is None or set(record) == fields, (key, name)
+            if record is not None and "cwd" in record:
+                assert record["cwd"] in CWD_ENCODINGS, (key, name)
+                assert ("{cwd}" in "/".join(record.get("files") or record.get("segments"))) == (record["cwd"] != "absent"), (key, name)
+
+
+def test_a_logs_pattern_that_leaves_the_root_is_refused(tmp_path: Path) -> None:
+    generator = declarations_with(tmp_path, "claude", lambda facts: facts["logs"].update(files=["../{cwd}/*.jsonl"]))
+    with pytest.raises(SystemExit, match="relative"):
+        generator.load(tmp_path)
+
+
+def test_a_logs_cwd_encoding_must_match_its_placeholder(tmp_path: Path) -> None:
+    generator = declarations_with(tmp_path, "claude", lambda facts: facts["logs"].update(cwd="absent"))
+    with pytest.raises(SystemExit, match="exactly when"):
+        generator.load(tmp_path)
+
+
+def test_a_session_path_without_the_id_is_refused(tmp_path: Path) -> None:
+    generator = declarations_with(tmp_path, "claude", lambda facts: facts["session_path"].update(segments=["{cwd}", "x.jsonl"]))
+    with pytest.raises(SystemExit, match="session_path must hold"):
+        generator.load(tmp_path)
+
+
+def test_a_subcommand_that_is_not_the_first_word_of_the_resume_is_refused(tmp_path: Path) -> None:
+    generator = declarations_with(tmp_path, "goose", lambda facts: facts["subcommand"].update(word="chat"))
+    with pytest.raises(SystemExit, match="first word of resume_args"):
+        generator.load(tmp_path)
 
 
 def test_an_observer_declaration_is_typed_and_a_vendor_without_one_says_so() -> None:

@@ -465,7 +465,7 @@ def test_resolve_user_thread_id_survives_a_cyclic_parent_chain(tmp_path: Path) -
 
 
 def test_command_with_resume_id_rewrites_inside_the_shell_wrapper() -> None:
-    from agent_team_backend.cli_vendors.codex import command_with_resume_id
+    from agent_team_backend.cli_launch import with_resume_id as command_with_resume_id
 
     assert command_with_resume_id(
         ["/bin/zsh", "-ilc", "codex resume child-id"], "child-id", "parent-id"

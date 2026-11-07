@@ -1,7 +1,8 @@
 /** Cursor CLI — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.cursor
 
@@ -17,10 +18,8 @@ export const SPEC = {
   // separate flag and asking for one is refused. The bracket form
   // `model[effort=high]` that --help mentions has no official documentation
   // and is reported to fail; it is not offered here.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
   // --force (official alias --yolo) auto-approves all commands
-  skipPermissionFlag: FACT.permission_flag,
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  ...factOptions(FACT),
   needsSessionMarker: true,
   // Executable is `agent` (the installer also creates the legacy
   // `cursor-agent`); accept both, `=` and space forms, so a command saved by

@@ -1,7 +1,8 @@
 /** Antigravity CLI — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.antigravity
 
@@ -11,11 +12,7 @@ export const SPEC = {
   defaultCommand: FACT.command,
   // agy validates both together and exits 1 on a bad value, naming the
   // three it accepts.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
-  effortArgs: (e) => `${FACT.effort_flag} ${e}`,
-  knownEfforts: FACT.known_efforts,
-  skipPermissionFlag: FACT.permission_flag,
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  ...factOptions(FACT),
   needsSessionMarker: true,
   bracketedPaste: true,
   resumeCommandPattern: /^agy\s+--conversation\s+\S+/,

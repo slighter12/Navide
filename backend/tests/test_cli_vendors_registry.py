@@ -66,6 +66,17 @@ def _frontend_declared_source(path: Path) -> str:
         generated = (REPO_ROOT / "src" / "shared" / "vendorFacts.ts").read_text(encoding="utf-8")
         table = json.loads(generated.partition("export const VENDOR_FACTS = ")[2].partition(" as const\n")[0])
         facts = table[path.stem]
+        # `...factOptions(FACT)` (src/shared/launchWords.ts) declares each option the facts spell, and none other.
+        declared = [
+            line for present, line in (
+                (facts["model_flag"], "  modelArgs: (model) => model,"),
+                (facts["effort_flag"], "  effortArgs: (effort) => effort,"),
+                (facts["known_efforts"], f"  knownEfforts: {facts['known_efforts']!r},"),
+                (facts["permission_flag"], "  skipPermissionFlag: FACT.permission_flag,"),
+                (facts["resume_args"], "  resumeArgs: (id) => id,"),
+            ) if present
+        ]
+        source = source.replace("...factOptions(FACT),", "\n".join(declared))
         source = re.sub(r"FACT\.(\w+)", lambda match: repr(facts[match[1]]), source)
     return source
 
@@ -601,7 +612,7 @@ def test_session_resume_capability_matches_the_frontend_agent_spec() -> None:
     for path in FRONTEND_AGENTS_DIR.glob("*.ts"):
         if path.stem.startswith("_") or path.stem in {"index", "types"}:
             continue
-        source = path.read_text(encoding="utf-8")
+        source = _frontend_declared_source(path)
         keys = set(re.findall(r"agentKey: '([a-z]+)'", source))
         assert len(keys) == 1, f"{path.name} declares agentKeys {sorted(keys)}"
         key = keys.pop()

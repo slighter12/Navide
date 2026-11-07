@@ -35,7 +35,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import osplat
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
@@ -47,7 +47,8 @@ from .base import (
     ShutdownSpec,
     SkillsWiring,
     VendorSpec,
-    command_text,
+    data_dirs_of,
+    resume_reader_of,
 )
 from ..usage_common import (
     _KEYCHAIN_COOLDOWN_S,
@@ -283,18 +284,7 @@ class ClaudeLogReader(LogReader):
         return [default] if default is not None else []
 
     def session_files(self) -> list[Path]:
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                for child in root.iterdir():
-                    if not child.is_dir():
-                        continue
-                    for f in child.iterdir():
-                        if f.is_file() and f.suffix == ".jsonl":
-                            out.append(f)
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", root, err)
-        return out
+        return declared_log_files(CLAUDE.logs, self.project_dirs())
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
         """Only the jsonl files under this workspace's project subdirectory.
@@ -303,19 +293,7 @@ class ClaudeLogReader(LogReader):
         workspace maps to exactly one folder — we can enumerate just that
         folder instead of the entire (potentially multi-GB) projects root.
         """
-        encoded = encode_claude_cwd(workspace_path)
-        out: list[Path] = []
-        for root in self.project_dirs():
-            d = root / encoded
-            if not d.is_dir():
-                continue
-            try:
-                for f in d.iterdir():
-                    if f.is_file() and f.suffix == ".jsonl":
-                        out.append(f)
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", d, err)
-        return out
+        return declared_log_files(CLAUDE.logs, self.project_dirs(), workspace_path)
 
     def own_session_files(self, workspace_path: str) -> list[Path]:
         """session_files_for_workspace without a neighbour's sessions: the folder can
@@ -1413,14 +1391,6 @@ async def fetch_claude_account_dir(config_dir: Path) -> dict:
 # ---- resume / session ------------------------------------------------------
 
 CLAUDE = FACTS["claude"]
-_RESUME_RE = re.compile(
-    rf"^{re.escape(CLAUDE.command)}\s+(?:\S+\s+)*{re.escape(CLAUDE.resume_args.removesuffix(' {id}'))}\s+(\S+)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `claude ... --resume <id>` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
 
 
 def _session_path(workspace_path: str, session_id: str) -> Path:
@@ -1432,8 +1402,7 @@ def _session_path(workspace_path: str, session_id: str) -> Path:
     # diagnostics ("this is where we looked"). The wider search that mirrors
     # the CLI lives in _session_exists below.
     root = claude_projects_root() or Path.home() / ".claude" / "projects"
-    project_dir = encode_claude_cwd(workspace_path)
-    return root / project_dir / f"{session_id}.jsonl"
+    return declared_session_path(CLAUDE.session_path, root, workspace_path, session_id)
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -1512,7 +1481,7 @@ SPEC = VendorSpec(
     ),
     # Same config home as install_dep; never use the backend reader's fallback
     # search across other accounts when this pane has an isolated config dir.
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("CLAUDE_CONFIG_DIR") or ctx.home / ".claude"),),
+    data_dirs=data_dirs_of(CLAUDE.data_dirs),
     data_dir_env_vars=("CLAUDE_CONFIG_DIR",),
     supports_model=CLAUDE.model_flag is not None,
     supports_effort=CLAUDE.effort_flag is not None,
@@ -1616,7 +1585,7 @@ SPEC = VendorSpec(
     # The vault's claude behavior branches (Keychain dual-track, oauthAccount,
     # wiped guard, login CLAUDE_CONFIG_DIR + env removals) are the documented
     # exemption list and are NOT routed through this spec.
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(CLAUDE),
     session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=(

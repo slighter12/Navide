@@ -62,10 +62,11 @@ from urllib.parse import quote
 
 from agent_team_backend import log_redaction
 from agent_team_backend.applog import app_data_dir, backend_port_file
+from agent_team_backend.cli_launch import append_args
 from agent_team_backend.cli_vendors import registry
 from agent_team_backend.cli_vendors.base import McpWiring, mcp_document, mcp_entry
 from agent_team_backend.mcp_server import auth, pane_home
-from agent_team_backend.osplat import paths, secret_files, terminal_backend
+from agent_team_backend.osplat import secret_files, terminal_backend
 
 log = logging.getLogger("agent_team_backend.mcp_server.wiring")
 
@@ -353,15 +354,6 @@ def _already_wired(text: str, marker: str) -> bool:
     except ValueError:
         return False
     return any(marker in word for word in words)
-
-
-def _append_to_command(command: Any, suffix: str) -> Any:
-    """Append ``suffix`` to the real command, preserving the shell wrapper."""
-    if isinstance(command, list):
-        updated = list(command)
-        updated[-1] = f"{updated[-1]} {suffix}"
-        return updated
-    return f"{command} {suffix}"
 
 
 def project_config_path(agent_key: str, cwd: str | Path) -> Path | None:
@@ -687,7 +679,7 @@ def wire_command(
             return command
         if wiring.flag_file_prefix is not None and _already_wired(text, PANE_CONFIG_DIRNAME):
             return command
-        extra = ""
+        extra: tuple[str, ...] = ()
         if wiring.flag_value:
             # The credential goes in the environment, never in argv; without an
             # env to put it in, the URL has to carry it.
@@ -698,7 +690,7 @@ def wire_command(
             if by_env:
                 env[TOKEN_ENV] = spawn_token(pane_id)
                 token_value = wiring.flag_token_env_value.format(name=SERVER_NAME, env=TOKEN_ENV)
-                extra = f" {wiring.flag} {paths.quote_arg(token_value)}"
+                extra = (wiring.flag, token_value)
         elif wiring.flag_accepts_path and not pane_id:
             config = claude_config or claude_config_path()
             if not config.is_file():
@@ -715,7 +707,7 @@ def wire_command(
             value = f"{wiring.flag_file_prefix}{path}"
         else:
             value = config_json(agent_key, port, pane_id)
-        return _append_to_command(command, f"{wiring.flag} {paths.quote_arg(value)}{extra}")
+        return append_args(command, wiring.flag, value, *extra)
     if wiring.config_env:
         if env is not None and wiring.config_env not in env:
             env[wiring.config_env] = config_json(agent_key, port, pane_id)

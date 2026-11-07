@@ -24,7 +24,8 @@
  */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.muse
 
@@ -34,22 +35,19 @@ export const SPEC = {
   defaultCommand: FACT.command,
   // Values from the binary's --help, which lists one more (`max`) than the
   // published configuration docs. Meta-hosted models reject `none`.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
-  effortArgs: (e) => `${FACT.effort_flag} ${e}`,
-  knownEfforts: FACT.known_efforts,
+  //
   // Two documented ways to stop the prompting: `--yolo` drops BOTH the
   // approval layer and the OS sandbox (Meta scopes it to "CI containers
   // only"), while `--disable-approval` drops only the approval prompts and
   // keeps the sandbox confining writes to the workspace. YOLO mode here means
   // "don't stop to ask", not "remove OS containment", so the narrower flag is
   // the match; `--yolo` remains available to type as a custom command.
-  skipPermissionFlag: FACT.permission_flag,
+  ...factOptions(FACT),
   // Subcommand, NOT a --flag. `muse resume --help` (0.1.0) states
   // `muse resume <session-uuid>`, and the reader verified that uuid against
   // real session files: it is the session DIRECTORY's name, which equals the
   // `stream.id` every record carries — NOT the internal command id that also
   // appears in the log under `owner.session_id` / `command_id`.
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
   resumeCommandPattern: /^muse\s+resume\s+\S+/,
   // Muse can't be told a session id at launch, and its session directory is
   // named by a uuid it coins itself — so a fresh pane embeds the `at-pane:`

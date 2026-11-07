@@ -9,7 +9,12 @@ export const VENDOR_FACTS = {
     "permission_flag": "--yes-always",
     "resume_args": null,
     "session_id_flag": null,
-    "login_args": null
+    "login_args": null,
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": null,
+    "session_path": null,
+    "logs": null
   },
   "antigravity": {
     "key": "antigravity",
@@ -24,7 +29,32 @@ export const VENDOR_FACTS = {
     "permission_flag": "--dangerously-skip-permissions",
     "resume_args": "--conversation {id}",
     "session_id_flag": null,
-    "login_args": null
+    "login_args": null,
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": {
+      "env": [],
+      "home": [
+        ".gemini",
+        "antigravity-cli"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": {
+      "segments": [
+        "conversations",
+        "{id}.db"
+      ],
+      "cwd": "absent"
+    },
+    "logs": {
+      "files": [
+        "*.db"
+      ],
+      "cwd": "absent"
+    }
   },
   "claude": {
     "key": "claude",
@@ -41,7 +71,33 @@ export const VENDOR_FACTS = {
     "permission_flag": "--dangerously-skip-permissions",
     "resume_args": "--resume {id}",
     "session_id_flag": "--session-id",
-    "login_args": "auth login"
+    "login_args": "auth login",
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "CLAUDE_CONFIG_DIR"
+      ],
+      "home": [
+        ".claude"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": {
+      "segments": [
+        "{cwd}",
+        "{id}.jsonl"
+      ],
+      "cwd": "claude"
+    },
+    "logs": {
+      "files": [
+        "{cwd}/*.jsonl"
+      ],
+      "cwd": "claude"
+    }
   },
   "codex": {
     "key": "codex",
@@ -52,7 +108,29 @@ export const VENDOR_FACTS = {
     "permission_flag": "--dangerously-bypass-approvals-and-sandbox",
     "resume_args": "resume {id}",
     "session_id_flag": null,
-    "login_args": "login"
+    "login_args": "login",
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "CODEX_HOME"
+      ],
+      "home": [
+        ".codex"
+      ],
+      "append": [],
+      "extra_env": [
+        "CODEX_SQLITE_HOME"
+      ],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": {
+      "files": [
+        "**/rollout-*.jsonl"
+      ],
+      "cwd": "absent"
+    }
   },
   "copilot": {
     "key": "copilot",
@@ -71,7 +149,35 @@ export const VENDOR_FACTS = {
     "permission_flag": "--yolo",
     "resume_args": "--resume={id}",
     "session_id_flag": null,
-    "login_args": "login"
+    "login_args": "login",
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "COPILOT_HOME"
+      ],
+      "home": [
+        ".copilot"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": {
+      "segments": [
+        "session-state",
+        "{id}",
+        "events.jsonl"
+      ],
+      "cwd": "absent"
+    },
+    "logs": {
+      "files": [
+        "session-store.db",
+        "session-state/*/events.jsonl"
+      ],
+      "cwd": "absent"
+    }
   },
   "cursor": {
     "key": "cursor",
@@ -82,7 +188,31 @@ export const VENDOR_FACTS = {
     "permission_flag": "--force",
     "resume_args": "--resume={id}",
     "session_id_flag": null,
-    "login_args": null
+    "login_args": null,
+    "resume_aliases": {
+      "programs": [
+        "cursor-agent"
+      ],
+      "flags": []
+    },
+    "subcommand": null,
+    "data_dirs": {
+      "env": [],
+      "home": [
+        ".cursor",
+        "chats"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": {
+      "files": [
+        "{cwd}/*/store.db"
+      ],
+      "cwd": "md5"
+    }
   },
   "droid": {
     "key": "droid",
@@ -93,7 +223,39 @@ export const VENDOR_FACTS = {
     "permission_flag": "--auto high",
     "resume_args": "--resume {id}",
     "session_id_flag": null,
-    "login_args": null
+    "login_args": null,
+    "resume_aliases": {
+      "programs": [],
+      "flags": [
+        "-r"
+      ]
+    },
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "FACTORY_HOME_OVERRIDE"
+      ],
+      "home": [
+        ".factory"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": {
+      "segments": [
+        "{cwd}",
+        "{id}.jsonl"
+      ],
+      "cwd": "droid"
+    },
+    "logs": {
+      "files": [
+        "*.jsonl",
+        "{cwd}/*.jsonl"
+      ],
+      "cwd": "droid"
+    }
   },
   "goose": {
     "key": "goose",
@@ -104,7 +266,22 @@ export const VENDOR_FACTS = {
     "permission_flag": null,
     "resume_args": "session -r --session-id {id}",
     "session_id_flag": null,
-    "login_args": null
+    "login_args": null,
+    "resume_aliases": null,
+    "subcommand": {
+      "word": "session",
+      "aliases": [
+        "s"
+      ]
+    },
+    "data_dirs": null,
+    "session_path": null,
+    "logs": {
+      "files": [
+        "sessions.db"
+      ],
+      "cwd": "absent"
+    }
   },
   "grok": {
     "key": "grok",
@@ -115,7 +292,39 @@ export const VENDOR_FACTS = {
     "permission_flag": null,
     "resume_args": "-r {id}",
     "session_id_flag": "--session-id",
-    "login_args": "login"
+    "login_args": "login",
+    "resume_aliases": {
+      "programs": [],
+      "flags": [
+        "--resume"
+      ]
+    },
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "GROK_HOME"
+      ],
+      "home": [
+        ".grok"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": {
+      "segments": [
+        "{cwd}",
+        "{id}",
+        "updates.jsonl"
+      ],
+      "cwd": "url_quote"
+    },
+    "logs": {
+      "files": [
+        "{cwd}/*/updates.jsonl"
+      ],
+      "cwd": "url_quote"
+    }
   },
   "kilo": {
     "key": "kilo",
@@ -126,7 +335,35 @@ export const VENDOR_FACTS = {
     "permission_flag": "--auto",
     "resume_args": "--session {id}",
     "session_id_flag": null,
-    "login_args": "auth login"
+    "login_args": "auth login",
+    "resume_aliases": {
+      "programs": [],
+      "flags": [
+        "-s"
+      ]
+    },
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "XDG_DATA_HOME"
+      ],
+      "home": [
+        ".local",
+        "share"
+      ],
+      "append": [
+        "kilo"
+      ],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": {
+      "files": [
+        "kilo.db"
+      ],
+      "cwd": "absent"
+    }
   },
   "kimi": {
     "key": "kimi",
@@ -137,7 +374,32 @@ export const VENDOR_FACTS = {
     "permission_flag": "--yolo",
     "resume_args": "--session {id}",
     "session_id_flag": null,
-    "login_args": "login"
+    "login_args": "login",
+    "resume_aliases": {
+      "programs": [],
+      "flags": [
+        "-S"
+      ]
+    },
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "KIMI_CODE_HOME"
+      ],
+      "home": [
+        ".kimi-code"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": {
+      "files": [
+        "wd_*/session_*/agents/main/wire.jsonl"
+      ],
+      "cwd": "absent"
+    }
   },
   "mcode": {
     "key": "mcode",
@@ -148,7 +410,23 @@ export const VENDOR_FACTS = {
     "permission_flag": null,
     "resume_args": null,
     "session_id_flag": null,
-    "login_args": "login"
+    "login_args": "login",
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "MINIMAX_DATA_DIR",
+        "MAVIS_DATA_DIR"
+      ],
+      "home": [
+        ".minimax"
+      ],
+      "append": [],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": null
   },
   "muse": {
     "key": "muse",
@@ -168,7 +446,30 @@ export const VENDOR_FACTS = {
     "permission_flag": "--disable-approval",
     "resume_args": "resume {id}",
     "session_id_flag": null,
-    "login_args": "login"
+    "login_args": "login",
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "XDG_DATA_HOME"
+      ],
+      "home": [
+        ".local",
+        "share"
+      ],
+      "append": [
+        "muse"
+      ],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": {
+      "files": [
+        "*/*/*/*/session.jsonl"
+      ],
+      "cwd": "absent"
+    }
   },
   "opencode": {
     "key": "opencode",
@@ -179,7 +480,35 @@ export const VENDOR_FACTS = {
     "permission_flag": null,
     "resume_args": "--session {id}",
     "session_id_flag": null,
-    "login_args": "auth login"
+    "login_args": "auth login",
+    "resume_aliases": {
+      "programs": [],
+      "flags": [
+        "-s"
+      ]
+    },
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "XDG_DATA_HOME"
+      ],
+      "home": [
+        ".local",
+        "share"
+      ],
+      "append": [
+        "opencode"
+      ],
+      "extra_env": [],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": {
+      "files": [
+        "opencode.db"
+      ],
+      "cwd": "absent"
+    }
   },
   "pi": {
     "key": "pi",
@@ -198,7 +527,30 @@ export const VENDOR_FACTS = {
     "permission_flag": null,
     "resume_args": "--session-id {id}",
     "session_id_flag": null,
-    "login_args": null
+    "login_args": null,
+    "resume_aliases": null,
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "PI_CODING_AGENT_DIR"
+      ],
+      "home": [
+        ".pi",
+        "agent"
+      ],
+      "append": [],
+      "extra_env": [
+        "PI_CODING_AGENT_SESSION_DIR"
+      ],
+      "tilde": false
+    },
+    "session_path": null,
+    "logs": {
+      "files": [
+        "{cwd}/*.jsonl"
+      ],
+      "cwd": "pi"
+    }
   },
   "qwen": {
     "key": "qwen",
@@ -209,7 +561,43 @@ export const VENDOR_FACTS = {
     "permission_flag": "--yolo",
     "resume_args": "--resume {id}",
     "session_id_flag": null,
-    "login_args": null
+    "login_args": null,
+    "resume_aliases": {
+      "programs": [],
+      "flags": [
+        "-r"
+      ]
+    },
+    "subcommand": null,
+    "data_dirs": {
+      "env": [
+        "QWEN_HOME"
+      ],
+      "home": [
+        ".qwen"
+      ],
+      "append": [],
+      "extra_env": [
+        "QWEN_RUNTIME_DIR"
+      ],
+      "tilde": true
+    },
+    "session_path": {
+      "segments": [
+        "projects",
+        "{cwd}",
+        "chats",
+        "{id}.jsonl"
+      ],
+      "cwd": "claude"
+    },
+    "logs": {
+      "files": [
+        "{cwd}/chats/*.jsonl",
+        "{cwd}/chats/archive/*.jsonl"
+      ],
+      "cwd": "claude"
+    }
   }
 } as const
 

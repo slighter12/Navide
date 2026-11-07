@@ -68,6 +68,7 @@ export {
   paneBusyForRebuild,
   paneCanRebuild,
   paneRebuildVisible,
+  resumeWordsFor,
   sessionHomeIdFor,
   shouldPreserveMissingSessionOnRestore,
   shouldWarnMissingResume,

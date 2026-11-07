@@ -51,7 +51,6 @@ from . import (
     trust_store,
     webhook_service,
 )
-from .cli_vendors.codex import command_with_resume_id as codex_command_with_resume_id
 from .terminals import CreateCancel, CreateCancelled
 from .cli_vendors.registry import VENDORS as CLI_VENDORS
 from .cli_vendors.registry import vendor as cli_vendor
@@ -8690,6 +8689,12 @@ async def _terminal_create_impl(
                 pane_config_fingerprint.METADATA_KEY):
         metadata.pop(key, None)
     agent_key = payload.get("agent_key") or ""
+    try:
+        # The structure the renderer composed the command from, when it sent one beside the text.
+        payload["command"] = cli_launch.attach_words(payload.get("command"), payload.get("words"))
+    except cli_launch.LaunchRefused as refused:
+        session.terminals.receipt_refused_create(str(payload.get("pane_id") or ""), refused)
+        raise
     # The window's per-vendor env settings, first in the chain on purpose: the
     # vendor defaults below use setdefault, while onboarding, login profiles,
     # home management and wiring all update over the top,
@@ -8968,7 +8973,7 @@ async def _terminal_create_impl(
                     "codex resume id repaired: sub-agent %s → user thread %s",
                     resume_id, repaired,
                 )
-                payload["command"] = codex_command_with_resume_id(
+                payload["command"] = cli_launch.with_resume_id(
                     payload.get("command"), resume_id, repaired
                 )
                 resume_id = repaired
@@ -9031,9 +9036,6 @@ async def _terminal_create_impl(
     # Lines the pane prints at startup when this machine cannot wire it (see
     # wire_command): the only other trace is a backend log the user never sees.
     wiring_warnings: list[str] = []
-    # The command as submitted (after the binary, alias and login rewrites) is what the Rust runtime
-    # tokenises; whatever the injectors below append is described separately (cli_launch.build_launch).
-    base_command = payload["command"]
     # Keyed on the sign-in SUBCOMMAND, not on `login_profile_id` (which a live
     # login does not carry) nor on `is_login` (which a REPL-launching vendor
     # also sets): a subcommand rejects the top-level flags wired below —
@@ -9122,12 +9124,7 @@ async def _terminal_create_impl(
                 app.codex_home_manager.hook_trust_override, Path(env["CODEX_HOME"])
             )
             if override and not login_subcommand:
-                command = payload["command"]
-                flag = " -c " + osplat.paths.quote_arg(override)
-                payload["command"] = (
-                    [*command[:-1], f"{command[-1]}{flag}"] if isinstance(command, list) and command
-                    else f"{command}{flag}"
-                )
+                payload["command"] = cli_launch.append_args(payload["command"], "-c", override)
         else:
             seeded = await asyncio.to_thread(
                 convenience_wiring.seed_hook_trust_gated, app.codex_home_manager, Path(env["CODEX_HOME"])
@@ -9223,8 +9220,6 @@ async def _terminal_create_impl(
                 **({"spawn_command": spawn_command} if spawn_command is not None else {}),
                 cancelled=lambda: transaction["cancelled"] or session.dead,
                 cancel_record=transaction,
-                base_command=base_command,
-                login_subcommand=login_subcommand,
                 credential=credential,
             )
         except CreateCancelled:

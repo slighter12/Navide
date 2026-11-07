@@ -1,12 +1,16 @@
 import type { TerminalExitDetails, TerminalStartupProbe } from '../lib/terminalLifecycle'
 import type { PortResponse, ReactiveValue } from '@navide/plugin-ui/shared'
 import type { ShellCommandOptions } from '../../../../../shared/osplat'
+import type { LaunchWord } from '../../../../../shared/launchWords'
 import type { InjectionKey } from 'vue'
 
 export interface TerminalSpawnOptions {
   quotaTransactionId?: string
   quotaOriginalPaneId?: string
   command: string | string[]
+  /** The words `command` was composed from, when the caller has them. The backend checks they
+   *  compose to exactly `command` and builds the launch from them instead of the text. */
+  words?: LaunchWord[]
   cwd: string
   env?: Record<string, string>
   agentKey?: string
@@ -39,6 +43,7 @@ export interface TerminalCreateRequest {
   createGeneration: string
   agentKey: string | null
   command: string | string[]
+  words?: LaunchWord[]
   cwd: string
   env: Record<string, string> | null
   cols: number

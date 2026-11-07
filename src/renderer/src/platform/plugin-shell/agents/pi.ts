@@ -1,7 +1,8 @@
 /** Pi — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.pi
 
@@ -13,13 +14,10 @@ export const SPEC = {
   // failing, so the vocabulary is checked before launch. pi also accepts
   // `provider/id:<thinking>` in --model; the flag is used instead so the two
   // arguments stay independent.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
-  effortArgs: (e) => `${FACT.effort_flag} ${e}`,
-  knownEfforts: FACT.known_efforts,
-  // no skipPermissionFlag: pi has no permission system at all
-  // (bash/edit tools execute directly, nothing to bypass)
-  // Creates a NEW session when the id doesn't exist, resumes when it does.
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  // No skipPermissionFlag: pi has no permission system at all
+  // (bash/edit tools execute directly, nothing to bypass).
+  // The resume creates a NEW session when the id doesn't exist, resumes when it does.
+  ...factOptions(FACT),
   needsSessionMarker: true,
   turnEndInferredFromSilence: true,
   resumeCommandPattern: /^pi\s+--session-id\s+\S+/,

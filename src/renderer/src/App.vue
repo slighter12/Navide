@@ -234,6 +234,7 @@ import {
   paneBusyForRebuild,
   paneCanRebuild,
   paneRebuildVisible,
+  resumeWordsFor,
   RESTORE_PIN_AGENTS,
   shouldPreserveMissingSessionOnRestore,
   shouldWarnMissingResume,
@@ -483,6 +484,13 @@ import ShutdownOverlay, { type QuitStage } from './components/ShutdownOverlay.vu
 import BrandLoader from './components/BrandLoader.vue'
 import NavideCloudMark from './components/NavideCloudMark.vue'
 import { shellCommandArgv } from '../../shared/osplat'
+import {
+  freshLaunchWords,
+  literalWords,
+  verifiedWords,
+  withSessionIdWords,
+  type LaunchWord,
+} from '../../shared/launchWords'
 const OnboardingWizard = defineAsyncComponent(() => import('./components/OnboardingWizard.vue'))
 const WhatsNewModal = defineAsyncComponent(() => import('./components/WhatsNewModal.vue'))
 const GuidedTour = defineAsyncComponent(() => import('./components/GuidedTour.vue'))
@@ -1759,7 +1767,7 @@ function resolveCommand(
   paneArgCtx?: PaneArgContext,
   modelRequest: CliModelRequest = NO_MODEL_REQUEST,
   isLogin = false
-): { command: string; source: LaunchCommandSource } {
+): { command: string; words: LaunchWord[]; source: LaunchCommandSource } {
   const spec = agentSpecs.find((s) => s.agentKey === agentKey)
   // A caller's override (a rebuilt resume command, an MCP-supplied command)
   // outranks the stored one: it is this launch's command, while the setting is
@@ -1775,7 +1783,9 @@ function resolveCommand(
   // Navide adds, and an override means the user is writing the line instead.
   // Settings → CLI Agents says so where the override is typed.
   if (launch.source !== 'none') {
-    return { command: launch.command, source: launch.source }
+    // A rebuilt resume command comes with the words it was composed from; any other override is one literal.
+    const words = launch.source === 'caller' ? resumeWordsFor(launch.command) : undefined
+    return { command: launch.command, words: words ?? literalWords(launch.command), source: launch.source }
   }
   const parts = [spec?.defaultCommand ?? agentKey]
   const paneArg = paneArgCtx && spec?.paneArg ? spec.paneArg(paneArgCtx) : ''
@@ -1800,7 +1810,18 @@ function resolveCommand(
       + `effort="${modelRequest.effort}" (${chosen.refusal.kind}); launching on the vendor default`
     )
   }
-  return { command: parts.join(' '), source: 'none' }
+  return {
+    command: parts.join(' '),
+    words: freshLaunchWords({
+      agentKey,
+      program: spec?.defaultCommand ?? agentKey,
+      paneArg,
+      skipPermissions: Boolean(skipFlag),
+      model: chosen.ok ? modelRequest.model.trim() : '',
+      effort: chosen.ok ? modelRequest.effort.trim() : '',
+    }),
+    source: 'none',
+  }
 }
 
 interface RunGroup {
@@ -7829,6 +7850,7 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
     effort: opts.effort ?? '',
   }, !!(opts.isLogin || opts.loginProfileId))
   let command = launch.command
+  let words = launch.words
   // A stored launch command is the user's whole line, so no model or effort
   // reached argv. Recording the request anyway would make the pane (and every
   // record and rebuild built from it) claim a model the CLI never received.
@@ -7839,6 +7861,7 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
 
   if (opts.agentKey === 'terminal' && !command) {
     command = userShell
+    words = literalWords(command)
   }
 
   // For Claude, pin a unique --session-id so backend attribution maps THIS
@@ -7851,8 +7874,10 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
     opts.agentKey, opts.isResume ?? false, command, opts.freshSessionId,
     () => crypto.randomUUID()
   )
-  command = pinned.command
   const explicitSessionId = pinned.explicitSessionId
+  // The pin appends one `--session-id <id>` option; a handwritten one is already in the text.
+  if (pinned.command !== command) words = withSessionIdWords(opts.agentKey, words, explicitSessionId)
+  command = pinned.command
   const sessionHomeId = sessionHomeIdFor(opts.agentKey, id, opts.sessionHomeId)
   const pinnedSessionId = opts.isResume
     ? (opts.resumeSessionId?.trim() || undefined)
@@ -8055,6 +8080,7 @@ async function spawnPane(opts: SpawnInternal): Promise<string | null> {
       // A Windows agent pane skips the PowerShell wrapper entirely (agentPane):
       // `-Command` would re-parse a `--mcp-config {…}` payload as PowerShell.
       command: shellCommandArgv(userShell, command, { agentPane: opts.agentKey !== 'terminal' }),
+      words: verifiedWords(command, words),
       cwd: opts.workspacePath,
       agentKey: opts.agentKey,
       // Settings → CLI Agents → this vendor's env table. Undefined when the

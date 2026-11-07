@@ -1,7 +1,8 @@
 /** Claude Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.claude
 
@@ -13,11 +14,7 @@ export const SPEC = {
   // (exit 0), so an unchecked typo would run at the wrong effort and look
   // like it worked — hence knownEfforts. `ultracode` is deliberately absent:
   // it is a Claude Code orchestration mode, not a model effort level.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
-  effortArgs: (e) => `${FACT.effort_flag} ${e}`,
-  knownEfforts: FACT.known_efforts,
-  skipPermissionFlag: FACT.permission_flag,
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  ...factOptions(FACT),
   supportsRebuild: true,
   verifiedTurnText: true,
   bracketedPaste: true,

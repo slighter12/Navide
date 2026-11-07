@@ -100,8 +100,7 @@ async def test_the_in_process_service_creates_through_the_async_interface_and_ig
     service = TerminalService(Sink())
     session = await service.create_async(
         pane_id="p", agent_key=None, command=["/bin/cat"], cwd=str(tmp_path), cols=90, rows=20, env=None, env_remove=None,
-        metadata={}, output_log_file="", cancelled=lambda: False, cancel_record={}, base_command="cat",
-        login_subcommand=None, credential=None)
+        metadata={}, output_log_file="", cancelled=lambda: False, cancel_record={}, credential=None)
     try:
         assert service.get(session.id) is session and session.pane_id == "p"
         assert await service.activate_async(session.id) is None

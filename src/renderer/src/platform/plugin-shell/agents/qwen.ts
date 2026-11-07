@@ -1,7 +1,8 @@
 /** Qwen Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.qwen
 
@@ -11,9 +12,7 @@ export const SPEC = {
   defaultCommand: FACT.command,
   // Effort is settings-only (model.reasoningEffort) plus the in-session
   // /effort command; no launch flag.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
-  skipPermissionFlag: FACT.permission_flag,
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  ...factOptions(FACT),
   needsSessionMarker: true,
   turnEndInferredFromSilence: true,
   supportsRebuild: true,

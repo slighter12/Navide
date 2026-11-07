@@ -9,6 +9,11 @@
   "resume_args": null,
   "session_id_flag": null,
   "login_args": null,
+  "resume_aliases": null,
+  "subcommand": null,
+  "data_dirs": null,
+  "session_path": null,
+  "logs": null,
   "supports_session_resume": false,
   "shutdown": null,
   "capabilities": {

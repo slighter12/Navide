@@ -44,18 +44,18 @@ from pathlib import Path
 
 import re
 
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
     Dep,
     SkillsWiring,
-    VendorRuntimeContext,
     VendorSpec,
-    command_text,
+    data_dirs_of,
     provider_entry_identity,
     provider_map_extract,
     provider_map_merge,
+    resume_reader_of,
 )
 from . import _protocols
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
@@ -177,26 +177,8 @@ class PiLogReader(LogReader):
         default = pi_sessions_root()
         return [default] if default.is_dir() else []
 
-    def _session_dir_files(self, d: Path) -> list[Path]:
-        out: list[Path] = []
-        try:
-            for f in d.iterdir():
-                if f.is_file() and f.suffix == ".jsonl":
-                    out.append(f)
-        except OSError as err:
-            log.debug("enumerate %s failed: %s", d, err)
-        return out
-
     def session_files(self) -> list[Path]:
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                for child in root.iterdir():
-                    if child.is_dir():
-                        out.extend(self._session_dir_files(child))
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", root, err)
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs())
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
         """Only the jsonl files under this workspace's encoded session dir.
@@ -205,13 +187,7 @@ class PiLogReader(LogReader):
         maps to exactly one folder — enumerate just that folder. A missing
         folder is normal (lazy flush: no file exists until the first
         assistant reply completes)."""
-        encoded = encode_pi_cwd(workspace_path)
-        out: list[Path] = []
-        for root in self.project_dirs():
-            d = root / encoded
-            if d.is_dir():
-                out.extend(self._session_dir_files(d))
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs(), workspace_path)
 
     def _in_session_dir(self, path: Path) -> bool:
         name = path.parent.name
@@ -822,16 +798,7 @@ async def fetch_pi(home: Path, env: dict | None = None) -> dict:
 
 # `pi --session-id <id>` resumes when the id exists and creates a NEW session
 # under that id otherwise — either way the id names this pane's session, so
-# it is claimed like Claude's --session-id. Flag guard as usual.
-_RESUME_RE = re.compile(r"^pi\s+(?:\S+\s+)*--session-id\s+([^-\s]\S*)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `pi ... --session-id <id>` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
-
-
+# it is claimed like Claude's --session-id.
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # --session-id only resumes within the launch workspace; finding the id
     # in another project would make Pi create a new empty session instead.
@@ -843,15 +810,6 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
 
 
 # ---- vendor spec -----------------------------------------------------------
-
-def _risk_data_dirs(ctx: VendorRuntimeContext) -> tuple[Path, ...]:
-    # pi_sessions_root permits moving sessions separately from config/data.
-    root = ctx.path(ctx.env.get("PI_CODING_AGENT_DIR") or ctx.home / ".pi" / "agent")
-    sessions = ctx.env.get("PI_CODING_AGENT_SESSION_DIR")
-    if sessions:
-        return tuple(dict.fromkeys((root, ctx.path(sessions))))
-    return (root,)
-
 
 # Where this CLI keeps the extensions it installed for itself (read-only
 # inventory, cli_extensions). Verified 2026-10-10 against the installed
@@ -868,7 +826,7 @@ SPEC = VendorSpec(
     key=FACT.key,
     # Open-ended provider/model config; OpenRouter quota is not a CLI host set.
     expected_hosts=(),
-    data_dirs=_risk_data_dirs,
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"),
     supports_model=FACT.model_flag is not None,
     supports_effort=FACT.effort_flag is not None,
@@ -910,7 +868,7 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_pi(home),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=(
         "PI_CODING_AGENT_DIR",

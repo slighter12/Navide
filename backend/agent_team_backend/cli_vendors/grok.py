@@ -58,9 +58,9 @@ from urllib.parse import quote, unquote
 from uuid import UUID
 
 from .. import osplat
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
 from ._vendor_facts import FACTS
-from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, simple_command_args
+from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, data_dirs_of, resume_id_from_command
 from ..usage_common import _num, _snapshot, _window
 from ..log_readers.base import (
     ActivityEvent,
@@ -241,13 +241,7 @@ class GrokLogReader(LogReader):
         return self.project_dirs()
 
     def session_files(self) -> list[Path]:
-        root = self._sessions_root()
-        if not root.is_dir():
-            return []
-        try:
-            return sorted(root.glob(f"*/*/{_TRANSCRIPT}"))
-        except OSError:
-            return []
+        return declared_log_files(FACT.logs, self.project_dirs())
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path] | None:
         """Only the sessions of one workspace — the group directory IS the
@@ -259,15 +253,14 @@ class GrokLogReader(LogReader):
         """
         if not workspace_path:
             return None
+        # The `None` answers below are an adapter hook: whether a group name was shortened is a fact about the disk
+        # (a `.cwd` file), not about the layout, so `logs` cannot declare it.
         group = self._sessions_root() / quote(workspace_path.rstrip("/"), safe="")
         if not group.is_dir():
             # Either no sessions yet, or a shortened group name. Distinguishing
             # them costs a full scan of the root either way.
             return None if self._has_shortened_group() else []
-        try:
-            return sorted(group.glob(f"*/{_TRANSCRIPT}"))
-        except OSError:
-            return None
+        return declared_log_files(FACT.logs, self.project_dirs(), workspace_path)
 
     def _has_shortened_group(self) -> bool:
         root = self._sessions_root()
@@ -566,26 +559,14 @@ GrokLogReader.pane_cwd_match = _pane_cwd_match
 
 
 def _resume_id_from_command(command) -> str:
-    args = simple_command_args(command)
-    if not args or args[0] != "grok":
+    value = resume_id_from_command(command, FACT, plain_only=True)
+    # Grok also accepts titles. Only a UUID identifies the transcript for
+    # attribution and duplicate-PTY reaping without asking the CLI.
+    try:
+        session_id = str(UUID(value))
+    except ValueError:
         return ""
-    for index, arg in enumerate(args[1:], 1):
-        if arg == "--":
-            break
-        if arg in ("-r", "--resume") and index + 1 < len(args):
-            value = args[index + 1]
-        elif arg.startswith("--resume="):
-            value = arg.partition("=")[2]
-        else:
-            continue
-        # Grok also accepts titles. Only a UUID identifies the transcript for
-        # attribution and duplicate-PTY reaping without asking the CLI.
-        try:
-            session_id = str(UUID(value))
-        except ValueError:
-            return ""
-        return session_id if session_id == value.lower() else ""
-    return ""
+    return session_id if session_id == value.lower() else ""
 
 
 def _session_path(workspace_path: str, session_id: str) -> Path | None:
@@ -603,8 +584,7 @@ def _session_path(workspace_path: str, session_id: str) -> Path | None:
     reader = GrokLogReader()
     if reader._has_shortened_group():
         return None
-    group = reader._sessions_root() / quote(workspace_path.rstrip("/"), safe="")
-    return group / session_id / _TRANSCRIPT
+    return declared_session_path(FACT.session_path, reader._sessions_root(), workspace_path, session_id)
 
 
 # ---- credentials (vault layout + identity) ---------------------------------
@@ -808,7 +788,7 @@ SPEC = VendorSpec(
     # auth.x.ai proves login routing only; grok-build service hosts unverified.
     expected_hosts=(),
     # GrokLogReader._home layout, including GROK_HOME and the HOME shim.
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("GROK_HOME") or ctx.home / ".grok"),),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("GROK_HOME",),
     supports_model=FACT.model_flag is not None,
     # ~/.agents/skills is still a scanned tier on the official CLI (docs
