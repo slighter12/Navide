@@ -29,7 +29,7 @@
   "observer": {
     "parser": "pi",
     "parser_id": "rust-pi-jsonl-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "jsonl",
       "usage": "per_turn",

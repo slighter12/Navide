@@ -138,14 +138,13 @@ fn a_completed_step_is_credited_and_a_streaming_one_waits_for_its_completion() {
 /// `test_a_1x_watermark_on_an_upgraded_db_does_not_recredit_history` (lines 287-304).
 #[test]
 fn a_1x_cursor_on_a_v2_store_starts_at_the_newest_row_and_credits_nothing_twice() {
-    use std::os::unix::fs::MetadataExt;
     let db = Db::new("opencode.db", true);
     db.session(SID, "/ws", None);
     for _ in 0..3 {
         db.assistant(SID, "", Some(tokens()), true);
     }
-    let stat = std::fs::metadata(&db.store.path).unwrap();
-    let old = json!({"kind": "sqlite", "row_id": 1, "pending": [], "anchor": "", "identity": format!("{}:{}", stat.dev(), stat.ino())});
+    let stat = crate::observe::os::stat_regular(&db.store.path).unwrap().expect("the store is a regular file");
+    let old = json!({"kind": "sqlite", "row_id": 1, "pending": [], "anchor": "", "identity": stat.id.text()});
 
     let first = observe(&db.store, "usage", old, json!({}), json!({}));
     assert_eq!(first["events"], json!([]));

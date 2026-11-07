@@ -1,18 +1,22 @@
-"""G2 ticket 09 repair 1: Windows vendor observation over the principal seam (spec D2).
+"""Windows vendor observation over the principal seam: launched by the Rust runtime, observed by the Rust sidecar (t41).
 
-On Windows a vendor pane is launched through the Rust runtime (ConPTY, real sidecar) and observed by the Python
-watcher: the sidecar has no Windows observer by design. For every registry vendor with a reader, the vendor's
+The sidecar's observation core runs on Windows as on POSIX (t34 decision L2), so a vendor pane launched through the Rust
+runtime (ConPTY, real sidecar) is observed by the same sidecar under the evaluation selector (`rust-shell`), through the
+same production `LogWatcher`, sinks and persistence as on POSIX. For every registry vendor with a reader, the vendor's
 synthetic catalog fixture (`tests/fixtures/cli-regression/<vendor>.json`) is written in two stages with a backend
-restart between them, as the POSIX cases in `test_cli_runtime_observe_vendors.py` do, and the Python-observed
-outward result is asserted against the fixture's own expected result: `session.detected` attributed to the pane,
-the completion activity row, the persisted totals and the persisted usage and activity checkpoints. A Rust observer
-does not exist here, so nothing is compared with one and no native observation receipt may appear.
+restart between them, as the POSIX cases in `test_cli_runtime_observe_vendors.py` do, and the outward result is asserted
+against the fixture's own expected result, which the Python readers' runs established: `session.detected` attributed to the
+pane, one completion activity row, the persisted totals (counted once across the restart: the saved checkpoint, its anchor
+and its file identity were recognised on this file system) and the persisted usage and activity checkpoints. The receipts
+then prove that the native core did the reading: observation receipts of the vendor's declared parser, in the activity mode,
+none refused, all in the modes the declaration lists.
 
 Principal seam: authenticated WebSocket -> Python handlers -> real sidecar -> ConPTY (the `vendor_transport.py` peer
 stands in for the CLI) -> production `LogWatcher`, sinks and persistence. Membership comes from the registry.
 
 The cases run on Windows. Setting `NAVIDE_G2_OBSERVE_LOGIC=1` runs the same assertions on a POSIX host with the
-Python terminal service, which checks the observation half of the cases only (no launch receipt is asserted there).
+Python terminal service, which checks the observation half of the cases only (no launch receipt is asserted there, and
+the Python watcher reads: no native receipt is expected).
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ import sys
 
 import pytest
 
+from agent_team_backend.cli_vendors import _vendor_facts as facts
 from agent_team_backend.cli_vendors.registry import VENDORS
 from agent_team_backend import osplat
 from tests.cli_regression.support.backend_process import BackendProcess
@@ -202,7 +207,18 @@ async def test_windows_rust_launched_vendor_is_observed_by_the_python_watcher(ve
     assert durable["activity_checkpoint"], "no activity checkpoint was persisted"
 
     if WINDOWS:
-        # Observed Python-side: no native observation happened; launched by the Rust runtime, composed by the sidecar.
-        assert not [row for row in receipts if "parser" in row], "a native observation ran on Windows"
+        # Launched by the Rust runtime (composed by the sidecar) and observed by it: the native core read the vendor's files.
         owned = [row for row in receipts if row.get("event") == "owned"]
         assert owned and all(row.get("argv_source") == "rust" for row in owned), owned
+        declared = facts.FACTS[vendor].observer
+        observed = [row for row in receipts if "parser" in row]
+        assert observed, "no native observation ran: the Windows sidecar did not read the vendor's files"
+        assert {row["parser"] for row in observed} == {declared.parser_id}, [row["parser"] for row in observed]
+        modes = {row["mode"] for row in observed}
+        assert "activity" in modes, f"the activity pass never ran natively: {sorted(modes)}"
+        assert modes <= {str(mode.value) for mode in declared.core.modes}, (sorted(modes), declared.core.modes)
+        refused = [row for row in observed if row.get("error")]
+        assert not refused, f"the native core answered an error for a clean fixture: {refused[:2]}"
+        # Every observation named a file of the vendor's own layout: the fixture's log or store, never another path.
+        named = {Path(row["path"]).name for row in observed}
+        assert path.name in named, f"the vendor's file {path.name} was never observed: {sorted(named)}"

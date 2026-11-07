@@ -29,7 +29,7 @@
   "observer": {
     "parser": "aider",
     "parser_id": "rust-aider-md-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "text",
       "usage": "per_turn",

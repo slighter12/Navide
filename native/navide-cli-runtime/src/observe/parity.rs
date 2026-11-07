@@ -93,8 +93,7 @@ pub struct FileStat {
 
 impl FileStat {
     pub fn of(path: &std::path::Path) -> Option<Self> {
-        use std::os::unix::fs::MetadataExt;
-        std::fs::metadata(path).ok().map(|stat| Self { dev: stat.dev(), ino: stat.ino(), size: stat.len() })
+        super::os::stat_regular(path).ok().flatten().map(|stat| Self { dev: stat.id.device, ino: stat.id.index, size: stat.len })
     }
 
     pub fn identity(self) -> Value {
@@ -102,10 +101,14 @@ impl FileStat {
     }
 }
 
-/// Every string of `value` with each `(from, to)` swapped in turn.
+/// Every string of `value` with each `(from, to)` swapped in turn. A path that begins with a placeholder is spelled with `/` in a
+/// golden on every platform: on Windows the rest of it (`\sessions\a.jsonl`) is the platform's own spelling of the same path.
 fn swap(value: &Value, swaps: &[(String, String)]) -> Value {
     match value {
-        Value::String(s) => Value::String(swaps.iter().filter(|(from, _)| !from.is_empty()).fold(s.clone(), |acc, (from, to)| acc.replace(from.as_str(), to))),
+        Value::String(s) => {
+            let swapped = swaps.iter().filter(|(from, _)| !from.is_empty()).fold(s.clone(), |acc, (from, to)| acc.replace(from.as_str(), to));
+            Value::String(if cfg!(windows) && swapped.starts_with("$ROOT") { swapped.replace('\\', "/") } else { swapped })
+        }
         Value::Array(items) => Value::Array(items.iter().map(|item| swap(item, swaps)).collect()),
         Value::Object(map) => Value::Object(map.iter().map(|(key, item)| (key.clone(), swap(item, swaps))).collect()),
         other => other.clone(),
@@ -115,11 +118,10 @@ fn swap(value: &Value, swaps: &[(String, String)]) -> Value {
 /// What differs per run, as `(real, placeholder)`: the directory that holds the scenario's files (`$ROOT`) and each file's
 /// `dev:ino` (`$IDENTITY0`, `$IDENTITY1`, … in the order the files are named).
 fn run_specifics(roots: &[&std::path::Path], files: &[&std::path::Path]) -> Vec<(String, String)> {
-    use std::os::unix::fs::MetadataExt;
     let mut swaps: Vec<(String, String)> =
         roots.iter().enumerate().map(|(index, root)| (root.to_string_lossy().into_owned(), if index == 0 { "$ROOT".to_owned() } else { format!("$ROOT{index}") })).collect();
     for (index, file) in files.iter().enumerate() {
-        let identity = std::fs::metadata(file).map(|stat| format!("{}:{}", stat.dev(), stat.ino())).unwrap_or_default();
+        let identity = super::os::stat_regular(file).ok().flatten().map(|stat| stat.id.text()).unwrap_or_default();
         swaps.push((identity, format!("$IDENTITY{index}")));
     }
     // Longest first: a scenario's directories are numbered (`…-1`, `…-14`) and one name can be the start of another.

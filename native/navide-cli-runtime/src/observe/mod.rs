@@ -5,7 +5,8 @@
 //! the record pointers or table names of its source and its compatibility rules; `adapters/mod.rs` (generated) turns that
 //! into typed facts and a static dispatch. The core owns everything that is not a vendor's record vocabulary:
 //!
-//! - the bounded open (`jsonl.rs`: a regular file only, `O_NOFOLLOW | O_NONBLOCK`, byte and line caps;
+//! - the bounded open (`os.rs`, the one place the operating system shows: a regular file only, never through a link, never
+//!   blocking the open or the writer, identity and positioned reads, one arm per platform; `jsonl.rs`: byte and line caps;
 //!   `sqlite.rs`: a regular file, a percent-encoded URI, one connection per observation, row and byte caps);
 //! - anchor verification and production (`blake2b.rs`; Python does not read or hash the file);
 //! - the offset tail, the rotation rule, the fingerprinted resume of an activity pass, the high-water scan, the per-turn
@@ -27,6 +28,7 @@ mod answer;
 pub mod baseline;
 mod blake2b;
 mod jsonl;
+mod os;
 mod rows;
 pub mod sqlite;
 pub mod time;

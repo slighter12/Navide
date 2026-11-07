@@ -98,6 +98,9 @@ OBSERVER_FIELDS = ("parser", "parser_id", "platforms", "layouts", "core")
 OBSERVER_SOURCES = ("jsonl", "sqlite", "text", "sidecar")
 OBSERVER_USAGE = ("per_turn", "cumulative", "none")
 OBSERVER_PLATFORMS = ("unix", "windows")
+# The observation core compiles and runs on every platform (t34 L2), so every observer declares every platform. A vendor whose layout
+# truly cannot run on one is named here with its reason; with no entry, a declaration that leaves a platform out does not generate.
+OBSERVER_PLATFORM_EXCEPTIONS: dict[str, str] = {}
 LAYOUT_FIELDS = ("source", "usage", "store_file", "usage_fields", "store", "rules", "defers_to", "request", "applies_when")
 # What a request carries that the log itself does not: the working directory and session the Python discovery reader
 # resolved for the file, and the scan clock. A layout declares the ones it reads; the core puts them on `Ident`.
@@ -552,6 +555,8 @@ def validate_observer(name: str, observer: dict | None, root: Path) -> None:
         raise SystemExit(f"{name}: observer parser_id must be set")
     if not observer["platforms"] or not set(observer["platforms"]) <= set(OBSERVER_PLATFORMS):
         raise SystemExit(f"{name}: observer platforms must be a non-empty subset of {OBSERVER_PLATFORMS}")
+    if set(observer["platforms"]) != set(OBSERVER_PLATFORMS) and name not in OBSERVER_PLATFORM_EXCEPTIONS:
+        raise SystemExit(f"{name}: observer platforms must name every platform in {OBSERVER_PLATFORMS}; a layout that cannot run on one is a named exception with its reason in OBSERVER_PLATFORM_EXCEPTIONS")
     if not observer["layouts"]:
         raise SystemExit(f"{name}: an observer declares at least one layout")
     files = []

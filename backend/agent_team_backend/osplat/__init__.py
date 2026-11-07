@@ -142,13 +142,3 @@ __all__ += ["has_tty_servicing", "has_windows_runtime_client"]
 #: would let another process take over a bound port, and Cygwin follows Windows.
 listen_socket_reuseaddr: bool = platform_id != "win32" and sys.platform != "cygwin"
 __all__ += ["listen_socket_reuseaddr"]
-
-
-def has_native_vendor_observer() -> bool:
-    """Whether the selected Rust runtime's sidecar answers vendor OBSERVE requests on this platform. The Windows
-    sidecar refuses every one (`Host::observer` in `native/navide-cli-runtime/src/host.rs`, "observer not integrated"), so a
-    Rust-launched Windows pane is observed by the Python watcher's baseline readers (spec D2)."""
-    return platform_id != "win32"
-
-
-__all__ += ["has_native_vendor_observer"]

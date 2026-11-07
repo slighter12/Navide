@@ -37,10 +37,14 @@ export const BACKEND_ONLY = ['backend/tests/']
 
 // Inside BACKEND_ONLY, but imported by the frontend CLI suite
 // (tests/cli/backendWire.test.ts drives the backend through this harness).
+// `backend/tests/data/` holds the launch-word vectors the renderer's own
+// suite (src/shared/launchWords.vectors.test.ts) reads as well.
 export const BACKEND_SHARED = [
   'backend/tests/__init__.py',
   'backend/tests/cli_regression/__init__.py',
   'backend/tests/cli_regression/support/',
+  'backend/tests/data',
+  'backend/tests/data/',
 ]
 
 const matches = (file, patterns) =>

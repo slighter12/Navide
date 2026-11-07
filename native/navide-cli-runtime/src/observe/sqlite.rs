@@ -1,20 +1,19 @@
 //! The SQLite source: a safe path open and one read-only connection per observation, with bounded results. What walks
 //! the rows (the cursor, the pending set, the activity marker, the lookups) is `rows.rs`.
 //!
-//! macOS links the system SQLite; Linux links the bundled one `libsqlite3-sys` builds (`use … as _` keeps it in).
-use super::{text_of, Ctx};
-use libc::{c_char, c_int, c_void};
+//! macOS links the system SQLite; Linux links the bundled one `libsqlite3-sys` builds (`use … as _` keeps it in); Windows
+//! imports the operating system's own `winsqlite3.dll` (no C compiler, no new crate: the same arrangement as macOS).
+use super::{os, text_of, Ctx};
 use serde_json::{json, Value};
-use std::ffi::CString;
+use std::ffi::{c_char, c_int, c_void, CString};
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 #[cfg(target_os = "linux")]
 use libsqlite3_sys as _;
 
 #[cfg_attr(target_os = "macos", link(name = "sqlite3"))]
+#[cfg_attr(windows, link(name = "winsqlite3", kind = "raw-dylib"))]
 unsafe extern "C" {
     fn sqlite3_open_v2(name: *const c_char, db: *mut *mut c_void, flags: c_int, vfs: *const c_char) -> c_int;
     fn sqlite3_close(db: *mut c_void) -> c_int;
@@ -62,17 +61,17 @@ fn wal_header(path: &Path) -> bool {
 }
 
 /// The URI SQLite opens: the path percent-encoded byte by byte (a `?`, `#` or `%` in a directory name is a path, never
-/// a URI parameter), then the read-only parameters.
-pub fn uri(path: &Path, immutable: bool) -> String {
+/// a URI parameter), then the read-only parameters. `None` for a path SQLite cannot be given (Windows: one that is not Unicode).
+pub fn uri(path: &Path, immutable: bool) -> Option<String> {
     let mut out = String::from("file:");
-    for byte in path.as_os_str().as_bytes() {
+    for byte in os::uri_path(path)? {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => out.push(*byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => out.push(byte as char),
             other => out.push_str(&format!("%{other:02X}")),
         }
     }
     out.push_str(if immutable { "?mode=ro&immutable=1" } else { "?mode=ro" });
-    out
+    Some(out)
 }
 
 /// One short-lived read-only connection. The core opens exactly one per observation.
@@ -113,7 +112,7 @@ impl Connection {
             Path::new(&name).exists()
         });
         let immutable = !sidecars.contains(&true) && wal_header(path);
-        let name = CString::new(uri(path, immutable)).map_err(|_| 1)?;
+        let name = CString::new(uri(path, immutable).ok_or(14)?).map_err(|_| 1)?;
         let mut raw = std::ptr::null_mut();
         let code = unsafe { sqlite3_open_v2(name.as_ptr(), &mut raw, OPEN_READONLY | OPEN_URI | OPEN_NOFOLLOW, std::ptr::null()) };
         if code != 0 {
@@ -311,20 +310,18 @@ impl Sqlite {
     }
 
     pub(super) fn open_at(path: &Path, page: usize) -> io::Result<Self> {
-        let Ok(stat) = std::fs::symlink_metadata(path) else {
+        // Not a regular file, or a link, is refused here (`os::stat_regular`); a path that cannot be inspected is an empty store.
+        let Some(stat) = os::stat_regular(path)? else {
             return Ok(Self::unreadable(page));
         };
-        if !stat.is_file() {
-            return Err(io::Error::other("observation source is not a regular file"));
-        }
         let (db, open_code) = match Connection::open(path) {
             Ok(db) => (Some(db), None),
             Err(code) => (None, Some(code)),
         };
         Ok(Self {
             db,
-            identity: format!("{}:{}", stat.dev(), stat.ino()),
-            document_identity: json!({"dev": stat.dev(), "ino": stat.ino(), "size": stat.len()}),
+            identity: stat.id.text(),
+            document_identity: json!({"dev": stat.id.device, "ino": stat.id.index, "size": stat.len}),
             open_code,
             ..Self::unreadable(page)
         })
@@ -521,16 +518,31 @@ mod tests {
         assert_eq!(pragma, vec![vec![json!(0)]]);
     }
 
+    /// A POSIX path is its own URI path; the same encoding applies on Windows to the path `os::uri_path` gives (its own test), which this
+    /// platform-neutral check does not need to know.
+    #[cfg(unix)]
     #[test]
     fn a_path_with_uri_metacharacters_is_encoded_as_a_path() {
-        let encoded = uri(Path::new("/tmp/a?b#c%41 d/opencode.db"), false);
+        let encoded = uri(Path::new("/tmp/a?b#c%41 d/opencode.db"), false).unwrap();
         assert_eq!(encoded, "file:/tmp/a%3Fb%23c%2541%20d/opencode.db?mode=ro");
-        assert!(uri(Path::new("/x"), true).ends_with("?mode=ro&immutable=1"));
+        assert!(uri(Path::new("/x"), true).unwrap().ends_with("?mode=ro&immutable=1"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_is_encoded_as_a_drive_path_and_its_metacharacters_as_data() {
+        let encoded = uri(Path::new(r"C:\Users\a?b#c%41 d\opencode.db"), false).unwrap();
+        assert_eq!(encoded, "file:/C%3A/Users/a%3Fb%23c%2541%20d/opencode.db?mode=ro");
+        assert!(uri(Path::new(r"C:\x"), true).unwrap().ends_with("?mode=ro&immutable=1"));
+        assert_eq!(uri(Path::new(r"\\server\share\x.db"), false).unwrap(), "file:////server/share/x.db?mode=ro");
+        assert_eq!(uri(Path::new(r"\\?\C:\x\y.db"), false).unwrap(), "file:/C%3A/x/y.db?mode=ro", "the verbatim prefix canonicalize adds is not part of the name");
     }
 
     #[test]
     fn a_store_under_a_directory_named_with_uri_metacharacters_opens_and_reads() {
-        let root = std::env::temp_dir().join(format!("sqlite-uri-{}?x=1#frag%41", std::process::id()));
+        // A `?` is not a character Windows lets a file name hold; `#`, `%` and `=` are the metacharacters left to it.
+        let query = if cfg!(windows) { "" } else { "?" };
+        let root = std::env::temp_dir().join(format!("sqlite-uri-{}{query}x=1#frag%41", std::process::id()));
         std::fs::create_dir(&root).unwrap();
         let path = root.join("opencode.db");
         let name = CString::new(path.to_str().unwrap()).unwrap();
@@ -551,8 +563,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("real.db"), b"").unwrap();
-        std::os::unix::fs::symlink(root.join("real.db"), root.join("opencode.db")).unwrap();
-        assert!(Connection::open(&root.join("opencode.db")).is_err());
+        os::link_file(&root.join("real.db"), &root.join("opencode.db")).expect("this runner cannot create a file symlink");
+        #[cfg(unix)]
+        assert!(Connection::open(&root.join("opencode.db")).is_err(), "SQLITE_OPEN_NOFOLLOW refuses the link");
+        // The path the observation takes is the one that refuses a link before SQLite is asked (SQLite's own NOFOLLOW is POSIX only).
+        assert!(Sqlite::open_at(&root.join("opencode.db"), 10).is_err(), "a symlinked store was opened by the observation");
         std::fs::remove_dir_all(&root).unwrap();
     }
 

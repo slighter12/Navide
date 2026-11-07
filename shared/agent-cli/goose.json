@@ -29,7 +29,7 @@
   "observer": {
     "parser": "goose",
     "parser_id": "rust-goose-sqlite-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "sqlite",
       "usage": "per_turn",

@@ -161,6 +161,10 @@ names what you forgot:
 ## Native observation (only if the CLI's log is read by the Rust core)
 
 A JSONL log is read by `native/navide-cli-runtime/src/observe/`; the vendor adds a declaration and a thin adapter, not a reader.
+The core runs on every platform through the one source seam `observe/os.rs` (regular file only, no link followed, shared-read
+open, positioned reads), so an `observer` block names `"platforms": ["unix", "windows"]`; the generator refuses an observer that
+omits a platform unless the layout is a named exception (`OBSERVER_PLATFORM_EXCEPTIONS` in `scripts/generate-agent-cli-facts.py`,
+with its reason). The adapter's own tests must not assume `/` paths or POSIX-only file APIs; use `os::link_file` and `os::stat_regular`.
 The test recipe, in the order that keeps each step falsifiable:
 
 1. Extend the `observer` block of the declaration you already wrote (usage fields, modes, `legacy_state` for every key of the Python bag the

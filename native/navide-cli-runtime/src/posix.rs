@@ -6,7 +6,7 @@
 use crate::adapters::{self, ShutdownSpec};
 use crate::compose;
 use crate::control::{
-    launch_object, post_effect_failure, precomposed, Config, Request, Runtime, KILL_ESCALATION_MS, ROOT_REAP,
+    launch_object, post_effect_failure, precomposed, Config, Runtime, KILL_ESCALATION_MS, ROOT_REAP,
 };
 use crate::frame::code;
 use crate::host::{
@@ -1027,7 +1027,6 @@ fn read_control(fd: i32, buffer: &mut [u8]) -> io::Result<usize> {
 impl Host for PosixHost {
     type Session = PosixSession;
     type Owned = Owned;
-    type Observer = &'static crate::observe::adapters::ObserverFacts;
     type Link = i32;
     type Options = Options;
     /// A POSIX session has no settle window: it settles on Python's end-of-stream report alone.
@@ -1036,7 +1035,6 @@ impl Host for PosixHost {
     const PTY_BACKEND: &'static str = "posix";
     const HANDOFF: &'static str = "scm_rights";
     const SERVICING: bool = false;
-    const OBSERVES: bool = true;
     const OPTIONS: &'static [&'static str] = &["--control-fd"];
 
     fn set_option(options: &mut Options, _name: &str, value: String) {
@@ -1249,13 +1247,6 @@ impl Host for PosixHost {
         }
         #[cfg(not(target_os = "linux"))]
         let _ = deadline;
-    }
-
-    fn observer(&self, vendor: &str) -> Option<Self::Observer> {
-        crate::observe::adapters::find(vendor)
-    }
-    fn observe(&self, observer: Self::Observer, request: &Request) -> io::Result<Value> {
-        crate::observe::adapters::dispatch(observer, &request.meta)
     }
 }
 

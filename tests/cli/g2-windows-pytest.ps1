@@ -12,6 +12,7 @@ uv --project backend run pytest `
   backend/tests/test_cli_launch_windows_words.py `
   backend/tests/test_cli_runtime_observe_windows.py `
   backend/tests/test_cli_runtime_observer_selection.py `
+  backend/tests/test_cli_runtime_observe_portable.py `
   backend/tests/test_main_graceful_shutdown.py `
   backend/tests/test_main_parent_watch.py `
   backend/tests/test_main_port_file_before_listen.py `

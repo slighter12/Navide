@@ -29,7 +29,7 @@
   "observer": {
     "parser": "muse",
     "parser_id": "rust-muse-jsonl-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "jsonl",
       "usage": "per_turn",

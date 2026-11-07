@@ -52,7 +52,6 @@ pub const OBSERVATION_CHUNK: usize = 64 * 1024 - 256;
 pub const TOMBSTONES: usize = 4096;
 // The observation core's answer ledger (`observe/answer.rs`) is sized to the answer this transport can send; the two
 // must agree.
-#[cfg(unix)]
 const _: () = assert!(MAX_OBSERVATION_PARTS * OBSERVATION_CHUNK == crate::observe::ANSWER_BYTES);
 
 /// `limits.cleanup_ms`, derived exactly as the baseline's `_reap_wait_timeout_s()`: the largest declared graceful
@@ -714,7 +713,7 @@ fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) -> Option<Ended> {
                 "inbound_bytes":wire.inbound.snapshot().0,"inbound_peak_bytes":wire.inbound.snapshot().1}}),
             );
         }
-        code::OBSERVE if H::OBSERVES => {
+        code::OBSERVE => {
             let sender = wire.observe_tx.lock().unwrap().clone();
             // The queue's sender is installed before the reader starts and taken only after it ended, so a missing
             // one means the runtime's own bookkeeping is broken. No request can be answered then, and an answer
@@ -734,8 +733,6 @@ fn dispatch<H: Host>(req: Request, runtime: &Arc<Runtime<H>>) -> Option<Ended> {
                 );
             }
         }
-        // Vendor observers read POSIX session files; none is integrated on Windows (E5 scope: shells).
-        code::OBSERVE => refuse(&fault(Code::ObserverNotIntegrated, "observer not integrated")),
         _ => refuse(&Refusal::bad("invalid code").into()),
     }
     None
@@ -804,10 +801,12 @@ fn observation_context<H: Host>(req: &Request, runtime: &Runtime<H>) -> io::Resu
 fn observe<H: Host>(req: &Request, runtime: &Arc<Runtime<H>>) {
     let wire = &runtime.wire;
     let refuse = |error: &io::Error| wire.refuse(req.code, req.id, error, Effect::None);
-    // The vendor's declaration is resolved once here and handed down; the wire's vendor string is not read again.
+    // The vendor's declaration is resolved once here and handed down; the wire's vendor string is not read again. Observation is the
+    // core's, not the host's: every platform reads the same declarations through `observe::adapters`, whose files open through
+    // `observe::os`, the one place that differs by operating system.
     let observer = req.meta["vendor"]
         .as_str()
-        .and_then(|vendor| runtime.host.observer(vendor));
+        .and_then(crate::observe::adapters::find);
     #[cfg(feature = "fault-hooks")]
     let fault_vendor = req.meta["vendor"].as_str() == Some(crate::adapters::FAULT_GRACEFUL);
     #[cfg(not(feature = "fault-hooks"))]
@@ -821,7 +820,7 @@ fn observe<H: Host>(req: &Request, runtime: &Arc<Runtime<H>>) {
         Err(error) => return refuse(&error),
     };
     let run = || match observer {
-        Some(observer) => runtime.host.observe(observer, req),
+        Some(observer) => crate::observe::adapters::dispatch(observer, &req.meta),
         None => Err(not_integrated()),
     };
     #[cfg(feature = "fault-hooks")]
@@ -1066,9 +1065,7 @@ pub fn run<H: Host>() -> io::Result<()> {
     let link = Arc::new(host.open_link()?);
     let runtime = Runtime::new(host, Wire::new(&config, tag));
     let (observe_tx, observe_rx) = mpsc::sync_channel::<Request>(OBSERVATION_QUEUE);
-    if H::OBSERVES {
-        *runtime.wire.observe_tx.lock().unwrap() = Some(observe_tx);
-    }
+    *runtime.wire.observe_tx.lock().unwrap() = Some(observe_tx);
     let (writer_runtime, writer_link) = (runtime.clone(), link.clone());
     let writer = thread::Builder::new()
         .name("control-writer".into())
@@ -1083,20 +1080,14 @@ pub fn run<H: Host>() -> io::Result<()> {
             }
             outcome
         })?;
-    let observer = if H::OBSERVES {
-        let observe_runtime = runtime.clone();
-        Some(
-            thread::Builder::new()
-                .name("observe".into())
-                .spawn(move || {
-                    while let Ok(request) = observe_rx.recv() {
-                        observe(&request, &observe_runtime);
-                    }
-                })?,
-        )
-    } else {
-        None
-    };
+    let observe_runtime = runtime.clone();
+    let observer = thread::Builder::new()
+        .name("observe".into())
+        .spawn(move || {
+            while let Ok(request) = observe_rx.recv() {
+                observe(&request, &observe_runtime);
+            }
+        })?;
     let wire = &runtime.wire;
     let read = |buffer: &mut [u8]| runtime.host.link_read(&link, buffer);
     let ended = loop {
@@ -1206,9 +1197,7 @@ pub fn run<H: Host>() -> io::Result<()> {
     }
     // Admitted observations finish (they are bounded file reads); then the queue closes.
     wire.observe_tx.lock().unwrap().take();
-    if let Some(observer) = observer {
-        let _ = observer.join();
-    }
+    let _ = observer.join();
     wire.out.finish();
     let written = writer
         .join()

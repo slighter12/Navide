@@ -19,7 +19,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import cli_runtime_hook, osplat
+from . import cli_runtime_hook
 from .cli_runtime_observation import observe_core
 from .cli_runtime_state import pack, unpack
 from .cli_vendors._vendor_facts import FACTS, WANTED_SESSION, Mode
@@ -408,12 +408,12 @@ def native_reader(discovery: type, vendor: str) -> type:
 
 def native_reference(spec):
     """Only explicit isolated evaluation selects native interpretation; then every vendor with a declared observer
-    reads through the sidecar."""
+    reads through the sidecar, on every operating system (the sidecar's observation core is the same on each)."""
     facts = FACTS.get(spec.key)
     if not (facts and facts.observer):
         return spec
     selected = cli_runtime_hook.runtime_selection()
-    if selected != cli_runtime_hook.RUST_SELECTION or not osplat.has_native_vendor_observer():
+    if selected != cli_runtime_hook.RUST_SELECTION:
         return spec
     cli_runtime_hook.require_isolated_harness(selected)
     return replace(spec, make_log_reader=native_reader(spec.make_log_reader, spec.key))

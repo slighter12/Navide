@@ -791,7 +791,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "aider",
         parser: Parser::Aider,
         parser_id: "rust-aider-md-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Text,
@@ -812,7 +812,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "antigravity",
         parser: Parser::Antigravity,
         parser_id: "rust-antigravity-sqlite-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Sqlite,
@@ -833,7 +833,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "claude",
         parser: Parser::Claude,
         parser_id: "rust-claude-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,
@@ -854,7 +854,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "codex",
         parser: Parser::Codex,
         parser_id: "rust-codex-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,
@@ -875,7 +875,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "copilot",
         parser: Parser::Copilot,
         parser_id: "rust-copilot-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Sqlite,
@@ -908,7 +908,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "cursor",
         parser: Parser::Cursor,
         parser_id: "rust-cursor-sqlite-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Sqlite,
@@ -929,7 +929,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "droid",
         parser: Parser::Droid,
         parser_id: "rust-droid-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,
@@ -950,7 +950,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "goose",
         parser: Parser::Goose,
         parser_id: "rust-goose-sqlite-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Sqlite,
@@ -971,7 +971,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "grok",
         parser: Parser::Grok,
         parser_id: "rust-grok-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,
@@ -992,7 +992,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "kilo",
         parser: Parser::Opencode,
         parser_id: "rust-kilo-sqlite-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Sqlite,
@@ -1025,7 +1025,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "kimi",
         parser: Parser::Kimi,
         parser_id: "rust-kimi-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,
@@ -1046,7 +1046,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "muse",
         parser: Parser::Muse,
         parser_id: "rust-muse-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,
@@ -1067,7 +1067,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "opencode",
         parser: Parser::Opencode,
         parser_id: "rust-opencode-sqlite-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Sqlite,
@@ -1100,7 +1100,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "pi",
         parser: Parser::Pi,
         parser_id: "rust-pi-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,
@@ -1121,7 +1121,7 @@ pub const OBSERVERS: &[ObserverFacts] = &[
         vendor: "qwen",
         parser: Parser::Qwen,
         parser_id: "rust-qwen-jsonl-v1",
-        platforms: &[Platform::Unix],
+        platforms: &[Platform::Unix, Platform::Windows],
         layouts: &[
             Layout {
                 source: SourceKind::Jsonl,

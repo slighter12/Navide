@@ -4,8 +4,11 @@
 //! and loss handling, the limits and the wire contract. A `Host` is only the part that differs by operating system:
 //! spawning a root, the PTY or ConPTY, signals, reaping, ownership evidence and the control channel. The control
 //! plane is monomorphised per platform, so no call on the request path is dynamic.
+//!
+//! Vendor observation is not a host's part: `control::observe` runs the one observation core (`observe/`) on every
+//! platform, and the core's own source I/O (`observe/os.rs`) is the single place that differs by operating system.
 use crate::compose;
-use crate::control::{Config, Request, Runtime};
+use crate::control::{Config, Runtime};
 use crate::session::{SessionCx, SessionHandle};
 use crate::wire::Outbound;
 use serde_json::Value;
@@ -183,8 +186,6 @@ pub trait Host: Sized + Send + Sync + 'static {
     type Session: Send + Sync + 'static;
     /// Ownership evidence only the session's own thread touches.
     type Owned: Send + 'static;
-    /// An observer resolved from the wire's vendor field.
-    type Observer: Copy + Send;
     /// The open control channel.
     type Link: Send + Sync + 'static;
     /// What the platform reads from the command line (a POSIX host: its control descriptor).
@@ -196,8 +197,6 @@ pub trait Host: Sized + Send + Sync + 'static {
     const HANDOFF: &'static str;
     /// `TTY_SERVICING` is part of this platform's stream contract.
     const SERVICING: bool;
-    /// This platform runs vendor observers.
-    const OBSERVES: bool;
     /// The command-line options only this platform reads; each takes one value.
     const OPTIONS: &'static [&'static str];
 
@@ -260,15 +259,4 @@ pub trait Host: Sized + Send + Sync + 'static {
     fn retire(&self, _handle: &SessionHandle<Self>) {}
     /// The runtime is ending and every session settled.
     fn teardown(&self, _deadline: Instant) {}
-
-    // ---- observation --------------------------------------------------------------------------
-    fn observer(&self, _vendor: &str) -> Option<Self::Observer> {
-        None
-    }
-    fn observe(&self, _observer: Self::Observer, _request: &Request) -> io::Result<Value> {
-        Err(crate::refusal::fault(
-            crate::refusal::Code::ObserverNotIntegrated,
-            "observer not integrated",
-        ))
-    }
 }
