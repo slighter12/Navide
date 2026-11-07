@@ -1,6 +1,6 @@
 """Which reader a vendor resolves to under the selected Rust runtime, on every operating system.
 
-The sidecar's observation core compiles and runs on Windows as on POSIX (t34 decision L2; t41), so the only gate between
+The sidecar's observation core compiles and runs on Windows as on POSIX, so the only gate between
 the baseline Python reader and the native one is the explicit evaluation selector (`NAVIDE_ACR_EVAL_RUNTIME=rust-shell`
 inside an isolated harness). The platform decides nothing: these cases hold on whatever host runs them, and the Windows CI
 runs them in its required list. The product default is unchanged: with no selector every vendor keeps its baseline reader.
@@ -55,6 +55,18 @@ def test_the_selection_does_not_depend_on_the_platform_the_backend_runs_on(platf
     monkeypatch.setattr(osplat, "platform_id", platform_id)
     assert not hasattr(osplat, "has_native_vendor_observer"), "a per-platform observer gate came back"
     assert all(_is_native(_reference(key)(VENDORS[key]).make_log_reader()) for key in OBSERVED)
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(("platform_id", "native"), [("win32", False), ("linux", True), ("darwin", True)])
+def test_a_vendor_whose_declared_platforms_leave_out_this_one_keeps_the_baseline_reader(platform_id, native, rust_shell, monkeypatch):
+    """The sidecar's roster is filtered by the platforms an observer declares, so the selection must not hand it a vendor it would refuse
+    as not integrated: a layout declared for `unix` only is read natively on POSIX and by the baseline reader on Windows."""
+    key = OBSERVED[0]
+    unix_only = facts.FACTS[key].observer._replace(platforms=("unix",))
+    monkeypatch.setitem(facts.FACTS, key, facts.FACTS[key]._replace(observer=unix_only))
+    monkeypatch.setattr(osplat, "platform_id", platform_id)
+    assert _is_native(_reference(key)(VENDORS[key]).make_log_reader()) is native
 
 
 @pytest.mark.timeout(30)

@@ -81,8 +81,8 @@ pub struct JsonlFile {
     limits: Limits,
 }
 
-fn modified_ms_of(stat: &std::fs::Metadata) -> Option<i64> {
-    stat.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|age| age.as_millis() as i64)
+fn modified_ms(time: Option<std::time::SystemTime>) -> Option<i64> {
+    time.and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|age| age.as_millis() as i64)
 }
 
 fn bytes_before(file: &File, end: u64, wanted: u64) -> io::Result<Vec<u8>> {
@@ -165,15 +165,14 @@ fn remember(recent: &mut VecDeque<String>, window: &mut HashSet<String>, key: &s
 impl JsonlFile {
     /// A regular file only, never through a link, and never blocking on a FIFO or device (`os::open_regular`, one arm per platform).
     pub fn open_path(path: &Path, limits: Limits) -> io::Result<Self> {
-        let os::Regular { file, id } = os::open_regular(path)?;
-        let stat = file.metadata()?;
-        Ok(Self { file, identity: id.text(), len: stat.len(), modified_ms: modified_ms_of(&stat), limits })
+        let os::Regular { file, id, len, modified } = os::open_regular(path)?;
+        Ok(Self { file, identity: id.text(), len, modified_ms: modified_ms(modified), limits })
     }
 
     /// The modification time (epoch milliseconds) the open handle reports now, for a decision made after the pass has read: a record
     /// appended while the pass ran has moved it since the open.
     fn modified_now(&self) -> Option<i64> {
-        self.file.metadata().ok().and_then(|stat| modified_ms_of(&stat))
+        modified_ms(self.file.metadata().ok().and_then(|stat| stat.modified().ok()))
     }
 
     #[cfg(test)]
@@ -451,7 +450,8 @@ pub fn decode(line: &Line) -> Decoded {
 /// The keys of the object at `path` in the order the line spells them. `serde_json::Value` sorts a map's keys and Python keeps
 /// insertion order, so a vendor whose behaviour names "the first key" of an object reads it from the raw line. Empty where
 /// `path` is not an object of the line, or the line ends before the object does (the keys read so far stay). A key the line spells
-/// twice is listed twice: the reader that wants a Python dict's single place keeps the first.
+/// twice is listed twice (the reader that wants a Python dict's single place keeps the first), but a `path` that names it goes to the
+/// last one, which is the value `json.loads` keeps.
 pub fn ordered_keys(raw: &[u8], path: &[&str]) -> Vec<String> {
     fn skip_ws(raw: &[u8], at: &mut usize) {
         while raw.get(*at).is_some_and(u8::is_ascii_whitespace) {
@@ -509,39 +509,47 @@ pub fn ordered_keys(raw: &[u8], path: &[&str]) -> Vec<String> {
             None => false,
         }
     }
-    // One object level: `want` is the key to stop at the value of (`Some`), or None to list every key; the position is left at the value.
+    // One object level: `want` is the key whose value the position is left at (`Some`; the LAST such key the object spells, as Python's
+    // `json.loads` keeps the last value of a duplicate), or None to list every key.
     fn level(raw: &[u8], at: &mut usize, want: Option<&str>) -> Option<Vec<String>> {
         skip_ws(raw, at);
         if raw.get(*at) != Some(&b'{') {
             return None;
         }
         *at += 1;
-        let mut keys = Vec::new();
+        let (mut keys, mut found) = (Vec::new(), None);
         loop {
             skip_ws(raw, at);
             if raw.get(*at) == Some(&b'}') || *at >= raw.len() {
-                return want.is_none().then_some(keys);
+                break;
             }
             let Some(key) = string_at(raw, at) else {
-                return want.is_none().then_some(keys);
+                break;
             };
             skip_ws(raw, at);
             if raw.get(*at) != Some(&b':') {
-                return want.is_none().then_some(keys);
+                break;
             }
             *at += 1;
             skip_ws(raw, at);
             if want == Some(key.as_str()) {
-                return Some(keys);
+                found = Some(*at);
             }
             if !skip_value(raw, at) {
-                return want.is_none().then_some(keys);
+                break;
             }
             keys.push(key);
             skip_ws(raw, at);
             if raw.get(*at) == Some(&b',') {
                 *at += 1;
             }
+        }
+        match want {
+            None => Some(keys),
+            Some(_) => found.map(|value| {
+                *at = value;
+                keys
+            }),
         }
     }
     let mut at = 0;

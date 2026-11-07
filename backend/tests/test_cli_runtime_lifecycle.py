@@ -610,6 +610,16 @@ class DropCounter(dict):
         super().__setitem__(key, value)
 
 
+def flood_difference(got: bytes, want: bytes) -> str | None:
+    """None when the streams are equal, else where they part (also when only the lengths differ) with the bytes around it."""
+    if got == want:
+        return None
+    at = next((i for i, (a, b) in enumerate(zip(got, want)) if a != b), min(len(got), len(want)))
+    low = max(0, at - 8)
+    return (f"first difference at byte {at} (got {len(got)} bytes, want {len(want)}): "
+            f"got {got[low:at + 16]!r}, want {want[low:at + 16]!r}")
+
+
 @pytest.mark.parametrize("slow", [False, True])
 async def test_r2_flood_during_resize_preserves_order_accounts_drops_and_emits_late_bytes_after_the_ack(rig, slow):
     service = rig.service()
@@ -649,20 +659,32 @@ async def test_r2_flood_during_resize_preserves_order_accounts_drops_and_emits_l
                 + len(f"flood {count}\r\n"))  # the tty also echoes the typed command line
     raw = rig.sink.raw(session.id)
     delivered = len(raw) - base
-    assert delivered + DropCounter.total == produced, (
-        "every gap equals the reported drop accounting: "
-        f"delivered={delivered} dropped={DropCounter.total} produced={produced} "
-        f"first={raw[base:base + 16]!r} last={raw[-16:]!r}")
+    accounting = f"delivered={delivered} dropped={DropCounter.total} produced={produced}"
     if not DropCounter.total:  # nothing was dropped, so the bytes are exactly the echo, the lines and the end marker
         expected = (f"flood {count}\r\n".encode()
                     + b"".join(f"FLOOD {n:06d} ".encode() + b"x" * 200 + b"\r\n" for n in range(count))
                     + b"FLOOD_DONE\r\n")
-        got = raw[base:]
-        at = next((i for i, (a, b) in enumerate(zip(got, expected)) if a != b), min(len(got), len(expected)))
-        assert got == expected, f"first difference at byte {at}: got {got[at:at + 16]!r}, want {expected[at:at + 16]!r}"
+        difference = flood_difference(raw[base:], expected)  # before the count: a stray byte is named by offset and bytes
+        assert difference is None, f"{difference}; {accounting}"
+    assert delivered + DropCounter.total == produced, f"every gap equals the reported drop accounting: {accounting}"
     assert before_ack <= slurp["read_total"], "B2: no byte first read after the slurp was emitted before the ack"
     await rig.say(service, session, "size")
     await rig.until(lambda: "SIZE [130, 45]" in rig.sink.text(session.id), "resize completed")
+
+
+async def test_r2c_the_flood_comparison_names_the_offset_and_the_bytes_of_a_one_byte_surplus():
+    """A recurrence of a stray byte must be decided from the failure message alone: the comparison names where the
+    streams part, with the bytes on both sides, whether the surplus is in the middle, at the end, or a byte is missing."""
+    want = b"".join(f"FLOOD {n:06d} ".encode() + b"x" * 20 + b"\r\n" for n in range(4)) + b"FLOOD_DONE\r\n"
+    assert flood_difference(want, want) is None
+    middle = want[:40] + b"\r" + want[40:]
+    message = flood_difference(middle, want)
+    assert "byte 40" in message and f"got {len(want) + 1} bytes" in message, message
+    assert repr(middle[32:56]) in message and repr(want[32:56]) in message, message
+    tail = flood_difference(want + b"\n", want)
+    assert f"byte {len(want)}" in tail and repr((want + b"\n")[-9:]) in tail, tail
+    short = flood_difference(want[:-1], want)
+    assert f"byte {len(want) - 1}" in short, short
 
 
 async def test_r2b_a_marker_in_the_sink_is_not_its_line_and_line_whole_waits_for_the_line_end(rig):

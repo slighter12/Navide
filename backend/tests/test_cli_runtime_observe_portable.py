@@ -1,6 +1,6 @@
 """The sidecar's native observation on every operating system, through the production client (`RustTerminalService`).
 
-t41 makes the observation core run on Windows as on POSIX. These cases drive the real sidecar binary below the Python readers with
+The observation core runs on Windows as on POSIX. These cases drive the real sidecar binary below the Python readers with
 the production client (the same class and the same `observe` path the backend uses, so they run unchanged on POSIX and Windows)
 and pin what the two platforms must agree on:
 
@@ -10,7 +10,8 @@ and pin what the two platforms must agree on:
 - the lifecycle of a log: an append is read once, a saved checkpoint is recognised by a *different* sidecar process (its anchor and
   the file identity are the file system's, so the next generation resumes and replays nothing), a rewritten or shorter log is a
   rotation that restarts at 0;
-- the bounds of the source open: a directory, and a link, are never read; a missing log is an empty one;
+- the bounds of the source open: a directory, and a link, are never read; a missing log is refused as missing (the reader decides
+  whether a missing file is empty, before the core is asked);
 - the paths real Windows users have: spaces, non-ASCII and non-BMP characters in the directory, for a log and for a SQLite store;
 - a log a writer keeps appending to while it is observed (the CLI's own state of affairs) is read without hurting either side.
 

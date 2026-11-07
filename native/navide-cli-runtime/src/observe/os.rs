@@ -4,39 +4,59 @@
 //! - a **regular file only**: a directory, a device, a pipe or a socket is refused, and so is a link;
 //! - **never through a link**: POSIX opens with `O_NOFOLLOW` and refuses a symlink named by the final component;
 //!   Windows opens with `FILE_FLAG_OPEN_REPARSE_POINT` (the handle is the reparse point itself, not its target) and
-//!   refuses any file that carries `FILE_ATTRIBUTE_REPARSE_POINT` (a symlink, a junction, a mount point);
+//!   refuses any file that carries `FILE_ATTRIBUTE_REPARSE_POINT`: a symlink, a junction, a mount point, and also every
+//!   other reparse tag (a cloud placeholder, a deduplicated file), which POSIX would read as a regular file;
 //! - **never blocking**: POSIX `O_NONBLOCK` keeps an open of a FIFO or device from waiting for a peer; a Windows
 //!   `CreateFile` of a regular file does not wait, and the file-type check refuses anything that is not a disk file
 //!   before a byte of it is read;
 //! - **shared**: the observer reads a log a CLI is appending to, so a Windows open allows every other opener
 //!   (`FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`); POSIX has no sharing mode;
 //! - an **identity** taken from the open handle (`device:index`), so a rotation is told from an append;
-//! - **positioned reads**: `read_at` never relies on the handle's own file pointer (Windows `seek_read` moves it).
+//! - **positioned reads**: `read_at` never relies on the handle's own file pointer (Windows `seek_read` moves it);
+//! - a **pin** (`pin_regular`): a SQLite engine opens its store by path and Windows SQLite ignores `SQLITE_OPEN_NOFOLLOW`, so
+//!   the core holds the checked file, deny-delete, while the engine opens it.
 //!
 //! Everything above this module is platform-neutral.
+use serde_json::{json, Value};
 use std::fs::File;
 use std::io;
 use std::path::Path;
+use std::time::SystemTime;
 
-/// What names a file on its volume: the device (the volume serial number on Windows) and the file's index on it (the
-/// inode; the NTFS file index on Windows).
+pub use arm::Pin;
+
+/// What names a file on its volume: the device (POSIX `st_dev`; the 64-bit volume serial number on Windows) and the file's
+/// index on it (the inode; on Windows the 128-bit `FILE_ID_INFO` file id, which NTFS fills with its 64-bit file reference
+/// number and ReFS, including a Dev Drive, with the whole 128 bits).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FileId {
     pub device: u64,
-    pub index: u64,
+    pub index: u128,
 }
 
 impl FileId {
-    /// The spelling the saved cursor and the answers carry: `device:index`.
+    /// The spelling the saved cursor and the answers carry: `device:index`, both in decimal.
     pub fn text(self) -> String {
         format!("{}:{}", self.device, self.index)
     }
+
+    /// The `ino` of a document's identity: a JSON integer while the index fits one (every POSIX inode and every NTFS file index),
+    /// else its decimal text (a ReFS id wider than 64 bits).
+    pub fn ino(self) -> Value {
+        match u64::try_from(self.index) {
+            Ok(small) => json!(small),
+            Err(_) => json!(self.index.to_string()),
+        }
+    }
 }
 
-/// A regular file opened under the core's bounds.
+/// A regular file opened under the core's bounds, with what the handle said at the open.
 pub struct Regular {
     pub file: File,
     pub id: FileId,
+    pub len: u64,
+    /// The modification time the handle reported; `None` where the platform gives none.
+    pub modified: Option<SystemTime>,
 }
 
 /// What a path names without following a link: its identity and size.
@@ -81,7 +101,7 @@ mod arm {
         if !stat.is_file() {
             return Err(not_regular());
         }
-        Ok(Regular { file, id: FileId { device: stat.dev(), index: stat.ino() } })
+        Ok(Regular { file, id: FileId { device: stat.dev(), index: u128::from(stat.ino()) }, len: stat.len(), modified: stat.modified().ok() })
     }
 
     pub fn stat_regular(path: &Path) -> io::Result<Option<Stat>> {
@@ -91,7 +111,14 @@ mod arm {
         if !stat.is_file() {
             return Err(not_regular());
         }
-        Ok(Some(Stat { id: FileId { device: stat.dev(), index: stat.ino() }, len: stat.len() }))
+        Ok(Some(Stat { id: FileId { device: stat.dev(), index: u128::from(stat.ino()) }, len: stat.len() }))
+    }
+
+    /// POSIX needs no pin: `SQLITE_OPEN_NOFOLLOW` refuses a link at the engine's own open.
+    pub struct Pin;
+
+    pub fn pin_regular(_path: &Path) -> io::Result<Pin> {
+        Ok(Pin)
     }
 
     pub fn read_at(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<usize> {
@@ -110,18 +137,25 @@ mod arm {
     use super::{not_regular, FileId, Regular, Stat};
     use std::fs::{File, OpenOptions};
     use std::io;
-    use std::mem::MaybeUninit;
+    use std::mem::{size_of, MaybeUninit};
     use std::os::windows::fs::{FileExt, OpenOptionsExt};
     use std::os::windows::io::AsRawHandle;
     use std::path::Path;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, FILETIME, HANDLE};
     use windows_sys::Win32::Storage::FileSystem::{
-        GetFileInformationByHandle, GetFileType, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK,
+        FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, GetFileType, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FILE_TYPE_DISK,
     };
 
     /// The sharing every observation open asks for: whoever else holds the file (the CLI that appends to it) keeps
     /// every right it has.
     const SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+    /// The sharing of a pin: everything but delete. While the pin is open, no other open can have `DELETE` access (a rename, a delete
+    /// or a replacement by rename all open the file for it) and each fails with a sharing violation.
+    const SHARE_NO_DELETE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE;
 
     /// What the handle says about the file it holds.
     struct Held {
@@ -129,6 +163,7 @@ mod arm {
         disk: bool,
         id: FileId,
         len: u64,
+        modified: Option<SystemTime>,
     }
 
     impl Held {
@@ -138,14 +173,34 @@ mod arm {
         }
     }
 
-    /// Open `path` itself (never its reparse target). `directories` lets `CreateFile` open a directory too, so that a
-    /// directory is refused as "not a regular file" and not as an access error.
-    fn open_itself(path: &Path, directories: bool) -> io::Result<File> {
-        OpenOptions::new()
-            .read(true)
-            .share_mode(SHARE_ALL)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | if directories { FILE_FLAG_BACKUP_SEMANTICS } else { 0 })
-            .open(path)
+    /// Open `path` itself (never its reparse target), with the sharing given. `FILE_FLAG_BACKUP_SEMANTICS` lets `CreateFile` open a
+    /// directory too, so that a directory is refused as "not a regular file" and not as an access error.
+    fn open_itself(path: &Path, share: u32) -> io::Result<File> {
+        OpenOptions::new().read(true).share_mode(share).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS).open(path)
+    }
+
+    /// A `FILETIME` (100 ns ticks since 1601-01-01) as a time; `None` before the Unix epoch.
+    fn system_time(time: FILETIME) -> Option<SystemTime> {
+        const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
+        let ticks = u64::from(time.dwHighDateTime) << 32 | u64::from(time.dwLowDateTime);
+        let since = ticks.checked_sub(UNIX_EPOCH_TICKS)?;
+        Some(UNIX_EPOCH + Duration::new(since / 10_000_000, (since % 10_000_000) as u32 * 100))
+    }
+
+    /// The identity of the open file: the 64-bit volume serial and the 128-bit file id of `FILE_ID_INFO` (Windows 8 and later; the
+    /// 64-bit index of `BY_HANDLE_FILE_INFORMATION` is not unique on ReFS). On NTFS the id is the file reference number, zero-extended,
+    /// and it is little-endian in the record. A file system that does not answer `FileIdInfo` (FAT, some network shares) keeps the 64-bit
+    /// index it always reported.
+    fn identity_of(handle: HANDLE, info: &BY_HANDLE_FILE_INFORMATION) -> FileId {
+        let mut wide = MaybeUninit::<FILE_ID_INFO>::zeroed();
+        // SAFETY: `handle` is open for the caller's `file`, and `wide` is a writable `FILE_ID_INFO` of the size the call is told.
+        let answered = unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, wide.as_mut_ptr().cast(), size_of::<FILE_ID_INFO>() as u32) } != 0;
+        if answered {
+            // SAFETY: the call succeeded, so it filled the record.
+            let wide = unsafe { wide.assume_init() };
+            return FileId { device: wide.VolumeSerialNumber, index: u128::from_le_bytes(wide.FileId.Identifier) };
+        }
+        FileId { device: u64::from(info.dwVolumeSerialNumber), index: u128::from(u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow)) }
     }
 
     fn hold(file: &File) -> io::Result<Held> {
@@ -161,29 +216,57 @@ mod arm {
             attributes: info.dwFileAttributes,
             // SAFETY: as above.
             disk: unsafe { GetFileType(handle) } == FILE_TYPE_DISK,
-            id: FileId { device: u64::from(info.dwVolumeSerialNumber), index: u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow) },
+            id: identity_of(handle, &info),
             len: u64::from(info.nFileSizeHigh) << 32 | u64::from(info.nFileSizeLow),
+            modified: system_time(info.ftLastWriteTime),
         })
     }
 
     pub fn open_regular(path: &Path) -> io::Result<Regular> {
-        let file = open_itself(path, true)?;
+        let file = open_itself(path, SHARE_ALL)?;
         let held = hold(&file)?;
         if !held.regular() {
             return Err(not_regular());
         }
-        Ok(Regular { file, id: held.id })
+        Ok(Regular { file, id: held.id, len: held.len, modified: held.modified })
     }
 
+    /// Only a path that is not there is `None`: a store another process holds without read sharing, or one this process may not
+    /// open, is there and unreadable, and the caller must hear that (it is no empty store).
     pub fn stat_regular(path: &Path) -> io::Result<Option<Stat>> {
-        let Ok(file) = open_itself(path, true) else {
-            return Ok(None);
+        let file = match open_itself(path, SHARE_ALL) {
+            Ok(file) => file,
+            Err(error) if is_absent(&error) => return Ok(None),
+            Err(error) => return Err(error),
         };
         let held = hold(&file)?;
         if !held.regular() {
             return Err(not_regular());
         }
         Ok(Some(Stat { id: held.id, len: held.len }))
+    }
+
+    /// `ERROR_FILE_NOT_FOUND` or `ERROR_PATH_NOT_FOUND`: the one answer that says "nothing is named so".
+    fn is_absent(error: &io::Error) -> bool {
+        matches!(error.raw_os_error().map(|code| code as u32), Some(ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND))
+    }
+
+    /// A checked regular file, held open without `FILE_SHARE_DELETE` for as long as the value lives.
+    pub struct Pin {
+        _file: File,
+    }
+
+    /// Open `path` itself, refuse anything but a regular file (a reparse point of any kind included), and hold it. SQLite's Windows
+    /// engine opens its store by path and ignores `SQLITE_OPEN_NOFOLLOW`, so a check made by path alone could be undone by a link put in
+    /// the file's place before the engine opens it. While this value lives the file named by `path` cannot be renamed, deleted or
+    /// replaced (every such change opens it for `DELETE`, which the missing `FILE_SHARE_DELETE` refuses), so the path the engine opens
+    /// is the file that was checked. Reading and writing by others stay allowed.
+    pub fn pin_regular(path: &Path) -> io::Result<Pin> {
+        let file = open_itself(path, SHARE_NO_DELETE)?;
+        if !hold(&file)?.regular() {
+            return Err(not_regular());
+        }
+        Ok(Pin { _file: file })
     }
 
     pub fn read_at(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<usize> {
@@ -223,10 +306,17 @@ pub fn open_regular(path: &Path) -> io::Result<Regular> {
     arm::open_regular(path)
 }
 
-/// What `path` names, without following a link: `Ok(None)` for a path that cannot be inspected (missing, no access),
-/// an error for one that is not a regular file.
+/// What `path` names, without following a link: `Ok(None)` for a path that is not there, an error for one that is not a regular file.
+/// A path that is there but cannot be opened for inspection is `None` on POSIX (as the baseline treats a failed `lstat`) and an error on
+/// Windows (a sharing violation or a refused access is the store being unreadable, which the caller must be told, not an empty store).
 pub fn stat_regular(path: &Path) -> io::Result<Option<Stat>> {
     arm::stat_regular(path)
+}
+
+/// Hold the regular file `path` names, refusing a link, until the returned value is dropped. Windows: deny-delete, so the path cannot be
+/// renamed, deleted or replaced meanwhile; POSIX: nothing (the engine's `SQLITE_OPEN_NOFOLLOW` does it).
+pub fn pin_regular(path: &Path) -> io::Result<Pin> {
+    arm::pin_regular(path)
 }
 
 /// The bytes SQLite is given for `path` as the path part of its URI (before percent-encoding); `None` for a path it cannot be given.
@@ -322,6 +412,30 @@ mod tests {
         let mut writer = std::fs::OpenOptions::new().append(true).open(&first).unwrap();
         writer.write_all(b"more\n").unwrap();
         assert_eq!(open_regular(&first).unwrap().id, a.id, "an append keeps the file's identity: a rotation is told from an append by it");
+    }
+
+    /// A 128-bit file id (ReFS) must not be cut to 64 bits in the text the cursor keeps, nor become a lossy JSON number.
+    #[test]
+    fn an_identity_spells_all_of_its_bits_in_the_text_and_in_the_document() {
+        let small = FileId { device: 7, index: 42 };
+        assert_eq!((small.text(), small.ino()), ("7:42".to_owned(), json!(42)));
+        let wide = FileId { device: u64::MAX, index: u128::MAX };
+        assert_eq!(wide.text(), format!("{}:{}", u64::MAX, u128::MAX));
+        assert_eq!(wide.ino(), json!(u128::MAX.to_string()), "an id over 64 bits is its decimal text, never a rounded number");
+        let edge = FileId { device: 1, index: u128::from(u64::MAX) };
+        assert_eq!(edge.ino(), json!(u64::MAX), "the largest id a JSON integer holds stays a number");
+        assert_ne!(FileId { device: 1, index: 1 << 64 }.text(), FileId { device: 1, index: 0 }.text(), "ids that differ only above bit 63 differ");
+    }
+
+    #[test]
+    fn an_open_file_reports_its_size_and_modification_time_from_the_one_handle() {
+        let dir = Dir::new();
+        let path = dir.file("sized.jsonl", b"12345\n");
+        let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(long_ago).unwrap();
+        let held = open_regular(&path).unwrap();
+        assert_eq!(held.len, 6);
+        assert_eq!(held.modified, Some(long_ago), "the handle's own modification time, not a second query");
     }
 
     #[test]
@@ -460,11 +574,86 @@ mod tests {
             assert_eq!(refused.to_string(), not_regular().to_string(), "{refused:?}");
         }
 
+        const SHARE_READ: u32 = 1;
+        const SHARE_WRITE: u32 = 2;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+
+        /// The identity must be the volume's 128-bit answer, not the 64-bit fallback: ReFS (a Dev Drive) does not keep the 64-bit index
+        /// unique. A volume that does not answer `FileIdInfo` fails here, loudly, where the fallback would have hidden it.
+        #[test]
+        fn the_identity_is_the_128_bit_file_id_the_handle_reports() {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO};
+            let dir = Dir::new();
+            let path = dir.file("id.jsonl", b"x\n");
+            let held = open_regular(&path).unwrap();
+            let mut wide = FILE_ID_INFO::default();
+            // SAFETY: the handle is open for `held`'s lifetime and `wide` is a writable `FILE_ID_INFO` of the size passed.
+            let answered = unsafe { GetFileInformationByHandleEx(held.file.as_raw_handle(), FileIdInfo, (&mut wide as *mut FILE_ID_INFO).cast(), std::mem::size_of::<FILE_ID_INFO>() as u32) };
+            assert_ne!(answered, 0, "the volume of {} does not answer FileIdInfo ({}): the identity fell back to the 64-bit index", path.display(), io::Error::last_os_error());
+            assert_eq!(held.id, FileId { device: wide.VolumeSerialNumber, index: u128::from_le_bytes(wide.FileId.Identifier) });
+        }
+
+        /// A store held without read sharing is there and unreadable: the caller hears the sharing violation (it is no empty store),
+        /// and a path that is not there stays `None`.
+        #[test]
+        fn a_store_another_process_holds_without_read_sharing_is_an_error_and_only_a_missing_path_is_none() {
+            let dir = Dir::new();
+            let path = dir.file("held.db", b"x");
+            for share in [0, SHARE_WRITE] {
+                let closed = std::fs::OpenOptions::new().write(true).share_mode(share).open(&path).unwrap();
+                let outcome = stat_regular(&path);
+                drop(closed);
+                let error = match outcome {
+                    Err(error) => error,
+                    Ok(found) => panic!("a store held with sharing {share} was reported as {}", if found.is_some() { "readable" } else { "absent" }),
+                };
+                assert_eq!(error.raw_os_error(), Some(ERROR_SHARING_VIOLATION), "sharing {share}: {error:?}");
+            }
+            assert!(stat_regular(&path).unwrap().is_some(), "released, the store is readable again");
+            assert!(stat_regular(&dir.0.join("absent.db")).unwrap().is_none(), "a missing file is no store");
+            assert!(stat_regular(&dir.0.join("no-such-dir").join("absent.db")).unwrap().is_none(), "nor is a file under a missing directory");
+        }
+
+        /// The pin is what keeps a store's path from being swapped for a link while the engine opens it: it must refuse every change of the
+        /// name and must not hold anyone's reading or writing back.
+        #[test]
+        fn a_pinned_file_cannot_be_renamed_deleted_or_replaced_and_readers_and_writers_are_unaffected() {
+            let dir = Dir::new();
+            let path = dir.file("pinned.db", b"x\n");
+            let replacement = dir.file("replacement.db", b"y\n");
+            let moved = dir.0.join("moved.db");
+            let pin = pin_regular(&path).expect("a regular file is pinned");
+            let renamed = std::fs::rename(&path, &moved);
+            assert!(renamed.is_err(), "a pinned file was renamed away");
+            let deleted = std::fs::remove_file(&path);
+            assert!(deleted.is_err(), "a pinned file was deleted");
+            let replaced = std::fs::rename(&replacement, &path);
+            assert!(replaced.is_err(), "a pinned file was replaced by a rename over it");
+            assert_eq!(std::fs::read(&path).unwrap(), b"x\n", "the pinned name still names the pinned file");
+            let mut writer = std::fs::OpenOptions::new().append(true).open(&path).expect("a writer is not held back by a pin");
+            writer.write_all(b"more\n").unwrap();
+            assert!(open_regular(&path).is_ok(), "a reader is not held back by a pin");
+            assert!(pin_regular(&path).is_ok(), "pins do not exclude each other");
+            drop(writer);
+            drop(pin);
+            std::fs::rename(&path, &moved).expect("released, the name is free again");
+        }
+
+        #[test]
+        fn a_pin_refuses_a_link_a_directory_and_a_device() {
+            let dir = Dir::new();
+            let real = dir.file("real.db", b"x");
+            let link = linked(&dir, &real, "link.db");
+            let refused = pin_regular(&link).err().expect("a symlink is a reparse point");
+            assert_eq!(refused.to_string(), not_regular().to_string(), "{refused:?}");
+            let refused = pin_regular(&dir.0).err().expect("a directory is not a store");
+            assert_eq!(refused.to_string(), not_regular().to_string(), "{refused:?}");
+            assert!(pin_regular(Path::new("NUL")).is_err(), "a device was pinned as a store");
+        }
+
         #[test]
         fn a_file_a_writer_shares_is_readable_and_one_held_without_read_sharing_fails_cleanly() {
-            const SHARE_READ: u32 = 1;
-            const SHARE_WRITE: u32 = 2;
-            const ERROR_SHARING_VIOLATION: i32 = 32;
             let dir = Dir::new();
             let path = dir.file("held.jsonl", b"x\n");
             // The common writer: read, write and delete sharing, as Rust's own default gives it.

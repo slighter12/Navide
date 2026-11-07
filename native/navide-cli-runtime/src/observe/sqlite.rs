@@ -99,6 +99,12 @@ impl Connection {
             }
             _ => return Err(14),
         };
+        // The engine opens the store by path. POSIX has `SQLITE_OPEN_NOFOLLOW`; the Windows engine ignores it, so the file is held, checked
+        // and deny-delete, until the engine has opened it: while the pin lives the path cannot be renamed, deleted or replaced by a link,
+        // and the engine opens the file that was checked. The directories above it were resolved just before (`canonicalize`); a link
+        // put into one of them in the instant between that and the pin is outside the guarantee. A store the pin cannot take (it is a
+        // link, it is not a regular file, another process holds it with delete access) is no store this pass.
+        let _pin = os::pin_regular(path).map_err(|_| 14)?;
         // A WAL store whose last writer closed has no -wal/-shm left, and the system SQLite refuses a plain read-only
         // open of it (SQLITE_CANTOPEN: it may not create the -shm), where the Python baseline's bundled SQLite creates
         // both. With neither file present the database file alone holds every committed row, so `immutable=1` reads it
@@ -113,6 +119,12 @@ impl Connection {
         });
         let immutable = !sidecars.contains(&true) && wal_header(path);
         let name = CString::new(uri(path, immutable).ok_or(14)?).map_err(|_| 1)?;
+        #[cfg(test)]
+        testing::BETWEEN_PIN_AND_OPEN.with(|hook| {
+            if let Some(hook) = hook.borrow().as_ref() {
+                hook(path);
+            }
+        });
         let mut raw = std::ptr::null_mut();
         let code = unsafe { sqlite3_open_v2(name.as_ptr(), &mut raw, OPEN_READONLY | OPEN_URI | OPEN_NOFOLLOW, std::ptr::null()) };
         if code != 0 {
@@ -310,7 +322,9 @@ impl Sqlite {
     }
 
     pub(super) fn open_at(path: &Path, page: usize) -> io::Result<Self> {
-        // Not a regular file, or a link, is refused here (`os::stat_regular`); a path that cannot be inspected is an empty store.
+        // Not a regular file, or a link, is refused here (`os::stat_regular`), and so is a store that is there but cannot be inspected
+        // on Windows (held without read sharing, access denied): that is an error of the observation, not an empty store. Only a path
+        // that is not there is an empty store. The link is refused again, and held in place, by the engine's open (`Connection::open`).
         let Some(stat) = os::stat_regular(path)? else {
             return Ok(Self::unreadable(page));
         };
@@ -321,7 +335,7 @@ impl Sqlite {
         Ok(Self {
             db,
             identity: stat.id.text(),
-            document_identity: json!({"dev": stat.id.device, "ino": stat.id.index, "size": stat.len}),
+            document_identity: json!({"dev": stat.id.device, "ino": stat.id.ino(), "size": stat.len}),
             open_code,
             ..Self::unreadable(page)
         })
@@ -431,6 +445,9 @@ pub mod testing {
     thread_local! {
         /// How many connections this thread has opened: an observation opens exactly one.
         pub static OPENED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        /// What a test does in the instant after the file is pinned and before the engine opens it (the path it is given is the
+        /// one the engine will open).
+        pub static BETWEEN_PIN_AND_OPEN: std::cell::RefCell<Option<Box<dyn Fn(&Path)>>> = const { std::cell::RefCell::new(None) };
     }
 
     pub struct Fixture {
@@ -564,11 +581,65 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("real.db"), b"").unwrap();
         os::link_file(&root.join("real.db"), &root.join("opencode.db")).expect("this runner cannot create a file symlink");
-        #[cfg(unix)]
-        assert!(Connection::open(&root.join("opencode.db")).is_err(), "SQLITE_OPEN_NOFOLLOW refuses the link");
-        // The path the observation takes is the one that refuses a link before SQLite is asked (SQLite's own NOFOLLOW is POSIX only).
+        // POSIX: `SQLITE_OPEN_NOFOLLOW` refuses the link; Windows: the pin does (SQLite's own NOFOLLOW is POSIX only).
+        assert!(Connection::open(&root.join("opencode.db")).is_err(), "the engine's open followed a link");
         assert!(Sqlite::open_at(&root.join("opencode.db"), 10).is_err(), "a symlinked store was opened by the observation");
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Windows: a store held by a process that grants no read sharing is there but unreadable. The observation must say so (an error that
+    /// names the sharing violation), not report the store absent.
+    #[cfg(windows)]
+    #[test]
+    fn a_store_held_without_read_sharing_is_an_unreadable_store_and_not_an_absent_one() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        let root = std::env::temp_dir().join(format!("sqlite-held-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("opencode.db");
+        std::fs::write(&path, b"x").unwrap();
+        let holder = std::fs::OpenOptions::new().write(true).share_mode(0).open(&path).unwrap();
+        let outcome = Sqlite::open_at(&path, 10);
+        drop(holder);
+        std::fs::remove_dir_all(&root).unwrap();
+        let error = match outcome {
+            Err(error) => error,
+            Ok(store) => panic!("a store held without read sharing opened as {}", if store.db.is_none() && store.identity.is_empty() { "an absent store" } else { "a store" }),
+        };
+        assert_eq!(error.raw_os_error(), Some(ERROR_SHARING_VIOLATION), "{error:?}");
+    }
+
+    /// Windows: the replacement the pin exists to stop. In the instant between the check and the engine's open, the store is renamed and a
+    /// link takes its place; every such change must be refused, and the engine must read the store that was checked.
+    #[cfg(windows)]
+    #[test]
+    fn the_store_cannot_be_renamed_deleted_or_replaced_by_a_link_between_the_check_and_the_engines_open() {
+        use super::testing::{Fixture, BETWEEN_PIN_AND_OPEN};
+        let mut store = Fixture::new("opencode.db");
+        store.sql("INSERT INTO session VALUES('ses_checked','/checked',NULL,'v')", &[]);
+        // Nothing but the pin may hold the store, or a refused rename would prove the writer's handle and not the pin.
+        drop(store.writer.take());
+        let decoy = store.root.join("decoy.db");
+        std::fs::write(&decoy, b"not a database").unwrap();
+        let attempts = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let seen = attempts.clone();
+        let moved = store.root.join("moved.db");
+        let decoy_link = decoy.clone();
+        BETWEEN_PIN_AND_OPEN.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |path: &Path| {
+                let mut seen = seen.borrow_mut();
+                seen.push(format!("rename away: {}", if std::fs::rename(path, &moved).is_err() { "refused" } else { "ALLOWED" }));
+                seen.push(format!("delete: {}", if std::fs::remove_file(path).is_err() { "refused" } else { "ALLOWED" }));
+                seen.push(format!("replace by rename: {}", if std::fs::rename(&decoy_link, path).is_err() { "refused" } else { "ALLOWED" }));
+            }));
+        });
+        let opened = Connection::open(&store.path).and_then(|db| db.query("SELECT id FROM session ORDER BY id", &[]));
+        BETWEEN_PIN_AND_OPEN.with(|hook| *hook.borrow_mut() = None);
+        let attempts = attempts.borrow().clone();
+        assert_eq!(attempts, ["rename away: refused", "delete: refused", "replace by rename: refused"], "the store's name moved while the engine was about to open it");
+        let rows = opened.expect("the engine opened the store that was checked");
+        assert!(rows.iter().any(|row| row[0] == "ses_checked"), "{rows:?}");
     }
 
     #[test]

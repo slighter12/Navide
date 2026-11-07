@@ -87,7 +87,7 @@ pub struct LogExpect {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FileStat {
     pub dev: u64,
-    pub ino: u64,
+    pub ino: u128,
     pub size: u64,
 }
 
@@ -97,8 +97,14 @@ impl FileStat {
     }
 
     pub fn identity(self) -> Value {
-        json!({"dev": self.dev, "ino": self.ino, "size": self.size})
+        json!({"dev": self.dev, "ino": super::os::FileId { device: self.dev, index: self.ino }.ino(), "size": self.size})
     }
+}
+
+/// The `dev:ino` text of a document's `{dev, ino, size}` identity (`ino` is a number, or its decimal text when it is wider than 64 bits).
+pub fn identity_text(identity: &Value) -> String {
+    let ino = identity["ino"].as_str().map_or_else(|| identity["ino"].to_string(), str::to_owned);
+    format!("{}:{ino}", identity["dev"])
 }
 
 /// Every string of `value` with each `(from, to)` swapped in turn. A path that begins with a placeholder is spelled with `/` in a
@@ -718,7 +724,7 @@ pub fn legacy_shape(vendor: &str, answered: &Answered, mode: &str, own: impl FnO
         if !named {
             json!("")
         } else if store {
-            json!(format!("{}:{}", identity["dev"], identity["ino"]))
+            json!(identity_text(identity))
         } else {
             identity.clone()
         },

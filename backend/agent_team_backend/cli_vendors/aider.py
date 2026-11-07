@@ -673,8 +673,8 @@ SPEC = VendorSpec(
     # The only vendor here with no session ids at all: resume is
     # `--chat-history-file <path> --restore-chat-history`, so there is nothing
     # for a caller to name. cli_open_agent refuses `session_id` on this key
-    # rather than opening a pane that restores something else.
-    supports_session_resume=FACT.supports_session_resume,
+    # rather than opening a pane that restores something else. The declaration
+    # says `supports_session_resume: false`; the spec derives it from there.
     # Multi-account = one provider API key per profile, parked in and
     # restored to ``~/.aider/oauth-keys.env`` (see AIDER_KEYS_FILE_REL).
     # "manual": there is no conversation to resume — the pane is relaunched

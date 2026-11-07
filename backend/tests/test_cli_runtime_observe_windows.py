@@ -1,6 +1,6 @@
-"""Windows vendor observation over the principal seam: launched by the Rust runtime, observed by the Rust sidecar (t41).
+"""Windows vendor observation over the principal seam: launched by the Rust runtime, observed by the Rust sidecar.
 
-The sidecar's observation core runs on Windows as on POSIX (t34 decision L2), so a vendor pane launched through the Rust
+The sidecar's observation core runs on Windows as on POSIX (one core, one OS seam), so a vendor pane launched through the Rust
 runtime (ConPTY, real sidecar) is observed by the same sidecar under the evaluation selector (`rust-shell`), through the
 same production `LogWatcher`, sinks and persistence as on POSIX. For every registry vendor with a reader, the vendor's
 synthetic catalog fixture (`tests/fixtures/cli-regression/<vendor>.json`) is written in two stages with a backend
@@ -156,7 +156,7 @@ def _receipts(root: Path) -> list[dict]:
 
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize("vendor", OBSERVED)
-async def test_windows_rust_launched_vendor_is_observed_by_the_python_watcher(vendor, tmp_path, monkeypatch, set_home):
+async def test_windows_rust_launched_vendor_is_observed_by_the_sidecars_native_core(vendor, tmp_path, monkeypatch, set_home):
     root = tmp_path / "pane-root"
     root.mkdir()
     data = VendorData(vendor, root, monkeypatch, set_home)

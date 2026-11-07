@@ -1206,8 +1206,11 @@ class VendorSpec:
         if self.session_path is None and vendor.session_path and vendor.session_root:
             object.__setattr__(self, "session_path", partial(declared_vendor_session_path, vendor))
         # The rest of what the declaration says is derived the same way, whenever the vendor leaves the field at its default:
-        # a vendor lists one only where it cannot be declared (Grok's reader of a resume id).
+        # a vendor lists one only where it cannot be declared (Grok's reader of a resume id). The declaration wins: a value
+        # equal to the default is taken for "left out", so `supports_model=False` beside a `model_flag` is turned on. To
+        # drop a capability, drop it from the declaration's JSON.
         derived: dict[str, Any] = {
+            "supports_session_resume": vendor.supports_session_resume,
             "supports_model": vendor.model_flag is not None,
             "supports_effort": vendor.effort_flag is not None,
             "known_efforts": vendor.known_efforts or (),
