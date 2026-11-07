@@ -16,6 +16,7 @@
   "session_path": {"segments": ["{id}.db"], "cwd": "absent"},
   "logs": {"files": ["*.db"], "cwd": "absent"},
   "permission_aliases": null,
+  "plain_only": true,
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

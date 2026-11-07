@@ -33,14 +33,28 @@ CAPABILITIES = ("model", "effort", "skip_permissions", "resume_by_id", "session_
 FIELDS = (
     "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
     "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_root", "session_path", "logs",
-    "permission_aliases", "supports_session_resume", "shutdown", "capabilities", "observer",
+    "permission_aliases", "plain_only", "supports_session_resume", "shutdown", "capabilities", "observer",
+)
+# Fields a declaration may leave out: the value each then takes. `plain_only`: the vendor's resume id decides a destructive
+# resume deduplication, so a command line with shell syntax in it names no resume (the baseline rule of Antigravity and Grok).
+OPTIONAL_FIELDS = {"plain_only": False}
+# The option table: the one place that says how a launch option is spelled. A word `{"opt": <option>, "value": ...}` names an
+# option; the spelling is the declaration field `field` (a flag, or with `template` a text holding `{id}`), then, when
+# `takes_value`, the quoted value (a flag and a space before it, or in place of `{id}` for a template). `values` names the
+# declaration field that lists the only values the option accepts (null: any). `capability` is the status that field must hold
+# for the sidecar to spell the option. Rust (`Opt`), Python (`OPTIONS`) and TypeScript (`OPTION_RULES`) each read this table
+# and spell nothing else of their own; quoting is the one thing each platform keeps at its own edge.
+OPTION_TABLE = (
+    {"option": "model", "field": "model_flag", "capability": "model", "takes_value": True, "template": False, "values": None},
+    {"option": "effort", "field": "effort_flag", "capability": "effort", "takes_value": True, "template": False, "values": "known_efforts"},
+    {"option": "skip_permissions", "field": "permission_flag", "capability": "skip_permissions", "takes_value": False, "template": False, "values": None},
+    {"option": "resume", "field": "resume_args", "capability": "resume_by_id", "takes_value": True, "template": True, "values": None},
+    {"option": "session_id", "field": "session_id_flag", "capability": "session_id_at_launch", "takes_value": True, "template": False, "values": None},
+    {"option": "login", "field": "login_args", "capability": "login", "takes_value": False, "template": False, "values": None},
 )
 # A launch option's flag is declared only for a capability the sidecar renders: the renderer and the backend spell an
 # option from the flag without looking at the status, so a flag next to any other status would be refused by the sidecar.
-FLAG_CAPABILITIES = (
-    ("model_flag", "model"), ("effort_flag", "effort"), ("permission_flag", "skip_permissions"),
-    ("resume_args", "resume_by_id"), ("session_id_flag", "session_id_at_launch"), ("login_args", "login"),
-)
+FLAG_CAPABILITIES = tuple((row["field"], row["capability"]) for row in OPTION_TABLE)
 
 # ---- typed command and path records ---------------------------------------------------------------------------------
 # What the generic core routines read instead of per-vendor code: how a resume command is spelled beyond `resume_args`
@@ -206,7 +220,7 @@ RUST_FAULT_DECLARATION = (
 )
 PY_KINDS = {"str": "str", "strs": "tuple[str, ...]", "bool": "bool", "cwd_encoding": "CwdEncoding"}
 RS_KINDS = {"str": "&'static str", "strs": "&'static [&'static str]", "bool": "bool", "cwd_encoding": "CwdEncoding"}
-TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilities", "supports_session_resume", "composition", "observer"})
+TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilities", "supports_session_resume", "composition", "observer", "plain_only"})
 
 
 def output_paths() -> tuple[Path, ...]:
@@ -685,6 +699,8 @@ def load(root: Path) -> list[dict]:
     facts = []
     for path in sorted((root / DECLARATIONS).glob("*.json")):
         item = json.loads(path.read_text())
+        for name, default in OPTIONAL_FIELDS.items():
+            item.setdefault(name, default)
         if set(item) != set(FIELDS):
             raise SystemExit(f"{path.name}: fields {sorted(set(item) ^ set(FIELDS))} do not match the declaration shape")
         if item["key"] != path.stem:
@@ -699,6 +715,8 @@ def load(root: Path) -> list[dict]:
                                  f"(it is {item['capabilities'][capability]!r})")
         if item["effort_flag"] is not None and item["known_efforts"] is None:
             raise SystemExit(f"{path.name}: effort_flag is declared, so known_efforts must be too")
+        if not isinstance(item["plain_only"], bool) or (item["plain_only"] and item["resume_args"] is None):
+            raise SystemExit(f"{path.name}: plain_only is true or false, and true only for a vendor that declares resume_args")
         if item["composition"] not in COMPOSITIONS:
             raise SystemExit(f"{path.name}: composition must be one of {COMPOSITIONS}")
         for name in RECORDS:
@@ -852,6 +870,18 @@ def python_source(facts: list[dict], subjects: dict) -> str:
             f"class {type_name}(NamedTuple):",
             *(f"    {field}: {PY_KINDS[kind]}" for field, kind in fields),
             "", "")),
+        "class OptionRule(NamedTuple):",
+        '    """How one launch option is spelled (the option table of the generator): the `VendorFacts` field `field` holds its flag,',
+        "    or with `template` a text holding `{id}`; `takes_value` puts the quoted value after the flag (in place of `{id}`);",
+        "    `values` names the `VendorFacts` field that lists the only values accepted; `capability` is the status that must be",
+        '    `integrated` for the option to be spelled."""',
+        "    field: str",
+        "    capability: str",
+        "    takes_value: bool",
+        "    template: bool",
+        "    values: str | None",
+        "",
+        "",
         "class VendorFacts(NamedTuple):",
         "    key: str",
         "    composition: str",
@@ -864,6 +894,7 @@ def python_source(facts: list[dict], subjects: dict) -> str:
         "    session_id_flag: str | None",
         "    login_args: str | None",
         *(f"    {name}: {type_name} | None" for name, (type_name, _) in RECORDS.items()),
+        "    plain_only: bool",
         "    supports_session_resume: bool",
         "    shutdown: ShutdownFacts | None",
         "    capabilities: CapabilityStatus",
@@ -892,6 +923,12 @@ def python_source(facts: list[dict], subjects: dict) -> str:
                 lines.append(f"        {name}={value!r},")
         lines.append("    ),")
     lines.append("}")
+    lines += ["", "#: The option table: every launch option a word can name, and how it is spelled from a vendor's facts.",
+              "OPTIONS: dict[str, OptionRule] = {"]
+    for row in OPTION_TABLE:
+        lines.append(f"    {row['option']!r}: OptionRule(field={row['field']!r}, capability={row['capability']!r}, "
+                     f"takes_value={row['takes_value']!r}, template={row['template']!r}, values={row['values']!r}),")
+    lines.append("}")
     lines += ["", "#: Non-vendor subjects (the ordinary shell) and how their launch is composed.",
               f"SUBJECT_COMPOSITION: dict[str, str] = {{{', '.join(f'{a!r}: {subjects['composition']!r}' for a in subjects['aliases'])}}}"]
     return "\n".join(lines) + "\n"
@@ -902,7 +939,12 @@ def typescript_source(facts: list[dict]) -> str:
     helper = ("\n/** Put a session id into a declared `resume_args` template. */\n"
               "export const fillId = (template: string, id: string): string => template.split('{id}').join(id)\n")
     observers = {item["key"]: item["observer"] for item in facts}
+    # The capability status stays out of this file (see the module doc): the sidecar checks it, the renderer never does.
+    rules = {row["option"]: {key: row[key] for key in ("field", "takes_value", "template", "values")} for row in OPTION_TABLE}
     return (f"// {HEADER}\nexport const VENDOR_FACTS = " + json.dumps(table, indent=2) + " as const\n"
+            + "\n/** The option table: every launch option a word can name, and how it is spelled from a vendor's facts. */\n"
+            + "export const OPTION_RULES = " + json.dumps(rules, indent=2) + " as const\n"
+            + "\nexport type LaunchOption = keyof typeof OPTION_RULES\n"
             + "\n/** How each vendor's session log is observed (null where none is). */\n"
             + "export const OBSERVER_FACTS = " + json.dumps(observers, indent=2) + " as const\n" + helper)
 
@@ -924,6 +966,68 @@ def rust_strs(values: list[str]) -> str:
 
 def rust_bool(value: bool) -> str:
     return "true" if value else "false"
+
+
+def rust_options() -> list[str]:
+    """The `Opt` enum of the option table: every `match` over it is exhaustive, so an option added to the table that a
+    consumer does not handle does not compile."""
+    variants = [(row, mode_variant(row["option"])) for row in OPTION_TABLE]
+
+    def arms(text) -> list[str]:
+        return [f"            Opt::{variant} => {text(row)}," for row, variant in variants]
+
+    return [
+        "/// A launch option a word can name (the generator's option table); the one list that says how each is spelled.",
+        "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
+        "pub enum Opt {",
+        *(f"    {variant}," for _, variant in variants),
+        "}",
+        "",
+        "impl Opt {",
+        "    /// The option a word names by its wire spelling.",
+        "    pub fn parse(wire: &str) -> Option<Opt> {",
+        "        match wire {",
+        *(f"            {rust_string(row['option'])} => Some(Opt::{variant})," for row, variant in variants),
+        "            _ => None,",
+        "        }",
+        "    }",
+        "",
+        "    /// The status the vendor's capability for this option must hold for it to be spelled.",
+        "    pub fn status(self, capabilities: &Capabilities) -> Status {",
+        "        match self {",
+        *arms(lambda row: f"capabilities.{row['capability']}"),
+        "        }",
+        "    }",
+        "",
+        "    /// The declared flag (or, for a template, the text holding `{id}`), `None` where the vendor declares none.",
+        "    pub fn flag(self, facts: &VendorFacts) -> Option<&'static str> {",
+        "        match self {",
+        *arms(lambda row: f"facts.{row['field']}"),
+        "        }",
+        "    }",
+        "",
+        "    /// Does the option carry a value after its flag (in place of `{id}` for a template)?",
+        "    pub const fn takes_value(self) -> bool {",
+        "        match self {",
+        *arms(lambda row: rust_bool(row["takes_value"])),
+        "        }",
+        "    }",
+        "",
+        "    /// Is the declared text a template whose `{id}` the value fills?",
+        "    pub const fn is_template(self) -> bool {",
+        "        match self {",
+        *arms(lambda row: rust_bool(row["template"])),
+        "        }",
+        "    }",
+        "",
+        "    /// The only values the vendor accepts for the option (an empty list when it declares none), `None` for any value.",
+        "    pub fn values(self, facts: &VendorFacts) -> Option<&'static [&'static str]> {",
+        "        match self {",
+        *arms(lambda row: "None" if row["values"] is None else f"Some(facts.{row['values']}.unwrap_or(&[]))"),
+        "        }",
+        "    }",
+        "}",
+    ]
 
 
 def rust_source(facts: list[dict], subjects: dict) -> str:
@@ -988,6 +1092,8 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
         "    pub shutdown: Option<Shutdown>,",
         "    pub capabilities: Capabilities,",
         "}",
+        "",
+        *rust_options(),
         "",
         "pub const VENDORS: &[VendorFacts] = &[",
     ]

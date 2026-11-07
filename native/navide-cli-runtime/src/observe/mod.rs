@@ -42,7 +42,7 @@ use std::io;
 use std::path::Path;
 
 pub use answer::{ANSWER_BYTES, OWNERSHIP_BYTES};
-pub use jsonl::{Decoded, JsonlFile, JsonlObserver, Line, TurnBreakdown, TurnCall, TurnRow};
+pub use jsonl::{ordered_keys, Decoded, JsonlFile, JsonlObserver, Line, TurnBreakdown, TurnCall, TurnRow};
 pub use rows::{CellOf, ColumnId, Mark, NoColumn, Pass, Progress, SqlObserver, WalkId, WalkMark};
 pub use sqlite::Sqlite;
 pub use usage::{sum, Reading, Totals, Usage};

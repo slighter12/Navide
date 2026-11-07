@@ -25,7 +25,7 @@ import re
 
 from .base import ExtensionsSource, ExtensionsSpec, session_root
 from ._vendor_facts import FACTS
-from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, data_dirs_of, resume_reader_of
+from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, data_dirs_of
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
 from ..log_readers.base import (
     ActivityLines,
@@ -602,7 +602,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same runtime root as _kimi_home.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
     skills_supported=True,
     # --skills-dir is repeatable but replaces auto-discovery outright, so the
     # roots kimi would have found itself are passed back alongside ours.
@@ -626,7 +625,6 @@ SPEC = VendorSpec(
         config_dir_env="KIMI_CODE_HOME",
         config_file=("mcp.json",),
     ),
-    login_command_args=FACT.login_args,
     live_file=(".kimi-code", "credentials", "kimi-code.json"),
     slot_file="kimi-code.json",
     login_home_secret_file=("credentials", "kimi-code.json"),
@@ -652,7 +650,6 @@ SPEC = VendorSpec(
     cli_verified_version="2.2.0",
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_kimi(home),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     # pi-tui otherwise treats a split ESC prefix as Escape after 10ms. Pane
     # input crosses the renderer/WebSocket/PTY boundary, so give Kimi the same

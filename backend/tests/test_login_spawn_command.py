@@ -16,6 +16,7 @@ import pytest
 
 from agent_team_backend import app as app_module
 from agent_team_backend.app import _login_spawn_command
+from agent_team_backend.cli_vendors._vendor_facts import FACTS
 from agent_team_backend.cli_vendors.registry import VENDORS
 
 
@@ -83,9 +84,8 @@ def test_every_declared_trigger_still_produces_a_command() -> None:
     # rewrite, so a typo'd or misplaced value cannot pass silently.
     declared = [k for k, s in VENDORS.items() if s.login_command_args is not None]
 
-    assert set(declared) == {
-        "claude", "codex", "kimi", "grok", "kilo", "copilot", "muse", "mcode", "opencode",
-    }
+    # The vendors with a sign-in trigger are the declarations that name `login_args`, not a list kept here.
+    assert set(declared) == {key for key, facts in FACTS.items() if facts.login_args is not None}
     for key in declared:
         rewritten = _login_spawn_command(key, f"{key} --some-flag")
         assert rewritten.startswith(key), key

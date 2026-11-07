@@ -139,6 +139,18 @@ class Logs(NamedTuple):
     cwd: CwdEncoding
 
 
+class OptionRule(NamedTuple):
+    """How one launch option is spelled (the option table of the generator): the `VendorFacts` field `field` holds its flag,
+    or with `template` a text holding `{id}`; `takes_value` puts the quoted value after the flag (in place of `{id}`);
+    `values` names the `VendorFacts` field that lists the only values accepted; `capability` is the status that must be
+    `integrated` for the option to be spelled."""
+    field: str
+    capability: str
+    takes_value: bool
+    template: bool
+    values: str | None
+
+
 class VendorFacts(NamedTuple):
     key: str
     composition: str
@@ -157,6 +169,7 @@ class VendorFacts(NamedTuple):
     session_path: SessionPath | None
     permission_aliases: PermissionAliases | None
     logs: Logs | None
+    plain_only: bool
     supports_session_resume: bool
     shutdown: ShutdownFacts | None
     capabilities: CapabilityStatus
@@ -182,6 +195,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=None,
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=False,
         shutdown=None,
         capabilities=CapabilityStatus(model='not-yet-integrated', effort='unknown', skip_permissions='integrated', resume_by_id='vendor-unsupported', session_id_at_launch='vendor-unsupported', login='unknown'),
@@ -205,6 +219,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=SessionPath(segments=('{id}.db',), cwd=CwdEncoding.ABSENT),
         logs=Logs(files=('*.db',), cwd=CwdEncoding.ABSENT),
         permission_aliases=None,
+        plain_only=True,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
@@ -228,6 +243,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=SessionPath(segments=('{cwd}', '{id}.jsonl'), cwd=CwdEncoding.CLAUDE),
         logs=Logs(files=('{cwd}/*.jsonl',), cwd=CwdEncoding.CLAUDE),
         permission_aliases=PermissionAliases(spellings=('--allow-dangerously-skip-permissions', '--permission-mode bypassPermissions'), mode_flags=('--permission-mode',), config_keys=()),
+        plain_only=False,
         supports_session_resume=True,
         shutdown=ShutdownFacts(graceful=True, grace_s=3.0, defer_master_close=True),
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='integrated', login='integrated'),
@@ -251,6 +267,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('**/rollout-*.jsonl',), cwd=CwdEncoding.ABSENT),
         permission_aliases=PermissionAliases(spellings=('--yolo', '--full-auto'), mode_flags=('-a', '--ask-for-approval', '-s', '--sandbox'), config_keys=('approval_policy', 'sandbox_mode')),
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='not-yet-integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -274,6 +291,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=SessionPath(segments=('session-state', '{id}', 'events.jsonl'), cwd=CwdEncoding.ABSENT),
         logs=Logs(files=('session-store.db', 'session-state/*/events.jsonl'), cwd=CwdEncoding.ABSENT),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='not-yet-integrated', login='integrated'),
@@ -297,6 +315,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('{cwd}/*/store.db',), cwd=CwdEncoding.MD5),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
@@ -320,6 +339,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=SessionPath(segments=('{cwd}', '{id}.jsonl'), cwd=CwdEncoding.DROID),
         logs=Logs(files=('*.jsonl', '{cwd}/*.jsonl'), cwd=CwdEncoding.DROID),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='vendor-unsupported', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
@@ -343,6 +363,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('sessions.db',), cwd=CwdEncoding.ABSENT),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='unknown', effort='unknown', skip_permissions='vendor-unsupported', resume_by_id='integrated', session_id_at_launch='vendor-unsupported', login='unknown'),
@@ -366,6 +387,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=SessionPath(segments=('{cwd}', '{id}', 'updates.jsonl'), cwd=CwdEncoding.URL_QUOTE),
         logs=Logs(files=('{cwd}/*/updates.jsonl',), cwd=CwdEncoding.URL_QUOTE),
         permission_aliases=None,
+        plain_only=True,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='not-yet-integrated', resume_by_id='integrated', session_id_at_launch='integrated', login='integrated'),
@@ -389,6 +411,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('kilo.db',), cwd=CwdEncoding.ABSENT),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -412,6 +435,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('wd_*/session_*/agents/main/wire.jsonl',), cwd=CwdEncoding.ABSENT),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -435,6 +459,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=None,
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=False,
         shutdown=None,
         capabilities=CapabilityStatus(model='vendor-unsupported', effort='vendor-unsupported', skip_permissions='vendor-unsupported', resume_by_id='not-yet-integrated', session_id_at_launch='unknown', login='integrated'),
@@ -458,6 +483,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('*/*/*/*/session.jsonl',), cwd=CwdEncoding.ABSENT),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='vendor-unsupported', login='integrated'),
@@ -481,6 +507,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('opencode.db',), cwd=CwdEncoding.ABSENT),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='vendor-unsupported', resume_by_id='integrated', session_id_at_launch='unknown', login='integrated'),
@@ -504,6 +531,7 @@ FACTS: dict[str, VendorFacts] = {
         session_path=None,
         logs=Logs(files=('{cwd}/*.jsonl',), cwd=CwdEncoding.PI),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='integrated', skip_permissions='vendor-unsupported', resume_by_id='integrated', session_id_at_launch='not-yet-integrated', login='unknown'),
@@ -527,11 +555,22 @@ FACTS: dict[str, VendorFacts] = {
         session_path=SessionPath(segments=('{cwd}', 'chats', '{id}.jsonl'), cwd=CwdEncoding.CLAUDE),
         logs=Logs(files=('{cwd}/chats/*.jsonl', '{cwd}/chats/archive/*.jsonl'), cwd=CwdEncoding.CLAUDE),
         permission_aliases=None,
+        plain_only=False,
         supports_session_resume=True,
         shutdown=None,
         capabilities=CapabilityStatus(model='integrated', effort='vendor-unsupported', skip_permissions='integrated', resume_by_id='integrated', session_id_at_launch='unknown', login='unknown'),
         observer=ObserverFacts(parser='qwen', parser_id='rust-qwen-jsonl-v1', platforms=('unix',), layouts=(LayoutFacts(source='jsonl', usage='per_turn', store_file=None, applies_when=(), request=('cwd', 'session', 'now_ms'), modes=(Mode.USAGE, Mode.SESSION_USAGE, Mode.ACTIVITY)),), core=CoreFacts(modes=(Mode.USAGE, Mode.SESSION_USAGE, Mode.ACTIVITY), legacy_state=(LegacyState(prefix='act_hw::', field='water', kind='int'), LegacyState(prefix='qwen_text::', field='last_text', kind='text'), LegacyState(prefix='qwen_turn::', field='adapter', kind='json'),), python=PythonFacts(prompt_detail='user', pane_scope='none', attribution='none', identity_source='file_stem'), compat=CompatFacts(absent_file_is_empty=True, no_python_turn_fallback=False, store_error_reported=False))),
     ),
+}
+
+#: The option table: every launch option a word can name, and how it is spelled from a vendor's facts.
+OPTIONS: dict[str, OptionRule] = {
+    'model': OptionRule(field='model_flag', capability='model', takes_value=True, template=False, values=None),
+    'effort': OptionRule(field='effort_flag', capability='effort', takes_value=True, template=False, values='known_efforts'),
+    'skip_permissions': OptionRule(field='permission_flag', capability='skip_permissions', takes_value=False, template=False, values=None),
+    'resume': OptionRule(field='resume_args', capability='resume_by_id', takes_value=True, template=True, values=None),
+    'session_id': OptionRule(field='session_id_flag', capability='session_id_at_launch', takes_value=True, template=False, values=None),
+    'login': OptionRule(field='login_args', capability='login', takes_value=False, template=False, values=None),
 }
 
 #: Non-vendor subjects (the ordinary shell) and how their launch is composed.

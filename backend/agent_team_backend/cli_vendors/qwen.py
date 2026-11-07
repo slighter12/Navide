@@ -53,7 +53,6 @@ from .base import (
     data_dirs_of,
     dotenv_extract,
     dotenv_merge,
-    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -912,7 +911,6 @@ SPEC = VendorSpec(
     # Verified in installed @qwen-code/qwen-code Storage.getRuntimeBaseDir: QWEN_RUNTIME_DIR overrides runtime output,
     # otherwise QWEN_HOME is used; config remains at QWEN_HOME. Storage.resolvePath expands ~/ itself (`tilde`).
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: QWEN_HOME *is* the .qwen directory (its
     # resolveQwenHome falls back to ~/.qwen), so skills sit one level in.
     skills_supported=True,
@@ -982,7 +980,6 @@ SPEC = VendorSpec(
         resume="native",
         todo="a Coding Plan key in the pane environment outranks both files and cannot be switched; no real-account round-trip recorded",
     ),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),
     make_log_reader=QwenLogReader,

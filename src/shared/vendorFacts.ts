@@ -812,6 +812,48 @@ export const VENDOR_FACTS = {
   }
 } as const
 
+/** The option table: every launch option a word can name, and how it is spelled from a vendor's facts. */
+export const OPTION_RULES = {
+  "model": {
+    "field": "model_flag",
+    "takes_value": true,
+    "template": false,
+    "values": null
+  },
+  "effort": {
+    "field": "effort_flag",
+    "takes_value": true,
+    "template": false,
+    "values": "known_efforts"
+  },
+  "skip_permissions": {
+    "field": "permission_flag",
+    "takes_value": false,
+    "template": false,
+    "values": null
+  },
+  "resume": {
+    "field": "resume_args",
+    "takes_value": true,
+    "template": true,
+    "values": null
+  },
+  "session_id": {
+    "field": "session_id_flag",
+    "takes_value": true,
+    "template": false,
+    "values": null
+  },
+  "login": {
+    "field": "login_args",
+    "takes_value": false,
+    "template": false,
+    "values": null
+  }
+} as const
+
+export type LaunchOption = keyof typeof OPTION_RULES
+
 /** How each vendor's session log is observed (null where none is). */
 export const OBSERVER_FACTS = {
   "aider": {

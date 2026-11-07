@@ -346,8 +346,7 @@ SPEC = VendorSpec(
     home_env_vars=("MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"),
     # `mcode login` (add `--region global` for a non-mainland account, which
     # is a choice the user makes in the CLI's own flow, not something Navide
-    # can pick for them).
-    login_command_args=FACT.login_args,
+    # can pick for them). `login_args` in mcode.json declares the bare `login`.
     # Multi-account: see the module docstring. One record of
     # ``<data-dir>/auth/auth.json`` per region scope, with the namespace's
     # ``auth-state.json`` derived to match. MINIMAX_DATA_DIR relocates the

@@ -143,7 +143,6 @@ from .base import (
     data_dirs_of,
     provider_map_extract,
     provider_map_merge,
-    resume_reader_of,
 )
 
 log = logging.getLogger("agent_team_backend.log_readers.muse")
@@ -756,9 +755,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Same dedicated XDG root as muse_data_root, with the pane's HOME shim.
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
-    supports_effort=FACT.effort_flag is not None,
-    known_efforts=FACT.known_efforts or (),
     # Verified 2026-08-15: `muse skills list --source user` reports skills
     # from ~/.claude/skills and ~/.agents/skills. Only HOME relocates those,
     # so this is the one vendor whose shim exists for skills alone.
@@ -773,7 +769,6 @@ SPEC = VendorSpec(
     # code in the browser — a flow a PTY pane can carry. Note META_API_KEY
     # still takes priority over the account login if it is set in the
     # environment. Verified against `muse login --help`, 2026-09-18.
-    login_command_args=FACT.login_args,
     # Quota exhaustion text from the 1.3.0 binary's error/goal-status strings
     # ("usage limit reached" is a distinct class from "rate limited") and the
     # quota_hit session failure entry. Source-read only.
@@ -804,7 +799,6 @@ SPEC = VendorSpec(
         resume="native",
         todo="layout from Meta's launcher script only (the binary's own writer not inspected); META_API_KEY in the pane env shadows the file; no real-account round-trip recorded",
     ),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     make_log_reader=MuseLogReader,
     install_dep=Dep(

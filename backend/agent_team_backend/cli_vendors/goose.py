@@ -46,7 +46,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from .base import Dep, ExtensionsSpec, PlatformInstall, VendorSpec, resume_reader_of
+from .base import Dep, ExtensionsSpec, PlatformInstall, VendorSpec
 from ._vendor_facts import FACTS
 from ..osplat import platform_id as _platform_id
 from ..usage_common import _epoch_to_iso
@@ -390,7 +390,6 @@ SPEC = VendorSpec(
     # The same data dir the reader opens, resolved against the pane's runtime.
     data_dirs=lambda ctx: (ctx.path(_data_dir(dict(ctx.env), ctx.home)),),
     data_dir_env_vars=("GOOSE_PATH_ROOT", "XDG_DATA_HOME", "APPDATA"),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     make_log_reader=GooseLogReader,
     # No usage/quota surface and no account switching: goose talks to the

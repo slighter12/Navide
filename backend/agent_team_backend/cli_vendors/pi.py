@@ -56,7 +56,6 @@ from .base import (
     provider_entry_identity,
     provider_map_extract,
     provider_map_merge,
-    resume_reader_of,
 )
 from . import _protocols
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
@@ -802,9 +801,6 @@ SPEC = VendorSpec(
     # Open-ended provider/model config; OpenRouter quota is not a CLI host set.
     expected_hosts=(),
     data_dirs=data_dirs_of(FACT.data_dirs),
-    supports_model=FACT.model_flag is not None,
-    supports_effort=FACT.effort_flag is not None,
-    known_efforts=FACT.known_efforts or (),
     skills_supported=True,
     # --skill takes one skill (file or directory) and is repeated; it adds to
     # discovery rather than replacing it (--no-skills is the opt-out).
@@ -842,7 +838,6 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_pi(home),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=(
         "PI_CODING_AGENT_DIR",

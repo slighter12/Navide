@@ -138,6 +138,92 @@ pub struct VendorFacts {
     pub capabilities: Capabilities,
 }
 
+/// A launch option a word can name (the generator's option table); the one list that says how each is spelled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Opt {
+    Model,
+    Effort,
+    SkipPermissions,
+    Resume,
+    SessionId,
+    Login,
+}
+
+impl Opt {
+    /// The option a word names by its wire spelling.
+    pub fn parse(wire: &str) -> Option<Opt> {
+        match wire {
+            "model" => Some(Opt::Model),
+            "effort" => Some(Opt::Effort),
+            "skip_permissions" => Some(Opt::SkipPermissions),
+            "resume" => Some(Opt::Resume),
+            "session_id" => Some(Opt::SessionId),
+            "login" => Some(Opt::Login),
+            _ => None,
+        }
+    }
+
+    /// The status the vendor's capability for this option must hold for it to be spelled.
+    pub fn status(self, capabilities: &Capabilities) -> Status {
+        match self {
+            Opt::Model => capabilities.model,
+            Opt::Effort => capabilities.effort,
+            Opt::SkipPermissions => capabilities.skip_permissions,
+            Opt::Resume => capabilities.resume_by_id,
+            Opt::SessionId => capabilities.session_id_at_launch,
+            Opt::Login => capabilities.login,
+        }
+    }
+
+    /// The declared flag (or, for a template, the text holding `{id}`), `None` where the vendor declares none.
+    pub fn flag(self, facts: &VendorFacts) -> Option<&'static str> {
+        match self {
+            Opt::Model => facts.model_flag,
+            Opt::Effort => facts.effort_flag,
+            Opt::SkipPermissions => facts.permission_flag,
+            Opt::Resume => facts.resume_args,
+            Opt::SessionId => facts.session_id_flag,
+            Opt::Login => facts.login_args,
+        }
+    }
+
+    /// Does the option carry a value after its flag (in place of `{id}` for a template)?
+    pub const fn takes_value(self) -> bool {
+        match self {
+            Opt::Model => true,
+            Opt::Effort => true,
+            Opt::SkipPermissions => false,
+            Opt::Resume => true,
+            Opt::SessionId => true,
+            Opt::Login => false,
+        }
+    }
+
+    /// Is the declared text a template whose `{id}` the value fills?
+    pub const fn is_template(self) -> bool {
+        match self {
+            Opt::Model => false,
+            Opt::Effort => false,
+            Opt::SkipPermissions => false,
+            Opt::Resume => true,
+            Opt::SessionId => false,
+            Opt::Login => false,
+        }
+    }
+
+    /// The only values the vendor accepts for the option (an empty list when it declares none), `None` for any value.
+    pub fn values(self, facts: &VendorFacts) -> Option<&'static [&'static str]> {
+        match self {
+            Opt::Model => None,
+            Opt::Effort => Some(facts.known_efforts.unwrap_or(&[])),
+            Opt::SkipPermissions => None,
+            Opt::Resume => None,
+            Opt::SessionId => None,
+            Opt::Login => None,
+        }
+    }
+}
+
 pub const VENDORS: &[VendorFacts] = &[
     VendorFacts {
         key: "aider",

@@ -24,20 +24,26 @@ names and does not prescribe current menu labels.
 
 ## Part 1 — Where the code lives
 
-Since the one-file-per-vendor refactor (July 2026) an integration is two
-vendor files plus one registration line on each side. No shared module
-carries per-vendor branches, and CI rejects a vendor module that imports
-another vendor or any app module.
+An integration starts from a declaration: `shared/agent-cli/<key>.json` states
+the command, the launch flags, the resume spelling, the data directories and
+the capabilities once, and `scripts/generate-agent-cli-facts.py` writes them
+into the Python (`_vendor_facts.py`), TypeScript (`vendorFacts.ts`) and Rust
+(`vendor_facts.rs`) sources. The vendor files that follow add only what a
+declaration cannot say, and a Rust adapter exists only when the native core
+reads the CLI's log. No shared module carries per-vendor branches, and CI
+rejects a vendor module that imports another vendor or any app module.
 
 | Layer | File |
 |-------|------|
-| Backend spec — credentials, usage, resume, session paths, spawn env, log reader, install entry | `backend/agent_team_backend/cli_vendors/<key>.py` |
+| Declaration — command, flags, resume spelling, data and session paths, capabilities (run the generator after every edit) | `shared/agent-cli/<key>.json` |
+| Backend spec — credentials, usage, spawn env, log reader, install entry, and named hooks only where disk state decides | `backend/agent_team_backend/cli_vendors/<key>.py` |
 | Backend registration | `backend/agent_team_backend/cli_vendors/registry.py` |
-| Frontend spec — label, command, resume syntax, capability flags | `src/renderer/src/platform/plugin-shell/agents/<key>.ts` |
+| Frontend spec — label, capability flags, and `...factOptions(FACT)` for the option spellings | `src/renderer/src/platform/plugin-shell/agents/<key>.ts` |
 | Frontend registration + display order | `src/renderer/src/platform/plugin-shell/agents/index.ts` |
+| Native adapter (optional) — only if the Rust core observes the CLI's log | `native/navide-cli-runtime/src/observe/adapters/<key>.rs` |
 
-Everything the old layer-by-layer checklist enumerated now derives from those
-four:
+Everything the old layer-by-layer checklist enumerated now derives from the
+declaration and those registrations:
 
 - `AgentKey` is re-exported from `agents/index.ts`; `data/stages.ts` holds no
   hand-written union to drift.

@@ -80,8 +80,12 @@ def launch_rig(request, rig, tmp_path, monkeypatch, posix_bash):
             await asyncio.to_thread(term.proc.wait)
         term.closed = True
 
+    async def wait_until_reaped(term_id, timeout=None):
+        return True  # `kill` above already waited for the process
+
     monkeypatch.setattr(owner.terminals, "create", create)
     monkeypatch.setattr(owner.terminals, "kill", kill, raising=False)
+    monkeypatch.setattr(owner.terminals, "wait_until_reaped", wait_until_reaped, raising=False)
     yield SimpleNamespace(vendor=vendor, scope=scope, stores=stores, rig=rig, owner=owner,
         live=live, home=home, output=output, processes=processes, snapshot_path=snapshot_path, rc=rc,
         payload={"agent_key": vendor, "pane_id": "first-pane", "cwd": str(tmp_path),

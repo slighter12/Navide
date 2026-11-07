@@ -35,7 +35,6 @@ from .base import (
     data_dirs_of,
     provider_map_extract,
     provider_map_merge,
-    resume_reader_of,
 )
 from .opencode import OpencodeLogReader  # vendor→vendor: sanctioned fork inheritance
 from ..usage_common import (
@@ -336,8 +335,8 @@ SPEC = VendorSpec(
     # Confirmed in source (Kilo-Org/kilocode): the root command declares
     # --model and applies it at the highest priority. No effort flag —
     # --variant exists only on `kilo run`. Details in agents/kilo.ts, which
-    # owns the flags themselves.
-    supports_model=FACT.model_flag is not None,
+    # owns the flags themselves; kilo.json declares them and the spec derives
+    # the capability from it.
     # Verified 2026-08-15: kilo's bundle carries no SKILL.md handling at all.
     skills_supported=False,
     label="Kilo Code CLI",
@@ -370,7 +369,6 @@ SPEC = VendorSpec(
         password_env="KILO_SERVER_PASSWORD",
         username="kilo",
     ),
-    login_command_args=FACT.login_args,
     # Multi-account (credential swap): the vault parks and restores this exact
     # file — `kilo auth list` prints the path itself, and it is the same tuple
     # the quota reader already resolves against.
@@ -413,7 +411,6 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_kilo(home),
     fetch_usage_from_context=lambda ctx: fetch_kilo(ctx.home, dict(ctx.env), bound_store=True),
-    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     # Only the env vars Kilo actually documents (kilo-config.md defines
     # KILO_CONFIG, KILO_CONFIG_DIR, KILO_CONFIG_CONTENT and

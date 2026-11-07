@@ -1,4 +1,4 @@
-"""The session root, the workspace encoders and the declaration-derived defaults (t39f M4, M5, M6)."""
+"""The session root, the workspace encoders and the declaration-derived defaults."""
 
 from __future__ import annotations
 

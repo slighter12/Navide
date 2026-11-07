@@ -3,7 +3,7 @@
 use super::adapters::{self, claude::Claude, codex::Codex, grok::Grok, pi::Pi, Mode};
 use super::baseline::QuietTurn;
 use super::blake2b;
-use super::jsonl::{Flow, JsonlFile, JsonlObserver, Limits, LIMITS};
+use super::jsonl::{ordered_keys, Flow, JsonlFile, JsonlObserver, Limits, LIMITS};
 use super::testing::facts_with;
 use super::{observe_with, Capability, Ctx, Cumulative, Cursor, NoCapability, PerTurn, Request, UsageScan};
 use serde_json::{json, Value};
@@ -20,6 +20,48 @@ fn scratch(name: &str) -> PathBuf {
 
 fn cursor(value: serde_json::Value) -> Cursor {
     Cursor(value.as_object().unwrap().clone())
+}
+
+// `ordered_keys`: the keys of one object in the order the raw line spells them (`serde_json::Value` sorts a map).
+
+#[test]
+fn ordered_keys_come_in_the_order_the_line_spells_them_and_a_missing_path_has_none() {
+    let raw = br#"{"params":{"x":1,"update":{"usage":{"modelUsage":{"zeta":{"a":1},"alpha":{"b":[1,{"c":"}"}]}}}}}"#;
+    assert_eq!(ordered_keys(raw, &["params", "update", "usage", "modelUsage"]), ["zeta", "alpha"]);
+    assert!(ordered_keys(raw, &["params", "missing"]).is_empty());
+    assert!(ordered_keys(b"not json", &["a"]).is_empty());
+    assert!(ordered_keys(br#"{"a":[1,2]}"#, &["a"]).is_empty(), "the value at the path is a list, not an object");
+}
+
+#[test]
+fn ordered_keys_read_escapes_in_keys_and_skip_braces_and_quotes_inside_string_values() {
+    let raw = br#"{"b\"q":"}{","a\\":"\"}","\\u00e9":"x\\","z":{"k":1}}"#;
+    assert_eq!(ordered_keys(raw, &[]), ["b\"q", "a\\", "\\u00e9", "z"]);
+    let nested = br#"{"outer":{"s":"{[\"","t":[{"u":"]}"}],"v":null}}"#;
+    assert_eq!(ordered_keys(nested, &["outer"]), ["s", "t", "v"], "an escaped quote does not end a string value, and brackets in a string do not nest");
+}
+
+#[test]
+fn ordered_keys_skip_nested_objects_lists_and_bare_values_whole() {
+    let raw = br#" { "a" : { "x" : [ 1 , { "y" : 2 } ] } , "b" : 7 , "c" : true , "d" : null , "e" : -1.5e3 } "#;
+    assert_eq!(ordered_keys(raw, &[]), ["a", "b", "c", "d", "e"], "only this object's own keys, whatever the spacing");
+    assert_eq!(ordered_keys(raw, &["a"]), ["x"]);
+}
+
+#[test]
+fn ordered_keys_list_a_duplicate_key_at_every_place_the_line_spells_it() {
+    let raw = br#"{"m":{"a":1,"b":2,"a":3}}"#;
+    assert_eq!(ordered_keys(raw, &["m"]), ["a", "b", "a"], "the reader that wants a dict's single place keeps the first");
+}
+
+#[test]
+fn ordered_keys_of_a_truncated_line_are_the_keys_whose_values_the_line_completed() {
+    assert_eq!(ordered_keys(br#"{"a":1,"b":"two","c":"#, &[]), ["a", "b"], "the value of `c` is cut off");
+    assert_eq!(ordered_keys(br#"{"a":1,"b"#, &[]), ["a"], "a key cut off in its name is not one");
+    assert_eq!(ordered_keys(br#"{"a":{"x":1"#, &[]), Vec::<String>::new(), "a value cut off inside a nested object is not complete");
+    assert_eq!(ordered_keys(br#"{"a":{"x":1,"y":"tw"#, &["a"]), ["x"], "the keys before the cut inside the object at the path stand");
+    assert!(ordered_keys(b"", &[]).is_empty());
+    assert!(ordered_keys(br#"{"a":1}"#, &["a"]).is_empty());
 }
 
 /// The worst identity the core lets through: every field at its cap, every character a six-byte JSON escape (and, for the section an

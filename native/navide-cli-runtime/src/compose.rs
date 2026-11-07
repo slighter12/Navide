@@ -268,48 +268,25 @@ impl Grammar {
     }
 }
 
-fn declared(
-    agent_key: &str,
-    option: &str,
-) -> Result<&'static vendor_facts::VendorFacts, ComposeError> {
+/// The text of one `opt` word (with its leading space), spelled from the generated option table and the vendor's facts: the
+/// option's flag (or, for a template, the text holding `{id}`), then the quoted value when the option takes one.
+fn spell(agent_key: &str, option: &str, value: Option<&str>, grammar: Grammar) -> Result<String, ComposeError> {
     let refuse = |why: &str| ComposeError::Option(format!("{option}: {why}"));
     let facts = vendor_facts::find(agent_key).ok_or_else(|| refuse("the subject declares no options"))?;
-    let status = match option {
-        "model" => facts.capabilities.model,
-        "effort" => facts.capabilities.effort,
-        "skip_permissions" => facts.capabilities.skip_permissions,
-        "resume" => facts.capabilities.resume_by_id,
-        "session_id" => facts.capabilities.session_id_at_launch,
-        "login" => facts.capabilities.login,
-        _ => return Err(refuse("unknown option")),
-    };
-    if status != vendor_facts::Status::Integrated {
+    let opt = vendor_facts::Opt::parse(option).ok_or_else(|| refuse("unknown option"))?;
+    if opt.status(&facts.capabilities) != vendor_facts::Status::Integrated {
         return Err(refuse("not integrated for this subject"));
     }
-    Ok(facts)
-}
-
-/// The text of one `opt` word (with its leading space), spelled from the generated facts.
-fn spell(agent_key: &str, option: &str, value: Option<&str>, grammar: Grammar) -> Result<String, ComposeError> {
-    let quote = |text: &str| grammar.quote(text);
-    let facts = declared(agent_key, option)?;
-    let need = || value.ok_or_else(|| ComposeError::Option(format!("{option}: a value is required")));
-    let missing = || ComposeError::Option(format!("{option}: no flag declared"));
-    Ok(match option {
-        "model" => format!(" {} {}", facts.model_flag.ok_or_else(missing)?, quote(need()?)),
-        "effort" => {
-            let value = need()?;
-            if !facts.known_efforts.is_some_and(|known| known.contains(&value)) {
-                return Err(ComposeError::Option(format!("effort: {value:?} is not a declared effort")));
-            }
-            format!(" {} {}", facts.effort_flag.ok_or_else(missing)?, quote(value))
-        }
-        "skip_permissions" => format!(" {}", facts.permission_flag.ok_or_else(missing)?),
-        "resume" => format!(" {}", facts.resume_args.ok_or_else(missing)?.replace("{id}", &quote(need()?))),
-        "session_id" => format!(" {} {}", facts.session_id_flag.ok_or_else(missing)?, quote(need()?)),
-        "login" => format!(" {}", facts.login_args.ok_or_else(missing)?),
-        _ => unreachable!("declared() rejects unknown options"),
-    })
+    let flag = opt.flag(facts).ok_or_else(|| refuse("no flag declared"))?;
+    if !opt.takes_value() {
+        return Ok(format!(" {flag}"));
+    }
+    let value = value.ok_or_else(|| refuse("a value is required"))?;
+    if opt.values(facts).is_some_and(|known| !known.contains(&value)) {
+        return Err(refuse(&format!("{value:?} is not a declared value")));
+    }
+    let quoted = grammar.quote(value);
+    Ok(if opt.is_template() { format!(" {}", flag.replace("{id}", &quoted)) } else { format!(" {flag} {quoted}") })
 }
 
 /// Render the ordered words of a launch to shell text (delta 2.3).
@@ -947,6 +924,26 @@ mod tests {
                     vector["words"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string()).collect();
                 assert_eq!(result.unwrap(), expected, "input {input:?}");
             }
+        }
+    }
+
+    /// The launch-word vectors every language reads (`backend/tests/test_launch_word_vectors.py`,
+    /// `src/shared/launchWords.vectors.test.ts`): the words of a vector compose to its text under each grammar, and a refused
+    /// vector is refused with an option error.
+    #[test]
+    fn the_words_compose_to_the_shared_launch_word_vectors() {
+        let file: Value = serde_json::from_str(include_str!("../../../backend/tests/data/launch_word_vectors.json")).unwrap();
+        let spelled = &file["words_to_text"];
+        for vector in spelled["vectors"].as_array().unwrap() {
+            let (vendor, words) = (vector["vendor"].as_str().unwrap(), &vector["words"]);
+            for (name, grammar) in [("posix", Grammar::Posix), ("windows", Grammar::Windows)] {
+                let text = render(vendor, words, grammar).unwrap_or_else(|error| panic!("{}: {error:?}", vector["name"]));
+                assert_eq!(text, vector[name].as_str().unwrap(), "{} under {name}", vector["name"]);
+            }
+        }
+        for vector in spelled["refused"].as_array().unwrap() {
+            let refused = render(vector["vendor"].as_str().unwrap(), &vector["words"], Grammar::Posix);
+            assert!(matches!(refused, Err(ComposeError::Option(_))), "{}: {refused:?}", vector["name"]);
         }
     }
 

@@ -36,6 +36,9 @@ class FakeTerminals(TerminalInterface):
     async def kill(self, session_id: str, force: bool = False) -> None:
         self.killed.append((session_id, force))
 
+    async def wait_until_reaped(self, session_id: str, timeout: float | None = None) -> bool:
+        return True
+
     def find_live_by_resume_id(self, *args: Any, **kwargs: Any) -> list[Any]:
         return []
 

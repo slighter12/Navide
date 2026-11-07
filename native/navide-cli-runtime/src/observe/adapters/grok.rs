@@ -13,7 +13,7 @@
 //!   Source: the retired `observe_grok.rs` (blob `bca9f13a906c1415682563775a4614e1b1d6ae7f`) lines 9-100 and 167-198, `cli_vendors/grok.py:101-210` and `454-520`.
 use crate::observe::baseline::{cap_text, py_int, py_num, str_or_empty};
 use crate::observe::time::stamp_millis;
-use crate::observe::{activity_event, Ctx, Ident, JsonlFile, JsonlObserver, Observer, Run, TurnBreakdown, TurnCall, TurnRow, Usage};
+use crate::observe::{activity_event, ordered_keys, Ctx, Ident, JsonlFile, JsonlObserver, Observer, Run, TurnBreakdown, TurnCall, TurnRow, Usage};
 use serde_json::{json, Value};
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -33,109 +33,6 @@ fn chunk_text(update: &Value) -> String {
         _ => return String::new(),
     };
     blocks.into_iter().filter(|block| block.is_object() && block["type"] == "text").map(|block| str_or_empty(&block["text"])).collect()
-}
-
-/// The keys of the object at `path` in the order the line spells them (`serde_json::Value` sorts a map's keys, and Python keeps insertion
-/// order, so "the first key" of an object is read from the raw line). Empty where the path is not an object of the line.
-fn ordered_keys(raw: &[u8], path: &[&str]) -> Vec<String> {
-    fn skip_ws(raw: &[u8], at: &mut usize) {
-        while raw.get(*at).is_some_and(u8::is_ascii_whitespace) {
-            *at += 1;
-        }
-    }
-    fn string_at(raw: &[u8], at: &mut usize) -> Option<String> {
-        if raw.get(*at) != Some(&b'"') {
-            return None;
-        }
-        let start = *at;
-        *at += 1;
-        while let Some(&byte) = raw.get(*at) {
-            match byte {
-                b'\\' => *at += 2,
-                b'"' => {
-                    *at += 1;
-                    return serde_json::from_slice::<String>(&raw[start..*at]).ok();
-                }
-                _ => *at += 1,
-            }
-        }
-        None
-    }
-    fn skip_value(raw: &[u8], at: &mut usize) -> bool {
-        match raw.get(*at) {
-            Some(b'"') => string_at(raw, at).is_some(),
-            Some(b'{') | Some(b'[') => {
-                let mut depth = 0;
-                while let Some(&byte) = raw.get(*at) {
-                    match byte {
-                        b'"' => {
-                            if string_at(raw, at).is_none() {
-                                return false;
-                            }
-                            continue;
-                        }
-                        b'{' | b'[' => depth += 1,
-                        b'}' | b']' => depth -= 1,
-                        _ => {}
-                    }
-                    *at += 1;
-                    if depth == 0 {
-                        return true;
-                    }
-                }
-                false
-            }
-            Some(_) => {
-                while raw.get(*at).is_some_and(|b| !matches!(b, b',' | b'}' | b']') && !b.is_ascii_whitespace()) {
-                    *at += 1;
-                }
-                true
-            }
-            None => false,
-        }
-    }
-    // One object level: `want` is the key to stop at the value of (`Some`), or None to list every key; the position is left at the value.
-    fn level(raw: &[u8], at: &mut usize, want: Option<&str>) -> Option<Vec<String>> {
-        skip_ws(raw, at);
-        if raw.get(*at) != Some(&b'{') {
-            return None;
-        }
-        *at += 1;
-        let mut keys = Vec::new();
-        loop {
-            skip_ws(raw, at);
-            if raw.get(*at) == Some(&b'}') || *at >= raw.len() {
-                return want.is_none().then_some(keys);
-            }
-            let Some(key) = string_at(raw, at) else {
-                return want.is_none().then_some(keys);
-            };
-            skip_ws(raw, at);
-            if raw.get(*at) != Some(&b':') {
-                return want.is_none().then_some(keys);
-            }
-            *at += 1;
-            skip_ws(raw, at);
-            if want == Some(key.as_str()) {
-                return Some(keys);
-            }
-            if !skip_value(raw, at) {
-                return want.is_none().then_some(keys);
-            }
-            keys.push(key);
-            skip_ws(raw, at);
-            if raw.get(*at) == Some(&b',') {
-                *at += 1;
-            }
-        }
-    }
-    let mut at = 0;
-    for wanted in path {
-        if level(raw, &mut at, Some(wanted)).is_none() {
-            return Vec::new();
-        }
-    }
-    level(raw, &mut at, None).unwrap_or_default()
 }
 
 /// One decoded transcript record.
@@ -431,14 +328,6 @@ mod tests {
         assert_eq!((second["model_calls"].clone(), second["calls"][0]["model"].clone(), second["input"].clone()), (Value::Null, json!(""), json!(5)));
         assert_eq!(turns_of(&lines, "s2").as_array().unwrap().len(), 0, "a session that never completes a turn has none");
         assert_eq!(turns_of(&lines, "").as_array().unwrap().len(), 2, "no session asked: every record is read");
-    }
-
-    #[test]
-    fn keys_come_in_the_order_the_line_spells_them_and_a_missing_path_has_none() {
-        let raw = br#"{"params":{"x":1,"update":{"usage":{"modelUsage":{"zeta":{"a":1},"alpha":{"b":[1,{"c":"}"}]}}}}}"#;
-        assert_eq!(super::ordered_keys(raw, &["params", "update", "usage", "modelUsage"]), ["zeta", "alpha"]);
-        assert!(super::ordered_keys(raw, &["params", "missing"]).is_empty());
-        assert!(super::ordered_keys(b"not json", &["a"]).is_empty());
     }
 
     #[test]

@@ -30,6 +30,8 @@ REQUIRED = {
     "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_root", "session_path", "logs",
     "permission_aliases", "supports_session_resume", "shutdown", "capabilities", "observer",
 }
+#: Fields a declaration may leave out (the generator gives them their default): `plain_only` is false unless declared.
+OPTIONAL = {"plain_only"}
 #: The typed records a declaration may carry (each is null or exactly these fields): what the generic core routines read
 #: instead of per-vendor code.
 RECORDS = {
@@ -88,7 +90,7 @@ def test_every_registered_vendor_has_exactly_one_declaration() -> None:
 
 def test_declarations_have_the_declared_shape() -> None:
     for key, facts in declarations().items():
-        assert set(facts) == REQUIRED, key
+        assert REQUIRED <= set(facts) <= REQUIRED | OPTIONAL, key
         assert set(facts["capabilities"]) == CAPABILITIES, key
         assert set(facts["capabilities"].values()) <= STATUSES, key
         assert facts["command"], key
@@ -152,6 +154,48 @@ def test_a_subcommand_that_is_not_the_first_word_of_the_resume_is_refused(tmp_pa
     generator = declarations_with(tmp_path, "goose", lambda facts: facts["subcommand"].update(word="chat"))
     with pytest.raises(SystemExit, match="first word of resume_args"):
         generator.load(tmp_path)
+
+
+def test_plain_only_is_a_declared_boolean_for_a_vendor_that_resumes(tmp_path: Path) -> None:
+    generator = declarations_with(tmp_path / "bad", "aider", lambda facts: facts.update(plain_only=True))
+    with pytest.raises(SystemExit, match="plain_only is true or false, and true only for a vendor that declares resume_args"):
+        generator.load(tmp_path / "bad")
+    generator = declarations_with(tmp_path / "text", "claude", lambda facts: facts.update(plain_only="yes"))
+    with pytest.raises(SystemExit, match="plain_only is true or false"):
+        generator.load(tmp_path / "text")
+    assert {key: facts.get("plain_only", False) for key, facts in declarations().items() if facts.get("plain_only")} == {
+        "antigravity": True, "grok": True}
+
+
+def test_an_option_table_row_names_a_declaration_field_and_a_capability() -> None:
+    generator = load_generator()
+    for row in generator.OPTION_TABLE:
+        assert row["field"] in generator.FIELDS and row["capability"] in generator.CAPABILITIES, row["option"]
+        assert row["values"] is None or row["values"] in generator.FIELDS, row["option"]
+        assert not row["template"] or row["takes_value"], row["option"]
+
+
+def test_a_spec_that_declares_nothing_takes_every_launch_fact_from_the_declaration() -> None:
+    from agent_team_backend.cli_vendors.base import ShutdownSpec, VendorSpec
+
+    facts = declarations()["claude"]
+    spec = VendorSpec(key="claude", label="Claude")
+    assert spec.supports_model and spec.supports_effort
+    assert spec.known_efforts == tuple(facts["known_efforts"])
+    assert spec.login_command_args == facts["login_args"]
+    assert spec.resume_id_from_command("claude --resume abc") == "abc"
+    assert spec.shutdown == ShutdownSpec(graceful=True, grace_s=3.0, defer_master_close=True)
+    # A vendor that names its own keeps it.
+    assert VendorSpec(key="claude", label="Claude", login_command_args="x").login_command_args == "x"
+    # A key the declarations do not hold has no facts to derive from.
+    bare = VendorSpec(key="not-declared", label="x")
+    assert (bare.supports_model, bare.known_efforts, bare.login_command_args, bare.resume_id_from_command) == (False, (), None, None)
+
+
+def test_plain_only_vendors_read_no_resume_out_of_a_line_with_shell_syntax() -> None:
+    line = "{} {} abc; echo x"
+    assert registry.VENDORS["antigravity"].resume_id_from_command(line.format("agy", "--conversation")) == ""
+    assert registry.VENDORS["claude"].resume_id_from_command(line.format("claude", "--resume")) == "abc;"
 
 
 def test_an_observer_declaration_is_typed_and_a_vendor_without_one_says_so() -> None:
@@ -298,6 +342,9 @@ def test_backend_spec_follows_the_declaration(key: str) -> None:
     assert tuple(spec.known_efforts or ()) == tuple(facts["known_efforts"] or ())
     assert spec.login_command_args == facts["login_args"]
     assert spec.supports_session_resume == facts["supports_session_resume"]
+    # A vendor that declares a resume has a reader of the id in a command line, and one that declares none has not: the
+    # reader is derived from the declaration (Grok's own only narrows it to a UUID), never forgotten.
+    assert (spec.resume_id_from_command is not None) == (facts["resume_args"] is not None)
     shutdown = facts["shutdown"]
     if shutdown is None:
         assert spec.shutdown is None

@@ -616,10 +616,11 @@ class TerminalInterface:
         yield
 
     async def kill_verified(self, session_id: str) -> bool:
-        """`kill(force=True)`, reporting whether the process is verified gone. The in-process kill returns once the
-        child is reaped, so its return is the verification."""
+        """`kill(force=True)`, reporting whether the process is verified gone. A vendor with a graceful shutdown has
+        `kill` return while the child is still shutting down, so the answer is the reap wait: True once the child is
+        reaped (at once for every other vendor), False when it outlived the wait."""
         await self.kill(session_id, force=True)
-        return True
+        return await self.wait_until_reaped(session_id)
 
     async def cancel_dispatched(self, record: dict[str, Any]) -> CreateCancel:
         """What this service can prove about the create `record` describes, whose caller has cancelled it."""

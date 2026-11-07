@@ -11,9 +11,9 @@
  * Only an argument that needs no shell quoting becomes an `opt` or `arg` word. The renderer
  * has no quoting rules of its own: anything else stays a `lit` word, the text as written.
  */
-import { VENDOR_FACTS, fillId } from './vendorFacts'
+import { OPTION_RULES, VENDOR_FACTS, fillId, type LaunchOption } from './vendorFacts'
 
-export type LaunchOption = 'model' | 'effort' | 'skip_permissions' | 'resume' | 'session_id' | 'login'
+export type { LaunchOption }
 
 export type LaunchWord =
   | { lit: string }
@@ -50,32 +50,27 @@ export function argWord(arg: string): LaunchWord {
   return UNQUOTED.test(arg) ? { arg } : { lit: ` ${arg}` }
 }
 
-/** The spelling of one option, with its leading space; `null` when the vendor declares none. */
+/** The spelling of one option, with its leading space; `null` when the vendor declares none. One lookup over the generated
+ *  option table (`OPTION_RULES`): the flag (or, for a template, the text holding `{id}`), then the value when the option takes
+ *  one. The renderer has no quoting rules: the value is written as it is. */
 export function optionText(facts: VendorFacts, option: LaunchOption, value?: string): string | null {
-  switch (option) {
-    case 'model':
-      return facts.model_flag && value ? ` ${facts.model_flag} ${value}` : null
-    case 'effort':
-      return facts.effort_flag && value ? ` ${facts.effort_flag} ${value}` : null
-    case 'skip_permissions':
-      return facts.permission_flag ? ` ${facts.permission_flag}` : null
-    case 'resume':
-      return facts.resume_args && value ? ` ${fillId(facts.resume_args, value)}` : null
-    case 'session_id':
-      return facts.session_id_flag && value ? ` ${facts.session_id_flag} ${value}` : null
-    case 'login':
-      return facts.login_args ? ` ${facts.login_args}` : null
-  }
+  const rule = OPTION_RULES[option]
+  const flag = facts[rule.field] as string | null
+  if (!flag) return null
+  if (!rule.takes_value) return ` ${flag}`
+  if (!value) return null
+  return ` ${rule.template ? fillId(flag, value) : `${flag} ${value}`}`
 }
 
 /** The word for one option, or `null` when the vendor declares none. A value that needs quoting
- *  becomes a literal of the same text, and so does an effort the facts do not list: the sidecar refuses an
- *  `effort` option outside `known_efforts`, so such an effort travels as the text the user chose. */
+ *  becomes a literal of the same text, and so does a value the facts do not list (an effort outside `known_efforts`): the
+ *  sidecar refuses such an `opt`, so the value travels as the text the user chose. */
 export function optionWord(facts: VendorFacts, option: LaunchOption, value?: string): LaunchWord | null {
   const text = optionText(facts, option, value)
   if (text === null) return null
   if (value !== undefined && !UNQUOTED.test(value)) return { lit: text }
-  if (option === 'effort' && !(facts.known_efforts as readonly string[] | null)?.includes(value ?? '')) return { lit: text }
+  const accepted = OPTION_RULES[option].values
+  if (accepted !== null && !((facts[accepted] as readonly string[] | null) ?? []).includes(value ?? '')) return { lit: text }
   return value === undefined ? { opt: option, text } : { opt: option, value, text }
 }
 
@@ -117,12 +112,52 @@ export function withSessionIdWords(agentKey: string, words: readonly LaunchWord[
 type ResumeAliases = { programs: readonly string[]; flags: readonly string[] } | null
 type Subcommand = { word: string; aliases: readonly string[] } | null
 
-/** A line split into its words, the quotes around a word taken off. The renderer has no quoting rules of its
- *  own: this reads the plain shapes a resume command has and nothing more. */
-function lineTokens(text: string): string[] {
-  return (text.match(/'[^']*'|"[^"]*"|\S+/g) ?? []).map((token) =>
-    token.length > 1 && (token[0] === "'" || token[0] === '"') && token.endsWith(token[0]) ? token.slice(1, -1) : token,
-  )
+/** `shlex.split` (POSIX mode, no comments), the grammar the backend reads a line with on POSIX (`cli_launch.read_literal`):
+ *  whitespace is space, tab, CR and LF; a quote brackets text (adjacent quoted and plain text is one word, `a"b c"` is `ab c`);
+ *  a backslash makes the next character literal, and in double quotes only before `"` or `\`. `null` for a line shlex refuses
+ *  (an unbalanced quote, a trailing backslash). */
+function shlexSplit(text: string): string[] | null {
+  const words: string[] = []
+  let word = ''
+  let started = false
+  let quote = ''
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at]
+    if (quote === "'") {
+      if (char === "'") quote = ''
+      else word += char
+    } else if (char === '\\') {
+      const next = text[at + 1]
+      if (next === undefined) return null
+      at += 1
+      word += quote === '"' && next !== '"' && next !== '\\' ? `\\${next}` : next
+      started = true
+    } else if (quote === '"') {
+      if (char === '"') quote = ''
+      else word += char
+    } else if (char === "'" || char === '"') {
+      quote = char
+      started = true
+    } else if (char === ' ' || char === '\t' || char === '\r' || char === '\n') {
+      if (started) words.push(word)
+      word = ''
+      started = false
+    } else {
+      word += char
+      started = true
+    }
+  }
+  if (quote) return null
+  if (started) words.push(word)
+  return words
+}
+
+/** A line split into its words. Read as the backend reads a POSIX line (`shlex`); a line it cannot read is whitespace-separated
+ *  words, as `read_literal` falls back to. The renderer reads every line this way. A Windows line is read by the backend with the
+ *  Windows grammar (backslash is a plain character, `'` is not a quote), so the two disagree only on a line that holds a backslash
+ *  or a single quote; the consequence is a resume id the renderer reads differently, and the backend's reading decides. */
+export function lineTokens(text: string): string[] {
+  return shlexSplit(text) ?? text.split(/\s+/).filter(Boolean)
 }
 
 /** The session id a command line resumes, by the vendor's declared spelling; '' when it resumes none.
