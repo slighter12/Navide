@@ -3,13 +3,16 @@ pre-CREATE refusals around them.
 
 G2 ticket 04, protocol delta sections 2, 3.1 and 4. Python decides whether and which flags a launch
 carries; the Rust runtime renders the words and spells the declared options from the generated facts.
+
+A command is a `Command`: a string that carries the words it was composed from. The renderer, the injectors
+and the rewriters make the words; nothing here reads a command line back into words.
 """
 from __future__ import annotations
 
-import shlex
-import subprocess
-from typing import Callable, NamedTuple
+import re
+from typing import Any, Callable, Iterable
 
+from . import osplat
 from .cli_vendors import _vendor_facts as facts
 
 ATTEST_BYTES = 128
@@ -42,7 +45,7 @@ def admit_composition(agent_key: str, *, platform: str, managed_credential_path:
         # The `credential` wrapper is POSIX shell text; Windows has none, so Python composes the argv.
         return "python"
     # A managed credential path no longer needs Python text on POSIX: the `credential` shape carries the
-    # wrapper. Windows otherwise follows the declaration; only its word grammar differs (`WINDOWS`).
+    # wrapper. Windows otherwise follows the declaration; only its word grammar differs.
     return declared
 
 
@@ -100,322 +103,200 @@ def verify_argv0_attestation(argv0: object, *, wrapped_shell: str | None) -> str
 
 # ---------------------------------------------------------------------------------------------
 # Words (delta 2.3)
+#
+# A word is one of four kinds, each an object with one key:
+#   {"lit": text}   text the shell reads as it stands (the user's own command line, or its remainder);
+#   {"exe": path}   the program, quoted as one word;
+#   {"arg": text}   one plain argument, quoted as one word behind a space;
+#   {"opt": name, "value": text?}  an option the subject declares (model, effort, skip_permissions, resume,
+#                   session_id, login); the sidecar spells it from the generated facts.
+# An `opt` that a composer made in Python or the renderer also carries `text`, its spelling with the leading
+# space, so that the text view of the command exists without the facts. The sidecar never reads `text`.
 # ---------------------------------------------------------------------------------------------
 
-_SAFE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@%+=:,./-")
+
+def _refused(why: str) -> LaunchRefused:
+    return LaunchRefused("COMPOSITION_UNREPRESENTABLE", "words", why)
 
 
-def quote(arg: str) -> str:
-    """The `shlex.quote` rule, the one explicit shell interface of the wrapped line (delta 2.5)."""
-    if not arg:
-        return "''"
-    if all(ch in _SAFE for ch in arg):
-        return arg
-    return "'" + arg.replace("'", "'\"'\"'") + "'"
+def _checked(word: object) -> dict:
+    """The word as a plain dict, or a refusal: exactly one kind, with text where text belongs."""
+    if not isinstance(word, dict):
+        raise _refused("a word is an object")
+    kinds = [kind for kind in ("lit", "exe", "arg", "opt") if kind in word]
+    if len(kinds) != 1 or set(word) - {kinds[0], "value", "text"}:
+        raise _refused("a word is exactly one of lit, exe, arg or opt")
+    kind = kinds[0]
+    if not isinstance(word[kind], str):
+        raise _refused(f"{kind} must be text")
+    if kind == "opt":
+        if not isinstance(word.get("text"), str):
+            raise _refused("an opt carries its spelling as text")
+        if "value" in word and not isinstance(word["value"], str):
+            raise _refused("an opt value must be text")
+    elif set(word) != {kind}:
+        raise _refused(f"{kind} takes no other key")
+    return dict(word)
 
 
-def scan(text: str) -> list[tuple[int, int, str]]:
-    """`shlex.split` (POSIX, no comments) with the span of every word. Raises `ValueError` when the
-    text does not split."""
-    words: list[tuple[int, int, str]] = []
-    size, at = len(text), 0
-    while at < size:
-        if text[at] in " \t\r\n":
-            at += 1
-            continue
-        start, value = at, []
-        while at < size and text[at] not in " \t\r\n":
-            ch = text[at]
-            if ch == "\\":
-                if at + 1 >= size:
-                    raise ValueError("no escaped character")
-                value.append(text[at + 1])
-                at += 2
-            elif ch == "'":
-                end = text.find("'", at + 1)
-                if end < 0:
-                    raise ValueError("no closing quotation")
-                value.append(text[at + 1:end])
-                at = end + 1
-            elif ch == '"':
-                at += 1
-                while True:
-                    if at >= size:
-                        raise ValueError("no closing quotation")
-                    if text[at] == '"':
-                        at += 1
-                        break
-                    if text[at] == "\\":
-                        if at + 1 >= size:
-                            raise ValueError("no closing quotation")
-                        nxt = text[at + 1]
-                        value.append(nxt if nxt in '"\\' else "\\" + nxt)
-                        at += 2
-                    else:
-                        value.append(text[at])
-                        at += 1
-            else:
-                value.append(ch)
-                at += 1
-        words.append((start, at, "".join(value)))
-    return words
+def _text_of(word: dict, quote: Callable[[str], str]) -> str:
+    if "lit" in word:
+        return word["lit"]
+    if "exe" in word:
+        return quote(word["exe"])
+    if "arg" in word:
+        return " " + quote(word["arg"])
+    return word["text"]
 
 
-def quote_windows(arg: str) -> str:
-    """`subprocess.list2cmdline` for one element: the rule the Python runtime renders a Windows command
-    line with (`osplat/_windows.py` `spawn`: `subprocess.list2cmdline(tail)`). A quoted element doubles
-    its trailing backslashes."""
-    return subprocess.list2cmdline([arg])
+class Command(str):
+    """A command line and the words it was composed from.
+
+    The text is derived from the words, so the two cannot disagree. A command that is only text (a user's
+    own command line, a plugin's result) is one `lit` word: the sidecar renders it as it stands, so the child
+    runs what the text says."""
+
+    _words: tuple[dict, ...]
+    _quote: Callable[[str], str]
+
+    @classmethod
+    def from_words(cls, words: Iterable[object], *, quote: Callable[[str], str] | None = None) -> "Command":
+        quote = quote or osplat.paths.quote_arg
+        checked = tuple(_checked(word) for word in words)
+        command = str.__new__(cls, "".join(_text_of(word, quote) for word in checked))
+        command._words = checked
+        command._quote = quote
+        return command
+
+    @classmethod
+    def literal(cls, text: str) -> "Command":
+        return cls.from_words([{"lit": str(text)}])
+
+    @property
+    def words(self) -> tuple[dict, ...]:
+        return getattr(self, "_words", None) or ({"lit": str(self)},)
+
+    def appended(self, *args: str) -> "Command":
+        """This command with each argument as one more `arg` word."""
+        return Command.from_words([*self.words, *({"arg": arg} for arg in args)],
+                                  quote=getattr(self, "_quote", None))
+
+    def wire_words(self) -> list[dict]:
+        """The words as the sidecar reads them: an `opt` without the spelling its text view needed."""
+        return [{key: value for key, value in word.items() if key != "text"} for word in self.words]
 
 
-def scan_windows(text: str) -> list[tuple[int, int, str]]:
-    """`CommandLineToArgvW` with the span of every word: the grammar of `osplat/_windows.py`
-    `_split_command_line`, which asks the OS. A line that starts with whitespace has an empty first word.
-    The first word is not escaped (a quote only brackets it);
-    later words use the 2n/2n+1 backslash rule and `""` inside quotes for a literal quote that ends the
-    quoted run. Whitespace is
-    space and tab. Never raises: an unmatched quote runs to the end, as the OS does."""
-    words: list[tuple[int, int, str]] = []
-    size, at = len(text), 0
-    if not text.strip():  # `_split_command_line` never asks the OS about a blank line
-        return words
-    if text[0] in " \t":  # the OS reads leading whitespace as an empty program (observed on hosted runners)
-        words.append((0, 0, ""))
-    while True:
-        while at < size and text[at] in " \t":
-            at += 1
-        if at >= size:
-            return words
-        start, value = at, []
-        if not words:
-            if text[at] == '"':
-                end = text.find('"', at + 1)
-                end = size if end < 0 else end
-                value.append(text[at + 1:end])
-                at = min(end + 1, size)
-            else:
-                while at < size and text[at] not in " \t":
-                    value.append(text[at])
-                    at += 1
-            words.append((start, at, "".join(value)))
-            continue
-        in_quote = False
-        while at < size:
-            ch = text[at]
-            if ch == "\\":
-                run = 0
-                while at < size and text[at] == "\\":
-                    run += 1
-                    at += 1
-                if at < size and text[at] == '"':
-                    value.append("\\" * (run // 2))
-                    if run % 2:
-                        value.append('"')
-                        at += 1
-                else:
-                    value.append("\\" * run)
-            elif ch == '"':
-                if in_quote and at + 1 < size and text[at + 1] == '"':
-                    # A doubled quote is a literal quote that also ends the quoted run (observed:
-                    # `"a ""b"" c"` is `a "b` and `c`).
-                    value.append('"')
-                    in_quote = False
-                    at += 2
-                else:
-                    in_quote = not in_quote
-                    at += 1
-            elif ch in " \t" and not in_quote:
-                break
-            else:
-                value.append(ch)
-                at += 1
-        words.append((start, at, "".join(value)))
+def _as_command(text: object) -> Command:
+    return text if isinstance(text, Command) else Command.literal(str(text))
 
 
-class Grammar(NamedTuple):
-    """How words are written and read back: one per platform family (delta 2.3, ticket 07)."""
-    quote: Callable[[str], str]
-    scan: Callable[[str], list[tuple[int, int, str]]]
+def append_args(command: Any, *args: str) -> Any:
+    """`command` with `args` appended as plain arguments to the real command line.
+
+    The product's wrapped shape is `[shell, flag, line]`: the line is the last element and the only one that
+    changes. The result keeps the shape of `command`."""
+    if isinstance(command, list):
+        if not command:
+            raise _refused("the command is empty")
+        return [*command[:-1], _as_command(command[-1]).appended(*args)]
+    return _as_command(command).appended(*args)
 
 
-POSIX = Grammar(quote, scan)
-WINDOWS = Grammar(quote_windows, scan_windows)
+_FIRST_TOKEN = re.compile(r"^\s*(?:'[^']*'|\"[^\"]*\"|\S+)")
 
 
-def grammar_of(platform: str) -> Grammar:
-    return WINDOWS if platform == "windows" else POSIX
+def _head_and_rest(command: Command) -> tuple[dict, str, tuple[dict, ...]] | None:
+    """The first word, the first token of a literal head, and the words after the head."""
+    first, rest = command.words[0], command.words[1:]
+    if "lit" in first:
+        match = _FIRST_TOKEN.match(first["lit"])
+        return (first, first["lit"], rest) if match else None
+    return (first, "", rest) if "exe" in first else None
 
 
-def render(words: list[dict], agent_key: str, grammar: Grammar = POSIX) -> str:
-    """The text the Rust runtime builds from `words`; used for presence checks and previews only, never
-    as the child's command."""
-    out = []
-    for word in words:
-        if "lit" in word:
-            out.append(word["lit"])
-        elif "exe" in word:
-            out.append(grammar.quote(word["exe"]))
-        elif "arg" in word:
-            out.append(" " + grammar.quote(word["arg"]))
-        else:
-            out.append(_spell(agent_key, word["opt"], word.get("value"), grammar))
-    return "".join(out)
+def with_executable(command: Any, executable: str) -> Any:
+    """`command` with its program replaced by `executable`, the words after it unchanged.
+
+    A program that the composer wrote as an `exe` word is replaced as that word. A user's own command line is
+    a literal, and its first token is swapped inside it, the way the shell would read that token."""
+    if isinstance(command, list):
+        return [*command[:-1], with_executable(command[-1], executable)] if command else command
+    built = _as_command(command)
+    parts = _head_and_rest(built)
+    if parts is None:
+        return command
+    first, lit, rest = parts
+    if "exe" in first:
+        head = {"exe": executable}
+    else:
+        match = _FIRST_TOKEN.match(lit)
+        quoted = (built._quote if hasattr(built, "_quote") else osplat.paths.quote_arg)(executable)
+        head = {"lit": f"{lit[:match.start()]}{quoted}{lit[match.end():]}"}
+    return Command.from_words([head, *rest], quote=getattr(built, "_quote", None))
 
 
-def _declared(agent_key: str, option: str):
-    vendor = facts.FACTS.get(agent_key)
-    if vendor is None:
-        return None
-    status = {"model": vendor.capabilities.model, "effort": vendor.capabilities.effort,
-              "skip_permissions": vendor.capabilities.skip_permissions,
-              "resume": vendor.capabilities.resume_by_id, "session_id": vendor.capabilities.session_id_at_launch,
-              "login": vendor.capabilities.login}.get(option)
-    return vendor if status == "integrated" else None
+def with_resume_id(command: Any, old_id: str, new_id: str) -> Any:
+    """`command` with the session id `old_id` swapped for `new_id`, in every word that holds it.
+
+    The one routine for repointing a resume: a `resume` option has its value swapped, an argument or a literal has
+    the id swapped inside its text. That is the named compatibility rule of the baseline (a text replace of the
+    id, wherever it stands in the line), so a command that is only text is repointed the way it always was.
+    A command that does not hold the id comes back as it was."""
+    if isinstance(command, list):
+        return [*command[:-1], with_resume_id(command[-1], old_id, new_id)] if command else command
+    if command is None:
+        return ""
+    built = _as_command(command)
+    if not old_id or old_id not in str(built):
+        return command
+    words = [{key: value.replace(old_id, new_id) if isinstance(value, str) else value for key, value in word.items()}
+             for word in built.words]
+    return Command.from_words(words, quote=getattr(built, "_quote", None))
 
 
-def _spell(agent_key: str, option: str, value: str | None, grammar: Grammar = POSIX) -> str:
-    vendor = _declared(agent_key, option)
-    assert vendor is not None, option
-    if option == "model":
-        return f" {vendor.model_flag} {grammar.quote(value)}"
-    if option == "effort":
-        return f" {vendor.effort_flag} {grammar.quote(value)}"
-    if option == "skip_permissions":
-        return f" {vendor.permission_flag}"
-    if option == "resume":
-        return " " + vendor.resume_args.replace("{id}", grammar.quote(value))
-    if option == "session_id":
-        return f" {vendor.session_id_flag} {grammar.quote(value)}"
-    return f" {vendor.login_args}"
+def with_login(command: Any, login_args: str) -> Any:
+    """`command` reduced to its program plus the CLI's own sign-in trigger (`login_args`, as declared).
+
+    Every other word is dropped: a sign-in subcommand takes none of the launch flags."""
+    if isinstance(command, list):
+        return [*command[:-1], with_login(command[-1], login_args)] if command else command
+    built = _as_command(command)
+    parts = _head_and_rest(built)
+    if parts is None:
+        return command
+    first, lit, _ = parts
+    if "lit" in first:
+        match = _FIRST_TOKEN.match(lit)
+        first = {"lit": match.group(0).strip()}
+    words: list[dict] = [first]
+    if login_args:
+        words.append({"opt": "login", "text": f" {login_args}"})
+    return Command.from_words(words, quote=getattr(built, "_quote", None))
 
 
-def _extractable(agent_key: str) -> list[tuple[str, str, bool]]:
-    """(option id, leading flag, takes a value) for every option Rust can spell for this subject."""
-    out: list[tuple[str, str, bool]] = []
-    for option, flag, valued in (("model", "model_flag", True), ("effort", "effort_flag", True),
-                                 ("session_id", "session_id_flag", True),
-                                 ("skip_permissions", "permission_flag", False)):
-        vendor = _declared(agent_key, option)
-        if vendor is not None and getattr(vendor, flag):
-            out.append((option, getattr(vendor, flag), valued))
-    vendor = _declared(agent_key, "resume")
-    if vendor is not None and vendor.resume_args and vendor.resume_args.endswith("{id}"):
-        head = vendor.resume_args[:-4].strip()
-        if head and len(head.split()) == 1:
-            out.append(("resume", head, True))
-    return out
+def attach_words(command: Any, words: object) -> Any:
+    """`command` carrying `words`, the structure its composer sent beside the text.
+
+    The text must be what the words compose to: a renderer whose two outputs disagree is refused before
+    CREATE instead of running one thing on one runtime and another on the other. `words` of `None` leaves the
+    command as the text it is."""
+    if words is None:
+        return command
+    if not isinstance(words, list):
+        raise _refused("words must be a list")
+    built = Command.from_words(words)
+    line = command[-1] if isinstance(command, list) and command else command
+    if not isinstance(line, str) or str(line) != str(built):
+        raise _refused("the words do not compose to the command text")
+    return [*command[:-1], built] if isinstance(command, list) else built
 
 
-def tokenize(agent_key: str, text: str, grammar: Grammar = POSIX) -> list[dict]:
-    """Split a submitted command into maximal `lit` chunks and `opt` words.
-
-    Only what Rust can render back without changing the launch is extracted; everything else stays
-    literal. A flag that occurs more than once, a value outside a closed set, a non-canonical spelling
-    or a separator other than plain spaces keeps its occurrence literal: no flag is added or lost."""
-    try:
-        spans = grammar.scan(text)
-    except ValueError:
-        return [{"lit": text}]
-    options = _extractable(agent_key)
-    vendor = facts.FACTS.get(agent_key)
-    extracted: list[tuple[int, int, dict]] = []
-    for option, flag, valued in options:
-        hits = [i for i, (_, _, value) in enumerate(spans) if value == flag]
-        if len(hits) != 1 or hits[0] == 0:
-            continue
-        i = hits[0]
-        start, end, _ = spans[i]
-        if text[start:end] != flag or not _plain_gap(text, spans[i - 1][1], start):
-            continue
-        if not valued:
-            extracted.append((start, end, {"opt": option}))
-            continue
-        if i + 1 >= len(spans):
-            continue
-        v_start, v_end, value = spans[i + 1]
-        if text[v_start:v_end] != grammar.quote(value) or not _plain_gap(text, end, v_start) or value.startswith("-"):
-            continue
-        if option == "effort" and (vendor is None or not vendor.known_efforts or value not in vendor.known_efforts):
-            continue
-        extracted.append((start, v_end, {"opt": option, "value": value}))
-    extracted.sort(key=lambda item: item[0])
-    out: list[dict] = []
-    cursor = 0
-    for start, end, word in extracted:
-        lead = start
-        while lead > cursor and text[lead - 1] == " ":
-            lead -= 1
-        if lead > cursor:
-            out.append({"lit": text[cursor:lead]})
-        out.append(word)
-        cursor = end
-    if cursor < len(text):
-        out.append({"lit": text[cursor:]})
-    return out
-
-
-def _plain_gap(text: str, left: int, right: int) -> bool:
-    gap = text[left:right]
-    return bool(gap) and set(gap) == {" "}
-
-
-def _login_words(agent_key: str, text: str, grammar: Grammar = POSIX) -> list[dict] | None:
-    vendor = _declared(agent_key, "login")
-    if vendor is None or not vendor.login_args:
-        return None
-    try:
-        spans = grammar.scan(text)
-        wanted = shlex.split(vendor.login_args) if grammar is POSIX else [
-            value for _, _, value in grammar.scan("x " + vendor.login_args)[1:]]
-    except ValueError:
-        return None
-    if len(spans) != len(wanted) + 1 or [value for _, _, value in spans[1:]] != wanted:
-        return None
-    if not _plain_gap(text, spans[0][1], spans[1][0]) or text[spans[-1][1]:].strip():
-        return None
-    return [{"lit": text[:spans[0][1]]}, {"opt": "login"}]
-
-
-def _suffix_words(suffix: str, stage: str, grammar: Grammar = POSIX) -> list[dict]:
-    """The text an injector appended, as plain `arg` words. Anything that is not exactly a run of
-    canonically quoted plain strings cannot be handed to the shell by Rust unchanged."""
-    if not suffix:
-        return []
-    try:
-        # The first word of a Windows command line is the program and is read without escapes, so
-        # the appended text is scanned behind a placeholder program.
-        spans = grammar.scan(suffix) if grammar is POSIX else grammar.scan("x" + suffix)[1:]
-    except ValueError:
-        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", stage, "the appended text does not split") from None
-    words = [{"arg": value} for _, _, value in spans]
-    if render(words, "", grammar) != suffix:
-        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", stage,
-                            "the appended text is not a run of plain quoted strings")
-    return words
-
-
-def _command_text(command: str | list[str]) -> tuple[str, str | list[str]]:
-    """(form, text of the part the words describe). `wrapped` is the product shape `[shell, flag, line]`."""
-    if isinstance(command, str):
-        return "string", command
-    if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
-        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "command", "the command is not a string or a list of strings")
-    if len(command) == 3 and command[1] in WRAPPED_FLAGS:
-        return "wrapped", command[2]
-    if not command:
-        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "command", "the command is empty")
-    return "list", command[-1]
-
-
-def build_launch(agent_key: str, base: str | list[str], final: str | list[str], *, login: bool = False,
-                 credential: dict | None = None, platform: str = "posix") -> dict:
-    """The structured launch for `final`, the command after every injector, given `base`, the command
-    just before the injectors ran. The submitted part is tokenised; what the injectors appended
-    becomes plain `arg` words. A result that is not `base + suffix` is refused before CREATE.
+def build_launch(command: Any, *, credential: dict | None = None) -> dict:
+    """The structured launch for `command`, a string or a list whose last element is the command line.
 
     `credential` is a `credential_launch.wrap_plan`: the launch is then wrapped in the `credential` shape
     that the Rust runtime renders around it (delta 10.2)."""
-    launch = _build_inner(agent_key, base, final, login=login, grammar=grammar_of(platform))
+    launch = _launch_of(command)
     if credential is None:
         return launch
     outer = {"shape": "credential", "helper": list(credential["helper"]), "unset": list(credential["unset"]),
@@ -425,27 +306,18 @@ def build_launch(agent_key: str, base: str | list[str], final: str | list[str], 
     return outer
 
 
-def _build_inner(agent_key: str, base: str | list[str], final: str | list[str], *, login: bool,
-                 grammar: Grammar = POSIX) -> dict:
-    form, base_text = _command_text(base)
-    final_form, final_text = _command_text(final)
-    if form != final_form or not isinstance(final_text, str) or not isinstance(base_text, str):
-        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "injector", "an injector changed the command's shape")
-    if form == "wrapped":
-        if final[0] != base[0] or final[1] != base[1]:
-            raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "injector", "an injector changed the shell")
-    elif form == "list" and list(final[:-1]) != list(base[:-1]):
-        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "injector", "an injector changed the list prefix")
-    if not final_text.startswith(base_text):
-        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "injector", "an injector edited the submitted command")
-    suffix = _suffix_words(final_text[len(base_text):], "injector", grammar)
-    if form == "list":
-        return {"shape": "direct", "form": "list", "elements": list(base), "words": suffix}
-    words = (_login_words(agent_key, base_text, grammar) if login else None) or tokenize(agent_key, base_text, grammar)
-    words = words + suffix
-    if form == "wrapped":
-        return {"shape": "wrapped", "shell": base[0], "flags": [base[1]], "words": words}
-    return {"shape": "direct", "form": "string", "words": words}
+def _launch_of(command: Any) -> dict:
+    if isinstance(command, str):
+        return {"shape": "direct", "form": "string", "words": _as_command(command).wire_words()}
+    if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "command", "the command is not a string or a list of strings")
+    if not command:
+        raise LaunchRefused("COMPOSITION_UNREPRESENTABLE", "command", "the command is empty")
+    words = _as_command(command[-1]).wire_words()
+    if len(command) == 3 and command[1] in WRAPPED_FLAGS:
+        return {"shape": "wrapped", "shell": command[0], "flags": [command[1]], "words": words}
+    # A list's last element is its command line; the sidecar appends the words to an empty last element.
+    return {"shape": "direct", "form": "list", "elements": [*command[:-1], ""], "words": words}
 
 
 def argv_launch(argv: list[str]) -> dict:

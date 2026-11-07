@@ -8,6 +8,7 @@ import {
   shouldPreserveMissingSessionOnRestore, shouldWarnMissingResume,
 } from '../../platform/plugin-shell/lib/resume-command'
 import { pinFreshSessionAtLaunch, shouldAttemptResume } from '../../lib/sessionHeal'
+import { literalWords, verifiedWords, withSessionIdWords } from '@shared/launchWords'
 import { accountSpawnPin, restoreSpawnPin } from '../../lib/accountFollowPanes'
 import { WakeClaims, sessionHeldElsewhere } from '../../lib/paneOpenAnswer'
 
@@ -57,14 +58,15 @@ function harness() {
   const deps = {
     agentSpecs: AGENT_SPECS, RESTORE_PIN_AGENTS,
     pinFreshSessionAtLaunch, sessionHomeIdFor, buildResumeCommand,
+    literalWords, verifiedWords, withSessionIdWords,
     normalizeResumeSessionId, shouldPreserveMissingSessionOnRestore,
     shouldWarnMissingResume, shouldAttemptResume,
     panes, paneRefs, backend: { shell: { value: 'bash' }, send }, sendQuiet,
     crypto: { randomUUID: () => `pane-${++nextId}` },
-    resolveCommand: (agent: string, override: string) => ({
-      command: override || AGENT_SPECS.find((spec) => spec.agentKey === agent)?.defaultCommand,
-      source: 'default',
-    }),
+    resolveCommand: (agent: string, override: string) => {
+      const command = override || AGENT_SPECS.find((spec) => spec.agentKey === agent)?.defaultCommand
+      return { command, words: literalWords(command ?? ''), source: 'default' }
+    },
     focusPaneId: { value: '' }, currentWorkspace: { value: '/workspace' },
     spawnHistory: { value: [] }, runGroups: { value: [] },
     activeTab: { value: '' }, runGroupsReady: { value: true },

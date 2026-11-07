@@ -23,9 +23,9 @@ from pathlib import Path
 
 import re
 
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
 from ._vendor_facts import FACTS
-from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, command_text
+from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, data_dirs_of, resume_reader_of
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
 from ..log_readers.base import (
     ActivityLines,
@@ -152,15 +152,7 @@ class KimiLogReader(LogReader):
         return [default] if default.is_dir() else []
 
     def session_files(self) -> list[Path]:
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                for f in root.glob("wd_*/session_*/agents/main/wire.jsonl"):
-                    if f.is_file():
-                        out.append(f)
-            except OSError as err:
-                log.debug("glob %s failed: %s", root, err)
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs())
 
     def has_session(self, session_id: str) -> bool:
         """True if a session dir named `session_id` exists under any workspace
@@ -595,16 +587,6 @@ async def fetch_kimi(home: Path, env: dict | None = None) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-# Optional-id guard so the capture never swallows a following flag.
-_RESUME_RE = re.compile(r"^kimi\s+(?:\S+\s+)*(?:--session|-S)\s+([^-\s]\S*)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `kimi ... --session <id>` / `-S <id>` command
-    ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
-
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # Sessions live at ~/.kimi-code/sessions/wd_*/<id>/; verify the id really
@@ -630,7 +612,7 @@ SPEC = VendorSpec(
     # Configurable provider/base URL; no verified default CLI host set here.
     expected_hosts=(),
     # Same runtime root as _kimi_home.
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("KIMI_CODE_HOME") or ctx.home / ".kimi-code"),),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("KIMI_CODE_HOME",),
     supports_model=FACT.model_flag is not None,
     skills_supported=True,
@@ -682,7 +664,7 @@ SPEC = VendorSpec(
     cli_verified_version="2.2.0",
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_kimi(home),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     # pi-tui otherwise treats a split ESC prefix as Escape after 10ms. Pane
     # input crosses the renderer/WebSocket/PTY boundary, so give Kimi the same

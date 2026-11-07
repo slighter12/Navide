@@ -81,7 +81,7 @@ from ..log_readers.base import (
     join_text_blocks,
     user_prompt_text,
 )
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -92,9 +92,10 @@ from .base import (
     McpWiring,
     SkillsWiring,
     VendorSpec,
-    command_text,
+    data_dirs_of,
     keychain_payload_items,
     platform_paths,
+    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -264,6 +265,11 @@ def cursor_project_hash(cwd: str) -> str:
     return hashlib.md5(cwd.encode("utf-8")).hexdigest()
 
 
+def _has_session_dir_name(path: Path) -> bool:
+    """The pattern names `<project>/<dir>/store.db`; only a chat id is a session's directory."""
+    return bool(_UUID_RE.match(path.parent.name))
+
+
 class CursorLogReader(LogReader):
     vendor: str = "cursor"
 
@@ -279,15 +285,7 @@ class CursorLogReader(LogReader):
         return [root] if root.is_dir() else []
 
     def session_files(self) -> list[Path]:
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                for f in root.glob(f"*/*/{_DB_NAME}"):
-                    if _UUID_RE.match(f.parent.name) and f.is_file():
-                        out.append(f)
-            except OSError as err:
-                log.debug("glob %s failed: %s", root, err)
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs(), accept=_has_session_dir_name)
 
     def session_id_from_path(self, path: Path) -> str:
         """Id is the session dir name (the chatId `agent --resume=<id>`
@@ -331,16 +329,9 @@ class CursorLogReader(LogReader):
         hash_dir = cursor_project_hash(workspace_path)
         if not hash_dir:
             return None
-        base = self._chats_root() / hash_dir
-        try:
-            if not base.is_dir():
-                return None
-            return [
-                f for f in base.glob(f"*/{_DB_NAME}")
-                if _UUID_RE.match(f.parent.name) and f.is_file()
-            ]
-        except OSError:
+        if not (self._chats_root() / hash_dir).is_dir():
             return None
+        return declared_log_files(FACT.logs, [self._chats_root()], workspace_path, accept=_has_session_dir_name)
 
     def _query(
         self, path: Path, sql: str, params: tuple = ()
@@ -834,19 +825,8 @@ async def fetch_cursor(home: Path) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-# Cursor CLI's binary is `agent` (legacy installs: `cursor-agent`); both take
+# Cursor CLI's binary is `agent` (legacy installs: `cursor-agent`, a declared program alias); both take
 # --resume=<id> / --resume <id>.
-_RESUME_RE = re.compile(
-    r"^(?:agent|cursor-agent)\s+(?:\S+\s+)*--resume(?:=(\S+)|\s+([^-\s]\S*))"
-)
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from an `agent ... --resume=<id>` /
-    `cursor-agent ... --resume <id>` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return (m.group(1) or m.group(2)) if m else ""
-
 
 def _session_path(workspace_path: str, session_id: str) -> Path | None:
     # The session path has a project-hash segment the id alone can't name —
@@ -879,7 +859,7 @@ SPEC = VendorSpec(
     # The web quota endpoint is not evidence of the CLI's inference hosts.
     expected_hosts=(),
     # Verified CLI conversation store; exclude the IDE's other .cursor data.
-    data_dirs=lambda ctx: (ctx.path(ctx.home / ".cursor" / "chats"),),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15 (docs): .cursor/skills and .agents/skills in the
     # project, ~/.cursor/skills globally, and no relocation variable at all —
@@ -933,7 +913,7 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_cursor(home),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_path=_session_path,
     session_exists=_session_exists,
     make_log_reader=CursorLogReader,

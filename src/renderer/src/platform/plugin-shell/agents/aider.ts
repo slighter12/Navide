@@ -8,6 +8,7 @@ import {
 } from './aider/history'
 import type { AgentSpec } from './types'
 import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.aider
 
@@ -18,7 +19,7 @@ export const SPEC = {
   // Left unsupported deliberately. aider passes any model string straight
   // through to litellm, so a wrong value cannot be caught before launch.
   // --yes-always auto-confirms every prompt (edits, shell commands, adds)
-  skipPermissionFlag: FACT.permission_flag,
+  ...factOptions(FACT),
   // Give every pane its own chat history: the default shared
   // `<git-root>/.aider.chat.history.md` merges all panes' token accounting.
   paneArg: (ctx) => aiderChatHistoryFlag(aiderHistoryPath(ctx.historyRoot, ctx.paneId)),

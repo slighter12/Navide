@@ -73,6 +73,7 @@ export default defineConfig({
         '@navide/terminal': resolve(__dirname, 'src/renderer/src/platform/terminal/index.ts'),
         '@navide/plugin-shell': resolve(__dirname, 'src/renderer/src/platform/plugin-shell/index.ts'),
         '@shared/vendorFacts': resolve(__dirname, 'src/shared/vendorFacts.ts'),
+        '@shared/launchWords': resolve(__dirname, 'src/shared/launchWords.ts'),
         '@navide/plugin-ui/styles.css': resolve(__dirname, 'packages/plugin-ui/src/foundation/styles.css'),
         '@navide/plugin-ui/foundation': resolve(__dirname, 'packages/plugin-ui/src/foundation/index.ts'),
         '@navide/plugin-ui': resolve(__dirname, 'packages/plugin-ui/src/index.ts'),

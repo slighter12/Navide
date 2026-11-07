@@ -132,7 +132,7 @@ from ..log_readers.base import (
     set_activity_high_water,
     user_prompt_text,
 )
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -140,9 +140,10 @@ from .base import (
     Dep,
     SkillsWiring,
     VendorSpec,
-    command_text,
+    data_dirs_of,
     provider_map_extract,
     provider_map_merge,
+    resume_reader_of,
 )
 
 log = logging.getLogger("agent_team_backend.log_readers.muse")
@@ -373,15 +374,7 @@ class MuseLogReader(LogReader):
         the explicit filter keeps that intent visible (counting a child log
         would double-count its tokens, which the parent already attributes).
         """
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                for f in root.glob(f"*/*/*/*/{_SESSION_FILE}"):
-                    if f.is_file() and _is_main_session_file(f):
-                        out.append(f)
-            except OSError as err:
-                log.debug("glob %s failed: %s", root, err)
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs(), accept=_is_main_session_file)
 
     def _metadata_record(self, path: Path) -> dict | None:
         """The ``runtime.session.metadata`` record (the log's first row)."""
@@ -692,14 +685,6 @@ class MuseLogReader(LogReader):
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^muse\s+resume\s+(\S+)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `muse resume <id> ...` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
-
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # Sessions are filed by DATE, not by workspace, so the workspace argument
@@ -774,7 +759,7 @@ SPEC = VendorSpec(
     # Login/usage observations do not establish Muse's CLI service host set.
     expected_hosts=(),
     # Same dedicated XDG root as muse_data_root, with the pane's HOME shim.
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("XDG_DATA_HOME", "").strip() or ctx.home / ".local" / "share") / "muse",),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("XDG_DATA_HOME",),
     supports_model=FACT.model_flag is not None,
     supports_effort=FACT.effort_flag is not None,
@@ -824,7 +809,7 @@ SPEC = VendorSpec(
         resume="native",
         todo="layout from Meta's launcher script only (the binary's own writer not inspected); META_API_KEY in the pane env shadows the file; no real-account round-trip recorded",
     ),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     make_log_reader=MuseLogReader,
     install_dep=Dep(

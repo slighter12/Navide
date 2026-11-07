@@ -9,6 +9,11 @@
   "resume_args": "--session {id}",
   "session_id_flag": null,
   "login_args": "login",
+  "resume_aliases": {"programs": [], "flags": ["-S"]},
+  "subcommand": null,
+  "data_dirs": {"env": ["KIMI_CODE_HOME"], "home": [".kimi-code"], "append": [], "extra_env": [], "tilde": false},
+  "session_path": null,
+  "logs": {"files": ["wd_*/session_*/agents/main/wire.jsonl"], "cwd": "absent"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

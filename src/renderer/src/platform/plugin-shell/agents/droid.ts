@@ -1,7 +1,8 @@
 /** Droid (Factory) — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.droid
 
@@ -20,9 +21,8 @@ export const SPEC = {
   // unknown flags (verified: a deliberately bogus flag still starts the TUI),
   // so "it did not error" proves nothing here. `--auto high` is the documented
   // unattended level and is what YOLO mode appends.
-  skipPermissionFlag: FACT.permission_flag,
-  // `-r, --resume [sessionId]` — the id is the session file's stem.
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  // The resume is `-r, --resume [sessionId]` — the id is the session file's stem.
+  ...factOptions(FACT),
   supportsRebuild: true,
   // Measured on a real PTY (0.204.0): droid emits `ESC[?2004h` during startup,
   // before it even finishes authenticating, and keeps it on.

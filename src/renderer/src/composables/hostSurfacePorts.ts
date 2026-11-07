@@ -276,6 +276,7 @@ export function createHostTerminalDockPort(backend: HostBackend): TerminalDockPo
       create_generation: request.createGeneration,
       agent_key: request.agentKey,
       command: request.command,
+      ...(request.words ? { words: request.words } : {}),
       cwd: request.cwd,
       env: request.env,
       cols: request.cols,

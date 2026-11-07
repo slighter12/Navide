@@ -30,8 +30,8 @@ import threading
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from agent_team_backend import osplat
 from agent_team_backend.applog import app_data_dir
+from agent_team_backend.cli_launch import append_args
 from agent_team_backend.cli_vendors.base import SkillsWiring
 from agent_team_backend.cli_vendors.registry import vendor
 from agent_team_backend.skills_store import SkillsStore
@@ -754,10 +754,8 @@ def _wire_command(
         return command
     if not wiring.flag or str(view) in text:
         return command
-    suffix = " ".join(
-        f"{wiring.flag} {osplat.paths.quote_arg(value)}" for value in flag_values(wiring, view, cwd)
-    )
-    return _append_to_command(command, suffix) if suffix else command
+    args = [part for value in flag_values(wiring, view, cwd) for part in (wiring.flag, value)]
+    return append_args(command, *args) if args else command
 
 
 def _managed_root(store: SkillsStore | None) -> Path:
@@ -1095,14 +1093,6 @@ def _command_text(command: Any) -> str:
     if isinstance(command, list):
         return str(command[-1]) if command else ""
     return str(command or "")
-
-
-def _append_to_command(command: Any, suffix: str) -> Any:
-    if isinstance(command, list):
-        updated = list(command)
-        updated[-1] = f"{updated[-1]} {suffix}"
-        return updated
-    return f"{command} {suffix}"
 
 
 def _remove_generated_path(path: Path) -> None:

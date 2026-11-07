@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from . import osplat
+from .cli_launch import append_args
 
 log = logging.getLogger("agent_team_backend.claude_hooks")
 
@@ -669,7 +670,7 @@ def wire_spawn(command: Any) -> Any:
     that file, and Claude Code reads only one. A pane file gone missing is
     written again first; when it cannot be, the pane starts without it rather
     than not at all."""
-    from .push_delivery import _append_to_command, _command_text, _has_flag
+    from .push_delivery import _command_text, _has_flag
 
     if _has_flag(_command_text(command), SETTINGS_FLAG):
         if str(pane_settings_path()) not in _command_text(command):
@@ -683,14 +684,12 @@ def wire_spawn(command: Any) -> Any:
         except Exception as err:  # noqa: BLE001 — a spawn is never broken over this
             log.warning("claude pane settings missing and not written again; pane starts without hooks: %s", err)
             return command
-    return _append_to_command(command, f"{SETTINGS_FLAG} {osplat.paths.quote_arg(str(pane_settings_path()))}")
+    return append_args(command, SETTINGS_FLAG, str(pane_settings_path()))
 
 
 def append_settings(command: Any, settings: Path) -> Any:
     """``command`` starting from `settings`, which wire_spawn then leaves alone."""
-    from .push_delivery import _append_to_command
-
-    return _append_to_command(command, f"{SETTINGS_FLAG} {osplat.paths.quote_arg(str(settings))}")
+    return append_args(command, SETTINGS_FLAG, str(settings))
 
 
 def hooks_present(settings_file: Path | None = None, *, dev_only: bool = False) -> bool:

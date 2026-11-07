@@ -1,7 +1,8 @@
 /** Kimi Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.kimi
 
@@ -11,10 +12,8 @@ export const SPEC = {
   defaultCommand: FACT.command,
   // Effort lives in ~/.kimi-code/config.toml ([thinking] effort) and an
   // invalid value is silently clamped there, so it is not exposed here.
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
-  skipPermissionFlag: FACT.permission_flag,
-  // id is the `session_<uuid>` dir name.
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  // The resume id is the `session_<uuid>` dir name.
+  ...factOptions(FACT),
   // Short flag is uppercase `-S` (verified with `kimi --help`); kimi does not
   // accept a lowercase `-s`, so it is not matched here.
   resumeCommandPattern: /^kimi\s+(?:--session|-S)\s+\S+/,

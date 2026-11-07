@@ -47,7 +47,8 @@ from typing import Any
 import httpx
 
 from .applog import app_data_dir
-from .osplat import paths, secret_files, terminal_backend
+from .cli_launch import append_args
+from .osplat import secret_files, terminal_backend
 from .cli_vendors import registry
 from .cli_vendors.base import PushChannel
 from .pending_registry import TIMEOUT, PendingRegistry
@@ -185,19 +186,6 @@ def _has_flag(text: str, flag: str) -> bool:
     return any(token == flag or token.startswith(f"{flag}=") for token in tokens)
 
 
-def _append_to_command(command: Any, suffix: str) -> Any:
-    """Append ``suffix`` to the real command, preserving the shell wrapper.
-
-    The frontend wraps agent commands as ``[shell, '-ilc'|'-lc', '<cmd>']`` —
-    the real command is the LAST element.
-    """
-    if isinstance(command, list):
-        updated = list(command)
-        updated[-1] = f"{updated[-1]} {suffix}"
-        return updated
-    return f"{command} {suffix}"
-
-
 def _command_text(command: Any) -> str:
     if isinstance(command, list):
         return str(command[-1]) if command else ""
@@ -236,11 +224,9 @@ def wire_spawn(
             if _has_flag(text, channel.port_flag):
                 return command, None
             state.port = _free_port(channel.host)
-            command = _append_to_command(command, f"{channel.port_flag} {state.port}")
+            command = append_args(command, channel.port_flag, str(state.port))
             if channel.host_flag:
-                command = _append_to_command(
-                    command, f"{channel.host_flag} {paths.quote_arg(channel.host)}"
-                )
+                command = append_args(command, channel.host_flag, channel.host)
             if channel.password_env and env is not None:
                 # Only when the CLI's own TUI can authenticate against it; a
                 # vendor that declares no variable is saying it cannot, and a
@@ -253,9 +239,7 @@ def wire_spawn(
                 return command, None
             path = _prepare_input_file(pane_id, channel)
             state.input_file = str(path)
-            command = _append_to_command(
-                command, f"{channel.input_file_flag} {paths.quote_arg(str(path))}"
-            )
+            command = append_args(command, channel.input_file_flag, str(path))
         # KIND_HOOK needs nothing at spawn: the CLI's hook arms the channel.
     except Exception as err:  # noqa: BLE001 — a spawn is never broken over this
         log.warning("push channel wiring failed for %s/%s: %s", agent_key, pane_id, err)

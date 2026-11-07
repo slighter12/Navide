@@ -1,7 +1,8 @@
 /** Goose (AAIF) — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.goose
 
@@ -17,7 +18,7 @@ export const SPEC = {
   // `--session-id` only resumes (`-r`); a new session cannot be given an id
   // at launch, so the pane binds through the kickoff marker. An unknown id
   // exits with "no such session exists", which the backend preflight checks.
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  ...factOptions(FACT),
   resumeCommandPattern: /^goose\s+session\s+-r\s+--session-id\s+\S+/,
   needsSessionMarker: true,
   supportsRebuild: true,

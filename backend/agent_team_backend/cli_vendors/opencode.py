@@ -52,7 +52,7 @@ from pathlib import Path
 
 import re
 
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     PlatformInstall,
@@ -64,10 +64,11 @@ from .base import (
     PushChannel,
     SkillsWiring,
     VendorSpec,
-    command_text,
+    data_dirs_of,
     provider_entry_identity,
     provider_map_extract,
     provider_map_merge,
+    resume_reader_of,
 )
 from . import _protocols
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
@@ -310,6 +311,7 @@ class OpencodeLogReader(LogReader):
     # subclasses this reader and overrides only these location attributes.
     _dir_name: str = "opencode"
     _db_name: str = _DB_NAME
+    _logs = FACTS["opencode"].logs
 
     def _opencode_dirs(self) -> list[Path]:
         """The single shared data dir (as a list for callers that iterate it)."""
@@ -322,7 +324,7 @@ class OpencodeLogReader(LogReader):
         return [d for d in self._opencode_dirs() if d.is_dir()]
 
     def session_files(self) -> list[Path]:
-        return [db for db in self._db_paths() if db.is_file()]
+        return declared_log_files(self._logs, self._opencode_dirs())
 
     def session_id_from_path(self, path: Path) -> str:
         """Only the shared db is a session source. Sibling files under the
@@ -1066,15 +1068,6 @@ async def fetch_opencode(home: Path, env: dict | None = None) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^opencode\s+(?:\S+\s+)*(?:--session|-s)\s+([^-\s]\S*)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from an `opencode ... --session <id>` / `-s <id>` command
-    ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
-
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # Every session lives in one shared SQLite db; ask the reader so a stale
@@ -1102,7 +1095,7 @@ SPEC = VendorSpec(
     # Arbitrary provider config; a selected quota provider is not a CLI host set.
     expected_hosts=(),
     # Same XDG database/auth root as _data_dir("opencode").
-    data_dirs=lambda ctx: (ctx.path(ctx.env.get("XDG_DATA_HOME") or ctx.home / ".local" / "share") / "opencode",),
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("XDG_DATA_HOME",),
     supports_model=FACT.model_flag is not None,
     skills_supported=True,
@@ -1200,7 +1193,7 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_opencode(home),
     fetch_usage_from_context=lambda ctx: fetch_opencode(ctx.home, dict(ctx.env)),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=("OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"),
     make_log_reader=OpencodeLogReader,

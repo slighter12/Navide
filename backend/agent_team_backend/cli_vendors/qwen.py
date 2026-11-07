@@ -39,7 +39,7 @@ from ..log_readers.base import (
     user_prompt_text,
 )
 from ..log_readers.base import encode_claude_cwd
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files, declared_session_path  # noqa: F401
 from ._vendor_facts import FACTS
 from .base import (
     AccountSwitchSpec,
@@ -50,10 +50,10 @@ from .base import (
     PushChannel,
     SkillsWiring,
     VendorSpec,
-    VendorRuntimeContext,
-    command_text,
+    data_dirs_of,
     dotenv_extract,
     dotenv_merge,
+    resume_reader_of,
 )
 from ..usage_common import (
     HTTP_TIMEOUT,
@@ -215,30 +215,9 @@ class QwenLogReader(LogReader):
         default = self._projects_root()
         return [default] if default.is_dir() else []
 
-    def _chats_files(self, chats: Path) -> list[Path]:
-        """All session jsonl files in one chats dir, archive/ included."""
-        out: list[Path] = []
-        for d in (chats, chats / "archive"):
-            if not d.is_dir():
-                continue
-            try:
-                for f in d.iterdir():
-                    if f.is_file() and f.suffix == ".jsonl":
-                        out.append(f)
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", d, err)
-        return out
-
     def session_files(self) -> list[Path]:
-        out: list[Path] = []
-        for root in self.project_dirs():
-            try:
-                for child in root.iterdir():
-                    if child.is_dir():
-                        out.extend(self._chats_files(child / "chats"))
-            except OSError as err:
-                log.debug("enumerate %s failed: %s", root, err)
-        return out
+        """All session jsonl files of every project's chats dir, archive/ included."""
+        return declared_log_files(FACT.logs, self.project_dirs())
 
     def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
         """Only the jsonl files under this workspace's project chats dir.
@@ -246,11 +225,7 @@ class QwenLogReader(LogReader):
         Qwen names each project dir after the Claude-encoded cwd, so one
         workspace maps to exactly one folder — enumerate just that folder.
         """
-        encoded = encode_claude_cwd(workspace_path)
-        out: list[Path] = []
-        for root in self.project_dirs():
-            out.extend(self._chats_files(root / encoded / "chats"))
-        return out
+        return declared_log_files(FACT.logs, self.project_dirs(), workspace_path)
 
     def _in_chats_dir(self, path: Path) -> bool:
         parent = path.parent
@@ -917,21 +892,10 @@ async def fetch_qwen(home: Path, env: dict | None = None) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^qwen\s+(?:\S+\s+)*(?:--resume|-r)\s+([^-\s]\S*)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `qwen ... --resume <id>` / `-r <id>` command
-    ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
-
-
 def _session_path(workspace_path: str, session_id: str) -> Path:
     # Qwen Code reuses Claude's cwd encoding for its per-project dirs; the
     # session file is named after the id `qwen --resume <id>` accepts.
-    project_dir = encode_claude_cwd(workspace_path)
-    return qwen_root() / "projects" / project_dir / "chats" / f"{session_id}.jsonl"
+    return declared_session_path(FACT.session_path, qwen_root(), workspace_path, session_id)
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -950,23 +914,6 @@ def _install_hooks(port_file: str, *, skip: frozenset[str] = frozenset()) -> Any
     return install_hooks(port_file, skip=skip)
 
 
-def _risk_data_dirs(ctx: VendorRuntimeContext) -> tuple[Path, ...]:
-    # Verified in installed @qwen-code/qwen-code Storage.getRuntimeBaseDir:
-    # QWEN_RUNTIME_DIR overrides runtime output, otherwise QWEN_HOME is used.
-    # Config remains at QWEN_HOME. Storage.resolvePath expands ~/ itself.
-    def path(value: str | Path) -> Path:
-        text = str(value)
-        if text == "~":
-            return ctx.home
-        if text.startswith(("~/", "~\\")):
-            return ctx.home.joinpath(*re.split(r"[/\\]+", text[2:]))
-        return ctx.path(value)
-
-    root = path(ctx.env.get("QWEN_HOME") or ctx.home / ".qwen")
-    runtime = ctx.env.get("QWEN_RUNTIME_DIR")
-    return tuple(dict.fromkeys((root, path(runtime)))) if runtime else (root,)
-
-
 # Where this CLI keeps the extensions it installed for itself (read-only
 # inventory, cli_extensions). Verified 2026-10-10 against the installed
 # binary's --help and the files on disk.
@@ -982,7 +929,9 @@ SPEC = VendorSpec(
     key=FACT.key,
     # OpenAI-compatible/custom providers; quota hosts cover another interface.
     expected_hosts=(),
-    data_dirs=_risk_data_dirs,
+    # Verified in installed @qwen-code/qwen-code Storage.getRuntimeBaseDir: QWEN_RUNTIME_DIR overrides runtime output,
+    # otherwise QWEN_HOME is used; config remains at QWEN_HOME. Storage.resolvePath expands ~/ itself (`tilde`).
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),
     supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: QWEN_HOME *is* the .qwen directory (its
@@ -1054,7 +1003,7 @@ SPEC = VendorSpec(
         resume="native",
         todo="a Coding Plan key in the pane environment outranks both files and cannot be switched; no real-account round-trip recorded",
     ),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_path=_session_path,
     session_exists=_session_exists,
     home_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),

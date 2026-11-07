@@ -1,7 +1,8 @@
 /** Kilo Code — per-vendor agent spec (see types.ts; assembled by index.ts). */
 
 import type { AgentSpec } from './types'
-import { VENDOR_FACTS, fillId } from '@shared/vendorFacts'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import { factOptions } from '@shared/launchWords'
 
 const FACT = VENDOR_FACTS.kilo
 
@@ -26,13 +27,10 @@ export const SPEC = {
   // `--variant` (its effort equivalent) exists only on `kilo run`; the root
   // command's option list has no such entry, and even `--mini` hardcodes
   // `variant: undefined` (cli/cmd/run.ts:1225).
-  modelArgs: (m) => `${FACT.model_flag} ${m}`,
   // `--auto` ("auto-approve permissions that are not explicitly denied
   // (dangerous!)") is listed on both the root TUI command and `kilo run`
-  // (verified on 7.4.21).
-  skipPermissionFlag: FACT.permission_flag,
-  // id is `ses_`-prefixed (OpenCode fork).
-  resumeArgs: (id) => fillId(FACT.resume_args, id),
+  // (verified on 7.4.21). The resume id is `ses_`-prefixed (OpenCode fork).
+  ...factOptions(FACT),
   needsSessionMarker: true,
   resumeCommandPattern: /^kilo\s+(?:--session|-s)\s+\S+/,
   supportsRebuild: true,

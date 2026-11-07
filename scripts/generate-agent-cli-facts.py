@@ -32,8 +32,34 @@ STATUSES = ("integrated", "vendor-unsupported", "not-yet-integrated", "unknown")
 CAPABILITIES = ("model", "effort", "skip_permissions", "resume_by_id", "session_id_at_launch", "login")
 FIELDS = (
     "key", "composition", "command", "model_flag", "effort_flag", "known_efforts", "permission_flag", "resume_args",
-    "session_id_flag", "login_args", "supports_session_resume", "shutdown", "capabilities", "observer",
+    "session_id_flag", "login_args", "resume_aliases", "subcommand", "data_dirs", "session_path", "logs",
+    "supports_session_resume", "shutdown", "capabilities", "observer",
 )
+
+# ---- typed command and path records ---------------------------------------------------------------------------------
+# What the generic core routines read instead of per-vendor code: how a resume command is spelled beyond `resume_args`
+# (`resume_aliases`, `subcommand`) and where the CLI keeps its data (`data_dirs`). Typed fields only: no expressions,
+# conditionals or templates. A declaration with none of a record carries null for it. Each record is
+# (Python/Rust type name, ((field, kind), ...)); kinds: str, strs (list of str), bool.
+RECORDS = {
+    # `programs`: other spellings of the program that start the same CLI; `flags`: other spellings of the resume flag.
+    "resume_aliases": ("ResumeAliases", (("programs", "strs"), ("flags", "strs"))),
+    # The subcommand the resume flag of `resume_args` lives under (`goose session ... --session-id <id>`).
+    "subcommand": ("Subcommand", (("word", "str"), ("aliases", "strs"))),
+    # The CLI's data directory: the first non-empty variable of `env`, else the home directory plus `home`; `append` is
+    # joined onto it; each non-empty variable of `extra_env` adds one more directory; `tilde`: a leading `~` is the home.
+    "data_dirs": ("DataDirs", (("env", "strs"), ("home", "strs"), ("append", "strs"), ("extra_env", "strs"), ("tilde", "bool"))),
+    # Where one session's transcript lives under the CLI's session root: `segments` joined onto the root, with `{id}` the
+    # session id and `{cwd}` the workspace path spelled by `cwd` (`absent` when the path has no workspace in it).
+    "session_path": ("SessionPath", (("segments", "strs"), ("cwd", "cwd_encoding"))),
+    # Where the CLI's session logs are under its log root (the root itself is the reader's: it follows the live environment):
+    # `files` are glob patterns relative to the root, `{cwd}` the one path segment named after the workspace, spelled by
+    # `cwd` (`absent` when no segment is). All sessions: `{cwd}` matches any segment; one workspace: only the patterns that
+    # hold `{cwd}` apply, with its spelling.
+    "logs": ("Logs", (("files", "strs"), ("cwd", "cwd_encoding"))),
+}
+# How a CLI spells a workspace path as one directory name; the one enum of the typed records.
+CWD_ENCODINGS = ("absent", "claude", "droid", "url_quote", "pi", "md5")
 
 # ---- the observer block ---------------------------------------------------------------------------------------------
 # observer: parser (one adapter; vendors that share a store format share it), parser_id (the id the backend checks on
@@ -163,6 +189,8 @@ RUST_FAULT_DECLARATION = (
     "    key == FAULT_GRACEFUL",
     "}",
 )
+PY_KINDS = {"str": "str", "strs": "tuple[str, ...]", "bool": "bool", "cwd_encoding": "CwdEncoding"}
+RS_KINDS = {"str": "&'static str", "strs": "&'static [&'static str]", "bool": "bool", "cwd_encoding": "CwdEncoding"}
 TS_FIELDS = tuple(name for name in FIELDS if name not in {"shutdown", "capabilities", "supports_session_resume", "composition", "observer"})
 
 
@@ -577,6 +605,64 @@ def normalize(observer: dict | None) -> None:
                 marker.setdefault(field, value)
 
 
+def validate_record(file: str, name: str, value: object) -> None:
+    """`value` is null or exactly the typed record `RECORDS[name]` names, each field of its kind."""
+    if value is None:
+        return
+    _, fields = RECORDS[name]
+    if not isinstance(value, dict) or set(value) != {field for field, _ in fields}:
+        raise SystemExit(f"{file}: {name} must be null or an object with exactly {[field for field, _ in fields]}")
+    for field, kind in fields:
+        item = value[field]
+        if kind == "str" and not (isinstance(item, str) and item and item == item.strip()):
+            raise SystemExit(f"{file}: {name}.{field} must be a non-empty string")
+        if kind == "strs" and not (isinstance(item, list) and all(isinstance(v, str) and v and v == v.strip() for v in item)
+                                   and len(set(item)) == len(item)):
+            raise SystemExit(f"{file}: {name}.{field} must be a list of distinct non-empty strings")
+        if kind == "bool" and not isinstance(item, bool):
+            raise SystemExit(f"{file}: {name}.{field} must be true or false")
+        if kind == "cwd_encoding" and item not in CWD_ENCODINGS:
+            raise SystemExit(f"{file}: {name}.{field} must be one of {CWD_ENCODINGS}")
+    if name == "data_dirs" and not (value["env"] or value["home"]):
+        raise SystemExit(f"{file}: data_dirs must name a variable or a home path")
+    if name == "logs":
+        joined = "/".join(value["files"])
+        if not value["files"] or any(p.startswith("/") or ".." in p.split("/") for p in value["files"]):
+            raise SystemExit(f"{file}: logs.files must be relative patterns")
+        if ("{cwd}" in joined) != (value["cwd"] != "absent"):
+            raise SystemExit(f"{file}: logs must hold {{cwd}} exactly when cwd is not absent")
+    if name == "session_path":
+        joined = "/".join(value["segments"])
+        if "{id}" not in joined or ("{cwd}" in joined) != (value["cwd"] != "absent"):
+            raise SystemExit(f"{file}: session_path must hold {{id}}, and {{cwd}} exactly when cwd is not absent")
+
+
+def py_record(name: str, value: dict | None) -> str:
+    """The Python spelling of one typed record value."""
+    if value is None:
+        return "None"
+    type_name, fields = RECORDS[name]
+    def spell(field: str, kind: str) -> str:
+        if kind == "cwd_encoding":
+            return f"CwdEncoding.{value[field].upper()}"
+        return repr(tuple(value[field])) if kind == "strs" else repr(value[field])
+    return f"{type_name}("+ ", ".join(f"{field}={spell(field, kind)}" for field, kind in fields) + ")"
+
+
+def rust_record(name: str, value: dict | None) -> str:
+    """The Rust spelling of one typed record value."""
+    if value is None:
+        return "None"
+    type_name, fields = RECORDS[name]
+    def spell(field: str, kind: str) -> str:
+        if kind == "strs":
+            return rust_strs(value[field])
+        if kind == "cwd_encoding":
+            return f"CwdEncoding::{mode_variant(value[field])}"
+        return rust_bool(value[field]) if kind == "bool" else rust_string(value[field])
+    return f"Some({type_name} {{ " + ", ".join(f"{field}: {spell(field, kind)}" for field, kind in fields) + " })"
+
+
 def load(root: Path) -> list[dict]:
     check_request_names()
     facts = []
@@ -592,6 +678,11 @@ def load(root: Path) -> list[dict]:
             raise SystemExit(f"{path.name}: resume_args must contain {{id}}")
         if item["composition"] not in COMPOSITIONS:
             raise SystemExit(f"{path.name}: composition must be one of {COMPOSITIONS}")
+        for name in RECORDS:
+            validate_record(path.name, name, item[name])
+        if item["subcommand"] is not None and (item["resume_args"] is None or not item["resume_args"].startswith(
+                item["subcommand"]["word"] + " ")):
+            raise SystemExit(f"{path.name}: subcommand must be the first word of resume_args")
         normalize(item["observer"])
         validate_observer(path.name, item["observer"], root)
         facts.append(item)
@@ -666,6 +757,11 @@ def python_source(facts: list[dict], subjects: dict) -> str:
         *(f"    {mode.upper()} = {mode!r}" for mode in MODES),
         "",
         "",
+        "class CwdEncoding(StrEnum):",
+        '    """How a CLI spells a workspace path as one directory name."""',
+        *(f"    {encoding.upper()} = {encoding!r}" for encoding in CWD_ENCODINGS),
+        "",
+        "",
         "#: The request key a `has_session` lookup names its session in. Never an ownership key: the sidecar reads `session_id`,",
         "#: `session_generation`, `pane_id` and `workspace_path` as who owns the observation.",
         f"WANTED_SESSION = {WANTED_SESSION!r}",
@@ -729,6 +825,10 @@ def python_source(facts: list[dict], subjects: dict) -> str:
         "    core: CoreFacts",
         "",
         "",
+        *(line for name, (type_name, fields) in RECORDS.items() for line in (
+            f"class {type_name}(NamedTuple):",
+            *(f"    {field}: {PY_KINDS[kind]}" for field, kind in fields),
+            "", "")),
         "class VendorFacts(NamedTuple):",
         "    key: str",
         "    composition: str",
@@ -740,6 +840,7 @@ def python_source(facts: list[dict], subjects: dict) -> str:
         "    resume_args: str | None",
         "    session_id_flag: str | None",
         "    login_args: str | None",
+        *(f"    {name}: {type_name} | None" for name, (type_name, _) in RECORDS.items()),
         "    supports_session_resume: bool",
         "    shutdown: ShutdownFacts | None",
         "    capabilities: CapabilityStatus",
@@ -760,6 +861,8 @@ def python_source(facts: list[dict], subjects: dict) -> str:
             elif name == "capabilities":
                 inner = ", ".join(f"{k}={value[k]!r}" for k in CAPABILITIES)
                 lines.append(f"        {name}=CapabilityStatus({inner}),")
+            elif name in RECORDS:
+                lines.append(f"        {name}={py_record(name, value)},")
             elif name == "observer" and value is not None:
                 lines.append(f"        {name}={py_observer(value)},")
             else:
@@ -831,6 +934,21 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
         "    Python,",
         "}",
         "",
+        "// How a CLI spells a workspace path as one directory name; read by the Python side.",
+        "#[allow(dead_code)]",
+        "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
+        "pub enum CwdEncoding {",
+        *(f"    {mode_variant(encoding)}," for encoding in CWD_ENCODINGS),
+        "}",
+        "",
+        *(line for name, (type_name, fields) in RECORDS.items() for line in (
+            "// The sidecar composes a launch from words; these records are read by the Python and TypeScript sides.",
+            "#[allow(dead_code)]",
+            "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
+            f"pub struct {type_name} {{",
+            *(f"    pub {field}: {RS_KINDS[kind]}," for field, kind in fields),
+            "}",
+            "")),
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         "pub struct VendorFacts {",
         "    pub key: &'static str,",
@@ -843,6 +961,7 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
         "    pub resume_args: Option<&'static str>,",
         "    pub session_id_flag: Option<&'static str>,",
         "    pub login_args: Option<&'static str>,",
+        *(f"    #[allow(dead_code)]\n    pub {name}: Option<{type_name}>," for name, (type_name, _) in RECORDS.items()),
         "    pub shutdown: Option<Shutdown>,",
         "    pub capabilities: Capabilities,",
         "}",
@@ -871,6 +990,7 @@ def rust_source(facts: list[dict], subjects: dict) -> str:
             f"        resume_args: {rust_option(item['resume_args'])},",
             f"        session_id_flag: {rust_option(item['session_id_flag'])},",
             f"        login_args: {rust_option(item['login_args'])},",
+            *(f"        {name}: {rust_record(name, item[name])}," for name in RECORDS),
             f"        shutdown: {shutdown_text},",
             f"        capabilities: Capabilities {{ {capabilities} }},",
             "    },",

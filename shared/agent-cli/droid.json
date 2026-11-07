@@ -9,6 +9,11 @@
   "resume_args": "--resume {id}",
   "session_id_flag": null,
   "login_args": null,
+  "resume_aliases": {"programs": [], "flags": ["-r"]},
+  "subcommand": null,
+  "data_dirs": {"env": ["FACTORY_HOME_OVERRIDE"], "home": [".factory"], "append": [], "extra_env": [], "tilde": false},
+  "session_path": {"segments": ["{cwd}", "{id}.jsonl"], "cwd": "droid"},
+  "logs": {"files": ["*.jsonl", "{cwd}/*.jsonl"], "cwd": "droid"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

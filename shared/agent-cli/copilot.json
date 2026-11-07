@@ -9,6 +9,11 @@
   "resume_args": "--resume={id}",
   "session_id_flag": null,
   "login_args": "login",
+  "resume_aliases": null,
+  "subcommand": null,
+  "data_dirs": {"env": ["COPILOT_HOME"], "home": [".copilot"], "append": [], "extra_env": [], "tilde": false},
+  "session_path": {"segments": ["session-state", "{id}", "events.jsonl"], "cwd": "absent"},
+  "logs": {"files": ["session-store.db", "session-state/*/events.jsonl"], "cwd": "absent"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

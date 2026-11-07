@@ -9,6 +9,11 @@
   "resume_args": "--session {id}",
   "session_id_flag": null,
   "login_args": "auth login",
+  "resume_aliases": {"programs": [], "flags": ["-s"]},
+  "subcommand": null,
+  "data_dirs": {"env": ["XDG_DATA_HOME"], "home": [".local", "share"], "append": ["opencode"], "extra_env": [], "tilde": false},
+  "session_path": null,
+  "logs": {"files": ["opencode.db"], "cwd": "absent"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

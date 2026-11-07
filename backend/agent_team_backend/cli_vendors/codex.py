@@ -31,9 +31,11 @@ import tomllib
 
 import psutil
 
-from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import ExtensionsSource, ExtensionsSpec, declared_log_files  # noqa: F401
 from ._vendor_facts import FACTS
-from .base import AccountSwitchSpec, Dep, McpWiring, SkillsWiring, VendorRuntimeContext, VendorSpec, command_text
+from .base import (
+    AccountSwitchSpec, Dep, McpWiring, SkillsWiring, VendorSpec, data_dirs_of, resume_reader_of,
+)
 from ..applog import app_data_dir
 from ..skills_store import SkillsStore
 from . import _protocols
@@ -201,6 +203,8 @@ class CodexLogReader(LogReader):
         self._discovery_lock = threading.Lock()
 
     def project_dirs(self) -> list[Path]:
+        # Adapter hook: the roots are the default home plus one per pane-isolated home found at run time, so they are
+        # found by listing `~/.codex-panes`, which a declaration cannot say. The files under each root are `logs`.
         roots: list[Path] = []
         default_root = Path.home() / ".codex" / "sessions"
         if default_root.is_dir():
@@ -232,14 +236,7 @@ class CodexLogReader(LogReader):
             now = time.monotonic()
             if now - self._files_cached_at <= self._SESSION_FILES_TTL_S:
                 return list(self._files_cache)
-            out: list[Path] = []
-            for root in self.project_dirs():
-                try:
-                    for f in root.rglob("rollout-*.jsonl"):
-                        if f.is_file():
-                            out.append(f)
-                except OSError as err:
-                    log.debug("rglob %s failed: %s", root, err)
+            out = declared_log_files(FACT.logs, self.project_dirs())
             self._files_cache = out
             self._files_cached_at = now
             # Deleted/archived rollouts must not pin their header entries forever.
@@ -1647,17 +1644,6 @@ def _session_meta_payloads(text: str) -> list[dict]:
     return out
 
 
-def command_with_resume_id(command: Any, old_id: str, new_id: str) -> Any:
-    """The launch command with `old_id` swapped for `new_id`, preserving the
-    ``[shell, '-ilc', '<cmd>']`` wrapper the frontend sends (see
-    ``command_text``)."""
-    if isinstance(command, list):
-        if not command:
-            return command
-        return [*command[:-1], str(command[-1]).replace(old_id, new_id)]
-    return str(command or "").replace(old_id, new_id)
-
-
 def _pane_id_from_home_path(file_path: str) -> str:
     try:
         path = Path(file_path).resolve()
@@ -1851,14 +1837,6 @@ async def fetch_codex(codex_home: Path) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^codex\s+resume\s+(\S+)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `codex resume <id> ...` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
-
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
     # Agent History stores only a pointer to the vendor-owned rollout. A
@@ -1870,17 +1848,6 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
 
 
 # ---- vendor spec -----------------------------------------------------------
-
-def _risk_data_dirs(ctx: VendorRuntimeContext) -> tuple[Path, ...]:
-    root = ctx.path(ctx.env.get("CODEX_HOME") or ctx.home / ".codex")
-    # https://learn.chatgpt.com/docs/config-file/environment-variables
-    # SQLite state can move separately; config-file sqlite_home takes precedence
-    # inside Codex and is outside this environment-only observation scope.
-    sqlite_home = ctx.env.get("CODEX_SQLITE_HOME")
-    if sqlite_home:
-        return tuple(dict.fromkeys((root, ctx.path(sqlite_home))))
-    return (root,)
-
 
 # Where this CLI keeps the extensions it installed for itself (read-only
 # inventory, cli_extensions). Verified 2026-10-10 against the installed
@@ -1903,7 +1870,7 @@ SPEC = VendorSpec(
     expected_hosts=("api.openai.com", "chatgpt.com", "auth.openai.com"),
     network_override_env_vars=("OPENAI_BASE_URL", "CODEX_OSS_BASE_URL", "CODEX_OSS_PORT"),
     # CODEX_HOME is assigned per pane, including resumes in an existing home.
-    data_dirs=_risk_data_dirs,
+    data_dirs=data_dirs_of(FACT.data_dirs),
     data_dir_env_vars=("CODEX_HOME", "CODEX_SQLITE_HOME"),
     supports_model=FACT.model_flag is not None,
     # Verified 2026-08-15: codex resolves its skills from $CODEX_HOME/skills.
@@ -1960,7 +1927,7 @@ SPEC = VendorSpec(
         Path(os.environ["CODEX_HOME"]) if os.environ.get("CODEX_HOME")
         else home / ".codex"
     ),
-    resume_id_from_command=_resume_id_from_command,
+    resume_id_from_command=resume_reader_of(FACT),
     session_exists=_session_exists,
     home_env_vars=("CODEX_HOME",),
     interrupt_key=b"\x1b",

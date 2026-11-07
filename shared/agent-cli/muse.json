@@ -9,6 +9,11 @@
   "resume_args": "resume {id}",
   "session_id_flag": null,
   "login_args": "login",
+  "resume_aliases": null,
+  "subcommand": null,
+  "data_dirs": {"env": ["XDG_DATA_HOME"], "home": [".local", "share"], "append": ["muse"], "extra_env": [], "tilde": false},
+  "session_path": null,
+  "logs": {"files": ["*/*/*/*/session.jsonl"], "cwd": "absent"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

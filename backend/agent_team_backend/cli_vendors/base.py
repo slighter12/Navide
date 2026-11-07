@@ -21,13 +21,19 @@ modules — those import the registry, and a back-edge would be a cycle.
 
 from __future__ import annotations
 
+import glob
+import hashlib
 import json
+import logging
+import re
 import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
 
 # Vendor modules may import `base` but not the application, so the platform
 # seam is re-exported here: a vendor that needs to find another product's
@@ -35,6 +41,8 @@ from typing import Any, Callable
 # platform's layout (which is how the Cursor reader ended up macOS-only).
 from ..osplat import paths as platform_paths  # noqa: F401
 from ..osplat import platform_id as _platform_id
+
+log = logging.getLogger("agent_team_backend.cli_vendors.base")
 
 
 def command_text(command: Any) -> str:
@@ -49,15 +57,13 @@ def command_text(command: Any) -> str:
     return str(command or "")
 
 
-def simple_command_args(command: Any) -> list[str]:
-    """Parse a literal CLI invocation for destructive resume deduplication.
+def _launched_text(command: Any) -> str | None:
+    """The command line of a launch: a string as it stands, or the last element of a known shell's argv.
 
-    Unlike command_text, only unwrap known shell command argv. Complex shell
-    overrides remain unclaimed rather than guessing which process they start.
-    """
+    None for any other list, which is never read as a launch of a CLI."""
     if isinstance(command, list):
         if len(command) < 3:
-            return []
+            return None
         shell = str(command[0]).replace("\\", "/").rsplit("/", 1)[-1].lower()
         flags = tuple(str(arg) for arg in command[1:-1])
         posix = shell in {"sh", "bash", "zsh", "dash", "ksh", "fish"} and flags in {
@@ -71,14 +77,175 @@ def simple_command_args(command: Any) -> list[str]:
             ("-command",), ("-nologo", "-noexit", "-command"),
         }
         if not (posix or windows or powershell):
-            return []
-    text = command_text(command)
-    if any(char in text for char in ";&|<>`$%#()\n\r"):
+            return None
+    return command_text(command)
+
+
+def simple_command_args(command: Any) -> list[str]:
+    """Parse a literal CLI invocation for destructive resume deduplication.
+
+    Unlike command_text, only unwrap known shell command argv. Complex shell
+    overrides remain unclaimed rather than guessing which process they start.
+    """
+    text = _launched_text(command)
+    if text is None or any(char in text for char in ";&|<>`$%#()\n\r"):
         return []
     try:
         return shlex.split(text)
     except ValueError:
         return []
+
+
+def resume_id_from_command(command: Any, facts: Any, *, plain_only: bool = False) -> str:
+    """The session id a launch command resumes, by the vendor's declared spelling; '' when it resumes none.
+
+    One routine for every vendor: `facts` is its `VendorFacts`. A command built from words names its resume as
+    one `resume` option, read as it stands. A command that is only text is read as a shell line would split it: the
+    program (`command` or one of `resume_aliases.programs`) first, then `subcommand` if declared, then either
+    the resume word right after them (`codex resume <id>`) or the resume flag (the one `resume_args` ends on, or one of
+    `resume_aliases.flags`) anywhere after, as `<flag> <id>` or `<flag>=<id>`, up to a bare `--`.
+
+    `plain_only` is the named compatibility rule of the vendors whose id decides a destructive resume
+    deduplication (Antigravity, Grok): text with shell syntax in it (`;`, `&`, `|`, `$`, a newline, ...) names no
+    resume at all."""
+    template = facts.resume_args
+    if template is None:
+        return ""
+    last = command[-1] if isinstance(command, list) and command else command
+    for word in getattr(last, "words", ()):
+        if word.get("opt") == "resume" and word.get("value"):
+            return str(word["value"])
+    if plain_only:
+        tokens = simple_command_args(command)
+    else:
+        text = _launched_text(command)
+        if text is None:
+            return ""
+        try:
+            tokens = shlex.split(text)
+        except ValueError:
+            tokens = text.split()
+    aliases = facts.resume_aliases
+    if not tokens or tokens[0] not in (facts.command, *(aliases.programs if aliases else ())):
+        return ""
+    rest = tokens[1:]
+    if facts.subcommand is not None:
+        if not rest or rest[0] not in (facts.subcommand.word, *facts.subcommand.aliases):
+            return ""
+        rest = rest[1:]
+    spelled = template.split()
+    marker = spelled[-1]
+    if marker == "{id}":  # `<word-or-flag> {id}`
+        lead = spelled[-2]
+        if not lead.startswith("-"):  # a word right after the program: `codex resume <id>`
+            return rest[1] if len(rest) > 1 and rest[0] == lead else ""
+        flags = (lead, *(aliases.flags if aliases else ()))
+    else:  # `<flag>={id}`
+        flags = (marker.removesuffix("={id}"), *(aliases.flags if aliases else ()))
+    for index, token in enumerate(rest):
+        if token == "--":
+            break
+        value = ""
+        if token in flags and index + 1 < len(rest):
+            value = rest[index + 1]
+        else:
+            for flag in flags:
+                if token.startswith(flag + "="):
+                    value = token[len(flag) + 1:]
+        if value:
+            return value if not value.startswith("-") else ""
+    return ""
+
+
+def resume_reader_of(facts: Any, *, plain_only: bool = False) -> Callable[[Any], str]:
+    """The `resume_id_from_command` of a `VendorSpec` for a vendor's declaration."""
+    return partial(resume_id_from_command, facts=facts, plain_only=plain_only)
+
+
+def declared_data_dirs(record: Any, ctx: "VendorRuntimeContext") -> tuple[Path, ...]:
+    """The directories a CLI keeps its data in, by the vendor's `data_dirs` declaration.
+
+    The first non-empty variable of `env`, else the home directory plus `home`; `append` is joined onto it;
+    every non-empty variable of `extra_env` adds one more directory. Relative values are made absolute, a leading
+    `~` is the home when `tilde` is declared."""
+    def resolve(value: str | Path) -> Path:
+        text = str(value)
+        if record.tilde:
+            if text == "~":
+                return ctx.home
+            if text.startswith(("~/", "~\\")):
+                return ctx.home.joinpath(*re.split(r"[/\\]+", text[2:]))
+        return ctx.path(value)
+
+    chosen = next((ctx.env[name] for name in record.env if ctx.env.get(name)), None)
+    root = resolve(chosen) if chosen else ctx.path(ctx.home.joinpath(*record.home))
+    roots = [root.joinpath(*record.append)]
+    roots += [resolve(ctx.env[name]) for name in record.extra_env if ctx.env.get(name)]
+    return tuple(dict.fromkeys(roots))
+
+
+def data_dirs_of(record: Any) -> "Callable[[VendorRuntimeContext], tuple[Path, ...]] | None":
+    """The `data_dirs` of a `VendorSpec` for a vendor's declaration: None when it declares none."""
+    return None if record is None else partial(declared_data_dirs, record)
+
+
+def encoded_cwd(encoding: Any, workspace_path: str) -> str:
+    """The workspace path spelled as one directory name, the way a CLI declared by `encoding` spells it."""
+    # The two encoders live with the code that reads those logs; they import this module, so the import is deferred.
+    if encoding == "claude":
+        from ..log_readers.base import encode_claude_cwd
+        return encode_claude_cwd(workspace_path)
+    if encoding == "droid":
+        from .droid import encode_droid_cwd
+        return encode_droid_cwd(workspace_path)
+    if encoding == "url_quote":
+        return quote(workspace_path.rstrip("/"), safe="")
+    if encoding == "pi":
+        from .pi import encode_pi_cwd
+        return encode_pi_cwd(workspace_path)
+    if encoding == "md5":
+        return hashlib.md5(workspace_path.encode("utf-8")).hexdigest() if workspace_path else ""
+    raise ValueError(f"a workspace path has no spelling as a directory name under {encoding!r}")
+
+
+def declared_session_path(record: Any, root: Path, workspace_path: str, session_id: str) -> Path:
+    """Where one session's transcript lives under `root`, by the vendor's `session_path` declaration.
+
+    Each segment is joined onto `root` with `{id}` the session id and `{cwd}` the workspace path as the vendor spells
+    it. A vendor that cannot name the path (no root on this machine, no workspace) answers None before it calls this."""
+    cwd = encoded_cwd(record.cwd, workspace_path) if "{cwd}" in "/".join(record.segments) else ""
+    return root.joinpath(*(segment.replace("{cwd}", cwd).replace("{id}", session_id) for segment in record.segments))
+
+
+def declared_log_files(
+    record: Any,
+    roots: Iterable[Path],
+    workspace_path: str | None = None,
+    *,
+    accept: Callable[[Path], bool] | None = None,
+) -> list[Path]:
+    """The session log files under `roots`, by the vendor's `logs` declaration.
+
+    Every pattern of `record.files` is globbed under each root, in the declared order. All sessions
+    (`workspace_path` None): `{cwd}` matches any directory name. One workspace: only the patterns that hold `{cwd}`
+    apply, with the workspace's directory name in its place. Only files count; `accept` is a vendor's extra test of a
+    path the pattern cannot say (an id's shape). A root that cannot be listed gives nothing, as a missing one does."""
+    patterns = record.files
+    if workspace_path is None:
+        patterns = tuple(pattern.replace("{cwd}", "*") for pattern in patterns)
+    else:
+        name = glob.escape(encoded_cwd(record.cwd, workspace_path))
+        patterns = tuple(pattern.replace("{cwd}", name) for pattern in patterns if "{cwd}" in pattern)
+    out: list[Path] = []
+    for root in roots:
+        for pattern in patterns:
+            try:
+                out.extend(
+                    sorted(path for path in root.glob(pattern) if path.is_file() and (accept is None or accept(path)))
+                )
+            except OSError as err:
+                log.debug("glob %s under %s failed: %s", pattern, root, err)
+    return out
 
 
 @dataclass(frozen=True)

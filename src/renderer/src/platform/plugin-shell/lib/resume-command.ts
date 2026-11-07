@@ -39,6 +39,14 @@ import { AGENT_SPECS, REBUILD_CAPABLE_AGENTS, RESTORE_PIN_AGENTS } from '../agen
 import type { AgentSpec } from '../agents/types'
 import { TERMINAL_CREATE_TIMEOUT_MS } from '@navide/terminal'
 import { modelArgsFor, type CliModelRequest } from './cliModel'
+import { VENDOR_FACTS } from '@shared/vendorFacts'
+import {
+  optionWord,
+  programWord,
+  type LaunchOption,
+  type LaunchWord,
+  type VendorFacts,
+} from '@shared/launchWords'
 
 export { REBUILD_CAPABLE_AGENTS, RESTORE_PIN_AGENTS }
 
@@ -226,7 +234,44 @@ export function buildResumeCommand(
   chatHistoryFile = '',
   modelRequest: CliModelRequest = { model: '', effort: '' }
 ): string {
+  const launch = buildResumeLaunch(agentKey, sessionId, skipFlag, chatHistoryFile, modelRequest)
+  if (launch.command) rememberResumeWords(launch.command, launch.words)
+  return launch.command
+}
+
+/** Resume commands are handed on as text (a `commandOverride` through many callers); the words they were
+ *  composed from wait here, by the exact text, for the spawn to ask for them. The words are only ever used when
+ *  they spell the command (`verifiedWords`), so a stale or missing entry costs the structure, never a launch. */
+const RESUME_WORDS_KEPT = 64
+const resumeWords = new Map<string, LaunchWord[]>()
+
+function rememberResumeWords(command: string, words: LaunchWord[]): void {
+  resumeWords.delete(command)
+  resumeWords.set(command, words)
+  if (resumeWords.size > RESUME_WORDS_KEPT) resumeWords.delete(resumeWords.keys().next().value as string)
+}
+
+/** The words a resume command was built from, or `undefined` when `command` is not one this module built. */
+export function resumeWordsFor(command: string): LaunchWord[] | undefined {
+  return resumeWords.get(command)
+}
+
+/** One flag of a resume command as a word: the vendor's declared option when the text is exactly its spelling,
+ *  else the text as a literal. */
+function flagWord(facts: VendorFacts | undefined, option: LaunchOption, value: string | undefined, text: string): LaunchWord {
+  const word = facts ? optionWord(facts, option, value) : null
+  return word && 'text' in word && word.text === ` ${text}` ? word : { lit: ` ${text}` }
+}
+
+export function buildResumeLaunch(
+  agentKey: string,
+  sessionId: string,
+  skipFlag = '',
+  chatHistoryFile = '',
+  modelRequest: CliModelRequest = { model: '', effort: '' }
+): { command: string; words: LaunchWord[] } {
   const spec = AGENT_SPECS.find((v) => v.agentKey === agentKey)
+  const facts = (VENDOR_FACTS as Record<string, VendorFacts | undefined>)[agentKey]
   // resolveCommand never runs on this path — the caller passes what we return
   // as a commandOverride, and resolveCommand hands an override straight back
   // untouched. So a pane opened with a model has to have that flag rebuilt
@@ -243,21 +288,31 @@ export function buildResumeCommand(
   // surprise than losing the effort.
   const chosenModel = modelArgsFor({ spec, request: { model: modelRequest.model, effort: '' } })
   const chosenEffort = modelArgsFor({ spec, request: { model: '', effort: modelRequest.effort } })
-  const flag = [
+  const flagTexts = [
     skipFlag.trim(),
     chosenModel.ok ? chosenModel.args : '',
     chosenEffort.ok ? chosenEffort.args : '',
   ]
-    .filter(Boolean)
-    .join(' ')
+  const flag = flagTexts.filter(Boolean).join(' ')
+  const flagWords = (): LaunchWord[] => {
+    const [skip, model, effort] = flagTexts
+    return [
+      ...(skip ? [flagWord(facts, 'skip_permissions', undefined, skip)] : []),
+      ...(model ? [flagWord(facts, 'model', modelRequest.model.trim(), model)] : []),
+      ...(effort ? [flagWord(facts, 'effort', modelRequest.effort.trim(), effort)] : []),
+    ]
+  }
   // Id-less vendors (aider): resume args come from the spec's resumeWithoutId
   // hook and the passed id — always empty there — is ignored.
   if (spec?.resumeWithoutId) {
     const base = `${spec.defaultCommand} ${spec.resumeWithoutId(chatHistoryFile)}`
-    return flag ? `${base} ${flag}` : base
+    return {
+      command: flag ? `${base} ${flag}` : base,
+      words: [{ lit: base }, ...flagWords()],
+    }
   }
   const id = normalizeResumeSessionId(agentKey, sessionId)
-  if (!id) return '' // no id → caller falls back to a fresh spawn
+  if (!id) return { command: '', words: [] } // no id → caller falls back to a fresh spawn
   // The binary comes from the spec's defaultCommand — never a hardcoded name
   // here. (Custom-binary overrides thread through the caller's baseCommand.)
   // Both branches take the binary from the spec: the vendor key is an id, not
@@ -265,8 +320,10 @@ export function buildResumeCommand(
   // to be lower case. `||`, not `??`: a spec with an empty defaultCommand has
   // no binary to offer, so the key is still the better guess.
   const binary = spec?.defaultCommand || agentKey
-  const base = spec?.resumeArgs
-    ? `${binary} ${spec.resumeArgs(id)}`
-    : `${binary} --resume ${id}`
-  return flag ? `${base} ${flag}` : base
+  const resumeText = spec?.resumeArgs ? spec.resumeArgs(id) : `--resume ${id}`
+  const base = `${binary} ${resumeText}`
+  return {
+    command: flag ? `${base} ${flag}` : base,
+    words: [programWord(binary), flagWord(facts, 'resume', id, resumeText), ...flagWords()],
+  }
 }

@@ -257,7 +257,10 @@ class AiderLogReader(LogReader):
     def session_files_for_workspace(self, workspace_path: str) -> list[Path]:
         """The workspace's history files — the legacy shared one plus every
         per-pane one (empty when none exist). Never returns None: an aider
-        scan can't be widened beyond the workspace."""
+        scan can't be widened beyond the workspace.
+
+        An adapter hook, not a `logs` declaration: the files sit in the workspace itself, beside the user's code,
+        under a name the product (and not a log root) decides, so there is no root to glob and no layout to share."""
         if not workspace_path:
             return []
         legacy = aider_history_path(workspace_path)

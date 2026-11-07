@@ -9,6 +9,11 @@
   "resume_args": "session -r --session-id {id}",
   "session_id_flag": null,
   "login_args": null,
+  "resume_aliases": null,
+  "subcommand": {"word": "session", "aliases": ["s"]},
+  "data_dirs": null,
+  "session_path": null,
+  "logs": {"files": ["sessions.db"], "cwd": "absent"},
   "supports_session_resume": true,
   "shutdown": null,
   "capabilities": {

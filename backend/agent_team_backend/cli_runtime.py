@@ -1416,10 +1416,7 @@ class RustTerminalService(TerminalService):
             subject, platform="windows" if WINDOWS else "posix",
             managed_credential_path=bool(kwargs.get("spawn_command")))
         if composition == "rust":
-            launch = cli_launch.build_launch(subject, kwargs.get("base_command", kwargs["command"]), kwargs["command"],
-                                             login=bool(kwargs.get("login_subcommand")),
-                                             credential=kwargs.get("credential"),
-                                             platform="windows" if WINDOWS else "posix")
+            launch = cli_launch.build_launch(kwargs["command"], credential=kwargs.get("credential"))
         else:
             launch = cli_launch.argv_launch(argv)
         cli_launch.check_text(launch, cwd, env)
