@@ -1,7 +1,7 @@
 //! Declared shutdown behaviour. Observation lives in `observe` (the roster is generated from the declarations).
 /// Harness build only: the test declaration of a graceful shutdown (owned by `vendor_facts`).
 #[cfg(feature = "fault-hooks")]
-pub const FAULT_GRACEFUL: &str = super::vendor_facts::FAULT_GRACEFUL;
+pub const FAULT_GRACEFUL: &str = crate::vendor_facts::FAULT_GRACEFUL;
 
 /// A vendor's declared shutdown behaviour (language-neutral declaration, ADR 0002). Shared
 /// lifecycle code reads this, never a vendor key (E1 13.1, 13.3 site 6).
@@ -23,7 +23,7 @@ pub fn shutdown(agent_key: &str) -> Option<ShutdownSpec> {
             defer_master_close: true,
         });
     }
-    super::vendor_facts::find(agent_key)
+    crate::vendor_facts::find(agent_key)
         .and_then(|facts| facts.shutdown)
         .map(|declared| ShutdownSpec {
             graceful: declared.graceful,
@@ -35,7 +35,7 @@ pub fn shutdown(agent_key: &str) -> Option<ShutdownSpec> {
 /// The largest graceful grace any registered adapter declares (derives `cleanup_ms`).
 pub fn max_grace_ms() -> u64 {
     // Every declared vendor, by its own declaration (never a key literal in this shared function).
-    super::vendor_facts::VENDORS
+    crate::vendor_facts::VENDORS
         .iter()
         .filter_map(|facts| shutdown(facts.key))
         .filter(|spec| spec.graceful)

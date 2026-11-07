@@ -458,6 +458,31 @@ async def test_t4_after_eof_the_remaining_descendants_are_swept_by_identity(rig)
     assert not alive(detached) and not session.cleanup_error, "the remaining descendant was swept after EOF"
 
 
+async def test_r9_the_registry_follows_the_ownership_set_and_clears_on_the_empty_one(rig):
+    from agent_team_backend.applog import in_data_dir
+
+    def recorded(service, session) -> dict:
+        entry = in_data_dir(service._data_dir, pty_registry._load)().get(str(session.proc.pid)) or {}
+        return entry.get("descendants") or {}
+
+    service = rig.service()
+    session = await rig.life(service, "pane-r9")
+    await rig.say(service, session, "detach")
+    await rig.until(lambda: "DETACHED " in rig.sink.text(session.id), "detached descendant started")
+    detached = json.loads(rig.sink.text(session.id).split("DETACHED ")[1].splitlines()[0])["pid"]
+    rig.pids.add(detached)
+    await rig.until(lambda: len(recorded(service, session)) >= 1, "the registry records the descendant", 30)
+    assert set(recorded(service, session)) == {str(detached)}
+    # The sidecar now says the set is empty (its final part, with nothing in it): the stale record is cleared.
+    # Injected here because a macOS snapshot keeps an exited member listed; the next real snapshot is seconds away.
+    service._on_frame(cli_runtime.wire.Frame(
+        cli_runtime.wire.FrameType.EVENT, cli_runtime.wire.code.SESSION_OWNERSHIP, 0, 0,
+        cli_runtime.wire.runtime_tag(service._runtime_generation),
+        {"session_id": session.id, "session_generation": session.generation, "pane_id": session.pane_id,
+         "workspace_path": session.cwd, "part": 0, "final": True, "descendants": []}), None)
+    await rig.until(lambda: not recorded(service, session), "the empty set clears the stale record", 5)
+
+
 # --------------------------------------------------------------------------- S2, S3 (kill policy)
 
 async def test_s2_a_term_trapping_cli_escalates_and_a_plain_one_completes_without_escalation(rig):

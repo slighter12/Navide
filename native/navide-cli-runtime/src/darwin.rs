@@ -1,5 +1,5 @@
 //! Darwin owned metadata: real libproc, not the setuid ps executable.
-use super::Table;
+use crate::posix::Table;
 use std::collections::HashSet;
 use std::io;
 use std::mem::{size_of, zeroed};
@@ -130,7 +130,7 @@ fn os_argv(buffer: &[u8]) -> io::Result<Vec<String>> {
     Ok(argv) // Stop at OS argc. The remaining buffer is NEVER inspected/emitted.
 }
 
-pub(super) fn self_process() -> io::Result<serde_json::Value> {
+pub(crate) fn self_process() -> io::Result<serde_json::Value> {
     // SAFETY: SELF cannot be reaped/reused while this helper executes. All
     // buffers are owned, initialized and sized for the pinned Darwin ABI.
     let pid = unsafe { libc::getpid() };
@@ -320,7 +320,7 @@ fn scan(seeds: &Table, deadline: Instant) -> io::Result<Table> {
 /// Whether `pid` may still be the owned process born at `start`: kill(pid, 0) still reaches a
 /// process and proc_pidinfo either reports that birth or no longer answers (ESRCH while exiting).
 /// A different birth is PID reuse, i.e. the owned process is gone.
-pub(super) fn owned_not_gone(pid: i32, start: &str) -> bool {
+pub(crate) fn owned_not_gone(pid: i32, start: &str) -> bool {
     // SAFETY: signal 0 performs only the existence/permission check.
     if unsafe { libc::kill(pid, 0) } != 0
         && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
@@ -335,8 +335,8 @@ pub(super) fn owned_not_gone(pid: i32, start: &str) -> bool {
 
 /// The live members of process group `root` (a former root's group stays listable after the root is gone). A
 /// member whose identity cannot be read for a reason other than "gone" is an error: fail closed.
-pub(super) fn former_group(root: i32) -> io::Result<Table> {
-    let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
+pub(crate) fn former_group(root: i32) -> io::Result<Table> {
+    let deadline = Instant::now() + Duration::from_millis(crate::control::SNAPSHOT_MS);
     let mut members = Table::new();
     for pid in list(root, false, deadline)? {
         if let Some(entry) = row(pid)? {
@@ -402,8 +402,8 @@ fn session_of(pid: i32) -> io::Result<Option<i32>> {
 
 /// The live members of session `root` (a former session leader's session stays queryable after it is gone). A
 /// member whose session or identity cannot be read for a reason other than "gone" is an error: fail closed.
-pub(super) fn former_session(root: i32) -> io::Result<Table> {
-    let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
+pub(crate) fn former_session(root: i32) -> io::Result<Table> {
+    let deadline = Instant::now() + Duration::from_millis(crate::control::SNAPSHOT_MS);
     let mut members = Table::new();
     for pid in list_all(deadline)? {
         if session_of(pid)? != Some(root) {
@@ -419,7 +419,7 @@ pub(super) fn former_session(root: i32) -> io::Result<Table> {
 }
 
 /// The recorded members that still run as the same instance. One whose state cannot be read stays listed.
-pub(super) fn still_running(members: &std::collections::HashMap<i32, (i32, i32, String)>) -> Table {
+pub(crate) fn still_running(members: &std::collections::HashMap<i32, (i32, i32, String)>) -> Table {
     members
         .iter()
         .filter(|(&pid, entry)| match row(pid) {
@@ -459,7 +459,7 @@ fn exited(pid: i32) -> bool {
 /// Event-driven wait (E1 13.2): block until every pid in `pids` has exited or `deadline`
 /// passes, woken by kqueue `EVFILT_PROC`/`NOTE_EXIT` (no polling interval). Returns the pids that
 /// had not exited at the deadline. Works for non-children of the same user (S0 spike).
-pub(super) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
+pub(crate) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
     let mut remaining: Vec<i32> = pids.iter().copied().filter(|pid| !exited(*pid)).collect();
     if remaining.is_empty() {
         return remaining;
@@ -531,12 +531,12 @@ pub(super) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
 /// The gated root's own row, read once: `None` unless `setsid` made it its own group leader. At the gate it has
 /// not executed yet, so it has no child and its group holds only itself; `snapshot(Some(pid), ..)` then returns
 /// exactly this row, after two scans. `None` sends the caller to that snapshot.
-pub(super) fn gated_root(pid: i32) -> io::Result<Option<(i32, i32, String)>> {
+pub(crate) fn gated_root(pid: i32) -> io::Result<Option<(i32, i32, String)>> {
     Ok(row(pid)?.filter(|entry| entry.1 == pid))
 }
 
-pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<Table> {
-    let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
+pub(crate) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<Table> {
+    let deadline = Instant::now() + Duration::from_millis(crate::control::SNAPSHOT_MS);
     let mut known = seeds.clone();
     if let Some(pid) = initial_child {
         if !known.is_empty() || pid <= 0 {
@@ -551,6 +551,7 @@ pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<
         return Err(io::Error::other("unknown retained birth"));
     }
     let mut previous = None;
+    let mut retries = 0;
     loop {
         if Instant::now() >= deadline {
             return Err(io::Error::new(
@@ -560,7 +561,10 @@ pub(super) fn snapshot(initial_child: Option<i32>, seeds: &Table) -> io::Result<
         }
         let table = match scan(&known, deadline) {
             Ok(table) => table,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                crate::posix::retry_pause(&mut retries, deadline);
+                continue;
+            }
             Err(error) => return Err(error), // Never ignore owned permission errors.
         };
         if previous.as_ref() == Some(&table) {

@@ -1,5 +1,5 @@
 //! Linux owned metadata from procfs, without a `ps` subprocess.
-use super::Table;
+use crate::posix::Table;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -15,7 +15,7 @@ const PIDFD_SIGNAL_PROCESS_GROUP: libc::c_uint = 1 << 2;
 /// so another session's snapshot can never rewrite the evidence this one admits and signals against.
 /// Internal only: the table and the wire keep the legacy string.
 #[derive(Default)]
-pub(super) struct Births(
+pub(crate) struct Births(
     HashMap<i32, (String, u64)>,
     /// Live members of a verified owned group that the pre-6.9 group fallback refused to signal because
     /// this session never admitted them: pid -> (parent, group, start string, exact birth ticks). They are
@@ -40,7 +40,7 @@ impl Births {
 
     /// The refused members that are still alive now (same exact instance, not a zombie). A member whose
     /// state cannot be read stays listed: fail closed.
-    pub(super) fn refused_alive(&self) -> Table {
+    pub(crate) fn refused_alive(&self) -> Table {
         let mut alive = Table::new();
         for (&pid, (parent, group, start, ticks)) in self.1.lock().unwrap().iter() {
             let gone = match process(pid) {
@@ -65,9 +65,9 @@ impl Births {
     /// session is empty, so a live process under the id is either a member we never admitted or a stranger that
     /// took the id after we were done. The stranger is only listed, which makes the result conservatively
     /// incomplete; no signal ever follows from this scan.
-    pub(super) fn record_unadmitted_former_group(&self, root: i32) -> io::Result<()> {
+    pub(crate) fn record_unadmitted_former_group(&self, root: i32) -> io::Result<()> {
         let (all, unreadable) =
-            scan_all(Instant::now() + Duration::from_millis(super::SNAPSHOT_MS))?;
+            scan_all(Instant::now() + Duration::from_millis(crate::control::SNAPSHOT_MS))?;
         for pid in unreadable {
             // The stat file failed with something other than "gone", so its group is unknown. The group and
             // session calls do not depend on /proc: an entry that may belong to the root's group or session
@@ -107,7 +107,7 @@ impl Births {
     /// Drop the evidence of every pid a verified snapshot no longer lists (absent, dead or replaced), so a
     /// long-lived session's ledger follows its live processes. The root's entry stays: it is one record and
     /// it keeps a same-second replacement of the root pid from being taken for the root.
-    pub(super) fn retain_live(&mut self, root: i32, snapshot: &Table) {
+    pub(crate) fn retain_live(&mut self, root: i32, snapshot: &Table) {
         self.0
             .retain(|pid, _| *pid == root || snapshot.contains_key(pid));
     }
@@ -179,7 +179,7 @@ fn parse_stat(pid: i32, bytes: &[u8]) -> io::Result<Process> {
 #[cfg(test)]
 thread_local! {
     /// Test seam: reading this pid's stat fails with `EACCES`, as a hidden or denied `/proc` entry would.
-    pub(super) static DENIED_STAT: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+    pub(crate) static DENIED_STAT: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
 }
 
 /// A file that is gone: the task exited between being named and being read. ENOENT, or ESRCH when it
@@ -285,13 +285,30 @@ fn process(pid: i32) -> io::Result<Option<Process>> {
     RealProc.stat(pid, None)
 }
 
+/// Boot time in seconds since the epoch, read from `/proc/stat` once per process (R1). Every process identity this
+/// sidecar derives uses the same value, so a clock step cannot make one process look like two, and the (large, on a
+/// many-CPU host) file is not re-read for every birth. A failed read is not cached.
 fn boot_seconds() -> io::Result<u64> {
+    static BOOT: Mutex<Option<u64>> = Mutex::new(None);
+    let mut cached = BOOT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(boot) = *cached {
+        return Ok(boot);
+    }
+    #[cfg(test)]
+    BOOT_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let stat = std::fs::read_to_string("/proc/stat")?;
-    stat.lines()
+    let boot = stat
+        .lines()
         .find_map(|line| line.strip_prefix("btime "))
         .and_then(|value| value.parse().ok())
-        .ok_or_else(|| io::Error::other("missing proc boot time"))
+        .ok_or_else(|| io::Error::other("missing proc boot time"))?;
+    *cached = Some(boot);
+    Ok(boot)
 }
+
+/// How many times `/proc/stat` was read for the boot time.
+#[cfg(test)]
+static BOOT_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn clock_ticks() -> io::Result<u64> {
     // SAFETY: sysconf queries the process's immutable clock tick rate.
@@ -398,6 +415,14 @@ fn owned_scan(
         .collect();
     let mut seen = HashSet::new();
     let mut queued = seeds.clone();
+    // R20: index the table once, so finding a process's children and group-mates costs their number, not the
+    // size of /proc (it was a walk over every PID for every owned PID).
+    let mut by_parent: HashMap<i32, Vec<i32>> = HashMap::new();
+    let mut by_group: HashMap<i32, Vec<i32>> = HashMap::new();
+    for (&child, candidate) in all {
+        by_parent.entry(candidate.parent).or_default().push(child);
+        by_group.entry(candidate.group).or_default().push(child);
+    }
     while let Some((pid, expected)) = pending.pop() {
         if Instant::now() >= deadline || seen.len() >= MAX_PIDS {
             return Err(io::Error::new(
@@ -420,19 +445,23 @@ fn owned_scan(
         if value.group <= 0 {
             return Err(io::Error::other("unverified owned group"));
         }
-        for (&child, candidate) in all {
-            if child != pid && (candidate.parent == pid || candidate.group == value.group) {
-                if let Some(old) = queued.get(&child) {
-                    if old.birth_ticks != candidate.birth_ticks {
-                        return Err(io::Error::new(
-                            io::ErrorKind::WouldBlock,
-                            "replaced discovery anchor",
-                        ));
-                    }
-                } else {
-                    queued.insert(child, candidate.clone());
-                    pending.push((child, candidate.clone()));
+        let children = by_parent.get(&pid).into_iter().flatten();
+        let mates = by_group.get(&value.group).into_iter().flatten();
+        for &child in children.chain(mates) {
+            if child == pid {
+                continue;
+            }
+            let candidate = &all[&child];
+            if let Some(old) = queued.get(&child) {
+                if old.birth_ticks != candidate.birth_ticks {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        "replaced discovery anchor",
+                    ));
                 }
+            } else {
+                queued.insert(child, candidate.clone());
+                pending.push((child, candidate.clone()));
             }
         }
         if fs.stat(pid, None)?.as_ref() != Some(&value) {
@@ -494,19 +523,19 @@ static EPOCH: OnceLock<Instant> = OnceLock::new();
 
 /// The latest point of the sidecar-wide 5 s grid at or before `own_due`. Never later than the session's own due
 /// time, so the "at most every 5 s / 30 s" bound holds; sessions snapshotting on the grid share their scans.
-pub(super) fn grid_due(own_due: Instant) -> Instant {
+pub(crate) fn grid_due(own_due: Instant) -> Instant {
     grid_due_from(*EPOCH.get_or_init(Instant::now), own_due)
 }
 
 fn grid_due_from(epoch: Instant, own_due: Instant) -> Instant {
-    let step = super::SNAPSHOT_YOUNG_MS;
+    let step = crate::control::SNAPSHOT_YOUNG_MS;
     let since = own_due.saturating_duration_since(epoch).as_millis() as u64;
     epoch + Duration::from_millis(since / step * step)
 }
 
 /// Where a snapshot gets its `/proc` reads.
 #[derive(Clone, Copy)]
-pub(super) enum Reads {
+pub(crate) enum Reads {
     /// Every scan is this snapshot's own (`terminal.create`).
     Own,
     /// Scans are shared with the other sessions due at the same time. `due` is when this snapshot became
@@ -519,7 +548,7 @@ pub(super) enum Reads {
 /// `snapshot(Some(pid), ..)` then admits exactly this row into `births`, after two scans. `None` sends the caller
 /// to that snapshot. The orphan ledger is not touched: it is only read for non-reserved children, and a gated
 /// root is reserved until its own waiter has reaped it.
-pub(super) fn gated_root(pid: i32, births: &mut Births) -> io::Result<Option<(i32, i32, String)>> {
+pub(crate) fn gated_root(pid: i32, births: &mut Births) -> io::Result<Option<(i32, i32, String)>> {
     let Some(seen) = process(pid)? else {
         return Ok(None);
     };
@@ -533,7 +562,7 @@ pub(super) fn gated_root(pid: i32, births: &mut Births) -> io::Result<Option<(i3
     Ok(Some((seen.parent, seen.group, start)))
 }
 
-pub(super) fn snapshot(
+pub(crate) fn snapshot(
     initial_child: Option<i32>,
     seeds: &Table,
     births: &mut Births,
@@ -541,14 +570,14 @@ pub(super) fn snapshot(
     snapshot_with(initial_child, seeds, births, Reads::Own)
 }
 
-pub(super) fn snapshot_with(
+pub(crate) fn snapshot_with(
     initial_child: Option<i32>,
     seeds: &Table,
     births: &mut Births,
     reads: Reads,
 ) -> io::Result<Table> {
     let _flush = counters::Flush;
-    let deadline = Instant::now() + Duration::from_millis(super::SNAPSHOT_MS);
+    let deadline = Instant::now() + Duration::from_millis(crate::control::SNAPSHOT_MS);
     let boot = boot_seconds()?;
     let ticks = clock_ticks()?;
     let mut known = HashMap::new();
@@ -577,6 +606,7 @@ pub(super) fn snapshot_with(
     }
     let mut previous = None;
     let mut used = 0;
+    let mut retries = 0;
     loop {
         if Instant::now() >= deadline {
             counters::skipped();
@@ -607,7 +637,10 @@ pub(super) fn snapshot_with(
         };
         let current = match owned_scan(&RealProc, &known, &all, deadline) {
             Ok(current) => current,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                crate::posix::retry_pause(&mut retries, deadline);
+                continue;
+            }
             Err(error) => return Err(error),
         };
         if previous.as_ref() == Some(&current) {
@@ -670,11 +703,11 @@ mod counters {
         act(&mut inner().lock().unwrap_or_else(|e| e.into_inner()));
     }
 
-    pub(super) fn scan_full_only() {
+    pub(crate) fn scan_full_only() {
         with(|c| c.scans_full += 1);
     }
 
-    pub(super) fn source(source: &Source) {
+    pub(crate) fn source(source: &Source) {
         with(|c| match source {
             Source::Scoped => c.scans_scoped += 1,
             Source::Full(why) => {
@@ -689,11 +722,11 @@ mod counters {
         });
     }
 
-    pub(super) fn fallback(reason: &'static str) {
+    pub(crate) fn fallback(reason: &'static str) {
         with(|c| *c.fallbacks.entry(reason).or_default() += 1);
     }
 
-    pub(super) fn walk(info: &WalkInfo, dirty: &Dirty) {
+    pub(crate) fn walk(info: &WalkInfo, dirty: &Dirty) {
         with(|c| {
             c.walk_reads += 1;
             c.inspected_pids += info.stat_reads as u64;
@@ -709,37 +742,37 @@ mod counters {
         });
     }
 
-    pub(super) fn skipped() {
+    pub(crate) fn skipped() {
         with(|c| c.skipped += 1);
     }
 
-    pub(super) fn subreaper(on: bool) {
+    pub(crate) fn subreaper(on: bool) {
         with(|c| c.subreaper = on);
     }
 
     /// Called by the reaper thread itself when it starts its loop.
-    pub(super) fn reaper_running() {
+    pub(crate) fn reaper_running() {
         with(|c| c.reaper_running = true);
     }
 
     /// Called when the reaper thread ends for any reason (its stop guard).
-    pub(super) fn reaper_stopped() {
+    pub(crate) fn reaper_stopped() {
         with(|c| c.reaper_running = false);
         flush();
     }
 
     #[cfg(test)]
-    pub(super) fn reaper_is_running() -> bool {
+    pub(crate) fn reaper_is_running() -> bool {
         let mut running = false;
         with(|c| running = c.reaper_running);
         running
     }
 
-    pub(super) fn reaped() {
+    pub(crate) fn reaped() {
         with(|c| c.reaped += 1);
     }
 
-    pub(super) fn unattributed() {
+    pub(crate) fn unattributed() {
         with(|c| c.unattributed += 1);
     }
 
@@ -763,7 +796,7 @@ mod counters {
         count
     }
 
-    pub(super) fn flush() {
+    pub(crate) fn flush() {
         static PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
         let Some(path) = PATH.get_or_init(|| std::env::var_os("NAVIDE_SCAN_STATS_FILE").map(Into::into)) else {
             return;
@@ -800,7 +833,7 @@ mod counters {
     }
 
     /// Rewrites the file when a snapshot ends, by whatever path.
-    pub(super) struct Flush;
+    pub(crate) struct Flush;
 
     impl Drop for Flush {
         fn drop(&mut self) {
@@ -813,18 +846,18 @@ mod counters {
 mod counters {
     use super::*;
 
-    pub(super) fn scan_full_only() {}
-    pub(super) fn source(_: &Source) {}
-    pub(super) fn fallback(_: &'static str) {}
-    pub(super) fn walk(_: &WalkInfo, _: &Dirty) {}
-    pub(super) fn skipped() {}
-    pub(super) fn subreaper(_: bool) {}
-    pub(super) fn reaper_running() {}
-    pub(super) fn reaper_stopped() {}
-    pub(super) fn reaped() {}
-    pub(super) fn unattributed() {}
-    pub(super) fn flush() {}
-    pub(super) struct Flush;
+    pub(crate) fn scan_full_only() {}
+    pub(crate) fn source(_: &Source) {}
+    pub(crate) fn fallback(_: &'static str) {}
+    pub(crate) fn walk(_: &WalkInfo, _: &Dirty) {}
+    pub(crate) fn skipped() {}
+    pub(crate) fn subreaper(_: bool) {}
+    pub(crate) fn reaper_running() {}
+    pub(crate) fn reaper_stopped() {}
+    pub(crate) fn reaped() {}
+    pub(crate) fn unattributed() {}
+    pub(crate) fn flush() {}
+    pub(crate) struct Flush;
 }
 
 /// Which walk rule found a walk unusable.
@@ -1126,13 +1159,13 @@ static REAPER: OnceLock<Arc<Reaper>> = OnceLock::new();
 #[cfg(test)]
 thread_local! {
     /// Test seam: this thread sees scoped mode on or off regardless of the process-wide decision.
-    pub(super) static SCOPED_FORCE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    pub(crate) static SCOPED_FORCE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
     /// Test seam: this thread sees this reaper as the process-wide one.
-    pub(super) static REAPER_FORCE: std::cell::RefCell<Option<Arc<Reaper>>> =
+    pub(crate) static REAPER_FORCE: std::cell::RefCell<Option<Arc<Reaper>>> =
         const { std::cell::RefCell::new(None) };
 }
 
-pub(super) fn scoped() -> bool {
+pub(crate) fn scoped() -> bool {
     #[cfg(test)]
     if let Some(forced) = SCOPED_FORCE.with(|forced| forced.get()) {
         return forced;
@@ -1141,7 +1174,7 @@ pub(super) fn scoped() -> bool {
 }
 
 /// The reaper, only in scoped mode.
-pub(super) fn reaper() -> Option<Arc<Reaper>> {
+pub(crate) fn reaper() -> Option<Arc<Reaper>> {
     #[cfg(test)]
     if let Some(forced) = REAPER_FORCE.with(|forced| forced.borrow().clone()) {
         return Some(forced);
@@ -1212,7 +1245,7 @@ impl Startup for RealStartup {
 
 /// Decide the scan mode once, before the first create is accepted. Subreaper on, reaper running, reservation
 /// enforced, `ECHILD` on a root fail-closed and the scoped walk are one decision: all on or all off.
-pub(super) fn enable_scoped_mode() {
+pub(crate) fn enable_scoped_mode() {
     #[cfg(feature = "fault-hooks")]
     if std::env::var_os("NAVIDE_FAULT_FORCE_FULL").is_some() {
         counters::fallback("forced");
@@ -1278,7 +1311,7 @@ enum Settled {
 }
 
 /// A root's claim that only its own waiter may consume its exit status. Removes only its own key.
-pub(super) struct RootReservation {
+pub(crate) struct RootReservation {
     reaper: Arc<Reaper>,
     key: (i32, u64),
 }
@@ -1299,7 +1332,7 @@ impl Drop for RootReservation {
 /// Lock order is `FD_FORK_LOCK` -> `gate` -> `reserved`; the reverse is forbidden. `reserved` is locked only for
 /// a membership insert, remove or lookup, never across a wait, an `fsync` or any read (rule L1): `gate` is the
 /// only lock a create may hold across another thread's work.
-pub(super) struct Reaper {
+pub(crate) struct Reaper {
     /// Held by a create from before `fork` until its reservation exists (design section 3).
     gate: Mutex<()>,
     /// `(pid, start ticks)` of every root that is alive and not yet waited for by its own waiter.
@@ -1335,22 +1368,22 @@ pub(super) struct Reaper {
 
 /// `Reaper::stop_store_seen` values.
 #[cfg(test)]
-pub(super) const STOP_UNRECORDED: u8 = 0;
+pub(crate) const STOP_UNRECORDED: u8 = 0;
 /// The `stopped` store happened while the stopper owned the gate (correct).
 #[cfg(test)]
-pub(super) const STOP_UNDER_GATE: u8 = 1;
+pub(crate) const STOP_UNDER_GATE: u8 = 1;
 /// The `stopped` store happened before the stopper owned the gate (the regression).
 #[cfg(test)]
-pub(super) const STOP_WITHOUT_GATE: u8 = 2;
+pub(crate) const STOP_WITHOUT_GATE: u8 = 2;
 
 /// Test seam values for `Reaper::inject`.
 #[cfg(test)]
-pub(super) const INJECT_WAITID_ERROR: u8 = 1;
+pub(crate) const INJECT_WAITID_ERROR: u8 = 1;
 #[cfg(test)]
-pub(super) const INJECT_PANIC: u8 = 2;
+pub(crate) const INJECT_PANIC: u8 = 2;
 /// The loop idles (never calls `waitid`) until the value changes, so a test can pick the moment it ends.
 #[cfg(test)]
-pub(super) const INJECT_PARK: u8 = 3;
+pub(crate) const INJECT_PARK: u8 = 3;
 
 /// Ends the reaper thread's life on every path out of `run`, including a panic: it records the stop (so creates
 /// are refused), clears the liveness counter, and says so once on stderr.
@@ -1420,7 +1453,7 @@ impl Drop for StopGuard<'_> {
 }
 
 impl Reaper {
-    pub(super) fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             gate: Mutex::new(()),
             reserved: Mutex::new(HashSet::new()),
@@ -1441,24 +1474,24 @@ impl Reaper {
     }
 
     /// Whether the reaper thread has ended. Checked by a create while it holds `gate`, before the fork.
-    pub(super) fn stopped(&self) -> bool {
+    pub(crate) fn stopped(&self) -> bool {
         self.stopped.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// The `reaper_running` counter, which exists only with `fault-hooks`.
     #[cfg(all(test, feature = "fault-hooks"))]
-    pub(super) fn counter_running() -> bool {
+    pub(crate) fn counter_running() -> bool {
         counters::reaper_is_running()
     }
 
     #[cfg(test)]
-    pub(super) fn inject(&self, what: u8) {
+    pub(crate) fn inject(&self, what: u8) {
         self.inject.store(what, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// What `StopGuard::drop` saw at the `stopped` store: one of the `STOP_*` values.
     #[cfg(test)]
-    pub(super) fn stop_store_seen(&self) -> u8 {
+    pub(crate) fn stop_store_seen(&self) -> u8 {
         self.stop_store_seen.load(std::sync::atomic::Ordering::SeqCst)
     }
 
@@ -1483,24 +1516,24 @@ impl Reaper {
         );
     }
 
-    pub(super) fn hold_gate(&self) -> std::sync::MutexGuard<'_, ()> {
+    pub(crate) fn hold_gate(&self) -> std::sync::MutexGuard<'_, ()> {
         self.gate.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Reserve the root `pid`: only its own waiter may consume its status from now until the guard drops.
-    pub(super) fn reserve(self: &Arc<Self>, pid: i32) -> RootReservation {
+    pub(crate) fn reserve(self: &Arc<Self>, pid: i32) -> RootReservation {
         // A root that is already gone keys on 0; the key only has to differ between two holders of one pid.
         let birth = process(pid).ok().flatten().map_or(0, |seen| seen.birth_ticks);
         self.reserve_key(pid, birth)
     }
 
     /// A create has a new child: wake the reaper if it is idle.
-    pub(super) fn note_spawned(&self) {
+    pub(crate) fn note_spawned(&self) {
         *self.spawns.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
         self.spawns.1.notify_all();
     }
 
-    pub(super) fn reserve_key(self: &Arc<Self>, pid: i32, birth: u64) -> RootReservation {
+    pub(crate) fn reserve_key(self: &Arc<Self>, pid: i32, birth: u64) -> RootReservation {
         self.reserved
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -1513,12 +1546,12 @@ impl Reaper {
 
     /// No lock of the reaper is held by anyone.
     #[cfg(test)]
-    pub(super) fn is_free(&self) -> bool {
+    pub(crate) fn is_free(&self) -> bool {
         self.gate.try_lock().is_ok() && self.reserved.try_lock().is_ok()
     }
 
     /// Whether any root is reserved under `pid`.
-    pub(super) fn holds(&self, pid: i32) -> bool {
+    pub(crate) fn holds(&self, pid: i32) -> bool {
         self.reserved
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -1527,7 +1560,7 @@ impl Reaper {
     }
 
     #[cfg(test)]
-    pub(super) fn holds_any(&self) -> bool {
+    pub(crate) fn holds_any(&self) -> bool {
         !self.reserved.lock().unwrap().is_empty()
     }
 
@@ -1606,7 +1639,7 @@ impl Reaper {
         }
     }
 
-    pub(super) fn start(self: &Arc<Self>) -> io::Result<()> {
+    pub(crate) fn start(self: &Arc<Self>) -> io::Result<()> {
         let reaper = self.clone();
         std::thread::Builder::new()
             .name("reaper".into())
@@ -1687,7 +1720,7 @@ impl Reaper {
     /// Shutdown: wait, bounded, until no non-reserved child is waitable. The reaper keeps consuming; this only
     /// observes. A reserved zombie ends the wait (its own waiter is the only one allowed to take it). Between
     /// looks it waits for reaper progress, not for a fixed interval.
-    pub(super) fn drain(&self, deadline: Instant) {
+    pub(crate) fn drain(&self, deadline: Instant) {
         while Instant::now() < deadline {
             let seen = self.progress();
             // SAFETY: an all-zero siginfo is a valid out buffer for waitid.
@@ -1727,7 +1760,7 @@ mod reaper_test_seams {
     const LOOK_AGAIN: Duration = Duration::from_millis(1);
 
     /// One idle pass of a parked reaper loop (`INJECT_PARK`).
-    pub(super) fn park() {
+    pub(crate) fn park() {
         std::thread::sleep(LOOK_AGAIN);
     }
 
@@ -1818,7 +1851,7 @@ fn note_admitted(batch: &[(i32, u64)], all: &HashMap<i32, Process>, scanned_at: 
 /// never signalled, never added to a receipt (design section 2). Called when a session finishes and at shutdown.
 /// A session root is the sidecar's usual child and is reserved, so roots are dropped before any stat read: with
 /// no other child the call costs the task listing and the `children` reads, nothing per process.
-pub(super) fn note_unattributed() {
+pub(crate) fn note_unattributed() {
     let Some(reaper) = reaper() else { return };
     let me = std::process::id() as i32;
     let Ok(Some(tids)) = RealProc.tasks(me) else {
@@ -1887,7 +1920,7 @@ fn pidfd_exited(fd: i32) -> bool {
 /// a pid recycled after the check is never signalled. A process that cannot be bound is not signalled.
 /// `group` signals the instance's process group (pidfd group signalling where the kernel has it, else the
 /// group of the verified, still unreaped leader). Returns whether a signal was delivered.
-pub(super) fn signal(
+pub(crate) fn signal(
     pid: i32,
     expected_start: &str,
     signal: i32,
@@ -1967,7 +2000,7 @@ fn send_pidfd(fd: i32, signal: i32, flags: libc::c_uint) -> bool {
 /// verified leader's group ended and the numeric group id was reused, the new members were never admitted
 /// and are left alone.
 fn signal_group_members(group: i32, signal: i32, births: &Births) -> bool {
-    let Ok(all) = scan(Instant::now() + Duration::from_millis(super::SNAPSHOT_MS)) else {
+    let Ok(all) = scan(Instant::now() + Duration::from_millis(crate::control::SNAPSHOT_MS)) else {
         return false;
     };
     let mut delivered = false;
@@ -1995,7 +2028,7 @@ fn signal_group_members(group: i32, signal: i32, births: &Births) -> bool {
     delivered
 }
 
-pub(super) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
+pub(crate) fn wait_exit(pids: &[i32], deadline: Instant) -> Vec<i32> {
     let mut remaining = Vec::new();
     let mut watched = Vec::new();
     for &pid in pids {
@@ -2065,6 +2098,28 @@ mod tests {
     use super::*;
     use std::os::unix::process::CommandExt;
     use std::process::Command;
+
+    /// R1: the boot time is read from `/proc/stat` once, however many identities are derived, from any thread.
+    #[test]
+    fn the_boot_time_is_read_once_per_process() {
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    (0..250).map(|_| boot_seconds().unwrap()).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let seen: Vec<u64> = readers
+            .into_iter()
+            .flat_map(|reader| reader.join().unwrap())
+            .collect();
+        assert!(seen.windows(2).all(|pair| pair[0] == pair[1]), "one value for every caller");
+        assert_eq!(
+            BOOT_READS.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "/proc/stat was read again"
+        );
+    }
 
     #[test]
     fn proc_stat_comm_with_parentheses_does_not_shift_identity_fields() {
@@ -2307,7 +2362,7 @@ mod tests {
     /// pid it ever saw, while a live detached descendant it retained stays owned and signallable.
     #[test]
     fn a_long_lived_session_keeps_a_bounded_ledger_and_still_signals_a_retained_descendant() {
-        use super::super::{known_owned, retain_owned, Owned};
+        use crate::posix::{known_owned, retain_owned, Owned};
         let mut root = Command::new("/bin/sh")
             .args([
                 "-c",
@@ -2414,7 +2469,7 @@ mod tests {
     /// gone nothing else would, and `cleanup_complete` would read true while it runs.
     #[test]
     fn an_unadmitted_group_member_the_fallback_refuses_is_named_in_the_cleanup_survivors() {
-        use super::super::with_unresolved;
+        use crate::posix::with_unresolved;
         let (mut leader, pid, start, _, bystander) = group_of_three();
         let admitted_only_leader = ledger(pid, &start, process(pid).unwrap().unwrap().birth_ticks);
         let late: Vec<i32> = scan(Instant::now() + Duration::from_secs(2))
@@ -3048,6 +3103,31 @@ mod scoped_tests {
         let mut pids: Vec<_> = from_scoped.keys().copied().collect();
         pids.sort();
         assert_eq!(pids, [1001, 1002, 1003, 1004, 1005], "1006 is a setsid orphan: not owned");
+    }
+
+    /// R20: the indexed discovery finds exactly the children and group-mates of the owned set in a large table, and
+    /// reads each owned pid twice (the identity read and the race check), whatever the table holds.
+    #[test]
+    fn owned_discovery_is_independent_of_unrelated_processes() {
+        let mut tree = vec![
+            (1, FProc::new(0, 1, 1, &[1])),
+            (100, FProc::new(1, 100, 100, &[100]).kids(100, &[101])),
+            (101, FProc::new(100, 100, 100, &[101])),
+            (102, FProc::new(1, 100, 100, &[102])), // a group-mate that is not a child
+        ];
+        for index in 0..3000 {
+            tree.push((5000 + index, FProc::new(1, 5000 + index, 5000 + index, &[5000 + index])));
+        }
+        let fake = Fake::new(tree);
+        let root = fake.stat(100, None).unwrap().unwrap();
+        let seeds: HashMap<_, _> = [(100, root)].into();
+        let (all, _) = scan_all_with(&fake, soon()).unwrap();
+        let before = fake.stats();
+        let owned = owned_scan(&fake, &seeds, &all, soon()).unwrap();
+        let mut pids: Vec<_> = owned.keys().copied().collect();
+        pids.sort();
+        assert_eq!(pids, [100, 101, 102]);
+        assert_eq!(fake.stats() - before, 2 * pids.len());
     }
 
     #[test]

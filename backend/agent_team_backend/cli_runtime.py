@@ -894,6 +894,12 @@ class RustTerminalService(TerminalService):
             if meta["final"]:
                 session.descendants = {entry["pid"]: entry["start_value"] for entry in pages}
                 self._ownership_pages.pop(sid, None)
+                # R9: the sidecar always sends a final part, an empty one included, so a set that became empty is
+                # persisted as empty and a record left by a member that has since exited is cleared. Unlike the
+                # baseline's `_refresh_descendants` (detached members only), every member is persisted: after a
+                # sidecar death the registry is what recovery signals from, and with the detached-only view
+                # `test_sidecar_death_invalidates_every_session_and_cleans_only_its_own_tree` left members of
+                # the root's group running.
                 self._task(asyncio.to_thread(in_data_dir(self._data_dir, pty_registry.update_descendants,
                                                           {session.proc.pid: session.descendants})))
         else:

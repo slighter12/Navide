@@ -56,7 +56,7 @@ fn genuine_self_system_sqlite_identity() {
     }
     let uuid = matched.unwrap();
     assert!(uuid.len() == 32 && uuid.bytes().all(|b| b.is_ascii_hexdigit()) && uuid.bytes().any(|b| b != b'0'), "not an LC_UUID: {uuid}");
-    let own = super::darwin::self_process().unwrap();
+    let own = crate::darwin::self_process().unwrap();
     assert_eq!(own["pid"], std::process::id());
     assert_eq!(own["parent"], unsafe { libc::getppid() });
     println!(
