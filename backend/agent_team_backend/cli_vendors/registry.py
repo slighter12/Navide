@@ -9,7 +9,7 @@ runtime.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -53,7 +53,13 @@ _ALL: tuple[VendorSpec, ...] = (
     qwen.SPEC,
 )
 
-VENDORS: dict[str, VendorSpec] = {spec.key: spec for spec in _ALL}
+def build(wrap: Callable[[VendorSpec], VendorSpec] | None = None) -> dict[str, VendorSpec]:
+    """A fresh registry, one entry per vendor. `wrap` maps each plain spec to the spec its caller wants (the application
+    wraps them for the evaluation selector); the registry itself is never rewritten."""
+    return {spec.key: spec if wrap is None else wrap(spec) for spec in _ALL}
+
+
+VENDORS: dict[str, VendorSpec] = build()
 
 
 def vendor(key: str) -> VendorSpec | None:

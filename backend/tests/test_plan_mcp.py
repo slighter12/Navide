@@ -374,11 +374,14 @@ async def test_plan_update_stage_rejects_path_traversal(workspace: Path) -> None
 
 
 class _FakeTerminalService:
-    """Stand-in for TerminalService: just the `_sessions` dict the
+    """Stand-in for TerminalService: just the sessions the
     workspace-mismatch check snapshots."""
 
     def __init__(self, sessions: list[SimpleNamespace]) -> None:
         self._sessions = {s.id: s for s in sessions}
+
+    def list_sessions(self) -> list[SimpleNamespace]:
+        return list(self._sessions.values())
 
 
 def _fake_session(

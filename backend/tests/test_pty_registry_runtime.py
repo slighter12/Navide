@@ -643,10 +643,7 @@ def test_a_group_target_survives_only_while_its_verified_group_does(monkeypatch)
 
     def against(fresh: dict) -> list:
         monkeypatch.setattr(pty_registry, "_ps_table", lambda: fresh)
-        group, plain = pty_registry._still_same([(10, True)], verdict), pty_registry._still_same([(10, False)], verdict)
-        assert pty_registry._recheck([(10, True)], verdict) == group
-        assert pty_registry._recheck([(10, False)], verdict) == plain
-        return [group, plain]
+        return [pty_registry._recheck([(10, True)], verdict), pty_registry._recheck([(10, False)], verdict)]
 
     assert against({10: (10, began)}) == [[(10, True)], [(10, False)]]  # the leader itself
     assert against({11: (10, "member")}) == [[(10, True)], []]  # the leader is gone, a member holds the group

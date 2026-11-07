@@ -82,6 +82,58 @@ REAPERS = {
 }
 
 
+GRACE = 2.0
+GRACEFUL = {
+    "reap_stale": (_stale, lambda: pty_registry.reap_stale(grace=GRACE, settle=3.0)),
+    "reap_runtime": (_owned, lambda: pty_registry.reap_runtime(GENERATION, grace=GRACE, settle=3.0)),
+}
+
+
+@pytest.mark.parametrize("reaper", sorted(GRACEFUL))
+def test_a_target_that_is_gone_after_sigterm_costs_less_than_the_grace_and_is_never_sent_sigkill(
+        reaper, survivor, monkeypatch):
+    prepare, run = GRACEFUL[reaper]
+    prepare(survivor)
+    signals: list[tuple[list, bool]] = []
+    monkeypatch.setattr(pty_registry, "_signal_each", lambda targets, *, force: signals.append((list(targets), force)))
+
+    def die_on_first_wait(count: int) -> None:
+        if count == 1:
+            survivor.kill()
+            survivor.wait()
+
+    clock = FakeClock(die_on_first_wait)
+    monkeypatch.setattr(pty_registry, "time", clock.module())
+
+    run()
+
+    assert [force for _targets, force in signals] == [False], "SIGKILL went to a process that SIGTERM had already ended"
+    assert clock.now - 1000.0 < GRACE / 4, f"waited {clock.now - 1000.0:.2f} s of a {GRACE} s grace for a process that was gone"
+
+
+@pytest.mark.parametrize("reaper", sorted(GRACEFUL))
+def test_a_target_that_outlives_the_grace_is_sent_sigkill_only_after_the_grace(reaper, survivor, monkeypatch):
+    prepare, run = GRACEFUL[reaper]
+    prepare(survivor)
+    clock = FakeClock()
+    monkeypatch.setattr(pty_registry, "time", clock.module())
+    signals: list[tuple[list, bool, float]] = []
+
+    def record(targets, *, force):
+        signals.append((list(targets), force, clock.now - 1000.0))
+        if force:
+            survivor.kill()
+            survivor.wait()
+
+    monkeypatch.setattr(pty_registry, "_signal_each", record)
+
+    run()
+
+    forced = [(targets, at) for targets, force, at in signals if force]
+    assert len(forced) == 1 and [pid for pid, _group in forced[0][0]] == [survivor.pid]
+    assert forced[0][1] >= GRACE, "SIGKILL was sent before the grace was over"
+
+
 @pytest.mark.parametrize("reaper", sorted(REAPERS))
 def test_a_survivor_is_looked_for_a_bounded_number_of_times_over_the_settle_window(
         reaper, survivor, table_reads, monkeypatch):

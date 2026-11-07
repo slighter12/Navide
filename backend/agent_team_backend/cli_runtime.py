@@ -548,8 +548,8 @@ class RustTerminalService(TerminalService):
                 for master in stuck:  # left open to process exit; the fence stays closed (E1 7.3)
                     if master.session_id not in self._close_incomplete:  # the stream path may have said so
                         self._close_incomplete.add(master.session_id)
-                        self._receipt({"event": "handle_close_incomplete", "session_id": master.session_id,
-                                       "platform": RECEIPT_PLATFORM, "path": "loss"})
+                        self._receipt(lambda: {"event": "handle_close_incomplete", "session_id": master.session_id,
+                                               "platform": RECEIPT_PLATFORM, "path": "loss"})
                 handles_incomplete = len(stuck)
                 self._stage("workers_joined", workers=len(masters), incomplete=len(stuck))
 
@@ -566,7 +566,7 @@ class RustTerminalService(TerminalService):
                 session.exit_signal = None
                 session.uptime_ms = int((time.monotonic() - session.started_monotonic) * 1000)
                 presented.append(self._present_lost(session))
-                self._receipt({"event": "exit_published", "session_id": session.id, "reason": "runtime_lost"})
+                self._receipt(lambda: {"event": "exit_published", "session_id": session.id, "reason": "runtime_lost"})
                 session.joined.set()
                 session.cleanup.set()
                 self._retire(session)
@@ -588,12 +588,13 @@ class RustTerminalService(TerminalService):
             return
         finally:
             for record in settlements:
-                self._receipt({"event": "loss_settled", **record})
-            self._receipt({"event": "runtime_invalidated", "lost_generation": generation, "cause": cause[:200],
-                           "sessions": len(lost), "signalled": len(result["signalled"]),
-                           "unresolved": len(result["unresolved"]) + unknown,
-                           "unknown_launches": unknown, "unverifiable": result["unverifiable"],
-                           "sidecar_exited": sidecar_gone, "complete": complete, "stages": list(self._loss_stages)})
+                self._receipt(lambda: {"event": "loss_settled", **record})
+            self._receipt(lambda: {"event": "runtime_invalidated", "lost_generation": generation, "cause": cause[:200],
+                                   "sessions": len(lost), "signalled": len(result["signalled"]),
+                                   "unresolved": len(result["unresolved"]) + unknown,
+                                   "unknown_launches": unknown, "unverifiable": result["unverifiable"],
+                                   "sidecar_exited": sidecar_gone, "complete": complete,
+                                   "stages": list(self._loss_stages)})
             self._retired[generation] = complete
             if complete:
                 # Only a verified-clean generation drops its durable records.
@@ -696,7 +697,7 @@ class RustTerminalService(TerminalService):
                 ready = await self._read_ready()
                 if self._runtime_identity["created"] is None:
                     raise RuntimeError("START_FAILED: the sidecar exited before its identity was read")
-                self._receipt({**ready, **self._runtime_identity})
+                self._receipt(lambda: {**ready, **self._runtime_identity})
                 self._ownership_gate = True  # verified in `_verify_ready`
                 # The reader runs before the first request is sent (3.3).
                 tag = wire.runtime_tag(self._runtime_generation)
@@ -725,8 +726,8 @@ class RustTerminalService(TerminalService):
                     except TimeoutError:
                         self._runtime.kill()
                         await self._runtime.wait()
-                self._receipt({"event": "startup_failed", "stage": "handshake", "error": self._lost,
-                               **self._runtime_identity, "exit_code": self._runtime.returncode})
+                self._receipt(lambda: {"event": "startup_failed", "stage": "handshake", "error": self._lost,
+                                       **self._runtime_identity, "exit_code": self._runtime.returncode})
                 raise RuntimeError(self._lost) from error
 
     async def _read_ready(self) -> dict:
@@ -852,18 +853,18 @@ class RustTerminalService(TerminalService):
                 meta.get("pane_id") != session.pane_id or meta.get("workspace_path") != session.cwd):
             raise RuntimeError("PROTOCOL_ERROR: wrong routing attribution")
         if event == code.SESSION_EXITED:
-            self._receipt({"event": "exit", **meta})
+            self._receipt(lambda: {"event": "exit", **meta})
             self._on_exited(session, meta, generation)
         elif event == code.SESSION_HANGUP:
-            self._receipt({"event": "hangup", "session_id": sid, "session_generation": session.generation})
+            self._receipt(lambda: {"event": "hangup", "session_id": sid, "session_generation": session.generation})
             if session.handle is not None:
                 self._close(session, reason="hangup")
         elif event == code.SESSION_ROOT_LIVE:
             session.root_live = True
-            self._receipt({"event": "root_live", "session_id": sid, "session_generation": session.generation})
+            self._receipt(lambda: {"event": "root_live", "session_id": sid, "session_generation": session.generation})
             self._maybe_publish_exit(session, generation)
         elif event == code.SESSION_CLEANED:
-            self._receipt({"event": "cleaned", **meta})
+            self._receipt(lambda: {"event": "cleaned", **meta})
             self._task(self._finish_cleanup(session, meta))
         elif event == code.SESSION_OWNERSHIP:
             pages = self._ownership_pages.setdefault(sid, [])
@@ -1046,7 +1047,7 @@ class RustTerminalService(TerminalService):
         kernel_facts = self._hook.create_checkpoint(fd, str(sid), launch["pane_id"], launch["session_generation"],
                                                     str(pty.get("tty")), root)
         if kernel_facts is not None:
-            self._receipt(kernel_facts)
+            self._receipt(lambda: kernel_facts)
         if not WINDOWS:
             try:
                 slot.tty = check_master(fd, pty.get("tty"), self._claimed_ttys)
@@ -1064,8 +1065,9 @@ class RustTerminalService(TerminalService):
             # ADOPT. Nothing was read from or written to any descriptor.
             self._handoff_failed[sid] = rejected
             self._close_slot(sid)
-            self._receipt({"event": "handoff_rejected", "session_id": sid, "session_generation": meta.get("session_generation"),
-                           "check": rejected.check, "detail": rejected.detail})
+            self._receipt(lambda: {"event": "handoff_rejected", "session_id": sid,
+                                   "session_generation": meta.get("session_generation"),
+                                   "check": rejected.check, "detail": rejected.detail})
             if (session := self._retained.get(sid)) is not None:
                 self._task(self._kill_rejected(session))
         else:
@@ -1077,11 +1079,12 @@ class RustTerminalService(TerminalService):
                 slot.start_pump(self._loop)
             else:
                 slot.start_reading(self._loop, _BUF_CAP)
-            self._receipt({"event": "handoff_received", "kind": "duplicate_handle" if WINDOWS else "scm_rights", "platform": RECEIPT_PLATFORM,
-                           "validated": True, "session_id": sid, "session_generation": meta.get("session_generation"),
-                           "owned_frame_bytes": frame.wire_size})
-        self._receipt({"event": "owned", "runtime_generation": self._runtime_generation,
-                       **{k: v for k, v in meta.items() if k not in ("pty", "argv0")}})
+            self._receipt(lambda: {"event": "handoff_received", "kind": "duplicate_handle" if WINDOWS else "scm_rights",
+                                   "platform": RECEIPT_PLATFORM, "validated": True, "session_id": sid,
+                                   "session_generation": meta.get("session_generation"),
+                                   "owned_frame_bytes": frame.wire_size})
+        self._receipt(lambda: {"event": "owned", "runtime_generation": self._runtime_generation,
+                               **{k: v for k, v in meta.items() if k not in ("pty", "argv0")}})
         self._task(self._persist_owned({"session_id": sid, "session_generation": meta["session_generation"], "root": root}))
 
     @staticmethod
@@ -1286,7 +1289,7 @@ class RustTerminalService(TerminalService):
         """The control-plane ledger so far (counts only; empty without a harness); a receipt `control_ledger` is
         written with it."""
         snapshot = self._ledger.snapshot()
-        self._receipt({"event": "control_ledger", "runtime_generation": self._runtime_generation, **snapshot})
+        self._receipt(lambda: {"event": "control_ledger", "runtime_generation": self._runtime_generation, **snapshot})
         return snapshot
 
     def _probe_after_timeout(self) -> None:
@@ -1339,11 +1342,14 @@ class RustTerminalService(TerminalService):
             raise RuntimeError("PROTOCOL_ERROR: historical observation claimed process ownership")
         if validate is not None:
             validate(result, session)
-        self._receipt({**context, "runtime_generation": self._runtime_generation,
-                       **{key: result[key] for key in ("parser", "path", "identity", "mode") if key in result},
-                       **(receipt(result) if receipt is not None else {}),
-                       **({"error": result["error"]} if result.get("error") else {})})
+        self._receipt(lambda: {**context, "runtime_generation": self._runtime_generation,
+                               **{key: result[key] for key in ("parser", "path", "identity", "mode") if key in result},
+                               **(receipt(result) if receipt is not None else {}),
+                               **({"error": result["error"]} if result.get("error") else {})})
         return result
+
+    def observation_loop(self) -> asyncio.AbstractEventLoop:
+        return self._loop
 
     def create(self, **kwargs):
         raise RuntimeError("Selected Rust runtime requires native async create; no Python fallback")
@@ -1364,10 +1370,10 @@ class RustTerminalService(TerminalService):
         marked so `create_async` never writes a second one."""
         if getattr(failure, "_failure_receipted", False):
             return
-        self._receipt({"event": "create_failed", "session_id": None, "pane_id": pane_id,
-                       "session_generation": None, "error": type(failure).__name__,
-                       "code": getattr(failure, "code", None), "stage": "pre-dispatch",
-                       "effect": "none", "message": str(failure)[:200], "root": None})
+        self._receipt(lambda: {"event": "create_failed", "session_id": None, "pane_id": pane_id,
+                               "session_generation": None, "error": type(failure).__name__,
+                               "code": getattr(failure, "code", None), "stage": "pre-dispatch",
+                               "effect": "none", "message": str(failure)[:200], "root": None})
         with suppress(Exception):
             failure._failure_receipted = True  # type: ignore[attr-defined]
 
@@ -1539,10 +1545,10 @@ class RustTerminalService(TerminalService):
                 session.handle = MasterHandle(slot.fd, session.proc)
                 session.tty, slot.fd = slot.tty, None
             session.handle.start_reading(self._loop, lambda s=session: self._on_readable(s))
-            self._receipt({"event": "handle_attached", "session_id": sid,
-                           "session_generation": generation, "handle": type(session.handle).__name__,
-                           # The duplicated pipe handle values (Windows), so W10 can see them reused across sessions.
-                           **({"handles": [slot.input_handle, slot.output_handle]} if WINDOWS else {})})
+            self._receipt(lambda: {"event": "handle_attached", "session_id": sid,
+                                   "session_generation": generation, "handle": type(session.handle).__name__,
+                                   # The duplicated pipe handle values (Windows), so W10 can see them reused across sessions.
+                                   **({"handles": [slot.input_handle, slot.output_handle]} if WINDOWS else {})})
             self._task(self._adopt(session))
             session.published = True
             self._sessions[sid] = session
@@ -1558,9 +1564,9 @@ class RustTerminalService(TerminalService):
                 handed += len(chunk)
             if eof or errored:
                 self._close(session, reason="error" if errored else "exit")
-            self._receipt({"event": "preread_handed_over", "session_id": sid, "session_generation": generation,
-                           "bytes": handed, "dropped": dropped, "read_total": slot.read_total,
-                           "stream_ended": bool(eof or errored)})
+            self._receipt(lambda: {"event": "preread_handed_over", "session_id": sid, "session_generation": generation,
+                                   "bytes": handed, "dropped": dropped, "read_total": slot.read_total,
+                                   "stream_ended": bool(eof or errored)})
             settle("published")
             return session
         except BaseException as failure:
@@ -1568,10 +1574,11 @@ class RustTerminalService(TerminalService):
             # (E2 3 item 2): its stage, the refusal's code/effect when the sidecar answered, and the root if one
             # was ever identified. Counts and identifiers only.
             meta = getattr(failure, "meta", None) or {}
-            self._receipt({"event": "create_failed", "session_id": sid, "pane_id": kwargs.get("pane_id"),
-                           "session_generation": generation, "error": type(failure).__name__,
-                           "code": meta.get("code"), "stage": meta.get("stage"), "effect": meta.get("effect"),
-                           "message": str(failure)[:200], "root": (session.root if session is not None else None)})
+            self._receipt(lambda error=failure: {
+                "event": "create_failed", "session_id": sid, "pane_id": kwargs.get("pane_id"),
+                "session_generation": generation, "error": type(error).__name__,
+                "code": meta.get("code"), "stage": meta.get("stage"), "effect": meta.get("effect"),
+                "message": str(error)[:200], "root": (session.root if session is not None else None)})
             with suppress(Exception):
                 failure._failure_receipted = True
             raise
@@ -1718,8 +1725,8 @@ class RustTerminalService(TerminalService):
                 self._cleanup_failed = True
                 self._lose(f"CLEANUP_FAILED: abandoned create {sid} could not be cleaned up")
         finally:
-            self._receipt({"event": "abandoned_create", "session_id": sid, "session_generation": stub.generation,
-                           "create_id": dispatched.get("request_id"), "outcome": outcome})
+            self._receipt(lambda: {"event": "abandoned_create", "session_id": sid, "session_generation": stub.generation,
+                                   "create_id": dispatched.get("request_id"), "outcome": outcome})
             if native:
                 native["outcome"] = f"abandon-{outcome}"
                 native["settled"].set()
@@ -1861,8 +1868,8 @@ class RustTerminalService(TerminalService):
             # A worker did not join: the read end is NOT closed, so `TTY_EOF` would announce a gate that
             # does not hold (7.3). Report it and retire the generation; loss owns the session from here.
             self._close_incomplete.add(session.id)
-            self._receipt({"event": "handle_close_incomplete", "session_id": session.id,
-                           "platform": RECEIPT_PLATFORM, "path": "stream"})
+            self._receipt(lambda: {"event": "handle_close_incomplete", "session_id": session.id,
+                                   "platform": RECEIPT_PLATFORM, "path": "stream"})
             self._lose("HANDLE_CLOSE_INCOMPLETE: a pump or writer did not end within THREAD_CLOSE_S")
             return
         session.ended_monotonic = time.monotonic()

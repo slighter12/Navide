@@ -251,20 +251,6 @@ def _signal_each(targets: "list[tuple[int, bool]]", *, force: bool) -> None:
             pass
 
 
-def _still_same(
-    targets: "list[tuple[int, bool]]", table: dict[int, tuple[int, str]]
-) -> "list[tuple[int, bool]]":
-    """The targets whose start-time identity in a fresh table still matches
-    the one in `table` (the snapshot the verdict was made on). A pid gone or
-    recycled in between is dropped (a group stays while a member holds its id,
-    see `_survives`); a failed fresh probe drops everything — an identity that
-    cannot be re-checked never authorizes a second kill."""
-    fresh = _ps_table()
-    if fresh is None:
-        return []
-    return [(pid, group) for pid, group in targets if _survives(fresh, pid, group, table)]
-
-
 def _collect_stale(
     entries: dict[str, dict], table: dict[int, tuple[int, str]]
 ) -> "tuple[list[int], list[int], list[int], dict[str, dict]]":
@@ -617,11 +603,11 @@ def reap_stale(grace: float = 1.0, settle: float = 3.0, _retry: bool = True) -> 
         watched: list = []
         if targets:
             _signal_each(targets, force=False)
-            time.sleep(grace)
-            # The grace is long enough for a pid to be recycled — on Windows
-            # by this backend's own first panes — so the force round is
-            # re-verified against a fresh table instead of re-sent blind.
-            _signal_each(_still_same(targets, table), force=True)
+            # The grace ends when every target is gone. The grace is long enough for a pid to be recycled — on
+            # Windows by this backend's own first panes — so the force round goes only to what a fresh table
+            # still shows as the same process, never re-sent blind. A table that cannot be read forces nothing.
+            if survivors := _wait_until_gone(_recheck(targets, table), table, grace):
+                _signal_each(survivors, force=True)
             log.info(
                 "reaped %d orphaned PTY process group(s) %s and %d detached descendant(s) %s",
                 len(roots), roots, len(desc_group) + len(desc_solo), desc_group + desc_solo,
@@ -688,10 +674,9 @@ def _settle_journals(ingested: list, remaining_rows: dict, problems: list) -> No
 
 
 def _recheck(targets: "list[tuple[int, bool]]", table: dict[int, tuple[int, str]]):
-    """Targets whose start-time identity still matches in a FRESH table, or None
-    when that table cannot be read (unlike `_still_same`, which treats a failed
-    read as "nothing left" — acceptable for narrowing a signal, never for
-    certifying that processes are gone)."""
+    """Targets whose start-time identity still matches in a FRESH table (a pid gone or recycled in between is
+    dropped; a group stays while a member holds its id, see `_survives`), or None when that table cannot be read. A
+    failed read is not "nothing left": it never certifies that processes are gone and never authorizes a kill."""
     fresh = _ps_table()
     if fresh is None:
         return None
@@ -787,9 +772,8 @@ def reap_runtime(runtime_generation: str, grace: float = 1.0, settle: float = 3.
         unverifiable = False
         if targets:
             _signal_each(targets, force=False)
-            time.sleep(grace)
-            remaining = _recheck(targets, table)
-            if remaining is not None and remaining:
+            remaining = _wait_until_gone(_recheck(targets, table), table, grace)
+            if remaining:
                 _signal_each(remaining, force=True)
                 remaining = _wait_until_gone(remaining, table, settle)
             if remaining is None:

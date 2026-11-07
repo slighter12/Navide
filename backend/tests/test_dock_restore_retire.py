@@ -46,6 +46,9 @@ class FakeTerminals:
         self._sessions = {s.id: s for s in sessions}
         self.killed: list[str] = []
 
+    def get(self, session_id: str) -> SimpleNamespace | None:
+        return self._sessions.get(session_id)
+
     async def kill(self, session_id: str, force: bool = False) -> None:
         self.killed.append(session_id)
 

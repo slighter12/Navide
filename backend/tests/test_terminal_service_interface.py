@@ -47,6 +47,47 @@ def test_both_services_implement_the_whole_async_interface(service):
     assert callable(service.control_async) and callable(service.prewarm) and callable(service.receipt_refused_create)
 
 
+#: The synchronous members the handlers, the app and the tools call on `session.terminals`.
+SYNC_INTERFACE = ("create", "write", "shell_in_foreground", "interrupt", "resize", "force_redraw", "log_sent", "get",
+                  "list_sessions", "list_session_ids", "live_pane_marks", "memory_pid_groups",
+                  "live_session_ids_for_pane", "live_ids_for_surface", "find_live_by_resume_id")
+
+
+@pytest.mark.parametrize("service", [TerminalService, RustTerminalService], ids=["in-process", "rust"])
+def test_the_interface_declares_every_member_a_caller_uses(service):
+    for name in SYNC_INTERFACE + ("drain_output", "kill", "wait_until_reaped", "kill_all"):
+        assert hasattr(terminals.TerminalInterface, name), f"TerminalInterface does not declare {name}"
+        assert hasattr(service, name)
+
+
+def test_a_service_that_implements_nothing_answers_nothing_live():
+    bare = terminals.TerminalInterface()
+    assert bare.get("s") is None and bare.list_sessions() == [] and bare.list_session_ids() == []
+    assert bare.live_pane_marks() == set() and bare.memory_pid_groups() == {}
+    assert bare.live_session_ids_for_pane("p") == [] and bare.live_ids_for_surface("dock") == []
+    assert bare.find_live_by_resume_id("claude", "r", lambda argv: "") == []
+    with pytest.raises(NotImplementedError):
+        bare.create(pane_id="p")
+
+
+async def test_list_sessions_is_the_public_view_of_what_the_service_holds(tmp_path):
+    service = TerminalService(Sink())
+    session = await service.create_async(pane_id="p", agent_key=None, command=["/bin/cat"], cwd=str(tmp_path))
+    try:
+        assert service.list_sessions() == [session] and service.get(session.id) is session
+    finally:
+        await service.kill(session.id, force=True)
+
+
+def test_no_caller_reads_the_private_session_table_of_a_service():
+    offenders = []
+    for name in ("ws_handlers.py", "app.py", "mcp_server/server.py"):
+        for number, line in enumerate((PY_SRC / name).read_text().splitlines(), 1):
+            if re.search(r"(terminals|service)\W+(?:[\"'])?_sessions\b", line):
+                offenders.append(f"{name}:{number}: {line.strip()}")
+    assert not offenders, offenders
+
+
 class Sink:
     def __init__(self) -> None:
         self.frames: list = []

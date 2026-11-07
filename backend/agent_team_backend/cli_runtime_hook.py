@@ -14,9 +14,9 @@ and a counter gate reads `control_ledger()` from the service.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .log_readers.watcher import DEFAULT_RESCAN_S
 
@@ -26,6 +26,21 @@ SELECTOR_ENV = "NAVIDE_ACR_EVAL_RUNTIME"
 ISOLATION_ENV = "NAVIDE_REGRESSION_ROOT"
 RUST_SELECTION = "rust-shell"
 PYTHON_SELECTION = "python"
+
+
+class Ledger(Protocol):
+    """The control-plane ledger: what the bridge reports about its frames to the hook, in one place. The product's
+    ledger and the harness's both satisfy it, so a member added to one cannot be silently dropped by the other."""
+
+    def sent(self, frame_code: int, size: int) -> None: ...
+
+    def received(self, frame: Any) -> None: ...
+
+    def late_part(self, size: int) -> None: ...
+
+    def late_answer(self) -> None: ...
+
+    def snapshot(self) -> dict: ...
 
 
 class NullLedger:
@@ -51,10 +66,11 @@ class HarnessHook:
     """What the product runs with."""
 
     def __init__(self) -> None:
-        self.ledger = NullLedger()
+        self.ledger: Ledger = NullLedger()
 
-    def receipt(self, record: dict) -> None:
-        """One structured record of the runtime's lifecycle for the harness's receipt file."""
+    def receipt(self, build: Callable[[], dict]) -> None:
+        """One structured record of the runtime's lifecycle for the harness's receipt file. The caller hands over how
+        to build the record, not the record, so a hook that keeps none builds none."""
 
     def create_checkpoint(self, fd: int, session_id: str, pane_id: str, generation: str, sidecar_tty: str,
                           root: dict) -> dict | None:

@@ -351,7 +351,7 @@ def test_reap_force_round_re_verifies_identity_after_the_grace(monkeypatch) -> N
     sent.clear()
     pty_registry._save({"77": {"argv0": "x", "lstart": "L77", "owner": 1}})
     pty_registry.reap_stale(grace=0.0)
-    assert sent == [([(77, True)], False), ([], True)]
+    assert sent == [([(77, True)], False)], "a fresh probe that fails sends no force round at all"
 
 
 def test_reap_leaves_live_sibling_entries_untouched(monkeypatch) -> None:

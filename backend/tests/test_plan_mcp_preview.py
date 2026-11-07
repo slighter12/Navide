@@ -80,13 +80,16 @@ def _pane(pane_id: str, workspace: str, agent_key: str = "claude") -> Any:
 
 
 class _FakeTerminalService:
-    """Stand-in for TerminalService: just the `_sessions` dict the
+    """Stand-in for TerminalService: just the sessions the
     workspace-mismatch check snapshots."""
 
     def __init__(self, cwds: list[str]) -> None:
         self._sessions = {
             cwd: SimpleNamespace(id=cwd, cwd=cwd, metadata={}, closed=False) for cwd in cwds
         }
+
+    def list_sessions(self) -> list[SimpleNamespace]:
+        return list(self._sessions.values())
 
 
 @pytest.fixture

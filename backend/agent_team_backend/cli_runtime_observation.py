@@ -15,17 +15,19 @@ OBSERVE_RESULT_S = 20
 def _submit(vendor, parser, request, *, match, validate=None, receipt):
     """Send one OBSERVE request from a scan executor and wait for its answer."""
     from .app import get_terminals
+    from .terminals import NATIVE_OBSERVATION_UNAVAILABLE
     service = get_terminals()
-    if not service._loop.is_running():
-        raise RuntimeError('Selected native observation unavailable; no Python parser fallback')
+    service_loop = service.observation_loop()
+    if service_loop is None or not service_loop.is_running():
+        raise RuntimeError(NATIVE_OBSERVATION_UNAVAILABLE)
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
-    if loop is service._loop:
+    if loop is service_loop:
         raise RuntimeError('Native synchronous observation requires the existing scan executor')
     future = asyncio.run_coroutine_threadsafe(service.observe(
-        vendor, parser, request, match=match, validate=validate, receipt=receipt), service._loop)
+        vendor, parser, request, match=match, validate=validate, receipt=receipt), service_loop)
     try:
         return future.result(timeout=OBSERVE_RESULT_S)
     except TimeoutError:

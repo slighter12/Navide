@@ -76,7 +76,7 @@ def test_touch_spares_workspaces_with_live_panes(wired, tmp_path: Path, monkeypa
     a, b, c = _dirs(tmp_path, "a", "b", "c")
     live = SimpleNamespace(closed=False, metadata={"workspace_path": a}, cwd=a)
     monkeypatch.setattr(
-        app_module, "get_terminals", lambda: SimpleNamespace(_sessions={"s": live}), raising=False
+        app_module, "get_terminals", lambda: SimpleNamespace(list_sessions=lambda: [live]), raising=False
     )
     _touch(a)
     _touch(b)

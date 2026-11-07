@@ -80,10 +80,11 @@ async def test_the_ck_is_emitted_before_the_create_reply_is_released(rig):
     order: list[str] = []
     original = service._receipt
 
-    def traced(record):
+    def traced(build):
+        record = build()
         if record["event"] == "ck":
             order.append("ck")
-        original(record)
+        original(lambda: record)
 
     service._receipt = traced
     session = await rig.life(service, "pane-ck-order")

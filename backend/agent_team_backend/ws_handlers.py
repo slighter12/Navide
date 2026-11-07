@@ -4670,7 +4670,7 @@ def _live_pane_workspaces_for_recent() -> list[str]:
 
     try:
         terminals = app.get_terminals()
-        sessions = list(getattr(terminals, "_sessions", {}).values())
+        sessions = terminals.list_sessions()
     except Exception:  # noqa: BLE001 — protection is best-effort, never fatal
         return []
     out: list[str] = []
@@ -8002,7 +8002,7 @@ async def onboarding_run(session: "Session", msg_id: str, msg_type: str, payload
         return
     command = str(resolved["command"])
     try:
-        term = session.terminals.create(
+        term = await session.terminals.create_async(
             pane_id=f"{ONBOARDING_RUN_AGENT_KEY}-{__import__('uuid').uuid4().hex}",
             agent_key=ONBOARDING_RUN_AGENT_KEY,
             command=app.onboarding_deps.run_argv(command),
@@ -9664,8 +9664,8 @@ async def terminal_create_cancel(
         # Acknowledge only with proof its target cannot execute, or that its created root was cleaned by
         # verified identity. Never a bare flag. A create with no dispatch fence proves it by its own rollback.
         outcome = await session.terminals.cancel_dispatched(transaction)
-        proven = outcome is not CreateCancel.PENDING
-        if outcome is CreateCancel.PENDING:
+        proven = outcome in (CreateCancel.PROVEN, CreateCancel.ROLLBACK)
+        if outcome == CreateCancel.PENDING:
             proven = await _native_cancel_disposition(transaction)
         await _rollback_terminal_create(session, transaction)
         if not proven:
@@ -10104,11 +10104,9 @@ async def terminal_kill(session: "Session", msg_id: str, msg_type: str, payload:
         return
     pane_id_for_unreg = ""
     dock: tuple[str, str] | None = None
-    for sess in session.terminals._sessions.values():  # noqa: SLF001
-        if sess.id == term_session_id:
-            pane_id_for_unreg = sess.pane_id
-            dock = _dock_target(getattr(sess, "metadata", None) or {})
-            break
+    if (sess := session.terminals.get(term_session_id)) is not None:
+        pane_id_for_unreg = sess.pane_id
+        dock = _dock_target(getattr(sess, "metadata", None) or {})
     try:
         await session.terminals.kill(term_session_id, force=force)
         if pane_id_for_unreg:
@@ -10259,11 +10257,10 @@ async def terminal_config_status(session: "Session", msg_id: str, msg_type: str,
             make_error(msg_id, msg_type, "BAD_REQUEST", "terminal_session_ids must be a list")
         )
         return
-    stored_sessions = session.terminals._sessions  # noqa: SLF001
     current: dict[str, dict[str, str | None]] = {}
     stale: list[dict[str, Any]] = []
     for tid in (str(x) for x in ids):
-        stored = stored_sessions.get(tid)
+        stored = session.terminals.get(tid)
         if stored is None or stored.closed or app._PTY_OWNERS.get(tid) is not session:
             continue
         recorded = stored.metadata.get(pane_config_fingerprint.METADATA_KEY)
@@ -10330,11 +10327,10 @@ async def terminal_reattach(session: "Session", msg_id: str, msg_type: str, payl
     expected_workspace_path = payload.get("expected_workspace_path")
     expected_origin = payload.get("expected_origin")
     expected_profile_ids = payload.get("expected_profile_ids")
-    stored_sessions = session.terminals._sessions  # noqa: SLF001
     alive: list[str] = []
     dead: list[str] = []
     for tid in ids:
-        stored = stored_sessions.get(tid)
+        stored = session.terminals.get(tid)
         if stored is None or stored.closed:
             dead.append(tid)
             continue
@@ -10370,7 +10366,7 @@ async def terminal_reattach(session: "Session", msg_id: str, msg_type: str, payl
         sessions: dict[str, dict[str, str]] = {}
         if session.host_authenticated:
             for tid in alive:
-                stored = stored_sessions.get(tid)
+                stored = session.terminals.get(tid)
                 if stored is None:
                     continue
                 row = {
@@ -10393,7 +10389,7 @@ async def terminal_reattach(session: "Session", msg_id: str, msg_type: str, payl
         # cli.bypass_dropped event already told the window that asked.
         bypass_dropped = {}
         for tid in alive:
-            metadata = getattr(stored_sessions.get(tid), "metadata", None) or {}
+            metadata = getattr(session.terminals.get(tid), "metadata", None) or {}
             if BYPASS_DROPPED_METADATA_KEY in metadata:
                 bypass_dropped[tid] = metadata[BYPASS_DROPPED_METADATA_KEY]
         response_payload["bypass_dropped"] = bypass_dropped

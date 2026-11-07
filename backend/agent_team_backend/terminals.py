@@ -163,9 +163,6 @@ class TerminalSession:
     exit_signal: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     output_log_fp: IO[str] | None = field(default=None, repr=False)
-    # Per-session vendor-parser state — used by vendor_parsers.parse_chunk to
-    # compute deltas against the last seen cumulative token totals.
-    vendor_parser_state: dict[str, Any] = field(default_factory=dict)
     # Rolling snapshot of the child's descendant pids (pid -> ps lstart at
     # capture time), refreshed by the service's snapshot loop while the child
     # is alive. When the child dies on its own (EOF path) its ancestry is
@@ -490,6 +487,10 @@ async def _to_thread_and_drain_on_cancel(func: Callable[..., Any], *args: Any) -
         raise
 
 
+#: The one sentence every refusal of a native observation carries, wherever it is refused.
+NATIVE_OBSERVATION_UNAVAILABLE = "Selected native observation unavailable; no Python parser fallback"
+
+
 class CreateCancelled(RuntimeError):
     """The caller cancelled this create while it was still being coordinated; nothing was sent."""
 
@@ -503,11 +504,80 @@ class CreateCancel(StrEnum):
 
 
 class TerminalInterface:
-    """The async surface every handler calls on a terminal service, written once over the synchronous primitives of
-    the service (`create`, `write`, `resize`, ...). The in-process service uses it as it is. The Rust service overrides
-    what it does differently (`create_async`, `control_async`, `kill_verified`, `cancel_dispatched`, `observe`,
-    `prewarm`, `receipt_refused_create`) and inherits the rest, so no caller asks which service it holds."""
+    """Everything a handler or the app calls on a terminal service, declared once. The async half is written here over
+    the synchronous primitives (`create`, `write`, `resize`, ...), which a service implements. The in-process service
+    uses the async half as it is. The Rust service overrides what it does differently (`create_async`, `control_async`,
+    `kill_verified`, `cancel_dispatched`, `observe`, `prewarm`, `receipt_refused_create`), so no caller asks which
+    service it holds. The queries answer "nothing live" until a service answers them."""
 
+    # ── synchronous primitives: a service implements these ──
+    def create(self, **launch: Any) -> TerminalSession:
+        raise NotImplementedError
+
+    def write(self, session_id: str, data: str) -> int:
+        raise NotImplementedError
+
+    def shell_in_foreground(self, session_id: str) -> bool | None:
+        raise NotImplementedError
+
+    def interrupt(self, session_id: str) -> None:
+        raise NotImplementedError
+
+    def resize(self, session_id: str, cols: int, rows: int) -> None:
+        raise NotImplementedError
+
+    def force_redraw(self, session_id: str, cols: int, rows: int) -> None:
+        raise NotImplementedError
+
+    async def drain_output(self, session_id: str) -> None:
+        raise NotImplementedError
+
+    async def kill(self, session_id: str, force: bool = False) -> None:
+        raise NotImplementedError
+
+    async def wait_until_reaped(self, session_id: str, timeout: float | None = None) -> bool:
+        raise NotImplementedError
+
+    async def kill_all(self, grace: float = 1.0) -> None:
+        raise NotImplementedError
+
+    def log_sent(self, session_id: str, label: str, text: str) -> None:
+        """Record text the backend itself sent to a session, in that session's transcript."""
+
+    # ── queries ──
+    def get(self, session_id: str) -> TerminalSession | None:
+        """The session for ``session_id``, or None when unknown."""
+        return None
+
+    def list_sessions(self) -> list[TerminalSession]:
+        """Every session the service holds, closed ones included until they are dropped."""
+        return []
+
+    def list_session_ids(self) -> list[str]:
+        return []
+
+    def live_pane_marks(self) -> set[str]:
+        return set()
+
+    def memory_pid_groups(self) -> dict[str, tuple[str, list[int]]]:
+        return {}
+
+    def live_session_ids_for_pane(self, pane_id: str) -> list[str]:
+        return []
+
+    def live_ids_for_surface(self, surface: str, workspace_path: str = "") -> list[tuple[str, str, str]]:
+        return []
+
+    def find_live_by_resume_id(
+        self, agent_key: str, resume_id: str, extract_resume_id: Callable[[list[str]], str]
+    ) -> list[TerminalSession]:
+        return []
+
+    def observation_loop(self) -> asyncio.AbstractEventLoop | None:
+        """The loop a synchronous caller schedules `observe` on, or None when this service answers no observation."""
+        return None
+
+    # ── the async surface ──
     def prewarm(self) -> None:
         """Called at each client connection. A service with something to start ahead of a create starts it here."""
 
@@ -571,7 +641,7 @@ class TerminalInterface:
         receipt: Callable[..., Any] | None = None,
     ) -> dict[str, Any]:
         """One native vendor observation. Only the Rust runtime answers; there is no Python parser fallback."""
-        raise RuntimeError("Selected native observation unavailable; no Python parser fallback")
+        raise RuntimeError(NATIVE_OBSERVATION_UNAVAILABLE)
 
 
 class TerminalService(TerminalInterface):
@@ -866,6 +936,9 @@ class TerminalService(TerminalInterface):
     def get(self, session_id: str) -> TerminalSession | None:
         """The session for ``session_id``, or None when unknown."""
         return self._sessions.get(session_id)
+
+    def list_sessions(self) -> list[TerminalSession]:
+        return list(self._sessions.values())
 
     def shell_in_foreground(self, session_id: str) -> bool | None:
         """Whether the PTY's own child (a plain terminal pane's login shell) is

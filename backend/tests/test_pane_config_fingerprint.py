@@ -161,15 +161,14 @@ def _stored(agent_key: str, recorded: Any, closed: bool = False) -> SimpleNamesp
 async def test_config_status_lists_only_owned_live_stale_panes(monkeypatch: pytest.MonkeyPatch) -> None:
     session = app.Session(FakeWebSocket())  # type: ignore[arg-type]
     other = app.Session(FakeWebSocket())  # type: ignore[arg-type]
-    session.terminals = SimpleNamespace(  # type: ignore[assignment]
-        _sessions={
-            "stale": _stored("claude", {"mcp": "old", "skills": "s"}),
-            "fresh": _stored("claude", {"mcp": "new", "skills": "s"}),
-            "closed": _stored("claude", {"mcp": "old", "skills": "s"}, closed=True),
-            "foreign": _stored("claude", {"mcp": "old", "skills": "s"}),
-            "legacy": _stored("claude", None),
-        }
-    )
+    stored = {
+        "stale": _stored("claude", {"mcp": "old", "skills": "s"}),
+        "fresh": _stored("claude", {"mcp": "new", "skills": "s"}),
+        "closed": _stored("claude", {"mcp": "old", "skills": "s"}, closed=True),
+        "foreign": _stored("claude", {"mcp": "old", "skills": "s"}),
+        "legacy": _stored("claude", None),
+    }
+    session.terminals = SimpleNamespace(get=stored.get)  # type: ignore[assignment]
     for tid in ("stale", "fresh", "closed", "legacy"):
         monkeypatch.setitem(app._PTY_OWNERS, tid, session)
     monkeypatch.setitem(app._PTY_OWNERS, "foreign", other)
@@ -246,9 +245,8 @@ async def test_config_status_answer_carries_no_secret(tmp_path: Path, monkeypatc
     monkeypatch.setattr(native_mcp, "_home", lambda: tmp_path)
     _claude_config_with_secrets(tmp_path, FAKE_TOKEN, "a@example.test")
     session = app.Session(FakeWebSocket())  # type: ignore[arg-type]
-    session.terminals = SimpleNamespace(  # type: ignore[assignment]
-        _sessions={"t": _stored("claude", {"mcp": "old", "skills": None})}
-    )
+    stored = {"t": _stored("claude", {"mcp": "old", "skills": None})}
+    session.terminals = SimpleNamespace(get=stored.get)  # type: ignore[assignment]
     monkeypatch.setitem(app._PTY_OWNERS, "t", session)
     await ws_handlers.terminal_config_status(session, "q", "terminal.config_status", {"terminal_session_ids": ["t"]})
     reply = session.websocket.sent[-1]
