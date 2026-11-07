@@ -28,6 +28,7 @@ from ._vendor_facts import FACTS
 from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, command_text
 from ..usage_common import HTTP_TIMEOUT, _epoch_to_iso, _num, _snapshot, _window, parse_retry_after
 from ..log_readers.base import (
+    ActivityLines,
     ActivityEvent,
     IncrementalParseResult,
     LogReader,
@@ -343,7 +344,7 @@ class KimiLogReader(LogReader):
             )
 
         try:
-            fh = path.open(encoding="utf-8")
+            fh = ActivityLines(self, path, seen_keys)
         except OSError:
             return out
 
@@ -357,7 +358,7 @@ class KimiLogReader(LogReader):
 
         try:
             with fh:
-                for line_no, raw_line in enumerate(fh, 1):
+                for line_no, raw_line in fh:
                     raw = raw_line.strip()
                     if not raw:
                         continue
@@ -468,6 +469,7 @@ class KimiLogReader(LogReader):
 
         finally:
             set_activity_high_water(seen_keys, last_line)
+            fh.save(last_line)
             _write_turn_state(seen_keys, state)
             _write_last_text(seen_keys, last_text)
         return out

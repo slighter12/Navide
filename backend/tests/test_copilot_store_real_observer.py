@@ -68,6 +68,23 @@ async def test_a_real_commit_binds_the_pane_after_a_pass_that_missed_it(journal_
     watcher = LogWatcher(sink=_noop, session_sink=session_sink, seen_path=tmp_path / "seen.json")
     watcher.add_reader(reader)
     watcher.start()
+    # start() returns before the OS stream is delivering: a write made in that gap raises no event at all
+    # (only the 30 s sweep would see it), which under load lost the commit below. Write to a probe
+    # file until its event arrives, so every write after this point is observed.
+    probe = home / "probe.jsonl"
+    live = asyncio.Event()
+    enqueue = watcher._enqueue_realtime  # noqa: SLF001
+
+    def note(path: Path) -> None:
+        if path == probe:
+            live.set()
+        enqueue(path)
+
+    monkeypatch.setattr(watcher, "_enqueue_realtime", note)
+    async with asyncio.timeout(15):
+        while not live.is_set():
+            probe.write_text("x", encoding="utf-8")
+            await asyncio.sleep(0.05)
     writer = sqlite3.connect(store, isolation_level=None)
     try:
         writer.execute("BEGIN")
