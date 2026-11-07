@@ -13,6 +13,7 @@ queues it again when it moved, instead of trusting that an event will.
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,15 @@ def _append(path: Path) -> None:
         fh.write("{}\n")
 
 
+def _append_within_the_same_tick(path: Path) -> None:
+    # A file system with a coarse timestamp (ext4, some Windows volumes) gives an append inside the same
+    # tick the mtime it already had; os.utime puts that back so the size is the only thing that moved.
+    stat = path.stat()
+    _append(path)
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert path.stat().st_mtime_ns == stat.st_mtime_ns
+
+
 def _wal_commit(path: Path) -> None:
     # The main file is untouched until a checkpoint; the commit lands in the -wal.
     wal = path.with_name(path.name + "-wal")
@@ -70,7 +80,11 @@ async def _tokens(_usage: object) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("name", "mutate"), [("t.jsonl", _append), ("store.db", _wal_commit)])
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [("t.jsonl", _append), ("t.jsonl", _append_within_the_same_tick), ("store.db", _wal_commit)],
+    ids=["append", "append-with-frozen-mtime", "wal-commit"],
+)
 async def test_a_change_during_the_walk_queues_the_file_again_without_a_file_event(
         tmp_path: Path, name: str, mutate) -> None:  # noqa: ANN001
     root = tmp_path / "root"
@@ -96,3 +110,13 @@ async def test_a_change_during_the_walk_queues_the_file_again_without_a_file_eve
         assert reader.parse_calls == 2
     finally:
         drain.cancel()
+
+
+def test_the_sweep_gate_sees_an_append_that_left_the_mtime_unchanged(tmp_path: Path) -> None:
+    target = tmp_path / "t.jsonl"
+    target.write_text("{}\n", encoding="utf-8")
+    watcher = LogWatcher(sink=_tokens, activity_sink=_activity)  # type: ignore[arg-type]
+    assert watcher._changed_since_last_scan([target]) == [target]  # noqa: SLF001
+    assert watcher._changed_since_last_scan([target]) == []  # noqa: SLF001
+    _append_within_the_same_tick(target)
+    assert watcher._changed_since_last_scan([target]) == [target]  # noqa: SLF001

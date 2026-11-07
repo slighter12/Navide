@@ -222,7 +222,7 @@ class LogWatcher:
         # this became the backend's largest retained structure.
         self._activity_seen: dict[str, set[str]] = {}
         self._activity_seen_swept_at: float | None = None
-        self._scan_mtimes: dict[str, int | tuple[int, int, int]] = {}
+        self._scan_mtimes: dict[str, tuple[int, ...]] = {}
         # Last seen size per file: a stat is how an append skips the line count.
         self._activity_sizes: dict[str, int] = {}
         self._queue: asyncio.Queue[tuple[Path | None, str]] = asyncio.Queue()
@@ -767,10 +767,10 @@ class LogWatcher:
             )
 
     def _files_to_scan(self) -> list[Path]:
-        """Backfill candidates whose mtime changed since the last sweep.
+        """Backfill candidates whose signature (mtime and size) changed since the last sweep.
 
         Workspace scoping (_candidate_files) bounds which files we look at;
-        this mtime gate stops us from re-enqueueing unchanged files. Without
+        this signature gate stops us from re-enqueueing unchanged files. Without
         it every 30-second cycle re-reads every workspace session file —
         including 100 MB+ Claude histories — saturating the drain task.
 
@@ -781,8 +781,12 @@ class LogWatcher:
         return self._changed_since_last_scan(self._candidate_files())
 
     @staticmethod
-    def _file_signature(p: Path) -> int | tuple[int, int, int] | None:
-        """What changes when ``p`` is written (None when it cannot be stat'ed)."""
+    def _file_signature(p: Path) -> tuple[int, ...] | None:
+        """What changes when ``p`` is written (None when it cannot be stat'ed).
+
+        A plain file is ``(mtime_ns, size)``: on a file system with a coarse timestamp (ext4, some Windows
+        volumes) an append inside the same tick leaves the mtime alone, and the size is what shows it.
+        """
         try:
             main = p.stat()
         except OSError:
@@ -796,10 +800,10 @@ class LogWatcher:
                 return (main.st_mtime_ns, wal.st_mtime_ns, wal.st_size)
             except OSError:
                 pass
-        return main.st_mtime_ns
+        return (main.st_mtime_ns, main.st_size)
 
     def _changed_since_last_scan(self, files: list[Path]) -> list[Path]:
-        """Drop files whose mtime is unchanged since we last enqueued them.
+        """Drop files whose signature (mtime and size) is unchanged since we last enqueued them.
 
         _scan_mtimes is shared by both scopes on purpose: a file is worth
         re-reading once per change, whichever scope surfaced it.
