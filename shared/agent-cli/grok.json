@@ -30,7 +30,7 @@
   "observer": {
     "parser": "grok",
     "parser_id": "rust-grok-jsonl-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "jsonl",
       "usage": "per_turn",

@@ -29,7 +29,7 @@
   "observer": {
     "parser": "opencode",
     "parser_id": "rust-opencode-sqlite-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "applies_when": ["session_v2", "session_message"],
       "source": "sqlite",

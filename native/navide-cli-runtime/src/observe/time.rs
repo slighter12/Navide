@@ -1,27 +1,42 @@
 //! ISO 8601 UTC spelling of an epoch time, the way the baseline readers print one (`isoformat()` of an aware UTC datetime).
 
-/// The broken-down UTC time of `seconds` (`gmtime_r`: the calendar every spelling here shares), `None` where the C library cannot build it.
-fn civil(seconds: i64) -> Option<libc::tm> {
-    let mut time: libc::tm = unsafe { std::mem::zeroed() };
-    (!unsafe { libc::gmtime_r(&seconds, &mut time) }.is_null()).then_some(time)
+/// A UTC calendar time: the proleptic Gregorian date and the time of day, as `gmtime` spells them.
+struct Civil {
+    year: i64,
+    month: i64,
+    day: i64,
+    hour: i64,
+    minute: i64,
+    second: i64,
+}
+
+/// The broken-down UTC time of `seconds` (days since the epoch to a civil date: the proleptic Gregorian calendar every spelling here
+/// shares, the same on every platform), `None` where the year does not fit the `int` a C `tm` keeps it in (`gmtime_r` refuses those).
+fn civil(seconds: i64) -> Option<Civil> {
+    let (days, of_day) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    // Days from 0000-03-01, so that the leap day is the last day of a year; a 400-year era is 146,097 days.
+    let shifted = days + 719_468;
+    let (era, day_of_era) = (shifted.div_euclid(146_097), shifted.rem_euclid(146_097));
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_from_march = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+    let month = if month_from_march < 10 { month_from_march + 3 } else { month_from_march - 9 };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    i32::try_from(year - 1900).ok()?;
+    Some(Civil { year, month, day, hour: of_day / 3_600, minute: of_day % 3_600 / 60, second: of_day % 60 })
 }
 
 /// `2023-11-14T22:13:20+00:00`, or `2023-11-14T22:13:20.123000+00:00` when `micros` is not 0; `""` where the year is
 /// outside 1..=9999 (a date Python cannot build).
 pub fn iso_utc(seconds: i64, micros: u32) -> String {
-    let Some(time) = civil(seconds).filter(|time| (1..=9999).contains(&(time.tm_year + 1900))) else {
+    let Some(time) = civil(seconds).filter(|time| (1..=9999).contains(&time.year)) else {
         return String::new();
     };
     let fraction = if micros == 0 { String::new() } else { format!(".{micros:06}") };
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}+00:00",
-        time.tm_year + 1900,
-        time.tm_mon + 1,
-        time.tm_mday,
-        time.tm_hour,
-        time.tm_min,
-        time.tm_sec,
-        fraction
+        time.year, time.month, time.day, time.hour, time.minute, time.second, fraction
     )
 }
 
@@ -63,12 +78,7 @@ pub fn stamp_millis(seconds: f64) -> String {
     };
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{millis:03}Z",
-        time.tm_year + 1900,
-        time.tm_mon + 1,
-        time.tm_mday,
-        time.tm_hour,
-        time.tm_min,
-        time.tm_sec
+        time.year, time.month, time.day, time.hour, time.minute, time.second
     )
 }
 
@@ -94,6 +104,40 @@ pub fn iso_json_micros(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// t41: the calendar is arithmetic, so it is the same on every platform (Windows has no `gmtime_r`). The C library is the oracle on the
+    /// platforms that have it: every second around each end of the calendar, every day boundary of a few centuries (leap days of century
+    /// years included), and a wide pseudo-random sweep, down to the seconds where the C `tm` refuses the year.
+    #[cfg(unix)]
+    #[test]
+    fn the_calendar_agrees_with_the_c_library_where_it_has_one() {
+        fn oracle(seconds: i64) -> Option<(i64, i64, i64, i64, i64, i64)> {
+            let mut time: libc::tm = unsafe { std::mem::zeroed() };
+            (!unsafe { libc::gmtime_r(&seconds, &mut time) }.is_null()).then(|| {
+                (i64::from(time.tm_year) + 1900, i64::from(time.tm_mon) + 1, i64::from(time.tm_mday), i64::from(time.tm_hour), i64::from(time.tm_min), i64::from(time.tm_sec))
+            })
+        }
+        fn mine(seconds: i64) -> Option<(i64, i64, i64, i64, i64, i64)> {
+            civil(seconds).map(|time| (time.year, time.month, time.day, time.hour, time.minute, time.second))
+        }
+        let mut probes: Vec<i64> = Vec::new();
+        // The last second of the year a `tm` can hold (`tm_year` is `i32::MAX`) and the first of the earliest one.
+        for edge in [-62_135_596_800, 0, 951_782_400, 4_107_542_400, 253_402_300_800, 67_768_036_191_676_799, -67_768_040_609_740_800] {
+            probes.extend((-3..=3).map(|step| edge + step * 86_399 + step));
+        }
+        probes.extend((-400 * 366..400 * 366).map(|day| day * 86_400 + 86_399));
+        probes.extend((-400 * 366..400 * 366).map(|day| day * 86_400));
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        for _ in 0..200_000 {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            probes.push((state >> 20) as i64 % 70_000_000_000_000 - 35_000_000_000_000);
+            probes.push((state >> 33) as i64 % 12_000_000_000 - 6_000_000_000);
+        }
+        probes.extend([i64::MIN, i64::MIN + 1, i64::MAX, i64::MAX - 1]);
+        for seconds in probes {
+            assert_eq!(mine(seconds), oracle(seconds), "the calendar disagrees with gmtime_r at {seconds}");
+        }
+    }
 
     #[test]
     fn a_stamp_is_the_python_strftime_with_milliseconds_and_a_zero_one_is_empty() {

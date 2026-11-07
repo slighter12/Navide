@@ -358,8 +358,6 @@ fn unsettled_cleanup(cx: &mut SessionCx<'_, WindowsHost>) -> Outcome {
 impl Host for WindowsHost {
     type Session = WindowsSession;
     type Owned = Owned;
-    /// Vendor observers read POSIX session files; none is integrated on Windows (E5 scope: shells).
-    type Observer = ();
     type Link = Link;
     /// The channel is the sidecar's own stdin and stdout: no option.
     type Options = ();
@@ -369,7 +367,6 @@ impl Host for WindowsHost {
     const PTY_BACKEND: &'static str = "conpty";
     const HANDOFF: &'static str = "duplicate_handle";
     const SERVICING: bool = true;
-    const OBSERVES: bool = false;
     const OPTIONS: &'static [&'static str] = &[];
 
     fn set_option(_: &mut (), _: &str, _: String) {}

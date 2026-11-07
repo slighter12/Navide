@@ -119,6 +119,7 @@ fn every_jsonl_adapter_emits_per_line_within_the_snapshot_bound() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_fifo_is_refused_without_blocking_the_observer() {
     let root = scratch("fifo");
@@ -132,6 +133,7 @@ fn a_fifo_is_refused_without_blocking_the_observer() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn a_device_and_a_socket_are_refused() {
     assert!(JsonlFile::open_path(Path::new("/dev/zero"), LIMITS).is_err());
@@ -142,11 +144,18 @@ fn a_device_and_a_socket_are_refused() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// The Windows counterpart of the device refusal: `NUL` is a device name, and is never a log.
+#[cfg(windows)]
+#[test]
+fn a_device_name_is_refused() {
+    assert!(JsonlFile::open_path(Path::new("NUL"), LIMITS).is_err());
+}
+
 #[test]
 fn a_symlink_is_not_followed() {
     let root = scratch("symlink");
     std::fs::write(root.join("real.jsonl"), b"{}\n").unwrap();
-    std::os::unix::fs::symlink(root.join("real.jsonl"), root.join("link.jsonl")).unwrap();
+    super::os::link_file(&root.join("real.jsonl"), &root.join("link.jsonl")).expect("this runner cannot create a file symlink");
     assert!(JsonlFile::open_path(&root.join("link.jsonl"), LIMITS).is_err());
     assert!(JsonlFile::open_path(&root.join("real.jsonl"), LIMITS).is_ok());
     std::fs::remove_dir_all(&root).unwrap();

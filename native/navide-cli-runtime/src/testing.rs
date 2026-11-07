@@ -26,7 +26,6 @@ pub struct MockHost {
 impl Host for MockHost {
     type Session = ();
     type Owned = ();
-    type Observer = ();
     type Link = ();
     type Options = ();
     type Unsettled = std::convert::Infallible;
@@ -34,7 +33,6 @@ impl Host for MockHost {
     const PTY_BACKEND: &'static str = "mock";
     const HANDOFF: &'static str = "mock";
     const SERVICING: bool = false;
-    const OBSERVES: bool = true;
     const OPTIONS: &'static [&'static str] = &[];
 
     fn set_option(_: &mut (), _: &str, _: String) {}

@@ -30,7 +30,7 @@
   "observer": {
     "parser": "antigravity",
     "parser_id": "rust-antigravity-sqlite-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "sqlite",
       "usage": "none",

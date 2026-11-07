@@ -29,7 +29,7 @@
   "observer": {
     "parser": "droid",
     "parser_id": "rust-droid-jsonl-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "jsonl",
       "usage": "cumulative",

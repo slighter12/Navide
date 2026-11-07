@@ -14,7 +14,6 @@ mod host;
 mod journal;
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(unix)]
 mod observe;
 #[cfg(unix)]
 mod posix;

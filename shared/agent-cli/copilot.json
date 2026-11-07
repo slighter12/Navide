@@ -29,7 +29,7 @@
   "observer": {
     "parser": "copilot",
     "parser_id": "rust-copilot-jsonl-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "sqlite",
       "usage": "per_turn",

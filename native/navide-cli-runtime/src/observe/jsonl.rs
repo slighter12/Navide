@@ -14,9 +14,9 @@ use super::{
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashSet, VecDeque};
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
-use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
+use super::os::{self, Positioned};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
 /// Bytes the anchor covers (the 512 bytes that end at the saved offset).
@@ -88,7 +88,7 @@ fn modified_ms_of(stat: &std::fs::Metadata) -> Option<i64> {
 fn bytes_before(file: &File, end: u64, wanted: u64) -> io::Result<Vec<u8>> {
     let start = end.saturating_sub(wanted);
     let mut bytes = vec![0; (end - start) as usize];
-    file.read_exact_at(&mut bytes, start)?;
+    os::read_exact_at(file, &mut bytes, start)?;
     Ok(bytes)
 }
 
@@ -163,14 +163,11 @@ fn remember(recent: &mut VecDeque<String>, window: &mut HashSet<String>, key: &s
 }
 
 impl JsonlFile {
-    /// A regular file only, never through a symlink, and never blocking on a FIFO or device.
+    /// A regular file only, never through a link, and never blocking on a FIFO or device (`os::open_regular`, one arm per platform).
     pub fn open_path(path: &Path, limits: Limits) -> io::Result<Self> {
-        let file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+        let os::Regular { file, id } = os::open_regular(path)?;
         let stat = file.metadata()?;
-        if !stat.is_file() {
-            return Err(io::Error::other("observation source is not a regular file"));
-        }
-        Ok(Self { file, identity: format!("{}:{}", stat.dev(), stat.ino()), len: stat.len(), modified_ms: modified_ms_of(&stat), limits })
+        Ok(Self { file, identity: id.text(), len: stat.len(), modified_ms: modified_ms_of(&stat), limits })
     }
 
     /// The modification time (epoch milliseconds) the open handle reports now, for a decision made after the pass has read: a record
@@ -231,8 +228,7 @@ impl JsonlFile {
     /// `resumable` pass stops before the line that would cross it (the next pass starts there); a line that alone
     /// crosses it, or any non-resumable pass that does, is refused. Returns whether the end of the file was reached.
     pub fn lines<F: FnMut(Line) -> Flow>(&mut self, start: u64, first: u64, resumable: bool, mut each: F) -> io::Result<bool> {
-        self.file.seek(SeekFrom::Start(start))?;
-        let mut reader = BufReader::with_capacity(64 * 1024, &self.file);
+        let mut reader = BufReader::with_capacity(64 * 1024, Positioned::new(&self.file, start));
         let (mut end, mut no, mut read) = (start, first, 0u64);
         loop {
             let (mut bytes, mut oversize, mut complete, mut seen) = (Vec::new(), false, false, 0u64);
@@ -372,7 +368,7 @@ impl JsonlFile {
             return Err(io::Error::other("the usage document is over the line bound"));
         }
         let mut bytes = vec![0; sibling.len as usize];
-        sibling.file.read_exact_at(&mut bytes, 0)?;
+        os::read_exact_at(&sibling.file, &mut bytes, 0)?;
         Ok(serde_json::from_slice(&bytes).ok())
     }
 

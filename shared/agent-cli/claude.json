@@ -29,7 +29,7 @@
   "observer": {
     "parser": "claude",
     "parser_id": "rust-claude-jsonl-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "jsonl",
       "usage": "per_turn",

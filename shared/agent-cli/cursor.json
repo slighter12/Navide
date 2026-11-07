@@ -29,7 +29,7 @@
   "observer": {
     "parser": "cursor",
     "parser_id": "rust-cursor-sqlite-v1",
-    "platforms": ["unix"],
+    "platforms": ["unix", "windows"],
     "layouts": [{
       "source": "sqlite",
       "usage": "none",

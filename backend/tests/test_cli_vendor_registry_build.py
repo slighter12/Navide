@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_team_backend import cli_runtime_adapters, osplat
+from agent_team_backend import cli_runtime_adapters
 from agent_team_backend.cli_vendors import registry
 
 
@@ -34,7 +34,6 @@ def test_build_applies_the_wrap_to_every_spec_once_and_leaves_the_registry_alone
 def test_the_selectors_wrap_changes_only_the_copy(key, monkeypatch):
     monkeypatch.setenv("NAVIDE_ACR_EVAL_RUNTIME", "rust-shell")
     monkeypatch.setenv("NAVIDE_REGRESSION_ROOT", "selection-seam")
-    monkeypatch.setattr(osplat, "has_native_vendor_observer", lambda: True)
     plain = registry.VENDORS[key]
 
     wrapped = registry.build(wrap=cli_runtime_adapters.native_reference)

@@ -860,7 +860,8 @@ export const OBSERVER_FACTS = {
     "parser": "aider",
     "parser_id": "rust-aider-md-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -957,7 +958,8 @@ export const OBSERVER_FACTS = {
     "parser": "antigravity",
     "parser_id": "rust-antigravity-sqlite-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1048,7 +1050,8 @@ export const OBSERVER_FACTS = {
     "parser": "claude",
     "parser_id": "rust-claude-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1140,7 +1143,8 @@ export const OBSERVER_FACTS = {
     "parser": "codex",
     "parser_id": "rust-codex-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1241,7 +1245,8 @@ export const OBSERVER_FACTS = {
     "parser": "copilot",
     "parser_id": "rust-copilot-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1466,7 +1471,8 @@ export const OBSERVER_FACTS = {
     "parser": "cursor",
     "parser_id": "rust-cursor-sqlite-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1557,7 +1563,8 @@ export const OBSERVER_FACTS = {
     "parser": "droid",
     "parser_id": "rust-droid-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1650,7 +1657,8 @@ export const OBSERVER_FACTS = {
     "parser": "goose",
     "parser_id": "rust-goose-sqlite-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1805,7 +1813,8 @@ export const OBSERVER_FACTS = {
     "parser": "grok",
     "parser_id": "rust-grok-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -1897,7 +1906,8 @@ export const OBSERVER_FACTS = {
     "parser": "opencode",
     "parser_id": "rust-kilo-sqlite-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -2173,7 +2183,8 @@ export const OBSERVER_FACTS = {
     "parser": "kimi",
     "parser_id": "rust-kimi-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -2274,7 +2285,8 @@ export const OBSERVER_FACTS = {
     "parser": "muse",
     "parser_id": "rust-muse-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -2377,7 +2389,8 @@ export const OBSERVER_FACTS = {
     "parser": "opencode",
     "parser_id": "rust-opencode-sqlite-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -2653,7 +2666,8 @@ export const OBSERVER_FACTS = {
     "parser": "pi",
     "parser_id": "rust-pi-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
@@ -2755,7 +2769,8 @@ export const OBSERVER_FACTS = {
     "parser": "qwen",
     "parser_id": "rust-qwen-jsonl-v1",
     "platforms": [
-      "unix"
+      "unix",
+      "windows"
     ],
     "layouts": [
       {
