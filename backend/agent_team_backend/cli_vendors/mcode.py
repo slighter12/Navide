@@ -335,10 +335,10 @@ SPEC = VendorSpec(
     # `--session <id>` exists on the interactive command, but resume also
     # needs something able to NAME the id of a session Navide started, and
     # that is the log reader mcode does not have yet (see the module
-    # docstring for the SQLite schema it would read). Declared False so the
-    # default True does not advertise a resume that would find no id —
-    # unlike aider, this is a missing reader, not a missing concept.
-    supports_session_resume=FACT.supports_session_resume,
+    # docstring for the SQLite schema it would read). The declaration says
+    # `supports_session_resume: false`, so the default True does not advertise
+    # a resume that would find no id — unlike aider, this is a missing reader,
+    # not a missing concept. The spec derives the field from the declaration.
     # Relocates the entire data root — config, auth, session SQLite. The CLI
     # also honours MAVIS_DATA_DIR as a legacy fallback. Navide strips rather
     # than injects these variables, so both names must be guarded or the

@@ -105,7 +105,7 @@ pub fn iso_json_micros(value: &serde_json::Value) -> String {
 mod tests {
     use super::*;
 
-    /// t41: the calendar is arithmetic, so it is the same on every platform (Windows has no `gmtime_r`). The C library is the oracle on the
+    /// The calendar is arithmetic, so it is the same on every platform (Windows has no `gmtime_r`). The C library is the oracle on the
     /// platforms that have it: every second around each end of the calendar, every day boundary of a few centuries (leap days of century
     /// years included), and a wide pseudo-random sweep, down to the seconds where the C `tm` refuses the year.
     #[cfg(unix)]

@@ -4,6 +4,10 @@ All notable released changes to Navide will be documented in this file. The form
 
 ## [Unreleased]
 
+### Fixed
+
+- Resuming: when the app looks for the session id in a command line you launched, it now splits the line the way a POSIX shell does: quoted and plain text next to each other is one word (`--resume "abc"def` is `abcdef`), and a backslash makes the next character literal (inside double quotes only before `"` or `\`). Before, adjacent quotes and escapes split a word, so a resume command written that way could be read with the wrong id or none. A line with an unbalanced quote or a trailing backslash is still read as plain words separated by whitespace, and on Windows the backend's own reading of a line decides when the two differ.
+
 ## [0.2.37] — 2026-11-04
 
 ### Added

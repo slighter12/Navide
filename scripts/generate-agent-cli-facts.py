@@ -98,7 +98,7 @@ OBSERVER_FIELDS = ("parser", "parser_id", "platforms", "layouts", "core")
 OBSERVER_SOURCES = ("jsonl", "sqlite", "text", "sidecar")
 OBSERVER_USAGE = ("per_turn", "cumulative", "none")
 OBSERVER_PLATFORMS = ("unix", "windows")
-# The observation core compiles and runs on every platform (t34 L2), so every observer declares every platform. A vendor whose layout
+# The observation core compiles and runs on every platform, so every observer declares every platform. A vendor whose layout
 # truly cannot run on one is named here with its reason; with no entry, a declaration that leaves a platform out does not generate.
 OBSERVER_PLATFORM_EXCEPTIONS: dict[str, str] = {}
 LAYOUT_FIELDS = ("source", "usage", "store_file", "usage_fields", "store", "rules", "defers_to", "request", "applies_when")

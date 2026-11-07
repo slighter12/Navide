@@ -54,6 +54,16 @@ fn ordered_keys_list_a_duplicate_key_at_every_place_the_line_spells_it() {
     assert_eq!(ordered_keys(raw, &["m"]), ["a", "b", "a"], "the reader that wants a dict's single place keeps the first");
 }
 
+/// Python's `json.loads` keeps the last value of a key a line spells twice, so the object a path names is the last one the line spells.
+#[test]
+fn ordered_keys_navigate_to_the_last_object_of_a_key_the_line_spells_twice() {
+    assert_eq!(ordered_keys(br#"{"a":{"x":1},"a":{"y":2}}"#, &["a"]), ["y"], "the last `a`, as json.loads keeps it");
+    assert_eq!(ordered_keys(br#"{"a":{"b":{"x":1},"b":{"y":2}},"a":{"b":{"z":3}}}"#, &["a", "b"]), ["z"], "the last at every level of the path");
+    assert_eq!(ordered_keys(br#"{"a":{"b":{"x":1},"b":{"y":2}},"c":0}"#, &["a", "b"]), ["y"], "a duplicate inside the only `a`");
+    assert!(ordered_keys(br#"{"a":{"x":1},"a":[1]}"#, &["a"]).is_empty(), "the last `a` is a list, whatever the first was");
+    assert!(ordered_keys(br#"{"a":{"x":1},"a":{"y":"tw"#, &["a"]).is_empty(), "the last `a` is cut off before its first value completes: no complete key");
+}
+
 #[test]
 fn ordered_keys_of_a_truncated_line_are_the_keys_whose_values_the_line_completed() {
     assert_eq!(ordered_keys(br#"{"a":1,"b":"two","c":"#, &[]), ["a", "b"], "the value of `c` is cut off");
@@ -596,7 +606,9 @@ fn the_quiet_of_a_log_is_read_from_the_file_the_pass_holds_open_and_not_from_wha
     let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
     std::fs::File::options().write(true).open(&path).unwrap().set_modified(long_ago).unwrap();
     let held = JsonlFile::open_path(&path, LIMITS).unwrap();
-    std::fs::remove_file(&path).unwrap();
+    // Rename the held file out of the way, then create the replacement at the old name. A delete under an open handle leaves the name
+    // delete-pending on Windows (ordinary `DeleteFile`), so only a rename frees the name on every delete semantics.
+    std::fs::rename(&path, path.with_extension("held")).unwrap();
     std::fs::write(&path, "{}\n").unwrap();
     let facts = adapters::find("pi").unwrap();
     let meta = json!({"vendor": "pi", "path": path, "mode": "activity", "seen": [], "state": {}, "cwd": "/w", "session": "s", "now_ms": 1_000_000_000i64 + 9_000});

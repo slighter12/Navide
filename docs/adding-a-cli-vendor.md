@@ -37,14 +37,16 @@ Each declaration field replaces a hook you used to write by hand:
 | `session_root`, `session_path` | `session_path` |
 | `logs` | where the sessions' logs are (`files`, `cwd`) |
 | `shutdown` | `shutdown=ShutdownSpec(...)` |
-| `supports_session_resume` | `supports_session_resume` (set it from `FACT`) |
+| `supports_session_resume` | `supports_session_resume` (derived; a CLI Navide cannot resume declares `false`) |
 | `capabilities` | the status of each launch option; a flag is declared only next to a status the sidecar renders |
 | `observer` | the native observation of the CLI's log (see below) |
 
 A `VendorSpec` whose key has a declaration derives `supports_model`, `supports_effort`, `known_efforts`,
-`login_command_args`, `resume_id_from_command`, `shutdown`, `session_path` and `data_dir_env_vars`
-from it when you leave the field out. List one only where the declaration cannot say it (Grok's reader of
-a resume id, a platform-dependent session path, the data directories of Goose). The parity test
+`login_command_args`, `resume_id_from_command`, `supports_session_resume`, `shutdown`, `session_path` and
+`data_dir_env_vars` from it when you leave the field out. List one only where the declaration cannot say it (Grok's
+reader of a resume id, a platform-dependent session path, the data directories of Goose). The declaration wins: a
+value equal to the class default counts as "left out", so `supports_model=False` next to a `model_flag` is turned
+on. To drop a capability, drop it from the declaration's JSON. The parity test
 `backend/tests/test_agent_cli_facts.py` checks that each vendor keeps to its declaration, including that a vendor
 reads a resume id if and only if it declares `resume_args`.
 
@@ -56,8 +58,7 @@ names what you forgot:
 1. Copy `backend/agent_team_backend/cli_vendors/_template.py` to
    `cli_vendors/<key>.py` and fill in the `SPEC`, which starts from
    `FACT = FACTS["<key>"]` and `key=FACT.key`. Add only named hooks and what
-   the declaration cannot say (credentials, quota, MCP and skills wiring, the install entry). Every capability you
-   leave at its default is treated as "unsupported" for your vendor — the app degrades gracefully.
+   the declaration cannot say (credentials, quota, MCP and skills wiring, the install entry).
 2. Register the spec in `cli_vendors/registry.py` (one import and one line, alphabetical). The import must stay
    static: the packaged backend finds vendor modules through it.
 3. If the CLI writes local conversation logs, implement the log reader in
@@ -68,8 +69,9 @@ names what you forgot:
    wrote one, also list its class in `log_readers/__init__.py`
    (`_MIGRATED_READERS` and `__all__`). Shipping no reader has one consequence
    worth knowing up front: Navide cannot learn the id of a session it started,
-   so set `supports_session_resume=False` (it defaults to **True**) and leave
-   `resumeArgs` out of the frontend spec — the two sides are cross-checked.
+   so declare `"supports_session_resume": false` (and no `resume_args`) in the
+   JSON, and leave `resumeArgs` out of the frontend spec — the sides are
+   cross-checked.
 5. Add a row to `MEMORY_SOURCES` in
    `backend/agent_team_backend/native_memory.py` naming the instruction file
    your CLI reads (`AGENTS.md` for most). Every vendor must be mapped there or
@@ -165,6 +167,9 @@ The core runs on every platform through the one source seam `observe/os.rs` (reg
 open, positioned reads), so an `observer` block names `"platforms": ["unix", "windows"]`; the generator refuses an observer that
 omits a platform unless the layout is a named exception (`OBSERVER_PLATFORM_EXCEPTIONS` in `scripts/generate-agent-cli-facts.py`,
 with its reason). The adapter's own tests must not assume `/` paths or POSIX-only file APIs; use `os::link_file` and `os::stat_regular`.
+The Windows rule refuses every reparse point, not only links: a symlink, a junction or a mount point, and also a cloud placeholder
+(OneDrive Files On-Demand) or a deduplicated file, which POSIX would read as a regular file. A CLI whose log sits under such a
+file is not observed on Windows until the narrower check (`FileAttributeTagInfo`, link tags only) is a decision of its own.
 The test recipe, in the order that keeps each step falsifiable:
 
 1. Extend the `observer` block of the declaration you already wrote (usage fields, modes, `legacy_state` for every key of the Python bag the

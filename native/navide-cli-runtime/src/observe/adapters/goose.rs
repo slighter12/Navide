@@ -259,7 +259,7 @@ mod tests {
                 if checkpoint.contains_key("row_id") {
                     let anchor = checkpoint.remove("anchor").unwrap();
                     assert!(anchor.as_str().is_some_and(|anchor| anchor.starts_with(&format!("{}|", checkpoint["row_id"]))), "{anchor}");
-                    checkpoint.insert("identity".into(), json!(format!("{}:{}", identity["dev"], identity["ino"])));
+                    checkpoint.insert("identity".into(), json!(parity::identity_text(&identity)));
                 }
             };
             if let Some(checkpoint) = object.get_mut("checkpoint").and_then(Value::as_object_mut) {

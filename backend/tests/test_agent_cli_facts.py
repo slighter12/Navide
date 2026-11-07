@@ -192,6 +192,19 @@ def test_a_spec_that_declares_nothing_takes_every_launch_fact_from_the_declarati
     assert (bare.supports_model, bare.known_efforts, bare.login_command_args, bare.resume_id_from_command) == (False, (), None, None)
 
 
+def test_whether_a_vendor_resumes_is_taken_from_its_declaration_and_the_declaration_wins() -> None:
+    from agent_team_backend.cli_vendors.base import VendorSpec
+
+    declared = declarations()
+    assert declared["aider"]["supports_session_resume"] is False and declared["claude"]["supports_session_resume"] is True
+    assert VendorSpec(key="aider", label="Aider").supports_session_resume is False, "a spec that says nothing follows its declaration"
+    assert VendorSpec(key="claude", label="Claude").supports_session_resume is True
+    assert VendorSpec(key="not-declared", label="x").supports_session_resume is True, "no declaration, the class default"
+    # A value equal to the default is "left out" to the derivation, so the declaration wins over it: to drop a capability, drop it from the JSON.
+    assert VendorSpec(key="claude", label="Claude", supports_model=False).supports_model is True
+    assert VendorSpec(key="aider", label="Aider", supports_session_resume=True).supports_session_resume is False
+
+
 def test_plain_only_vendors_read_no_resume_out_of_a_line_with_shell_syntax() -> None:
     line = "{} {} abc; echo x"
     assert registry.VENDORS["antigravity"].resume_id_from_command(line.format("agy", "--conversation")) == ""
