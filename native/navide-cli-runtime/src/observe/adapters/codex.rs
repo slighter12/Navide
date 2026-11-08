@@ -206,7 +206,7 @@ mod tests {
     }
 
     /// A checkpoint an older Navide left kept its totals with the cached and reasoning tokens counted a second time and carries no
-    /// `basis`: the declared rule `totals_basis_marked` re-reads the pair it stood on from the log, once, and the checkpoint then carries it.
+    /// `basis`: the declared rule `totals_basis` (2) re-reads the pair it stood on from the log, once, and the checkpoint then carries it.
     #[test]
     fn a_checkpoint_without_the_basis_marker_is_re_read_from_the_log_once() {
         let first_count = count(1000, 600, 50, 20);

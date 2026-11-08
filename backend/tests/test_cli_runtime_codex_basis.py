@@ -3,7 +3,7 @@
 Codex's `input_tokens` already holds `cached_input_tokens` and its `output_tokens` already holds
 `reasoning_output_tokens`. A checkpoint an older Navide wrote kept its totals in the double-counting basis and carries no
 `basis` marker; the Python reader re-reads the true pair from the rollout once. The sidecar must do the same from the
-declared rule (`totals_basis_marked`), and a checkpoint either arm writes must be read correctly by the other.
+declared rule (`totals_basis: 2`), and a checkpoint either arm writes must be read correctly by the other.
 """
 from contextlib import closing
 import json
@@ -84,11 +84,13 @@ def test_native_reader_resumes_an_old_basis_checkpoint_without_loss_or_repeat(tm
         assert _pair(event) == (500, 10)
 
 
-def test_native_reader_with_nothing_counted_yet_starts_from_zero(tmp_path):
+def test_native_reader_with_nothing_counted_before_the_offset_starts_from_zero(tmp_path):
+    """The old checkpoint holds non-zero totals but the log has no reading before its offset: the re-read finds the zero pair.
+    (With zero saved totals there is nothing to migrate, so the re-read is never reached and the case proves nothing.)"""
     path = _rollout(tmp_path)
     path.write_text(_meta())
     with closing(NativePeer(tmp_path)) as peer:
-        old = {key: value for key, value in _usage(peer, path, {})["checkpoint"].items() if key != "basis"}
+        old = _old_basis(_usage(peer, path, {})["checkpoint"], 5, 2)
         with path.open("a") as fh:
             fh.write(_count(1000, 600, 50, 20))
         [event] = _usage(peer, path, old)["events"]
@@ -123,6 +125,29 @@ def test_native_reader_reads_the_checkpoint_the_python_reader_wrote(tmp_path):
         [expected] = python.parse_incremental(path, _old_basis(written, 1600, 70)).events
         [event] = _usage(peer, path, _old_basis(written, 1600, 70))["events"]
     assert _pair(event) == (expected.input_tokens, expected.output_tokens) == (1500, 40)
+
+
+@pytest.mark.parametrize("later", [None, (2500, 1800, 90, 30)], ids=["no-later-record", "later-record"])
+def test_both_readers_agree_when_the_old_offset_falls_inside_a_rewritten_record(tmp_path, later):
+    """A same-inode rewrite leaves the old checkpoint's offset between a complete record's JSON and its newline. Both readers
+    see the changed anchor and read the tail from byte 0, but the basis re-read still uses the old offset: the Python one parses
+    the exact prefix (`head.splitlines()`), so the unterminated final element counts when it is complete JSON. The native one
+    must give the same events and the same checkpoint."""
+    path = _rollout(tmp_path)
+    path.write_text(_meta() + _count(1000, 600, 50, 20))
+    with closing(NativePeer(tmp_path)) as peer:
+        old = _old_basis(_usage(peer, path, {})["checkpoint"], 1600, 70)
+        record = _count(1000, 600, 50, 20).rstrip("\n")
+        # The old offset is the end of the original file: one byte past the rewritten record's JSON, before its newline.
+        body = _meta() + record + "  \n" + (_count(*later) if later else "")
+        assert len(_meta() + record) + 1 == old["offset"] < len(_meta() + record + "  \n")
+        path.write_text(body)
+        native = _usage(peer, path, old)
+    python = CodexLogReader().parse_incremental(path, old)
+    assert [_pair(e) for e in native["events"]] == [(e.input_tokens, e.output_tokens) for e in python.events]
+    assert [_pair(e) for e in native["events"]] == ([(1500, 40)] if later else [])
+    for key in ("input_total", "output_total", "basis", "offset", "identity", "anchor"):
+        assert native["checkpoint"][key] == python.checkpoint[key], key
 
 
 def test_python_reader_reads_the_checkpoint_the_native_reader_wrote(tmp_path):

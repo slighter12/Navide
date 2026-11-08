@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashSet, VecDeque};
 use super::os::{self, Positioned};
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
 
 /// Bytes the anchor covers (the 512 bytes that end at the saved offset).
@@ -226,8 +226,21 @@ impl JsonlFile {
     /// A line over the line cap is read through, not buffered. The pass cap is enforced while a line is read: a
     /// `resumable` pass stops before the line that would cross it (the next pass starts there); a line that alone
     /// crosses it, or any non-resumable pass that does, is refused. Returns whether the end of the file was reached.
-    pub fn lines<F: FnMut(Line) -> Flow>(&mut self, start: u64, first: u64, resumable: bool, mut each: F) -> io::Result<bool> {
-        let mut reader = BufReader::with_capacity(64 * 1024, Positioned::new(&self.file, start));
+    pub fn lines<F: FnMut(Line) -> Flow>(&mut self, start: u64, first: u64, resumable: bool, each: F) -> io::Result<bool> {
+        self.read_lines(start, first, resumable, self.limits.pass, u64::MAX, each)
+    }
+
+    /// The lines of the first `end` bytes of the file, the last one without its newline when `end` falls inside it, handed over as
+    /// `Line`s with `complete == false` for that one. This is not an observation pass: it is the one-time read of the bytes a saved
+    /// offset stood after, so the pass cap does not bind it. A line over the line cap is still read through and reported `oversize`, so
+    /// the memory held is one line at most. Returns whether the end of those bytes was reached.
+    fn prefix_lines<F: FnMut(Line) -> Flow>(&mut self, end: u64, each: F) -> io::Result<bool> {
+        self.read_lines(0, 0, false, u64::MAX, end, each)
+    }
+
+    /// `lines`, over the bytes from `start` up to byte `until`, under the pass cap `pass`.
+    fn read_lines<F: FnMut(Line) -> Flow>(&mut self, start: u64, first: u64, resumable: bool, pass: u64, until: u64, mut each: F) -> io::Result<bool> {
+        let mut reader = BufReader::with_capacity(64 * 1024, Positioned::new(&self.file, start).take(until.saturating_sub(start)));
         let (mut end, mut no, mut read) = (start, first, 0u64);
         loop {
             let (mut bytes, mut oversize, mut complete, mut seen) = (Vec::new(), false, false, 0u64);
@@ -240,7 +253,7 @@ impl JsonlFile {
                     Some(at) => (at + 1, true),
                     None => (buffer.len(), false),
                 };
-                if read + seen + take as u64 > self.limits.pass {
+                if read + seen + take as u64 > pass {
                     return if resumable && read > 0 { Ok(false) } else { Err(io::Error::other(PASS_LIMIT)) };
                 }
                 if !oversize {
@@ -996,7 +1009,7 @@ impl<O: JsonlObserver> UsageScan<O, JsonlFile> for Cumulative {
     fn scan(file: &mut JsonlFile, ctx: &Ctx, run: &mut Run<O>, start: u64) -> io::Result<Scan> {
         let fields = usage_fields(ctx)?;
         let incremental = run.mode == Mode::Usage;
-        let (never_decrease, marked) = (rules(ctx)?.totals_never_decrease, rules(ctx)?.totals_basis_marked);
+        let (never_decrease, basis) = (rules(ctx)?.totals_never_decrease, rules(ctx)?.totals_basis);
         let mut previous = if !incremental {
             run.saved.totals.unwrap_or_default()
         } else if run.replaced {
@@ -1004,9 +1017,10 @@ impl<O: JsonlObserver> UsageScan<O, JsonlFile> for Cumulative {
         } else {
             Totals { input: ctx.req.cursor.count("input_total"), output: ctx.req.cursor.count("output_total") }
         };
-        // Totals saved without the basis marker were counted in an older basis, from which the true pair cannot be recovered: the log
-        // still holds it, so the pair the checkpoint stood on is read again from the log before the checkpoint's offset, once.
-        if marked && incremental && !run.replaced && previous != Totals::default() && ctx.req.cursor.count("basis") != TOTALS_BASIS {
+        // Under a declared `totals_basis` the checkpoint carries `basis: <that value>`. Totals saved without it were counted in an older
+        // basis, from which the true pair cannot be recovered: the log still holds it, so the pair the checkpoint stood on is read again
+        // from the log before the checkpoint's offset, once. The value is the declaration's; the core compares and writes it.
+        if basis.is_some_and(|basis| incremental && !run.replaced && previous != Totals::default() && ctx.req.cursor.count("basis") != basis) {
             previous = totals_before::<O>(file, fields, &run.ident, ctx.req.cursor.offset())?;
         }
         let (mut latest, mut last, mut committed) = (previous, None, start);
@@ -1051,25 +1065,20 @@ impl<O: JsonlObserver> UsageScan<O, JsonlFile> for Cumulative {
         let kept = if never_decrease { Totals { input: previous.input.max(latest.input), output: previous.output.max(latest.output) } } else { latest };
         run.checkpoint.insert("input_total".into(), json!(kept.input));
         run.checkpoint.insert("output_total".into(), json!(kept.output));
-        if marked && incremental {
-            run.checkpoint.insert("basis".into(), json!(TOTALS_BASIS));
+        if let Some(basis) = basis.filter(|_| incremental) {
+            run.checkpoint.insert("basis".into(), json!(basis));
         }
         Ok(Scan { committed, owed: Owed::Delta { previous, latest, last } })
     }
 }
 
-/// The value of the checkpoint's `basis` field under `totals_basis_marked`: the saved totals are the log's running totals as the
-/// declared pointers read them. A checkpoint without it holds an older basis (the Python reader's `_TOTALS_BASIS`).
-const TOTALS_BASIS: u64 = 2;
-
-/// The running totals of the last reading that ends at or before byte `offset`, as the declared pointers read them: what a checkpoint
-/// that stood at `offset` had counted. Nothing yet is the zero pair. The pass byte limit of a full scan applies to this read.
+/// The running totals of the last reading in the first `offset` bytes of the log, as the declared pointers read them: what a checkpoint
+/// that stood at `offset` had counted. Nothing yet is the zero pair. The bytes are parsed as they stand, line by line, so a final line
+/// that `offset` cuts before its newline counts when it is whole JSON (the Python reader parses `head.splitlines()` the same way), and the
+/// pass cap does not apply (`JsonlFile::prefix_lines`): the checkpoint's offset may lie anywhere in a log of any size.
 fn totals_before<O: JsonlObserver>(file: &mut JsonlFile, fields: &super::adapters::UsageFields, ident: &Ident, offset: u64) -> io::Result<Totals> {
     let (mut ident, mut found) = (ident.clone(), Totals::default());
-    file.lines(0, 0, false, |line| {
-        if !line.complete || line.end > offset {
-            return Flow::Stop;
-        }
+    file.prefix_lines(offset, |line| {
         if let Decoded::Object(record) = O::read_line(&line) {
             if let Some(Reading { totals, .. }) = O::reading(fields, &mut ident, &record) {
                 found = totals;

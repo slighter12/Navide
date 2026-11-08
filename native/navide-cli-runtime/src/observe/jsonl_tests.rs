@@ -419,6 +419,29 @@ fn a_capped_cumulative_usage_pass_emits_deltas_that_add_up_to_the_final_totals()
     assert_eq!(sums, (70, 10));
 }
 
+/// rf2g Q1: the one-time re-read of an unmarked checkpoint (`totals_basis`) reads the bytes before the checkpoint's offset, however many
+/// there are: it is not an observation pass, so the pass cap does not bind it (the ordinary pass after the offset still does). The
+/// checkpoint stands after three lines, which together are over the lowered pass cap; the tail is one line, which is not.
+#[test]
+fn an_unmarked_checkpoint_past_the_pass_cap_migrates_and_emits_the_baseline_delta() {
+    let total = |input: u64, output: u64| json!({"type":"event_msg","timestamp":"t","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":input,"output_tokens":output}}}});
+    let lines: Vec<String> = [total(10, 1), total(25, 4), total(40, 9), total(70, 10)].iter().map(|record| format!("{record}\n")).collect();
+    let path = write("migration-past-cap", &lines[..3].concat());
+    let facts = adapters::find("codex").unwrap();
+    let limits = Limits { line: 1000, pass: lines[0].len() as u64 * 2 + 8 };
+    assert!(lines[..3].iter().map(String::len).sum::<usize>() as u64 > limits.pass, "the prefix is over the pass cap");
+    let mut old = pass::<Codex, Cumulative, NoCapability>(facts, &path, Mode::Usage, LIMITS, &json!({"checkpoint": {}})).unwrap()["checkpoint"].clone();
+    old.as_object_mut().unwrap().remove("basis");
+    old.as_object_mut().unwrap().extend([("input_total".to_owned(), json!(100)), ("output_total".to_owned(), json!(20))]);
+    std::fs::write(&path, lines.concat()).unwrap();
+    let document = pass::<Codex, Cumulative, NoCapability>(facts, &path, Mode::Usage, limits, &json!({"checkpoint": old}))
+        .expect("the re-read of the prefix is not bound by the pass cap");
+    let events = document["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!((events[0]["input_tokens"].clone(), events[0]["output_tokens"].clone()), (json!(30), json!(1)), "70/10 less the 40/9 the checkpoint stood on");
+    assert_eq!((document["checkpoint"]["input_total"].clone(), document["checkpoint"]["basis"].clone()), (json!(70), json!(2)));
+}
+
 #[test]
 fn a_pass_over_a_line_that_alone_exceeds_the_cap_is_refused_in_every_resumable_mode() {
     let record = format!("{{\"type\":\"assistant\",\"pad\":\"{}\"}}\n", "x".repeat(300));

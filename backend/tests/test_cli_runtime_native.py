@@ -107,7 +107,7 @@ JSONL_RULES = {
                     activity_non_object_fails=True, totals_never_decrease=False, water_survives_replacement=True)],
     "codex": [dict(missing_identity_rotates=False, invalid_utf8_fails=False, non_object_fails=False,
                    activity_non_object_fails=True, totals_never_decrease=False, water_survives_replacement=True,
-                   totals_basis_marked=True)],
+                   totals_basis=2)],
     "copilot": [None, dict(missing_identity_rotates=True, invalid_utf8_fails=False, non_object_fails=False,
                            activity_non_object_fails=False, totals_never_decrease=True, water_survives_replacement=True)],
     "droid": [dict(missing_identity_rotates=False, invalid_utf8_fails=True, non_object_fails=False,

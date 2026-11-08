@@ -701,8 +701,8 @@ pub struct JsonlRules {
     pub totals_never_decrease: bool,
     /// Baseline: the activity high-water mark outlived a replaced or rewritten file.
     pub water_survives_replacement: bool,
-    /// Baseline: the checkpoint's cumulative totals carry a `basis` marker; one with totals and no marker was counted in an older basis and is re-read from the log before its offset once.
-    pub totals_basis_marked: bool,
+    /// Baseline: the checkpoint's cumulative totals carry a `basis` marker; one with totals and a different marker (or none) was counted in an older basis and is re-read from the log before its offset once.
+    pub totals_basis: Option<u64>,
 }
 
 /// This layout yields to the store `file`, `up` directories above the log, when that store's parent table already

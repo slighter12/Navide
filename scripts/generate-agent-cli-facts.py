@@ -154,7 +154,12 @@ JSONL_RULES = (
     ("activity_non_object_fails", "an activity pass over a record that is not an object failed the pass (progress kept, events dropped) instead of skipping it"),
     ("totals_never_decrease", "the checkpoint's cumulative totals are a per-component high-water mark: a reading below them emits nothing and leaves that saved total where it was"),
     ("water_survives_replacement", "the activity high-water mark outlived a replaced or rewritten file"),
-    ("totals_basis_marked", "the checkpoint's cumulative totals carry a `basis` marker; one with totals and no marker was counted in an older basis and is re-read from the log before its offset once"),
+)
+# Rules whose declaration is a number, or null where the layout does not have the behaviour: `totals_basis` is the value of the `basis`
+# field the checkpoint's cumulative totals carry; a checkpoint with totals and another value (or none) was counted in an older basis and
+# is re-read from the log before its offset once. The core compares and writes the declared value; it holds no basis number of its own.
+JSONL_NUMBER_RULES = (
+    ("totals_basis", "the checkpoint's cumulative totals carry a `basis` marker; one with totals and a different marker (or none) was counted in an older basis and is re-read from the log before its offset once"),
 )
 USAGE_FIELDS = (
     "select", "object", "input", "output", "cache_read", "cache_creation", "key", "key_join", "model", "version",
@@ -497,9 +502,13 @@ def validate_core(name: str, core: dict, layouts: list[dict]) -> None:
                 raise SystemExit(f"{name}: usage_fields.document gives running totals, so the layout's usage is cumulative")
             if layout["store"] is not None or layout["rules"] is None:
                 raise SystemExit(f"{name}: a jsonl layout on the core declares rules and no store")
-            _exact(name, "layout.rules", layout["rules"], tuple(field for field, _ in JSONL_RULES))
-            if not all(isinstance(value, bool) for value in layout["rules"].values()):
-                raise SystemExit(f"{name}: layout.rules holds named booleans only")
+            _exact(name, "layout.rules", layout["rules"], tuple(field for field, _ in JSONL_RULES + JSONL_NUMBER_RULES))
+            if not all(isinstance(layout["rules"][field], bool) for field, _ in JSONL_RULES):
+                raise SystemExit(f"{name}: layout.rules holds named booleans, and the numbers {[field for field, _ in JSONL_NUMBER_RULES]}")
+            for field, _ in JSONL_NUMBER_RULES:
+                value = layout["rules"][field]
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                    raise SystemExit(f"{name}: layout.rules.{field} is null or a non-negative integer")
             if "legacy" in modes and not any(l["source"] == "sqlite" for l in layouts):
                 raise SystemExit(f"{name}: the legacy mode replays a row store")
         else:
@@ -597,7 +606,8 @@ def normalize(observer: dict | None) -> None:
     for layout in (observer or {}).get("layouts", []):
         layout.setdefault("rules", None)
         if isinstance(layout["rules"], dict):
-            layout["rules"].setdefault("totals_basis_marked", False)
+            for field, _ in JSONL_NUMBER_RULES:
+                layout["rules"].setdefault(field, None)
         layout.setdefault("defers_to", None)
         layout.setdefault("request", [])
         layout.setdefault("applies_when", [])
@@ -1404,7 +1414,9 @@ def rust_store(store: dict | None, parser: str) -> str:
 def rust_rules(rules: dict | None) -> str:
     if rules is None:
         return "None"
-    return "Some(JsonlRules { " + ", ".join(f"{name}: {rust_bool(rules[name])}" for name, _ in JSONL_RULES) + " })"
+    fields = [f"{name}: {rust_bool(rules[name])}" for name, _ in JSONL_RULES]
+    fields += [f"{name}: {'None' if rules[name] is None else f'Some({rules[name]})'}" for name, _ in JSONL_NUMBER_RULES]
+    return "Some(JsonlRules { " + ", ".join(fields) + " })"
 
 
 def rust_defers(defers: dict | None) -> str:
@@ -1806,6 +1818,7 @@ def rust_observers_source(facts: list[dict]) -> str:
         "#[derive(Clone, Copy, Debug)]",
         "pub struct JsonlRules {",
         *(line for name, baseline in JSONL_RULES for line in (f"    /// Baseline: {baseline}.", f"    pub {name}: bool,")),
+        *(line for name, baseline in JSONL_NUMBER_RULES for line in (f"    /// Baseline: {baseline}.", f"    pub {name}: Option<u64>,")),
         "}",
         "",
         "/// This layout yields to the store `file`, `up` directories above the log, when that store's parent table already",

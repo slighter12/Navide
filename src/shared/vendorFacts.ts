@@ -909,7 +909,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": false,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "applies_when": []
@@ -1103,7 +1103,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": true,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "request": [],
@@ -1194,7 +1194,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": true,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": true
+          "totals_basis": 2
         },
         "defers_to": null,
         "request": [],
@@ -1410,7 +1410,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": false,
           "totals_never_decrease": true,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": {
           "file": "session-store.db",
@@ -1611,7 +1611,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": false,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "applies_when": []
@@ -1864,7 +1864,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": false,
           "totals_never_decrease": false,
           "water_survives_replacement": false,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "applies_when": []
@@ -2239,7 +2239,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": true,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "applies_when": []
@@ -2350,7 +2350,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": false,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "applies_when": []
@@ -2726,7 +2726,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": false,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "applies_when": []
@@ -2831,7 +2831,7 @@ export const OBSERVER_FACTS = {
           "activity_non_object_fails": true,
           "totals_never_decrease": false,
           "water_survives_replacement": true,
-          "totals_basis_marked": false
+          "totals_basis": null
         },
         "defers_to": null,
         "applies_when": []

@@ -57,7 +57,7 @@
         "activity_non_object_fails": true,
         "totals_never_decrease": false,
         "water_survives_replacement": true,
-        "totals_basis_marked": true
+        "totals_basis": 2
       }
     }],
     "core": {
