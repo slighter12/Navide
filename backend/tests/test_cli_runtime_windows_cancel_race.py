@@ -296,3 +296,42 @@ def test_a_stuck_master_does_not_use_up_the_deadline_a_later_master_needs_for_a_
     finally:
         per_thread_kernel.free_everything()
         loop.close()
+
+
+def test_a_slow_uncancellable_master_does_not_take_the_repeat_a_later_master_needs_after_a_runtime_loss(
+    per_thread_kernel: _PerThreadKernel, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime loss: `begin_close()` already ran on both masters, so `close_together` adds no initial sweep. Master A
+    is slow to cancel (10 ms a call) and cannot be cancelled while it is in its read; master B missed its first sweep
+    and needs one repeat. Each join iteration makes one cancel attempt per live worker, so A's repeat cannot use up
+    the deadline B's repeat needs: B closes complete, only A is incomplete."""
+    deadline_s, margin_s = 1.0, 0.3
+    real_cancel = per_thread_kernel.cancel_io
+    slow = threading.Event()
+
+    def slow_cancel(handle) -> int:
+        if slow.is_set():
+            time.sleep(0.01)
+        return real_cancel(handle)
+
+    monkeypatch.setattr(per_thread_kernel, "cancel_io", slow_cancel)
+    loop = asyncio.new_event_loop()
+    slow_master = winrt.WindowsMaster("m3", 11, 12)
+    late_master = winrt.WindowsMaster("m4", 21, 22)
+    try:
+        for master in (slow_master, late_master):
+            master.start_pump(loop)
+            _announced(master)
+        for master in (slow_master, late_master):
+            master.begin_close()  # the `_lose` path: step 1 for everything, no deadline
+        slow.set()
+        started = time.monotonic()
+        incomplete = winrt.close_together([slow_master, late_master], started + deadline_s)
+        elapsed = time.monotonic() - started
+        assert incomplete == [slow_master]
+        assert late_master.closed and [h for h in per_thread_kernel.closed if h in (21, 22)] == [21, 22]
+        assert not slow_master.closed and not [h for h in per_thread_kernel.closed if h in (11, 12)]
+        assert elapsed < deadline_s + margin_s, f"close_together took {elapsed:.2f}s against a {deadline_s}s deadline"
+    finally:
+        per_thread_kernel.free_everything()
+        loop.close()

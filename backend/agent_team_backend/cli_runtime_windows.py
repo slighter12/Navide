@@ -41,7 +41,7 @@ _ERROR_NOT_FOUND = 1168
 #: Immediate (never slept) re-issues of a cancel that found no call in progress yet: the window is the few
 #: instructions between a worker announcing its call and entering it.
 _CANCEL_RETRIES = 1000
-#: How long `finish_close` waits for a worker before it cancels the worker again.
+#: How long `_join_workers` waits on a worker before it cancels the live workers again.
 _CANCEL_RECHECK_S = 0.02
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _ERROR_INVALID_PARAMETER = 87
@@ -432,18 +432,22 @@ class WindowsMaster:
             self._begun = True
         self._cancel_workers(deadline)
 
-    def _cancel_workers(self, deadline: float | None = None) -> None:
+    def _cancel_workers(self, deadline: float | None = None, *, once: bool = False) -> None:
         """One sweep of `CancelSynchronousIo` over the workers (never waits). A worker that has not entered its
         blocking call yet sees `_closing` and leaves by itself; one that is inside it is cancelled.
         `ERROR_NOT_FOUND` means "no call in progress right now": retry at once (no wait) only while the thread is
         alive and has announced its call. The retries are a count, not a time, so a worker the scheduler has not
-        run into its call by the end of them is missed: `_join_workers` sweeps again while it joins. A `deadline`
-        stops the sweep before the next cancel call, so a sweep ends at most one call after it."""
+        run into its call by the end of them is missed: `_join_workers` sweeps again while it joins, with `once`
+        (one attempt for each live announced worker, no immediate retries) so that one master's sweep cannot use
+        up the time another master's repeat needs. A `deadline` stops the sweep before the next cancel call, so a
+        sweep ends at most one call after it."""
         k = api()
         for thread, tid in ((self._pump, self._pump_tid), (self._writer, self._writer_tid)):
             if thread is None or not tid:
                 continue
-            for _attempt in range(_CANCEL_RETRIES):
+            if once and not self._blocking(thread):
+                continue
+            for _attempt in range(1 if once else _CANCEL_RETRIES):
                 if not thread.is_alive() or (deadline is not None and time.monotonic() >= deadline):
                     break
                 thread_handle = k.open_thread(_THREAD_TERMINATE, False, tid)
@@ -497,12 +501,16 @@ class WindowsMaster:
 
 def _join_workers(masters: list[WindowsMaster], deadline: float) -> None:
     """Wait for every master's workers against one absolute `deadline`, one shared loop: join a live worker for a
-    slice of `_CANCEL_RECHECK_S`, then cancel again every master that still has a live worker. A cancel is a no-op
-    for a worker that is between two calls or not yet inside its first one, and the repeat is what ends it (the
-    documented pattern); repeating is safe because after `_closing` a worker makes no I/O call but the one it is in.
-    Sharing the loop keeps a master that never ends from using up the time another one needs for its repeat."""
+    slice of `_CANCEL_RECHECK_S`, then cancel again every master that still has a live worker, once per live
+    announced worker (no immediate retries; the next iteration is the retry). A cancel is a no-op for a worker that
+    is between two calls or not yet inside its first one, and the repeat is what ends it (the documented pattern);
+    repeating is safe because after `_closing` a worker makes no I/O call but the one it is in. One attempt per
+    worker per iteration, with the deadline checked before each, keeps a master that never ends from using up the
+    time another one needs for its repeat; the join target rotates so no master's worker is always the one waited
+    for."""
     started = time.monotonic()
     current = threading.current_thread()
+    turn = 0
 
     def live(master: WindowsMaster) -> list[threading.Thread]:
         return [t for t in (master._pump, master._writer) if t is not None and t is not current and t.is_alive()]
@@ -512,9 +520,10 @@ def _join_workers(masters: list[WindowsMaster], deadline: float) -> None:
         remaining = deadline - time.monotonic()
         if not pending or remaining <= 0:
             break
-        pending[0][1][0].join(min(remaining, _CANCEL_RECHECK_S))
+        pending[turn % len(pending)][1][0].join(min(remaining, _CANCEL_RECHECK_S))
+        turn += 1
         for master, _threads in pending:
-            master._cancel_workers(deadline)
+            master._cancel_workers(deadline, once=True)
     elapsed_ms = int((time.monotonic() - started) * 1000)
     for master in masters:
         master.pump_join_ms = elapsed_ms
