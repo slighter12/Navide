@@ -104,6 +104,31 @@ fn join_bounded(handle: JoinHandle<()>, what: &str) {
     handle.join().unwrap();
 }
 
+/// Joins a pump thread that may be blocked in `ReadFile`, cancelling it until it ends; returns how many
+/// cancels were issued after the first. `CancelSynchronousIo` only reaches a call that is in progress at that
+/// instant (`ERROR_NOT_FOUND` otherwise), so one cancel misses a pump that is between two reads or has not been
+/// scheduled into its first one yet; the documented pattern is to repeat it until the thread ends. Repeating is
+/// safe here because the pump's only synchronous I/O is that `ReadFile`.
+fn cancel_and_join(handle: JoinHandle<()>, what: &str) -> u32 {
+    let deadline = Instant::now() + LONG;
+    let mut repeats = 0;
+    let mut first = true;
+    while !handle.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "{what} did not end within {LONG:?} of repeated cancels"
+        );
+        // SAFETY: the pump's own thread handle, valid until joined.
+        unsafe { CancelSynchronousIo(handle.as_raw_handle()) };
+        if !std::mem::take(&mut first) {
+            repeats += 1;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    handle.join().unwrap();
+    repeats
+}
+
 fn tag() -> u64 {
     frame::runtime_tag(GENERATION).unwrap()
 }
@@ -692,10 +717,14 @@ fn many_sessions_cost_bounded_threads_and_cancellation_joins_within_the_bound() 
             )
         })
         .collect();
+    // The cancels above reach only a pump already inside its read; a pump the scheduler had not run that far
+    // (or one between two reads) is cancelled by the repeats while it is joined. The join time is therefore the
+    // time from the join start to the pump's end with the cancel in force, not from one lucky cancel.
     let mut worst_join = Duration::ZERO;
+    let mut cancel_repeats = 0;
     for session in &mut sessions {
         let join_started = Instant::now();
-        join_bounded(session.pump.take().unwrap(), "a pump");
+        cancel_repeats += cancel_and_join(session.pump.take().unwrap(), "a pump");
         worst_join = worst_join.max(join_started.elapsed());
     }
     let total_join = started.elapsed();
@@ -729,6 +758,7 @@ fn many_sessions_cost_bounded_threads_and_cancellation_joins_within_the_bound() 
             "sidecar_working_set_delta_bytes":memory_after.saturating_sub(memory_before),
             "worst_pump_join_ms":worst_join.as_millis() as u64,
             "total_cancel_join_ms":total_join.as_millis() as u64,
+            "pump_cancel_repeats":cancel_repeats,
             "thread_close_s_proposed":THREAD_CLOSE.as_secs()}),
     );
 }

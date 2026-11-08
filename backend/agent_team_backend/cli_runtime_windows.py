@@ -41,6 +41,8 @@ _ERROR_NOT_FOUND = 1168
 #: Immediate (never slept) re-issues of a cancel that found no call in progress yet: the window is the few
 #: instructions between a worker announcing its call and entering it.
 _CANCEL_RETRIES = 1000
+#: How long `finish_close` waits for a worker before it cancels the worker again.
+_CANCEL_RECHECK_S = 0.02
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _ERROR_INVALID_PARAMETER = 87
 
@@ -427,13 +429,18 @@ class WindowsMaster:
             if self._begun:
                 return
             self._begun = True
+        self._cancel_workers()
+
+    def _cancel_workers(self) -> None:
+        """One sweep of `CancelSynchronousIo` over the workers (never waits). A worker that has not entered its
+        blocking call yet sees `_closing` and leaves by itself; one that is inside it is cancelled.
+        `ERROR_NOT_FOUND` means "no call in progress right now": retry at once (no wait) only while the thread is
+        alive and has announced its call. The retries are a count, not a time, so a worker the scheduler has not
+        run into its call by the end of them is missed: `finish_close` sweeps again while it joins."""
         k = api()
         for thread, tid in ((self._pump, self._pump_tid), (self._writer, self._writer_tid)):
             if thread is None or not tid:
                 continue
-            # A worker that has not entered its blocking call yet sees `_closing` and leaves by itself;
-            # one that is inside it is cancelled. `ERROR_NOT_FOUND` means "no call in progress right now":
-            # retry at once (no wait) only while the thread is alive, which ends when it returns.
             for _attempt in range(_CANCEL_RETRIES):
                 if not thread.is_alive():
                     break
@@ -459,8 +466,18 @@ class WindowsMaster:
         self.begin_close()
         started = time.monotonic()
         for thread in (self._pump, self._writer):
-            if thread is not None and thread is not threading.current_thread():
-                thread.join(max(0.0, deadline - time.monotonic()))
+            if thread is None or thread is threading.current_thread():
+                continue
+            # Join in slices and cancel again after each: a cancel is a no-op for a worker that is between two
+            # calls or not yet inside its first one, and the repeat is what ends it (the documented pattern).
+            # Repeating is safe because after `_closing` a worker makes no further I/O call but the one it is in.
+            while thread.is_alive():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                thread.join(min(remaining, _CANCEL_RECHECK_S))
+                if thread.is_alive():
+                    self._cancel_workers()
         self.pump_join_ms = int((time.monotonic() - started) * 1000)
         if any(t is not None and t.is_alive() for t in (self._pump, self._writer)):
             return False
