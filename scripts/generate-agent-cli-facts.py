@@ -154,6 +154,7 @@ JSONL_RULES = (
     ("activity_non_object_fails", "an activity pass over a record that is not an object failed the pass (progress kept, events dropped) instead of skipping it"),
     ("totals_never_decrease", "the checkpoint's cumulative totals are a per-component high-water mark: a reading below them emits nothing and leaves that saved total where it was"),
     ("water_survives_replacement", "the activity high-water mark outlived a replaced or rewritten file"),
+    ("totals_basis_marked", "the checkpoint's cumulative totals carry a `basis` marker; one with totals and no marker was counted in an older basis and is re-read from the log before its offset once"),
 )
 USAGE_FIELDS = (
     "select", "object", "input", "output", "cache_read", "cache_creation", "key", "key_join", "model", "version",
@@ -595,6 +596,8 @@ def normalize(observer: dict | None) -> None:
     shape: no jsonl rules and no ownership, the folded/text usage spellings, and a store with the plain defaults."""
     for layout in (observer or {}).get("layouts", []):
         layout.setdefault("rules", None)
+        if isinstance(layout["rules"], dict):
+            layout["rules"].setdefault("totals_basis_marked", False)
         layout.setdefault("defers_to", None)
         layout.setdefault("request", [])
         layout.setdefault("applies_when", [])

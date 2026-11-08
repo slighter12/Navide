@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_totals_saturate_and_only_a_token_count_record_with_totals_is_a_reading() {
+    fn codex_totals_ignore_the_cached_and_reasoning_fields_and_only_a_token_count_record_with_totals_is_a_reading() {
         let codex = fields("codex");
         let record = json!({"type":"event_msg","timestamp":"t","payload":{"type":"token_count","info":{"total_token_usage":{
             "input_tokens":9223372036854775807i64,"cached_input_tokens":9223372036854775807i64,

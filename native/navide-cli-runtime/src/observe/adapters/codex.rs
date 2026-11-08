@@ -190,6 +190,72 @@ mod tests {
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
+    fn count(input: u64, cached: u64, output: u64, reasoning: u64) -> String {
+        json!({"type":"event_msg","timestamp":"t","payload":{"type":"token_count","info":{"total_token_usage":{
+            "input_tokens": input, "cached_input_tokens": cached, "output_tokens": output, "reasoning_output_tokens": reasoning,
+            "total_tokens": input + output}}}})
+        .to_string()
+    }
+
+    fn usage(path: &std::path::Path, checkpoint: Value) -> Value {
+        dispatch(find("codex").unwrap(), &json!({"vendor":"codex","path":path,"mode":"usage","checkpoint":checkpoint})).unwrap()
+    }
+
+    fn pair(value: &Value, input: &str, output: &str) -> (u64, u64) {
+        (value[input].as_u64().unwrap(), value[output].as_u64().unwrap())
+    }
+
+    /// A checkpoint an older Navide left kept its totals with the cached and reasoning tokens counted a second time and carries no
+    /// `basis`: the declared rule `totals_basis_marked` re-reads the pair it stood on from the log, once, and the checkpoint then carries it.
+    #[test]
+    fn a_checkpoint_without_the_basis_marker_is_re_read_from_the_log_once() {
+        let first_count = count(1000, 600, 50, 20);
+        let path = rollout("basis-old", &format!("{first_count}\n"));
+        let first = usage(&path, json!({}));
+        assert_eq!((pair(&first["events"][0], "input_tokens", "output_tokens"), first["checkpoint"]["basis"].clone()), ((1000, 50), json!(2)));
+
+        let mut old = first["checkpoint"].clone();
+        old.as_object_mut().unwrap().remove("basis");
+        old.as_object_mut().unwrap().extend([("input_total".to_owned(), json!(1600)), ("output_total".to_owned(), json!(70))]);
+        std::fs::write(&path, format!("{first_count}\n{}\n", count(2500, 1800, 90, 30))).unwrap();
+        let second = usage(&path, old);
+        assert_eq!(second["events"].as_array().unwrap().len(), 1);
+        assert_eq!(pair(&second["events"][0], "input_tokens", "output_tokens"), (1500, 40));
+        assert_eq!(pair(&second["checkpoint"], "input_total", "output_total"), (2500, 90));
+        assert_eq!(second["checkpoint"]["basis"], 2);
+        assert_eq!(second["events"][0]["checkpoint"]["basis"], 2, "the event's own cursor carries the basis too");
+
+        std::fs::write(&path, format!("{first_count}\n{}\n{}\n", count(2500, 1800, 90, 30), count(3000, 2000, 100, 30))).unwrap();
+        let third = usage(&path, second["checkpoint"].clone());
+        assert_eq!(pair(&third["events"][0], "input_tokens", "output_tokens"), (500, 10));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_checkpoint_that_carries_the_basis_is_taken_as_saved() {
+        let first_count = count(1000, 600, 50, 20);
+        let path = rollout("basis-marked", &format!("{first_count}\n"));
+        let mut marked = usage(&path, json!({}))["checkpoint"].clone();
+        marked.as_object_mut().unwrap().extend([("input_total".to_owned(), json!(900)), ("output_total".to_owned(), json!(40))]);
+        std::fs::write(&path, format!("{first_count}\n{}\n", count(2500, 1800, 90, 30))).unwrap();
+        let result = usage(&path, marked);
+        assert_eq!(pair(&result["events"][0], "input_tokens", "output_tokens"), (1600, 50));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_unmarked_checkpoint_with_no_reading_before_its_offset_starts_from_zero() {
+        let header = json!({"type":"session_meta","payload":{"id":"cx1","cwd":"/w"}}).to_string();
+        let path = rollout("basis-nothing", &format!("{header}\n"));
+        let mut old = usage(&path, json!({}))["checkpoint"].clone();
+        old.as_object_mut().unwrap().remove("basis");
+        old.as_object_mut().unwrap().extend([("input_total".to_owned(), json!(5)), ("output_total".to_owned(), json!(2))]);
+        std::fs::write(&path, format!("{header}\n{}\n", count(1000, 600, 50, 20))).unwrap();
+        let result = usage(&path, old);
+        assert_eq!(pair(&result["events"][0], "input_tokens", "output_tokens"), (1000, 50));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
     #[test]
     fn a_sub_agent_rollout_names_no_session_of_its_own_and_identify_answers_from_the_header() {
         let meta = json!({"type":"session_meta","payload":{"id":"parent-id","cwd":"/w","model_provider":"p","cli_version":"9","parent_thread_id":"x"}});

@@ -996,14 +996,19 @@ impl<O: JsonlObserver> UsageScan<O, JsonlFile> for Cumulative {
     fn scan(file: &mut JsonlFile, ctx: &Ctx, run: &mut Run<O>, start: u64) -> io::Result<Scan> {
         let fields = usage_fields(ctx)?;
         let incremental = run.mode == Mode::Usage;
-        let never_decrease = rules(ctx)?.totals_never_decrease;
-        let previous = if !incremental {
+        let (never_decrease, marked) = (rules(ctx)?.totals_never_decrease, rules(ctx)?.totals_basis_marked);
+        let mut previous = if !incremental {
             run.saved.totals.unwrap_or_default()
         } else if run.replaced {
             Totals::default()
         } else {
             Totals { input: ctx.req.cursor.count("input_total"), output: ctx.req.cursor.count("output_total") }
         };
+        // Totals saved without the basis marker were counted in an older basis, from which the true pair cannot be recovered: the log
+        // still holds it, so the pair the checkpoint stood on is read again from the log before the checkpoint's offset, once.
+        if marked && incremental && !run.replaced && previous != Totals::default() && ctx.req.cursor.count("basis") != TOTALS_BASIS {
+            previous = totals_before::<O>(file, fields, &run.ident, ctx.req.cursor.offset())?;
+        }
         let (mut latest, mut last, mut committed) = (previous, None, start);
         let mut ident = run.ident.clone();
         let mut unfinished = false;
@@ -1046,8 +1051,33 @@ impl<O: JsonlObserver> UsageScan<O, JsonlFile> for Cumulative {
         let kept = if never_decrease { Totals { input: previous.input.max(latest.input), output: previous.output.max(latest.output) } } else { latest };
         run.checkpoint.insert("input_total".into(), json!(kept.input));
         run.checkpoint.insert("output_total".into(), json!(kept.output));
+        if marked && incremental {
+            run.checkpoint.insert("basis".into(), json!(TOTALS_BASIS));
+        }
         Ok(Scan { committed, owed: Owed::Delta { previous, latest, last } })
     }
+}
+
+/// The value of the checkpoint's `basis` field under `totals_basis_marked`: the saved totals are the log's running totals as the
+/// declared pointers read them. A checkpoint without it holds an older basis (the Python reader's `_TOTALS_BASIS`).
+const TOTALS_BASIS: u64 = 2;
+
+/// The running totals of the last reading that ends at or before byte `offset`, as the declared pointers read them: what a checkpoint
+/// that stood at `offset` had counted. Nothing yet is the zero pair. The pass byte limit of a full scan applies to this read.
+fn totals_before<O: JsonlObserver>(file: &mut JsonlFile, fields: &super::adapters::UsageFields, ident: &Ident, offset: u64) -> io::Result<Totals> {
+    let (mut ident, mut found) = (ident.clone(), Totals::default());
+    file.lines(0, 0, false, |line| {
+        if !line.complete || line.end > offset {
+            return Flow::Stop;
+        }
+        if let Decoded::Object(record) = O::read_line(&line) {
+            if let Some(Reading { totals, .. }) = O::reading(fields, &mut ident, &record) {
+                found = totals;
+            }
+        }
+        Flow::Continue
+    })?;
+    Ok(found)
 }
 
 impl JsonlFile {
