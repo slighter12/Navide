@@ -548,6 +548,10 @@ FIELDS0 = ("layouts", 0, "usage_fields")
     ("copilot", _break(("layouts", 1, "rules"), None), "declares rules"),
     ("copilot", _break(("layouts", 0, "rules"), {"missing_identity_rotates": True, "invalid_utf8_fails": True,
                                                   "non_object_fails": True, "water_survives_replacement": True}), "no jsonl rules"),
+    # A checkpoint without a basis marker reads as 0, so a declared basis below 1 would never migrate and is refused.
+    ("codex", _break(("layouts", 0, "rules", "totals_basis"), 0), "totals_basis is null or an integer of at least 1"),
+    ("codex", _break(("layouts", 0, "rules", "totals_basis"), -1), "totals_basis is null or an integer of at least 1"),
+    ("codex", _break(("layouts", 0, "rules", "totals_basis"), True), "totals_basis is null or an integer of at least 1"),
     # H1 / N11: a compatibility flag the mode list decides is not a flag any more.
     ("goose", lambda observer: observer["core"]["compat"].update(legacy_replay=True), "compat"),
 ])

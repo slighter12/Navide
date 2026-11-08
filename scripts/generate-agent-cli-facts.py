@@ -507,8 +507,9 @@ def validate_core(name: str, core: dict, layouts: list[dict]) -> None:
                 raise SystemExit(f"{name}: layout.rules holds named booleans, and the numbers {[field for field, _ in JSONL_NUMBER_RULES]}")
             for field, _ in JSONL_NUMBER_RULES:
                 value = layout["rules"][field]
-                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
-                    raise SystemExit(f"{name}: layout.rules.{field} is null or a non-negative integer")
+                # A checkpoint with no marker reads as 0, so a declared 0 would never be told apart from "no marker": it must be at least 1.
+                if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
+                    raise SystemExit(f"{name}: layout.rules.{field} is null or an integer of at least 1")
             if "legacy" in modes and not any(l["source"] == "sqlite" for l in layouts):
                 raise SystemExit(f"{name}: the legacy mode replays a row store")
         else:
