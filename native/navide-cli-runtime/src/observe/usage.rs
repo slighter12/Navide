@@ -241,7 +241,9 @@ mod tests {
         let record = json!({"type":"event_msg","timestamp":"t","payload":{"type":"token_count","info":{"total_token_usage":{
             "input_tokens":9223372036854775807i64,"cached_input_tokens":9223372036854775807i64,
             "output_tokens":9223372036854775807i64,"reasoning_output_tokens":9223372036854775807i64}}}});
-        assert_eq!(codex.reading(&record).unwrap().totals, Totals { input: 18446744073709551614, output: 18446744073709551614 });
+        // Codex's input_tokens already holds the cached tokens and its output_tokens the reasoning
+        // ones (0.2.38): neither is added again.
+        assert_eq!(codex.reading(&record).unwrap().totals, Totals { input: 9223372036854775807, output: 9223372036854775807 });
         let beyond = json!({"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{
             "input_tokens":"9223372036854775807","cached_input_tokens":"9223372036854775807","output_tokens":1}}}});
         assert_eq!(codex.reading(&beyond).unwrap().totals.output, 1, "an integer string past i64 is not a number");

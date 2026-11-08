@@ -37,8 +37,8 @@
       "usage_fields": {
         "select": [{"pointer": "/type", "equals": "event_msg"}, {"pointer": "/payload/type", "equals": "token_count"}],
         "object": "/payload/info/total_token_usage",
-        "input": ["/payload/info/total_token_usage/input_tokens", "/payload/info/total_token_usage/cached_input_tokens"],
-        "output": ["/payload/info/total_token_usage/output_tokens", "/payload/info/total_token_usage/reasoning_output_tokens"],
+        "input": ["/payload/info/total_token_usage/input_tokens"],
+        "output": ["/payload/info/total_token_usage/output_tokens"],
         "cache_read": [],
         "cache_creation": [],
         "key": [],

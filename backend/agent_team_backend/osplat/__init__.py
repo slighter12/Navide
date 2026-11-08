@@ -142,3 +142,8 @@ __all__ += ["has_tty_servicing", "has_windows_runtime_client"]
 #: would let another process take over a bound port, and Cygwin follows Windows.
 listen_socket_reuseaddr: bool = platform_id != "win32" and sys.platform != "cygwin"
 __all__ += ["listen_socket_reuseaddr"]
+
+# Whether the directory watcher reports a plain read (atime/attribute touch) as
+# `modified`: ReadDirectoryChangesW does, inotify and FSEvents do not.
+watch_reports_touch_as_modified: bool = {"darwin": False, "linux": False, "win32": True}[platform_id]
+__all__ += ["watch_reports_touch_as_modified"]

@@ -189,6 +189,10 @@ def default_seams() -> Seams:
         pane = agent_messaging.current(pane_id)
         return pane.pane_id if pane is not None else ""
 
+    def pane_live(pane_id: str) -> bool:
+        pane = agent_messaging.current(pane_id)
+        return pane is not None and pane.realized and not pane.offline
+
     def pane_workspace(pane_id: str) -> str:
         pane = agent_messaging.current(pane_id)
         return pane.workspace_path if pane is not None else ""
@@ -301,7 +305,7 @@ def default_seams() -> Seams:
         pane_directory=pane_directory, inherit_taint=inherit_taint,
         ui_settings=ui_settings, pane_agent=pane_agent, agent_skills=agent_skills, cancel=cancel, resume=resume,
         agent_mcp=agent_mcp, navide_mcp=navide_mcp, navide_mcp_tools=navide_mcp_tools,
-        wake_target=wake_target, windows_open=windows_open, wake=wake, turn_text=turn_text,
+        wake_target=wake_target, windows_open=windows_open, pane_live=pane_live, wake=wake, turn_text=turn_text,
         is_login_pane=login_panes.is_login_pane,
     )
 
@@ -341,6 +345,18 @@ def _wake_record(workspace_path: str, session_id: str) -> Any | None:
     return None if record is None or getattr(record, "spawn_status", "") == "removed" else record
 
 
+def _held_entry(pane_id: str) -> Any | None:
+    """The registry entry a connected window holds for ``pane_id`` (or the pane it is now
+    known by), else None. An entry waiting out its offline grace is not one: its window closed,
+    so no window has that pane to open, and the window holding the workspace, asked to open
+    it, answers "unknown pane" at once (0.2.38: a duplicate window holding only a pane's
+    children, the pane's own entry left behind by the window that closed)."""
+    from .. import agent_messaging
+
+    entry = agent_messaging.current(pane_id)
+    return None if entry is None or entry.offline else entry
+
+
 def _session_open_elsewhere(pane_id: str, workspace_path: str, session_id: str) -> bool:
     """Whether a realized pane other than ``pane_id`` (or the pane it is now known by) already
     runs this conversation in the workspace: opening ours too would put two CLIs on it."""
@@ -360,18 +376,18 @@ def _session_open_elsewhere(pane_id: str, workspace_path: str, session_id: str) 
 
 
 def _registered_pane(pane_id: str, workspace_path: str, session_id: str) -> Any | None:
-    """The registered pane behind the binding: its id (or an alias), else the live record
-    that holds the same conversation."""
-    from .. import agent_messaging, app
+    """The pane a connected window holds behind the binding: its id (or an alias), else the
+    live record that holds the same conversation."""
+    from .. import app
 
-    entry = agent_messaging.current(pane_id)
+    entry = _held_entry(pane_id)
     if entry is not None:
         return entry
     project = app.project_store.peek(workspace_path)
     for record in reversed(project.panes if project else []):
         if (getattr(record, "session_id", "") or "").strip() == session_id \
                 and getattr(record, "spawn_status", "") != "removed":
-            entry = agent_messaging.current(record.pane_id)
+            entry = _held_entry(record.pane_id)
             if entry is not None:
                 return entry
     return None
@@ -388,13 +404,13 @@ async def wake_pane(pane_id: str, workspace_path: str, session_id: str) -> dict[
 def _superseded(workspace_path: str, session_id: str) -> list[str]:
     """The live records of this conversation that no window holds: the ones a pane opened onto
     it replaces."""
-    from .. import agent_messaging, app
+    from .. import app
 
     project = app.project_store.peek(workspace_path)
     return [record.pane_id for record in (project.panes if project else [])
             if getattr(record, "spawn_status", "") != "removed"
             and (getattr(record, "session_id", "") or "").strip() == session_id
-            and agent_messaging.current(record.pane_id) is None]
+            and _held_entry(record.pane_id) is None]
 
 
 def _has_live_record(workspace_path: str, pane_id: str) -> bool:
@@ -417,11 +433,12 @@ async def _await_successor_record(workspace_path: str, pane_id: str) -> bool:
 
 def _retire_superseded(workspace_path: str, session_id: str, keep: str,
                        idle: set[str]) -> tuple[list[str], list[str]]:
-    """Retire the records the woken pane replaced. Left in place, the next restore of the
-    workspace would bring the conversation back a second time. Only a record found with no
-    live terminal is retired; one that appeared since is left. Returns the retired pane ids,
-    and those of them whose children the store actually handed to `keep` (it does only while
-    `keep`'s record is live; otherwise they move up a level)."""
+    """Retire the records the woken pane replaced: the ones of the same conversation that no
+    window holds. Left in place, the next restore of the workspace would bring the
+    conversation back a second time. Only a record found with no live terminal is retired;
+    one that appeared since is left. Returns the retired pane ids, and those of them whose
+    children the store actually handed to `keep` (it does only while `keep`'s record is live;
+    otherwise they move up a level)."""
     from .. import app
 
     retired: list[str] = []
@@ -570,7 +587,8 @@ async def _wake_pane(pane_id: str, workspace_path: str, session_id: str) -> dict
         entry = _registered_pane(pane_id, workspace_path, session_id)
     if entry is None:
         # No placeholder: the window's restore skipped the record (a detached group's, a
-        # pipeline run holding the restore) or the pane left its layout. Asked again first,
+        # pipeline run holding the restore), the pane left its layout, or only the entry its
+        # closed window left behind remains. Asked again first,
         # in case the conversation came back in a pane under another record meanwhile.
         if await asyncio.to_thread(_session_open_elsewhere, pane_id, workspace_path, session_id):
             return {"ok": False, "code": "session-open-elsewhere", "started": True}
@@ -603,6 +621,7 @@ async def start() -> None:
         manager = ChannelManager(ChannelStore(app.database), default_seams())
         _manager = manager
         app.pane_activity_listeners.append(manager.on_pane_activity)
+        app.hook_reply_listeners.append(manager.on_hook_reply)
         app.pane_prompt_listeners.append(manager.mirror.on_local_prompt)
         agent_messaging.pane_listeners.append(manager.mirror.on_registry)
         agent_messaging.message_row_listeners.append(manager.mirror.on_message_rows)
@@ -629,6 +648,7 @@ async def stop() -> None:
 
     for registry, hook in (
         (app.pane_activity_listeners, manager.on_pane_activity),
+        (app.hook_reply_listeners, manager.on_hook_reply),
         (app.pane_prompt_listeners, manager.mirror.on_local_prompt),
         (agent_messaging.pane_listeners, manager.mirror.on_registry),
         (agent_messaging.message_row_listeners, manager.mirror.on_message_rows),
