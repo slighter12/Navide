@@ -74,6 +74,88 @@ class _FakeKernel:
         return 1
 
 
+class _PerThreadState:
+    def __init__(self) -> None:
+        self.enter = threading.Event()  # the read may begin once this is set
+        self.cancelled = threading.Event()
+        self.in_read = False
+        self.stuck = False
+        self.cancels = 0
+
+
+class _PerThreadKernel:
+    """Like `_FakeKernel`, for several masters at once: each reading thread has its own state, a read on one of the
+    `stuck_outputs` handles can never be cancelled, and any other read begins only after `enter_after` cancels aimed
+    at its thread (the pump the first sweep missed)."""
+
+    def __init__(self, stuck_outputs: set[int], enter_after: int) -> None:
+        self.stuck_outputs = stuck_outputs
+        self.enter_after = enter_after
+        self.closed: list[int] = []
+        self.wintypes = types.SimpleNamespace(DWORD=ctypes.c_ulong)
+        self.release = threading.Event()  # test cleanup: lets every blocked read return
+        self._lock = threading.Lock()
+        self._states: dict[int, _PerThreadState] = {}
+        self._local = threading.local()
+
+    def _state(self, tid: int) -> _PerThreadState:
+        with self._lock:
+            return self._states.setdefault(tid, _PerThreadState())
+
+    def thread_id(self) -> int:
+        return threading.get_ident()
+
+    def read(self, handle, buffer, size, got, overlapped) -> int:
+        state = self._state(threading.get_ident())
+        with self._lock:
+            state.stuck = handle in self.stuck_outputs
+        state.enter.wait(10)
+        with self._lock:
+            state.in_read = True
+        (self.release if state.stuck else state.cancelled).wait(10)
+        self._local.error = _ERROR_OPERATION_ABORTED
+        return 0
+
+    def write(self, handle, buffer, size, written, overlapped) -> int:  # pragma: no cover - the writer never gets data
+        raise AssertionError("nothing is written")
+
+    def open_thread(self, access, inherit, tid) -> int:
+        return tid
+
+    def cancel_io(self, handle) -> int:
+        state = self._state(handle)
+        with self._lock:
+            state.cancels += 1
+            if state.cancels >= self.enter_after:
+                state.enter.set()
+            if state.in_read and not state.stuck and not state.cancelled.is_set():
+                state.cancelled.set()
+                return 1
+        self._local.error = winrt._ERROR_NOT_FOUND
+        return 0
+
+    def close(self, handle) -> int:
+        self.closed.append(handle)
+        return 1
+
+    def free_everything(self) -> None:
+        self.release.set()
+        with self._lock:
+            for state in self._states.values():
+                state.enter.set()
+                state.cancelled.set()
+
+
+@pytest.fixture
+def per_thread_kernel(monkeypatch: pytest.MonkeyPatch) -> _PerThreadKernel:
+    fake = _PerThreadKernel(stuck_outputs={12}, enter_after=winrt._CANCEL_RETRIES)
+    monkeypatch.setattr(winrt, "api", lambda: fake)
+    monkeypatch.setattr(winrt, "ctypes", types.SimpleNamespace(
+        create_string_buffer=ctypes.create_string_buffer, byref=ctypes.byref,
+        get_last_error=lambda: getattr(fake._local, "error", 0)))
+    return fake
+
+
 @pytest.fixture
 def kernel(monkeypatch: pytest.MonkeyPatch) -> _FakeKernel:
     # Past the immediate retries of the first sweep, so the pump enters its read only after that sweep gave up.
@@ -131,4 +213,86 @@ def test_a_pump_that_never_ends_is_still_reported_not_closed_at_the_deadline(ker
     finally:
         kernel._enter.set()
         kernel._cancelled.set()
+        loop.close()
+
+
+def test_slow_cancel_calls_do_not_carry_finish_close_past_its_deadline(kernel: _FakeKernel, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A repeat sweep is up to `_CANCEL_RETRIES` cancel calls; none may be issued once the deadline passed, so the
+    close ends within the deadline plus one call, not one sweep, whatever each call costs."""
+    call_cost = 0.01
+    deadline_s, margin_s = 0.3, 0.2
+    real_cancel = kernel.cancel_io
+    slow = threading.Event()
+
+    def slow_cancel(handle) -> int:
+        if slow.is_set():
+            time.sleep(call_cost)
+        return real_cancel(handle)
+
+    monkeypatch.setattr(kernel, "cancel_io", slow_cancel)
+    monkeypatch.setattr(kernel, "enter_read_after_cancels", 10 ** 9)  # a worker that never exits
+    loop = asyncio.new_event_loop()
+    master = winrt.WindowsMaster("s3", 31, 32)
+    try:
+        master.start_pump(loop)
+        _announced(master)
+        master.begin_close()  # the production order: step 1 for everything, then the bounded join
+        slow.set()
+        started = time.monotonic()
+        assert master.finish_close(started + deadline_s) is False
+        elapsed = time.monotonic() - started
+        assert elapsed < deadline_s + margin_s, f"finish_close took {elapsed:.2f}s against a {deadline_s}s deadline"
+        assert not master.closed
+    finally:
+        kernel._enter.set()
+        kernel._cancelled.set()
+        loop.close()
+
+
+def test_slow_cancel_calls_do_not_carry_begin_close_made_by_finish_close_past_its_deadline(kernel: _FakeKernel, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`close()` runs `begin_close` inside `finish_close`: that first sweep is bound by the same deadline."""
+    deadline_s, margin_s = 0.3, 0.2
+    real_cancel = kernel.cancel_io
+
+    def slow_cancel(handle) -> int:
+        time.sleep(0.01)
+        return real_cancel(handle)
+
+    monkeypatch.setattr(kernel, "cancel_io", slow_cancel)
+    monkeypatch.setattr(kernel, "enter_read_after_cancels", 10 ** 9)
+    loop = asyncio.new_event_loop()
+    master = winrt.WindowsMaster("s4", 41, 42)
+    try:
+        master.start_pump(loop)
+        _announced(master)
+        started = time.monotonic()
+        assert master.finish_close(started + deadline_s) is False
+        elapsed = time.monotonic() - started
+        assert elapsed < deadline_s + margin_s, f"finish_close took {elapsed:.2f}s against a {deadline_s}s deadline"
+    finally:
+        kernel._enter.set()
+        kernel._cancelled.set()
+        loop.close()
+
+
+def test_a_stuck_master_does_not_use_up_the_deadline_a_later_master_needs_for_a_repeat_cancel(per_thread_kernel: _PerThreadKernel) -> None:
+    """Master 1 can never be cancelled; master 2 missed the first sweep and needs one more cancel. They share one
+    deadline, so master 2 must get its repeat while master 1 is still being waited for."""
+    deadline_s, margin_s = 1.0, 0.3
+    loop = asyncio.new_event_loop()
+    stuck_master = winrt.WindowsMaster("m1", 11, 12)
+    late_master = winrt.WindowsMaster("m2", 21, 22)
+    try:
+        for master in (stuck_master, late_master):
+            master.start_pump(loop)
+            _announced(master)
+        started = time.monotonic()
+        stuck = winrt.close_together([stuck_master, late_master], started + deadline_s)
+        elapsed = time.monotonic() - started
+        assert stuck == [stuck_master]
+        assert late_master.closed and [h for h in per_thread_kernel.closed if h in (21, 22)] == [21, 22]
+        assert not stuck_master.closed and not [h for h in per_thread_kernel.closed if h in (11, 12)]
+        assert elapsed < deadline_s + margin_s, f"close_together took {elapsed:.2f}s against a {deadline_s}s deadline"
+    finally:
+        per_thread_kernel.free_everything()
         loop.close()

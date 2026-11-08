@@ -758,6 +758,9 @@ fn many_sessions_cost_bounded_threads_and_cancellation_joins_within_the_bound() 
             "sidecar_working_set_delta_bytes":memory_after.saturating_sub(memory_before),
             "worst_pump_join_ms":worst_join.as_millis() as u64,
             "total_cancel_join_ms":total_join.as_millis() as u64,
+            // Status only, never gated: the cancels `cancel_and_join` issued after its first one during the
+            // joins, i.e. extra attempts made while a pump was still running. It is not a count of missed
+            // cancels: a cancel that landed but whose pump had not ended by the next 1 ms poll counts too.
             "pump_cancel_repeats":cancel_repeats,
             "thread_close_s_proposed":THREAD_CLOSE.as_secs()}),
     );
