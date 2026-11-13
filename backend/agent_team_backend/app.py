@@ -2906,9 +2906,6 @@ async def _stop_log_watcher() -> None:
             # LogWatcher.drain_pending_tokens.
             await _log_watcher.drain_pending_tokens()
             _log_watcher.stop()
-        # After the watcher (its readers call the runtime); off the loop, since
-        # it waits for the process to go.
-        await asyncio.to_thread(_cli_runtime.shutdown)
         try:
             tokens_store.flush()
         except Exception as err:  # noqa: BLE001
@@ -2971,6 +2968,18 @@ async def _stop_log_watcher() -> None:
     _log_watcher = None
     _git_watcher = None
     _credential_watcher = None
+
+
+@app.on_event("shutdown")
+async def _stop_cli_runtime() -> None:
+    """Stop the Rust CLI runtime's process, if the switch ever started one.
+
+    Its own handler, registered after _stop_log_watcher: the watcher, whose
+    readers call the runtime, has stopped by then. Off the loop, since it waits
+    for the process to go. Should the handler before it raise, this one does
+    not run; the process then ends when its stdin closes with the backend.
+    """
+    await asyncio.to_thread(_cli_runtime.shutdown)
 
 
 def _default_pool_reading(loop: asyncio.AbstractEventLoop) -> dict[str, int]:
