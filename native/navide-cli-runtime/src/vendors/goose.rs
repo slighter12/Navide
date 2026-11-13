@@ -48,6 +48,7 @@ static DB: Sqlite = Sqlite {
         page: 0,
         restart_below: false,
         hold_last: None,
+        partition: None,
     }),
     activity: Some(Rows {
         sql: "SELECT m.id AS id, m.session_id AS session_id, m.role AS role, m.content_json AS content, \
@@ -59,6 +60,7 @@ static DB: Sqlite = Sqlite {
         page: 256,
         restart_below: false,
         hold_last: None,
+        partition: None,
     }),
 };
 
@@ -179,7 +181,7 @@ pub static CLI: Cli = Cli {
             turn_stamp: TurnStamp::Text,
             turn_text: "reply",
             persist: &[],
-            bag: Bag { slots: &[], turn: None, cursor: Some("goose_message::") },
+            bag: Bag { slots: &[], turn: None, cursor: Some("goose_message::"), anchor: None },
         },
         turns: TurnsSpec {
             slots: &[],

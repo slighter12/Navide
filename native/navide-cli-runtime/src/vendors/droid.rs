@@ -144,7 +144,7 @@ pub static CLI: Cli = Cli {
             turn_stamp: TurnStamp::Text,
             turn_text: "reply",
             persist: &["reply"],
-            bag: Bag { slots: &[BagSlot::Text { slot: "reply", prefix: "droid_text::" }], turn: None, cursor: None },
+            bag: Bag { slots: &[BagSlot::Text { slot: "reply", prefix: "droid_text::" }], turn: None, cursor: None, anchor: None },
         },
         turns: TurnsSpec {
             slots: &[],

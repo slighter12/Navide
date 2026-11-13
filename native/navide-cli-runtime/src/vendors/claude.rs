@@ -196,7 +196,7 @@ pub static CLI: Cli = Cli {
             turn_stamp: TurnStamp::Text,
             turn_text: "reply",
             persist: &[],
-            bag: Bag { slots: &[], turn: None, cursor: None },
+            bag: Bag { slots: &[], turn: None, cursor: None, anchor: None },
         },
         turns: TurnsSpec {
             slots: &[],

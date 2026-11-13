@@ -21,6 +21,19 @@ fn replace(bag: &mut Vec<String>, prefix: &str, value: Option<String>) {
     }
 }
 
+/// Per-partition marks `prefix + part + "::" + id` (the part split off at the
+/// last `::`; an id that is not `-?digits` is ignored).
+fn marks(bag: &[String], prefix: &str) -> std::collections::BTreeMap<String, i64> {
+    bag.iter()
+        .filter_map(|k| k.strip_prefix(prefix))
+        .filter_map(|rest| {
+            let (part, id) = rest.rsplit_once("::").unwrap_or(("", rest));
+            let digits = id.trim_start_matches('-');
+            (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())).then(|| Some((part.to_owned(), id.parse().ok()?)))?
+        })
+        .collect()
+}
+
 /// `activity_high_water`: the first mark's number, 0 when absent or not a number.
 pub fn high_water(bag: &[String]) -> usize {
     find(bag, HW_PREFIX).and_then(|n| n.parse().ok()).unwrap_or(0)
@@ -54,6 +67,10 @@ pub fn load(spec: &ActivitySpec, bag: &[String]) -> ActivityState {
         }
     }
     match (spec.bag.cursor, spec.cursor) {
+        (Some(prefix), Cursor::Rows) if spec.bag.anchor.is_some() => {
+            state.marks = marks(bag, prefix);
+            state.anchored = spec.bag.anchor.is_some_and(|anchor| bag.iter().any(|k| k == anchor));
+        }
         (Some(prefix), Cursor::Bytes) => {
             if let Some(Value::Object(cursor)) = find(bag, prefix).and_then(|raw| serde_json::from_str::<Value>(raw).ok()) {
                 state.cursor = cursor;
@@ -110,6 +127,18 @@ pub fn store(spec: &ActivitySpec, after: &ActivityState, bag: &mut Vec<String>) 
         replace(bag, turn.prefix, json);
     }
     match (spec.bag.cursor, spec.cursor) {
+        (Some(prefix), Cursor::Rows) if spec.bag.anchor.is_some() => {
+            // Only the marks that moved are rewritten, as main remembers them.
+            let before = marks(bag, prefix);
+            for (part, id) in &after.marks {
+                if before.get(part) != Some(id) {
+                    replace(bag, &format!("{prefix}{part}::"), Some(id.to_string()));
+                }
+            }
+            if let Some(anchor) = spec.bag.anchor.filter(|a| after.anchored && !bag.iter().any(|k| k == a)) {
+                bag.push(anchor.to_owned());
+            }
+        }
         (Some(prefix), Cursor::Bytes) => {
             let cursor = (!after.cursor.is_empty()).then(|| py_json(&Value::Object(after.cursor.clone()), false, true));
             replace(bag, prefix, cursor);

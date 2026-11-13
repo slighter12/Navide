@@ -88,6 +88,7 @@ static DB: Sqlite = Sqlite {
         page: 0,
         restart_below: false,
         hold_last: None,
+        partition: None,
     }),
     activity: Some(Rows {
         sql: concat!(
@@ -106,6 +107,7 @@ static DB: Sqlite = Sqlite {
         // The newest row is an assistant reply with no finish_reason yet: read
         // it again next pass rather than lose its turn end.
         hold_last: Some(Pred::All(&[ASSISTANT, Pred::Not(&Pred::Truthy(&["finish"])), Pred::Not(&Pred::Truthy(&["tool_calls"]))])),
+        partition: None,
     }),
 };
 
@@ -200,7 +202,7 @@ pub static CLI: Cli = Cli {
             turn_stamp: TurnStamp::Text,
             turn_text: "reply",
             persist: &[],
-            bag: Bag { slots: &[], turn: None, cursor: Some("hermes_msg::") },
+            bag: Bag { slots: &[], turn: None, cursor: Some("hermes_msg::"), anchor: None },
         },
         turns: TurnsSpec {
             slots: &[],

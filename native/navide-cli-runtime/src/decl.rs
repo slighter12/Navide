@@ -187,9 +187,28 @@ pub struct Rows {
     /// Activity: the newest id is read every pass, and one below the
     /// watermark (a replaced database) starts over at it.
     pub restart_below: bool,
-    /// Activity: a last row matching this is not consumed yet (it is read
-    /// again next pass, when it may have changed).
+    /// A last row matching this is not consumed yet (it is read again next
+    /// pass, when it may have changed).
     pub hold_last: Option<Pred>,
+    /// One watermark per partition (openclaw: per session in one table)
+    /// instead of one for the database.
+    pub partition: Option<Partition>,
+}
+
+/// Rows read per partition: `sql` then binds the partition (`?1`), its
+/// watermark (`?2`) and the page size (`?3`), and a partition whose newest id
+/// is not above its watermark is not queried.
+#[derive(Debug, Serialize)]
+pub struct Partition {
+    /// Every partition with its newest id, as columns `part` and `top`.
+    pub tops: Str,
+    /// The label each of a partition's rows carries (column `label_as`): the
+    /// first non-empty text, evaluated over the first row of its query with
+    /// the partition bound as `?1`. A query that fails (its table is absent
+    /// in this build) is skipped. No label at all is `Error::Unsupported`:
+    /// main's reader reports such a partition.
+    pub label: &'static [(Str, Text)],
+    pub label_as: Str,
 }
 
 #[derive(Debug, Serialize)]
@@ -315,6 +334,9 @@ pub enum Text {
     IsoFromSeconds(&'static Num),
     /// `usage_common._epoch_to_iso` of the value as a float ("" when it is not a number).
     IsoFromFloat(Path),
+    /// The first path holding a non-empty string (as is) or a non-zero
+    /// number: epoch milliseconds above 1e11, else seconds, as `IsoFromFloat`.
+    Stamp(&'static [Path]),
     /// A vendor hook: a string function the vocabulary cannot express. The
     /// declaration states why next to the function.
     #[serde(serialize_with = "hook")]
@@ -345,6 +367,10 @@ pub enum Num {
     Case(&'static [(Pred, Num)]),
     /// Only when the record holds the path at all (else this rule yields no reading).
     Required(Path, &'static Num),
+    /// `int(usage_common._num(v))`: no reading when the value is not a number.
+    Float(Path),
+    /// 0 where the inner number has no reading (`int(_num(v) or 0)`).
+    OrZero(&'static Num),
 }
 
 // ---- usage ------------------------------------------------------------------
@@ -398,6 +424,10 @@ pub enum UsageMode {
     /// rules see the row with `delta` (column → growth, floored at 0) and
     /// `counters` (`"a:b:…"`) added; a row that did not grow yields nothing.
     Counters { kind: Str, map: Str, columns: &'static [Str] },
+    /// SQLite rows read per partition (`Rows::partition`), one event per
+    /// row with a reading; the checkpoint keeps each partition's last read
+    /// id, held rows excluded, as `{"kind": kind, map: {part: id}}`.
+    Watermarks { kind: Str, map: Str },
 }
 
 #[derive(Debug, Serialize)]
@@ -465,8 +495,12 @@ pub struct Bag {
     /// `TurnStamp::Text` tracker, `{idx, last_ms, flushed[, cancelled]}` for `Millis`.
     pub turn: Option<BagTurn>,
     /// The cursor: `prefix + json(sort_keys)` for `Cursor::Bytes`,
-    /// `prefix + id` for `Cursor::Rows`.
+    /// `prefix + id` for `Cursor::Rows`, and `prefix + part + "::" + id` per
+    /// partition for partitioned rows.
     pub cursor: Option<Str>,
+    /// Partitioned rows: the key that records the database's first sight
+    /// (every partition then present was anchored at its newest id).
+    pub anchor: Option<Str>,
 }
 
 #[derive(Debug, Serialize)]

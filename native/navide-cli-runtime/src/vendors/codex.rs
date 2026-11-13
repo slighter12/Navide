@@ -246,7 +246,7 @@ pub static CLI: Cli = Cli {
             turn_stamp: TurnStamp::Text,
             turn_text: "reply",
             persist: &["reply"],
-            bag: Bag { slots: &[BagSlot::TextOnChange { slot: "reply", prefix: "__lasttext__:" }], turn: None, cursor: None },
+            bag: Bag { slots: &[BagSlot::TextOnChange { slot: "reply", prefix: "__lasttext__:" }], turn: None, cursor: None, anchor: None },
         },
         turns: TurnsSpec {
             slots: &[empty("model"), empty("cli_version"), empty("meta_seen")],

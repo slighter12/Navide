@@ -107,6 +107,7 @@ static TOY: Cli = Cli {
                 slots: &[BagSlot::Text { slot: "reply", prefix: "toy_text::" }],
                 turn: Some(BagTurn { prefix: "toy_turn::", compact: true, keep_null: false }),
                 cursor: None,
+                anchor: None,
             },
         },
         turns: TurnsSpec {

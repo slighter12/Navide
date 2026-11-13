@@ -2,6 +2,7 @@
 //! one event per usage record (deduplicated through a bounded key window),
 //! or one event per read carrying the delta of running totals.
 use super::jsonl::{self, Tail};
+use super::sqlite::Param;
 use super::{Error, UsageEvent, UsageRead};
 use crate::decl::{Format, RawValue, Reading, Restore, Sqlite, UsageMode, UsageSpec};
 use crate::expr::{self, py_int, py_str_opt, Scope, Slots};
@@ -109,7 +110,7 @@ pub fn read(
         UsageMode::Cumulative => cumulative(spec, vendor, path, slots, checkpoint, tail, restore),
         UsageMode::Snapshot { .. } => unreachable!("read above"),
         // tests/declarations.rs: only a SQLite declaration uses Counters.
-        UsageMode::Counters { .. } => unreachable!("Counters is a SQLite mode"),
+        UsageMode::Counters { .. } | UsageMode::Watermarks { .. } => unreachable!("a SQLite mode"),
     }
 }
 
@@ -120,6 +121,9 @@ pub fn read(
 fn rows(spec: &'static UsageSpec, db: &'static Sqlite, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, full: bool) -> Result<UsageRead, Error> {
     if let UsageMode::Counters { kind, map, columns } = spec.mode {
         return counters(spec, db, vendor, path, slots, checkpoint, full, (kind, map, columns));
+    }
+    if let UsageMode::Watermarks { kind, map } = spec.mode {
+        return watermarks(spec, db, vendor, path, slots, checkpoint, full, (kind, map));
     }
     let (Some(query), Ok(meta)) = (db.usage.as_ref(), std::fs::metadata(path)) else {
         return Ok(UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() });
@@ -137,7 +141,7 @@ fn rows(spec: &'static UsageSpec, db: &'static Sqlite, vendor: &str, path: &Path
     };
     let mut events = Vec::new();
     let mut seen = HashSet::new();
-    for row in super::sqlite::rows(path, db, query.sql, &[last])?.unwrap_or_default() {
+    for row in super::sqlite::rows(path, db, query.sql, &[Param::Int(last)])?.unwrap_or_default() {
         let Some(reading) = apply_rules(spec, &row, 0, &mut slots) else { continue };
         let s = scope(&row, 0, &slots);
         let (Some(input), Some(output)) = (expr::num(&reading.input, &s), expr::num(&reading.output, &s)) else { continue };
@@ -206,6 +210,54 @@ fn counters(
     let mut next = Map::new();
     next.insert("kind".into(), kind.into());
     next.insert(map.into(), state.into());
+    Ok(UsageRead { events, checkpoint: next })
+}
+
+/// Per-partition watermarks: every partition whose newest id is above its
+/// mark is read from the mark on, and each row read moves the mark (with or
+/// without a reading). Any unreadable query leaves the checkpoint as it was.
+#[allow(clippy::too_many_arguments)]
+fn watermarks(
+    spec: &'static UsageSpec,
+    db: &'static Sqlite,
+    vendor: &str,
+    path: &Path,
+    mut slots: Slots,
+    checkpoint: &Map<String, Value>,
+    full: bool,
+    (kind, map): (&'static str, &'static str),
+) -> Result<UsageRead, Error> {
+    let unchanged = || Ok(UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() });
+    let Some((query, part)) = db.usage.as_ref().and_then(|q| Some((q, q.partition.as_ref()?))) else { return unchanged() };
+    let mut marks: Map<String, Value> = match checkpoint.get(map) {
+        Some(Value::Object(last)) if !full && checkpoint.get("kind").and_then(Value::as_str) == Some(kind) => {
+            last.iter().filter(|(_, v)| v.is_i64()).map(|(k, v)| (k.clone(), v.clone())).collect()
+        }
+        _ => Map::new(),
+    };
+    let Some(tops) = super::sqlite::tops(path, db, part)? else { return unchanged() };
+    let (mut events, mut seen) = (Vec::new(), HashSet::new());
+    for (name, top) in tops {
+        let after = marks.get(&name).and_then(Value::as_i64).unwrap_or(-1);
+        if top <= after {
+            continue;
+        }
+        let Some(rows) = super::sqlite::page(path, db, query, part, &name, after)? else { return unchanged() };
+        for row in rows {
+            marks.insert(name.clone(), row.get(query.id).and_then(expr::py_int_raw).unwrap_or(0).into());
+            let Some(reading) = apply_rules(spec, &row, 0, &mut slots) else { continue };
+            let s = scope(&row, 0, &slots);
+            let (Some(input), Some(output)) = (expr::num(&reading.input, &s), expr::num(&reading.output, &s)) else { continue };
+            let key = expr::text(&reading.key, &s);
+            if full && !seen.insert(key.clone()) {
+                continue;
+            }
+            events.push(event(vendor, path, reading, &s, input, output, key, Map::new()));
+        }
+    }
+    let mut next = Map::new();
+    next.insert("kind".into(), kind.into());
+    next.insert(map.into(), marks.into());
     Ok(UsageRead { events, checkpoint: next })
 }
 

@@ -124,6 +124,7 @@ pub static CLI: Cli = Cli {
                 slots: &[BagSlot::Text { slot: "reply", prefix: "pi_text::" }],
                 turn: Some(BagTurn { prefix: "pi_turn::", compact: false, keep_null: false }),
                 cursor: None,
+                anchor: None,
             },
         },
         turns: TurnsSpec {

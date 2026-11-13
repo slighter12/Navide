@@ -290,6 +290,18 @@ pub fn text(t: &Text, s: &Scope) -> String {
             if seconds == 0.0 { String::new() } else { time::iso_truncated_ms(seconds) }
         }
         Text::IsoFromFloat(path) => py_float(get(s.record, path)).map(time::iso_from_float).unwrap_or_default(),
+        Text::Stamp(paths) => {
+            for path in *paths {
+                match get(s.record, path) {
+                    Some(Value::String(v)) if !v.is_empty() => return v.clone(),
+                    value => match py_float(value) {
+                        Some(n) if n != 0.0 => return time::iso_from_float(if n > 1e11 { n / 1000.0 } else { n }),
+                        _ => {}
+                    },
+                }
+            }
+            String::new()
+        }
         Text::Hook(inner, func) => func(&text(inner, s)),
         Text::IsoFromSeconds(n) => num(n, s).and_then(|v| v.checked_mul(1_000_000)).map(time::iso_from_micros).unwrap_or_default(),
         Text::IsoFromMicros(path) => get(s.record, path).and_then(py_int_raw).map(time::iso_from_micros).unwrap_or_default(),
@@ -331,6 +343,8 @@ pub fn num(n: &Num, s: &Scope) -> Option<i64> {
             get(s.record, path).filter(|v| v.is_object())?;
             num(inner, s)
         }
+        Num::Float(path) => py_float(get(s.record, path)).filter(|f| f.is_finite()).map(|f| f.trunc() as i64),
+        Num::OrZero(inner) => Some(num(inner, s).unwrap_or(0)),
     }
 }
 

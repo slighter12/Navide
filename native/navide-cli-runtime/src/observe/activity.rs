@@ -4,7 +4,8 @@
 //! inferred-turn tracker) in one `ActivityState`.
 use super::jsonl::{self, LineResume};
 use super::{ActivityEvent, Error, CWD, SESSION, WALK_RESUMED};
-use crate::decl::{ActivitySpec, Clock, Cursor, Effect, Emit, EventKind, Format, Rule, TurnOp, TurnStamp};
+use super::sqlite::Param;
+use crate::decl::{ActivitySpec, Clock, Cursor, Effect, Emit, EventKind, Format, Partition, Rows, Rule, Sqlite, TurnOp, TurnStamp};
 use crate::expr::{self, Scope, Slots};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -41,6 +42,12 @@ pub struct ActivityState {
     /// Row cursor: the highest row id walked; `None` until the database is first seen.
     #[serde(default)]
     pub rows: Option<i64>,
+    /// Partitioned row cursor: each partition's highest id walked, and
+    /// whether the database's first sight anchored them.
+    #[serde(default)]
+    pub marks: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub anchored: bool,
     /// Persisted slots the last walk wrote (even with the value they had).
     #[serde(skip)]
     pub written: Vec<String>,
@@ -279,6 +286,60 @@ fn sqlite_activity(format: &'static Format) -> Option<&'static crate::decl::Rows
     }
 }
 
+/// Rows after one database-wide watermark.
+fn walk_rows(ctx: &mut Ctx, spec: &'static ActivitySpec, path: &Path, db: &Sqlite, query: &Rows, state: &mut ActivityState) -> Result<(), Error> {
+    let newest = || super::sqlite::scalar(path, db, query.newest);
+    let Some(after) = state.rows else {
+        // First sight: everything already in the database is history.
+        state.rows = newest()?;
+        return Ok(());
+    };
+    match if query.restart_below { newest()? } else { Some(after) } {
+        None => {}
+        Some(top) if top < after => state.rows = Some(top),
+        Some(_) => {
+            let mut rows = super::sqlite::rows(path, db, query.sql, &[Param::Int(after), Param::Int(query.page)])?.unwrap_or_default();
+            if rows.last().is_some_and(|row| super::sqlite::held(query, row)) {
+                rows.pop();
+            }
+            if let Some(last) = rows.last() {
+                state.rows = Some(expr::py_int(last.get(query.id)));
+            }
+            for row in &rows {
+                ctx.record(spec.rules, row, At { line: 0, end: 0 });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Rows after each partition's watermark. First sight anchors every
+/// partition then present at its newest id; one that appears later is read
+/// from its start.
+fn walk_partitions(ctx: &mut Ctx, spec: &'static ActivitySpec, path: &Path, db: &Sqlite, query: &Rows, part: &Partition, state: &mut ActivityState) -> Result<(), Error> {
+    let Some(tops) = super::sqlite::tops(path, db, part)? else { return Ok(()) };
+    if !state.anchored {
+        state.marks.extend(tops);
+        state.anchored = true;
+        return Ok(());
+    }
+    for (name, top) in tops {
+        let after = state.marks.get(&name).copied().unwrap_or(-1);
+        if top < after && query.restart_below {
+            state.marks.insert(name, top);
+            continue;
+        }
+        if top <= after {
+            continue;
+        }
+        for row in super::sqlite::page(path, db, query, part, &name, after)?.unwrap_or_default() {
+            state.marks.insert(name.clone(), row.get(query.id).and_then(expr::py_int_raw).unwrap_or(0));
+            ctx.record(spec.rules, &row, At { line: 0, end: 0 });
+        }
+    }
+    Ok(())
+}
+
 /// One walk of `path` from `state`. Returns the events and where a line walk
 /// can pick the file up again (main keeps that in reader memory).
 #[allow(clippy::too_many_arguments)]
@@ -344,34 +405,9 @@ pub fn walk(
             let (Format::Sqlite(db), Some(query)) = (format, sqlite_activity(format)) else {
                 unreachable!("a Rows cursor is declared with a SQLite activity query")
             };
-            let newest = || super::sqlite::scalar(path, db, query.newest);
-            match state.rows {
-                // First sight: everything already in the database is history.
-                None => state.rows = newest()?.or(state.rows),
-                Some(after) => {
-                    let top = if query.restart_below { newest()? } else { Some(after) };
-                    match top {
-                        None => {}
-                        Some(top) if top < after => state.rows = Some(top),
-                        Some(_) => {
-                            let mut rows = super::sqlite::rows(path, db, query.sql, &[after, query.page])?.unwrap_or_default();
-                            let held = |row: &Value| {
-                                let slots = Slots::new();
-                                let scope = Scope { record: row, line: 0, offset: 0, slots: &slots, cancelled: false, entry_key: "" };
-                                query.hold_last.as_ref().is_some_and(|p| expr::pred(p, &scope))
-                            };
-                            if rows.last().is_some_and(held) {
-                                rows.pop();
-                            }
-                            if let Some(last) = rows.last() {
-                                state.rows = Some(crate::expr::py_int(last.get(query.id)));
-                            }
-                            for row in &rows {
-                                ctx.record(spec.rules, row, At { line: 0, end: 0 });
-                            }
-                        }
-                    }
-                }
+            match &query.partition {
+                Some(part) => walk_partitions(&mut ctx, spec, path, db, query, part, state)?,
+                None => walk_rows(&mut ctx, spec, path, db, query, state)?,
             }
             ctx
         }

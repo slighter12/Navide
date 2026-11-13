@@ -42,6 +42,7 @@ from tests.vendors import test_grok as grok_t
 from tests.vendors import test_hermes as hermes_t
 from tests.vendors import test_kimi_code_2_2_fixture as kimi_t
 from tests.vendors import test_muse as muse_t
+from tests.vendors import test_openclaw as oc_t
 from tests.vendors import test_pi as pi_t
 from tests.vendors import test_qwen_0_25_fixture as qwen_t
 
@@ -215,6 +216,50 @@ def _scenarios() -> dict[str, dict]:
             hermes_tokens("cont", 1500, 90, 300, 20, 1003.5),
         ], 2, 3),
     ]
+    def oc_row(sid: str, seq: int, event: dict | None, role: str | None = None) -> tuple:
+        return ("INSERT INTO transcript_events(session_id, seq, event_json, message_role) VALUES (?, ?, ?, ?)",
+                (sid, seq, None if event is None else json.dumps(event), role))
+
+    oc_windows, oc_header, oc_nodes = (f"{n}0000000-0000-4000-8000-000000000000" for n in "abc")
+    oc_key2 = "agent:main:navide-22222222-2222-4333-8444-555555555555"
+    oc_steps = [
+        _db_step([oc_t._SCHEMA, oc_t._SESSION_TABLES, oc_row(oc_t.KEY, 0, {"type": "session"}),
+                  oc_row(oc_t.KEY, 1, oc_t._msg("user", "old"), "user"),
+                  oc_row(oc_t.KEY, 2, oc_t._msg("assistant", "a", stopReason="stop", model="m1",
+                                                usage={"input": 10, "output": 3, "cacheRead": 4, "cacheWrite": 1}),
+                         "assistant")], 0, 1),
+        _db_step([
+            oc_row(oc_t.KEY, 3, oc_t._msg("user", [{"type": "text", "text": "do it"}]), "user"),
+            oc_row(oc_t.KEY, 4, {"type": "custom_message", "customType": "openclaw.runtime-context"}),
+            oc_row(oc_t.KEY, 5, None),
+            oc_row(oc_t.KEY, 6, {"type": "message", "timestamp": 1792000000123,
+                                 "message": {"role": "assistant", "content": [{"type": "toolCall"}], "stopReason": "toolUse",
+                                             "usage": {"input": "7", "output": 2.9, "cacheRead": None}}}, "assistant"),
+            oc_row(oc_t.KEY, 7, oc_t._msg("toolResult", []), "toolResult"),
+            oc_row(oc_t.KEY, 8, {"type": "message", "message": {
+                "role": "assistant", "timestamp": 1792000001, "stopReason": "stop",
+                "content": [{"type": "thinking", "thinking": "x"}, {"type": "text", "text": "done"}]}}, "assistant"),
+            oc_row(oc_t.KEY, 9, oc_t._msg("user", "<system-reminder>x</system-reminder>"), "user"),
+            ("INSERT INTO session_windows(session_id, session_key) VALUES (?, ?)", (oc_windows, oc_t.KEY)),
+            oc_row(oc_windows, 0, dict(oc_t._VM_HEADER, id=oc_windows)),
+            oc_row(oc_windows, 1, oc_t._msg("user", "hello"), "user"),
+            oc_row(oc_windows, 2, oc_t._msg("assistant", "STUB-REPLY-OK", stopReason="stop"), "assistant"),
+            oc_row(oc_header, 0, {"type": "session", "sessionKey": oc_key2}),
+            oc_row(oc_header, 1, oc_t._msg("assistant", "part", usage={"input": 5, "output": 1}), "assistant"),
+        ], 1, 2),
+        _db_step([
+            ("UPDATE transcript_events SET event_json = ? WHERE session_id = ? AND seq = 1",
+             (json.dumps(oc_t._msg("assistant", "whole", stopReason="stop", usage={"input": 5, "output": 1})), oc_header)),
+            oc_row(oc_t.KEY, 10, {"type": "message", "message": {"content": "x"}}, "tool"),
+        ], 2, 3),
+        # A rewritten session (its newest seq fell below the mark) and one mapped by session_nodes.
+        _db_step([
+            ("DELETE FROM transcript_events WHERE session_id = ? AND seq >= 5", (oc_t.KEY,)),
+            ("INSERT INTO session_nodes(session_key, current_session_id) VALUES (?, ?)", (oc_key2, oc_nodes)),
+            oc_row(oc_nodes, 0, {"type": "session"}),
+            oc_row(oc_nodes, 1, oc_t._msg("user", "late"), "user"),
+        ], 3, 4),
+    ]
     grok = [grok_t._user(1, "hello grok"), grok_t._agent(2, "hi "), grok_t._agent(3, "there"), grok_t._turn(4),
             grok_t._user(5, "again"), grok_t._agent(6, "ok"), grok_t._turn(7, inp=50, out=5, stop="cancelled")]
     return {
@@ -304,6 +349,11 @@ def _scenarios() -> dict[str, dict]:
             "vendor": "hermes", "env": {"HERMES_HOME": "hermes"},
             "file": "hermes/state.db",
             "steps": hermes_steps,
+        },
+        "openclaw_db": {
+            "vendor": "openclaw", "env": {"OPENCLAW_STATE_DIR": "openclaw"},
+            "file": "openclaw/agents/main/agent/openclaw-agent.sqlite",
+            "steps": oc_steps,
         },
         "grok_turns": {
             "vendor": "grok", "env": {"GROK_HOME": "grok"},
