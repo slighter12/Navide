@@ -91,6 +91,18 @@ impl<V: Vendor<Backend = Sqlite>> Backend<V> for Sqlite {
         !matches!(spec.usage, SqlUsage::None | SqlUsage::Legacy)
     }
 
+    fn usage_rules(spec: &'static Self::Spec) -> Vec<&'static UsageRule<V>> {
+        fn of<V: Vendor>(usage: &'static SqlUsage<V>) -> Vec<&'static UsageRule<V>> {
+            match usage {
+                SqlUsage::None | SqlUsage::Legacy => Vec::new(),
+                SqlUsage::After { rules, .. } | SqlUsage::Counters { rules, .. } | SqlUsage::Watermarks { rules, .. } => rules.iter().collect(),
+                SqlUsage::Anchored(anchored) => anchored.rules.iter().collect(),
+                SqlUsage::OneOf { of: variants, .. } => variants.iter().flat_map(of).collect(),
+            }
+        }
+        of(&spec.usage)
+    }
+
     fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, memo: &mut Memo) -> Result<(), Error> {
         walk.restore(state);
         let conn = Conn::open(walk.file)?;

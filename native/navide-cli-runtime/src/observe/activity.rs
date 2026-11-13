@@ -3,7 +3,7 @@
 //! readers keep in their `seen_keys` sentinels (the line mark, slots such as
 //! the pending reply text, and the inferred-turn tracker) in one
 //! `ActivityState`.
-use super::{ActivityEvent, Backend, Error, File, Memo};
+use super::{trace, ActivityEvent, Backend, Error, File, Memo};
 use crate::decl::{Activity, Clock, Effect, Emit, EventKind, Num, Rule, SlotKey, TurnOp, TurnStamp, Vendor};
 use crate::expr::{self, Blob, Scope, Slots};
 use serde::{Deserialize, Serialize};
@@ -149,6 +149,7 @@ impl<'a, V: Vendor> Walk<'a, V> {
             if !expr::pred(&rule.when, &self.scope(record, at)) {
                 continue;
             }
+            trace::matched(rule);
             if let Flow::Stop = self.apply_all(rule.effects, record, at) {
                 return;
             }

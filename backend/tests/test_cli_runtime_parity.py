@@ -252,7 +252,8 @@ def _scenarios() -> dict[str, dict]:
             goose_msg("s1", "assistant", goose_t._text("hidden"), meta={"agentVisible": False}),
             goose_msg("s1", "system", goose_t._text("note")),
         ], 1, 2),
-        _db_step([goose_msg("s1", "user", goose_t._text("again"), ts=1792513700), goose_usage("s1", 50, 5)], 2, 3),
+        _db_step([goose_msg("s1", "user", goose_t._text("again"), ts=1792513700), goose_usage("s1", 50, 5),
+                  goose_msg("s1", "user", [{"type": "actionRequired"}])], 2, 3),
     ]
     def cop_usage(sid: str, inp: int | None, out: int | None, model: str = "claude-haiku-4.5",
                   ts: str | None = cop_t._TS) -> tuple:
@@ -551,6 +552,11 @@ def _scenarios() -> dict[str, dict]:
     ]
     grok = [grok_t._user(1, "hello grok"), grok_t._agent(2, "hi "), grok_t._agent(3, "there"), grok_t._turn(4),
             grok_t._user(5, "again"), grok_t._agent(6, "ok"), grok_t._turn(7, inp=50, out=5, stop="cancelled")]
+    def qwen_note(uuid: str, parent: str, second: int, task: str, status: str) -> dict:
+        text = f"<task-notification>\n<task-id>{task}</task-id>\n<status>{status}</status>\n</task-notification>"
+        return qwen_t._rec("user", uuid, parent, second, subtype="notification",
+                           message={"role": "user", "parts": [{"text": text}]})
+
     return {
         "qwen_0_25": {
             "vendor": "qwen", "env": {"QWEN_RUNTIME_DIR": "qwen"},
@@ -558,8 +564,11 @@ def _scenarios() -> dict[str, dict]:
             "steps": [
                 _step("write", qwen[:4], 0, 1),
                 _step("append", qwen[4:], 2, 3),
+                # The CLI records a background task's end (and a Monitor event, whose task goes on).
                 _step("append", [qwen_t._prompt("u2", "a2", 8, "second prompt"),
-                                 qwen_t._reply("a3", "u2", 9, "second reply", 1500, 30, 1200, 5)], 4, 5),
+                                 qwen_t._reply("a3", "u2", 9, "second reply", 1500, 30, 1200, 5),
+                                 qwen_note("n1", "a3", 10, "bg-7", "completed"),
+                                 qwen_note("n2", "n1", 11, "bg-8", "running")], 4, 5),
                 _step("append", [], 4, 14),
             ],
         },
@@ -586,8 +595,11 @@ def _scenarios() -> dict[str, dict]:
                 _step("write", codex[:12], 2, 3),
                 _step("replace", codex, 3, 4),
                 _step("append", [], 3, 5, checkpoint_drop=["basis"]),
+                # ... and a record in the format of rollouts older than `response_item`.
                 _step("append", codex_t._turn(3, "third prompt", "third reply", totals=(4000, 2000, 200, 40),
-                                              last=(1500, 600, 80, 10), start=22), 5, 6, checkpoint_drop=["basis"]),
+                                              last=(1500, 600, 80, 10), start=22)
+                      + [{"type": "assistant", "timestamp": "2026-10-21T02:00:40.000Z"}], 5, 6,
+                      checkpoint_drop=["basis"]),
             ],
         },
         "codex_subagent_parent": {
@@ -703,6 +715,11 @@ def _scenarios() -> dict[str, dict]:
             "vendor": "kilo", "env": {"XDG_DATA_HOME": "share"}, "problems": True,
             "file": "share/kilo/kilo.db",
             "steps": opencode_steps[:3] + [_db_step(["CREATE TABLE session_v2 (id TEXT);"], 3, 4)],
+        },
+        "kilo_v2": {
+            "vendor": "kilo", "env": {"XDG_DATA_HOME": "share"}, "problems": True,
+            "file": "share/kilo/kilo.db",
+            "steps": oc2_steps[:3],
         },
         "hermes_db": {
             "vendor": "hermes", "env": {"HERMES_HOME": "hermes"},

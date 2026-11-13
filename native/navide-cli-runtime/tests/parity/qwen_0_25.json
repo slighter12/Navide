@@ -142,7 +142,7 @@
   },
   {
    "mode": "append",
-   "text": "{\"uuid\": \"u2\", \"parentUuid\": \"a2\", \"sessionId\": \"2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25\", \"timestamp\": \"2026-10-20T10:00:08.000Z\", \"type\": \"user\", \"provenance\": \"real_user\", \"cwd\": \"/Users/me/proj\", \"version\": \"0.25.3\", \"gitBranch\": \"main\", \"promptId\": \"p-u2\", \"executionContext\": {\"modelId\": \"qwen3-coder-plus\", \"approvalMode\": \"default\"}, \"message\": {\"role\": \"user\", \"parts\": [{\"text\": \"second prompt\"}]}, \"systemPayload\": {\"displayText\": \"second prompt\"}}\n{\"uuid\": \"a3\", \"parentUuid\": \"u2\", \"sessionId\": \"2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25\", \"timestamp\": \"2026-10-20T10:00:09.000Z\", \"type\": \"assistant\", \"provenance\": \"assistant_output\", \"cwd\": \"/Users/me/proj\", \"version\": \"0.25.3\", \"gitBranch\": \"main\", \"model\": \"qwen3-coder-plus\", \"message\": {\"role\": \"model\", \"parts\": [{\"text\": \"second reply\"}]}, \"usageMetadata\": {\"promptTokenCount\": 1500, \"candidatesTokenCount\": 30, \"cachedContentTokenCount\": 1200, \"thoughtsTokenCount\": 5, \"totalTokenCount\": 1535}, \"contextWindowSize\": 1000000}\n",
+   "text": "{\"uuid\": \"u2\", \"parentUuid\": \"a2\", \"sessionId\": \"2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25\", \"timestamp\": \"2026-10-20T10:00:08.000Z\", \"type\": \"user\", \"provenance\": \"real_user\", \"cwd\": \"/Users/me/proj\", \"version\": \"0.25.3\", \"gitBranch\": \"main\", \"promptId\": \"p-u2\", \"executionContext\": {\"modelId\": \"qwen3-coder-plus\", \"approvalMode\": \"default\"}, \"message\": {\"role\": \"user\", \"parts\": [{\"text\": \"second prompt\"}]}, \"systemPayload\": {\"displayText\": \"second prompt\"}}\n{\"uuid\": \"a3\", \"parentUuid\": \"u2\", \"sessionId\": \"2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25\", \"timestamp\": \"2026-10-20T10:00:09.000Z\", \"type\": \"assistant\", \"provenance\": \"assistant_output\", \"cwd\": \"/Users/me/proj\", \"version\": \"0.25.3\", \"gitBranch\": \"main\", \"model\": \"qwen3-coder-plus\", \"message\": {\"role\": \"model\", \"parts\": [{\"text\": \"second reply\"}]}, \"usageMetadata\": {\"promptTokenCount\": 1500, \"candidatesTokenCount\": 30, \"cachedContentTokenCount\": 1200, \"thoughtsTokenCount\": 5, \"totalTokenCount\": 1535}, \"contextWindowSize\": 1000000}\n{\"uuid\": \"n1\", \"parentUuid\": \"a3\", \"sessionId\": \"2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25\", \"timestamp\": \"2026-10-20T10:00:10.000Z\", \"type\": \"user\", \"provenance\": \"real_user\", \"cwd\": \"/Users/me/proj\", \"version\": \"0.25.3\", \"gitBranch\": \"main\", \"subtype\": \"notification\", \"message\": {\"role\": \"user\", \"parts\": [{\"text\": \"<task-notification>\\n<task-id>bg-7</task-id>\\n<status>completed</status>\\n</task-notification>\"}]}}\n{\"uuid\": \"n2\", \"parentUuid\": \"n1\", \"sessionId\": \"2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25\", \"timestamp\": \"2026-10-20T10:00:11.000Z\", \"type\": \"user\", \"provenance\": \"real_user\", \"cwd\": \"/Users/me/proj\", \"version\": \"0.25.3\", \"gitBranch\": \"main\", \"subtype\": \"notification\", \"message\": {\"role\": \"user\", \"parts\": [{\"text\": \"<task-notification>\\n<task-id>bg-8</task-id>\\n<status>running</status>\\n</task-notification>\"}]}}\n",
    "mtime": 1792000004,
    "now": 1792000005,
    "expect": {
@@ -161,7 +161,7 @@
        "checkpoint": {
         "kind": "jsonl",
         "offset": 4395,
-        "anchor": "e0401383ec2578da",
+        "anchor": "f28392c7a6cd8588",
         "recent_keys": [
          "a1",
          "a2",
@@ -176,8 +176,8 @@
      ],
      "checkpoint": {
       "kind": "jsonl",
-      "offset": 4395,
-      "anchor": "e0401383ec2578da",
+      "offset": 5221,
+      "anchor": "f28392c7a6cd8588",
       "recent_keys": [
        "a1",
        "a2",
@@ -219,10 +219,21 @@
       "timestamp": "2026-10-20T10:00:09.000Z",
       "detail": "assistant",
       "text": ""
+     },
+     {
+      "vendor": "qwen",
+      "event_type": "agent_active",
+      "cwd": "/Users/me/proj",
+      "session_id": "2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25",
+      "file_path": "<root>/qwen/projects/-Users-me-proj/chats/2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25.jsonl",
+      "dedup_key": "bg:11",
+      "timestamp": "2026-10-20T10:00:10.000Z",
+      "detail": "background:end",
+      "text": "bg-7"
      }
     ],
     "bag": [
-     "act_hw::10",
+     "act_hw::12",
      "qwen_text::second reply",
      "qwen_turn::{\"idx\": 1, \"flushed\": false, \"ts\": \"2026-10-20T10:00:09.000Z\"}"
     ]
@@ -238,8 +249,8 @@
      "events": [],
      "checkpoint": {
       "kind": "jsonl",
-      "offset": 4395,
-      "anchor": "e0401383ec2578da",
+      "offset": 5221,
+      "anchor": "f28392c7a6cd8588",
       "recent_keys": [
        "a1",
        "a2",
@@ -261,7 +272,7 @@
      }
     ],
     "bag": [
-     "act_hw::10",
+     "act_hw::12",
      "qwen_turn::{\"idx\": 1, \"flushed\": true, \"ts\": \"2026-10-20T10:00:09.000Z\"}"
     ]
    }

@@ -3,9 +3,9 @@
 //! bytes, mtimes and clock, read the way the log watcher reads them, must give
 //! the same usage events and checkpoints, activity events and turns, and
 //! (where a fixture records it) the same open read problem.
-use navide_cli_runtime::decl::{Form, Read};
-use navide_cli_runtime::observe::Error;
-use navide_cli_runtime::registry;
+use navide_cli_runtime::decl::{Form, Read, Vendor};
+use navide_cli_runtime::observe::{trace, Backend, Error};
+use navide_cli_runtime::registry::{self, Visit};
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -214,12 +214,41 @@ fn replay(fixture: &Path) -> Vec<String> {
     failures
 }
 
+/// The declared rules no fixture record matched.
+#[derive(Default)]
+struct Unmatched(Vec<String>);
+
+impl Visit for Unmatched {
+    fn vendor<V: Vendor>(&mut self, file: &'static str) {
+        let Some(observe) = V::OBSERVE else { return };
+        for (n, rule) in observe.activity.rules.iter().enumerate() {
+            if !trace::has_matched(rule) {
+                self.0.push(format!("{file}: activity rule {n} ({:?})", rule.when));
+            }
+        }
+        for (n, rule) in <V::Backend as Backend<V>>::usage_rules(&observe.records).into_iter().enumerate() {
+            if !trace::has_matched(rule) {
+                self.0.push(format!("{file}: usage rule {n} ({:?})", rule.when));
+            }
+        }
+    }
+}
+
+/// One test, so that the coverage check sees every fixture's replay.
 #[test]
-fn every_fixture_matches_mains_readers() {
+fn every_fixture_matches_mains_readers_and_every_rule_has_a_record() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("parity");
     let mut fixtures: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
     fixtures.sort();
     assert!(!fixtures.is_empty(), "no parity fixtures in {}", dir.display());
+    trace::start();
     let failures: Vec<String> = fixtures.iter().flat_map(|f| replay(f)).collect();
     assert!(failures.is_empty(), "{} mismatch(es):\n{}", failures.len(), failures.join("\n"));
+
+    // A rule no recorded transcript reaches is a rule nobody compared with
+    // main's reader: record a step for it (from Python) in
+    // backend/tests/test_cli_runtime_parity.py.
+    let mut unmatched = Unmatched::default();
+    registry::each(&mut unmatched);
+    assert!(unmatched.0.is_empty(), "{} declared rule(s) without a fixture record:\n{}", unmatched.0.len(), unmatched.0.join("\n"));
 }

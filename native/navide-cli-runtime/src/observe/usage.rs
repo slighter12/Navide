@@ -25,6 +25,7 @@ pub(crate) fn apply_rules<V: Vendor>(
     slots: &mut Slots<V>,
 ) -> Option<&'static Reading<V>> {
     let rule = rules.iter().find(|r| expr::pred(&r.when, &scope(record, at, slots)))?;
+    super::trace::matched(rule);
     if !rule.effects.is_empty() {
         activity::slot_effects(file, rule.effects, record, at, slots);
     }

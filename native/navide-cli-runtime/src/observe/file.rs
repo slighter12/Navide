@@ -6,7 +6,7 @@
 use super::activity::{At, Walk};
 use super::{bag, usage, ActivityState, Backend, Error, File, Memo, TurnUsage, UsageRead};
 use crate::blake2b;
-use crate::decl::{ExactTurns, JsonlRecords, LineCursor, TextRecords, Vendor};
+use crate::decl::{ExactTurns, JsonlRecords, LineCursor, TextRecords, UsageRule, Vendor};
 use crate::expr::{py_int, py_str_opt, py_strip};
 use crate::text::ignore_invalid;
 use serde_json::{Map, Value};
@@ -34,6 +34,10 @@ impl<V: Vendor<Backend = Jsonl>> Backend<V> for Jsonl {
 
     fn has_usage(spec: &Self::Spec) -> bool {
         spec.usage.is_some()
+    }
+
+    fn usage_rules(spec: &'static Self::Spec) -> Vec<&'static UsageRule<V>> {
+        spec.usage.iter().flat_map(|usage| usage.rules).collect()
     }
 
     fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, memo: &mut Memo) -> Result<(), Error> {
@@ -106,6 +110,10 @@ impl<V: Vendor<Backend = TextLog>> Backend<V> for TextLog {
 
     fn has_usage(spec: &Self::Spec) -> bool {
         spec.usage.is_some()
+    }
+
+    fn usage_rules(spec: &'static Self::Spec) -> Vec<&'static UsageRule<V>> {
+        spec.usage.iter().flat_map(|usage| usage.rules).collect()
     }
 
     fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, _memo: &mut Memo) -> Result<(), Error> {

@@ -7,10 +7,11 @@ pub mod bag;
 pub mod db;
 pub mod file;
 pub mod sqlite;
+pub mod trace;
 pub mod turns;
 pub mod usage;
 
-use crate::decl::{Observe, OtherFiles, Read, Seed, SlotInit, Turns, Vendor};
+use crate::decl::{Observe, OtherFiles, Read, Seed, SlotInit, Turns, UsageRule, Vendor};
 use crate::expr::{self, py_str, truthy, Scope, Slots};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -177,6 +178,9 @@ pub trait Backend<V: Vendor>: Sized + 'static {
 
     /// Whether the declaration reads usage at all (inferred turns need it).
     fn has_usage(spec: &Self::Spec) -> bool;
+
+    /// Every usage rule the declaration holds, whatever variant it is in.
+    fn usage_rules(spec: &'static Self::Spec) -> Vec<&'static UsageRule<V>>;
 
     /// Feed the records past the cursor to the walk and move the cursor.
     fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, memo: &mut Memo) -> Result<(), Error>;
