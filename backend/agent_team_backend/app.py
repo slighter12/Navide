@@ -65,6 +65,7 @@ from .analyzer_settings import AnalyzerSettingsStore
 from . import session_archive
 from .ai_chat_settings import AIChatSettingsStore
 from .applog import app_data_dir, backend_log_path, backend_port_file, in_data_dir
+from . import cli_runtime as _cli_runtime
 from .cli_vendors.registry import VENDORS as _CLI_VENDORS
 from .cli_vendors.registry import vendor as cli_vendor
 from .codex_home import CodexHomeManager
@@ -365,8 +366,10 @@ async def analyzer_benchmark(progress_cb=None) -> list:
 
 # Log readers: one per vendor. Attribution maps log session files to panes.
 # One reader per registered vendor — the registry is the single source.
+# cli_runtime.wrap leaves each reader on Python unless the Rust CLI runtime
+# switch is on (off by default).
 _readers = [
-    spec.make_log_reader()
+    _cli_runtime.wrap(spec.make_log_reader())
     for spec in _CLI_VENDORS.values()
     if spec.make_log_reader is not None
 ]
@@ -2596,6 +2599,8 @@ async def _start_log_watcher() -> None:
     from . import acp_switch
 
     acp_switch.apply_settings(ui_settings_store.get())
+    # Settings → CLI Agents → Rust CLI runtime (experimental); off unless turned on.
+    _cli_runtime.apply_settings(ui_settings_store.get())
     # Per-pane watch files hold message text in the clear and belong to panes
     # that died with the previous process. Only a startup sweep ever removes
     # the ones a killed backend left behind.
