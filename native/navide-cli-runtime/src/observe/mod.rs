@@ -233,10 +233,10 @@ impl Observer {
     /// main's `finally` does; not when the file cannot be read).
     pub fn activity_bag(&mut self, path: &Path, bag: &mut Vec<String>) -> Result<Vec<ActivityEvent>, Error> {
         let spec = &self.spec.activity;
-        let mut state = bag::load(spec, bag);
+        let mut state = bag::load(spec, &self.spec.format, bag);
         let result = self.activity(path, &mut state);
         if !matches!(result, Err(Error::Io(_) | Error::Unsupported(_))) {
-            bag::store(spec, &state, bag);
+            bag::store(spec, &self.spec.format, &state, bag);
         }
         result
     }
@@ -322,6 +322,7 @@ fn init(init_spec: &SlotInit, path: &Path) -> String {
             });
             found
         }
+        SlotInit::Joined(sql) => sqlite::joined(path, sql),
         SlotInit::SidecarJson { up, file, keys } => nth_dir(path, *up)
             .and_then(|dir| std::fs::read_to_string(dir.join(file)).ok())
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())

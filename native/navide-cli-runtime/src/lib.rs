@@ -5,6 +5,7 @@ pub mod decl;
 pub mod expr;
 pub mod launch;
 pub mod observe;
+pub mod proto;
 pub mod resume;
 #[cfg(unix)]
 pub mod session;

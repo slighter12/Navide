@@ -347,6 +347,39 @@ pub fn text(t: &Text, s: &Scope) -> String {
             let base = py_float(Some(&Value::String(text(base, s)))).filter(|ms| *ms != 0.0).map_or(s.now, |ms| ms / 1000.0);
             time::iso_from_float(base + s.emitted as f64 * 0.001)
         }
+        Text::ProtoText { column, path, fields } => {
+            let blob = crate::proto::unhex(get(s.record, column).and_then(Value::as_str).unwrap_or_default());
+            let message = path.iter().fold(&blob[..], |node, field| crate::proto::bytes(node, *field));
+            if message.is_empty() {
+                return String::new();
+            }
+            fn clean(b: &[u8]) -> Option<&str> {
+                std::str::from_utf8(b).ok().filter(|t| !t.chars().any(|c| c < ' ' && !matches!(c, '\t' | '\n' | '\r')))
+            }
+            fields
+                .iter()
+                .flat_map(|field| {
+                    crate::proto::scan(message).into_iter().filter_map(move |(f, v)| match v {
+                        crate::proto::Field::Bytes(b) if f == *field => Some(b),
+                        _ => None,
+                    })
+                })
+                .filter_map(clean)
+                .map(py_strip)
+                .find(|t| !t.is_empty())
+                .unwrap_or_default()
+                .to_owned()
+        }
+        Text::ProtoStamp { column, at } => {
+            let blob = crate::proto::unhex(get(s.record, column).and_then(Value::as_str).unwrap_or_default());
+            at.iter()
+                .map(|field| crate::proto::bytes(&blob, *field))
+                .filter(|ts| !ts.is_empty())
+                .find_map(|ts| crate::proto::varint_field(ts, 1).filter(|n| *n != 0))
+                .and_then(|seconds| i64::try_from(seconds).ok()?.checked_mul(1_000_000))
+                .map(time::iso_from_micros)
+                .unwrap_or_default()
+        }
         Text::Enclosed(inner, open, close) => enclosed(&text(inner, s), open, close).map(|t| py_strip(t).to_owned()).unwrap_or_default(),
         Text::Hook(inner, func) => func(&text(inner, s)),
         Text::IsoFromSeconds(n) => num(n, s).and_then(|v| v.checked_mul(1_000_000)).map(time::iso_from_micros).unwrap_or_default(),

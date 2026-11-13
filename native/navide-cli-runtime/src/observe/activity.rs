@@ -48,6 +48,9 @@ pub struct ActivityState {
     pub marks: std::collections::BTreeMap<String, i64>,
     #[serde(default)]
     pub anchored: bool,
+    /// Rows still settling (`Rows::revisit`).
+    #[serde(default)]
+    pub pending: std::collections::BTreeSet<i64>,
     /// Persisted slots the last walk wrote (even with the value they had).
     #[serde(skip)]
     pub written: Vec<String>,
@@ -301,14 +304,31 @@ fn walk_rows(ctx: &mut Ctx, spec: &'static ActivitySpec, path: &Path, db: &Sqlit
         None => {}
         Some(top) if top < after => state.rows = Some(top),
         Some(_) => {
-            let mut rows = super::sqlite::rows(path, db, query.sql, &[Param::Int(after), Param::Int(query.page)])?.unwrap_or_default();
+            let pending = serde_json::to_string(&state.pending).unwrap_or_default();
+            let params = [Param::Int(after), Param::Int(query.page), Param::Text(&pending)];
+            let params = if query.revisit.is_some() { &params[..] } else { &params[..2] };
+            let mut rows = super::sqlite::rows(path, db, query.sql, params)?.unwrap_or_default();
             if rows.last().is_some_and(|row| super::sqlite::held(query, row)) {
                 rows.pop();
             }
-            if let Some(last) = rows.last() {
-                state.rows = Some(expr::py_int(last.get(query.id)));
-            }
-            for row in &rows {
+            let id = |row: &Value| row.get(query.id).and_then(expr::py_int_raw).unwrap_or(0);
+            let Some(newest) = rows.last().map(|last| after.max(id(last))) else { return Ok(()) };
+            state.rows = Some(newest);
+            for row in &mut rows {
+                let at = id(row);
+                if let Some(revisit) = &query.revisit {
+                    if expr::pred(&revisit.when, &Scope::of(row, &Slots::new())) {
+                        // Still settling: reported once, then quiet until it settles.
+                        if !state.pending.insert(at) {
+                            continue;
+                        }
+                    } else {
+                        state.pending.remove(&at);
+                    }
+                }
+                if let (Some(column), Value::Object(object)) = (query.last_as, &mut *row) {
+                    object.insert(column.to_owned(), (at == newest).into());
+                }
                 ctx.record(spec.rules, row, At { line: 0, end: 0 });
             }
         }

@@ -166,6 +166,9 @@ pub enum Format {
 pub struct Sqlite {
     /// Columns that hold JSON text: read as the parsed value (`null` when malformed).
     pub json: &'static [Str],
+    /// Columns that hold binary blobs (protobuf): read as lowercase hex, and a
+    /// value that is not a BLOB as `null` (main's `x if isinstance(x, bytes) else b""`).
+    pub binary: &'static [Str],
     /// Columns each table must have (`PRAGMA table_info`), checked before
     /// every query: a store without them is not read at all.
     pub requires: &'static [(Str, &'static [Str])],
@@ -195,6 +198,20 @@ pub struct Rows {
     /// One watermark per partition (openclaw: per session in one table)
     /// instead of one for the database.
     pub partition: Option<Partition>,
+    /// Rows that are read again on later passes until they settle.
+    pub revisit: Option<Revisit>,
+    /// Each row gets this boolean column: it is the newest row of the pass.
+    pub last_as: Option<Str>,
+}
+
+/// Rows matching `when` (antigravity: an assistant step still streaming)
+/// stay pending: `sql` binds their ids as a JSON list (`?3`), a pending row
+/// read again yields nothing until it no longer matches, and the ids are kept
+/// in the bag as `bag + json(sorted ids)`.
+#[derive(Debug, Serialize)]
+pub struct Revisit {
+    pub when: Pred,
+    pub bag: Str,
 }
 
 /// Rows read per partition: `sql` then binds the partition (`?1`), its
@@ -242,6 +259,10 @@ pub enum SlotInit {
     DashDir,
     /// First non-empty of several initialisers.
     FirstOf(&'static [SlotInit]),
+    /// The first column of every row of a SQLite query, as UTF-8 with
+    /// invalid bytes dropped, concatenated; when the query fails, the
+    /// database file's own bytes the same way (a live store mid-write).
+    Joined(Str),
 }
 
 // ---- record access ----------------------------------------------------------
@@ -349,6 +370,13 @@ pub enum Text {
     /// time): epoch milliseconds from the text when it is a non-zero number,
     /// else the walk's now, plus 1 ms per event already emitted, as `IsoFromFloat`.
     PassClock(&'static Text),
+    /// Protobuf in a binary column: the submessage at `path` (field numbers,
+    /// first occurrence each), then the first of `fields` holding clean text
+    /// (UTF-8 without control characters but tab and newlines), stripped.
+    ProtoText { column: Path, path: &'static [u64], fields: &'static [u64] },
+    /// A `google.protobuf.Timestamp` in a binary column: the first of the
+    /// `at` submessages whose seconds (field 1) are non-zero, as ISO-8601.
+    ProtoStamp { column: Path, at: &'static [u64] },
     /// Between the first `open` that a `close` follows and that `close`,
     /// stripped ("" when there is none; `Pred::Encloses` tells the two apart).
     Enclosed(&'static Text, Str, Str),
@@ -439,6 +467,10 @@ pub enum UsageMode {
     /// rules see the row with `delta` (column → growth, floored at 0) and
     /// `counters` (`"a:b:…"`) added; a row that did not grow yields nothing.
     Counters { kind: Str, map: Str, columns: &'static [Str] },
+    /// No token records on disk, read the way main's base reader reads them:
+    /// no events, and the legacy seen-set checkpoint kept as it was
+    /// (`{"kind": "legacy", "legacy_seen": [...]}`).
+    Legacy,
     /// SQLite rows read per partition (`Rows::partition`), one event per
     /// row with a reading; the checkpoint keeps each partition's last read
     /// id, held rows excluded, as `{"kind": kind, map: {part: id}}`.

@@ -68,6 +68,7 @@ const fn event(kind: EventKind, detail: Text, text: Text, require_text: bool) ->
 
 static DB: Sqlite = Sqlite {
     json: &["blocks", "titles"],
+    binary: &[],
     requires: &[
         (
             "sessions",
@@ -89,6 +90,8 @@ static DB: Sqlite = Sqlite {
         restart_below: false,
         hold_last: None,
         partition: None,
+        revisit: None,
+        last_as: None,
     }),
     activity: Some(Rows {
         sql: concat!(
@@ -108,6 +111,8 @@ static DB: Sqlite = Sqlite {
         // it again next pass rather than lose its turn end.
         hold_last: Some(Pred::All(&[ASSISTANT, Pred::Not(&Pred::Truthy(&["finish"])), Pred::Not(&Pred::Truthy(&["tool_calls"]))])),
         partition: None,
+        revisit: None,
+        last_as: None,
     }),
 };
 

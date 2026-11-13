@@ -31,6 +31,7 @@ const fn event(kind: EventKind, detail: Str, text: Text) -> [Effect; 2] {
 
 static DB: Sqlite = Sqlite {
     json: &["data"],
+    binary: &[],
     requires: &[],
     usage: None,
     activity: Some(Rows {
@@ -42,6 +43,8 @@ static DB: Sqlite = Sqlite {
         restart_below: true,
         hold_last: None,
         partition: None,
+        revisit: None,
+        last_as: None,
     }),
 };
 

@@ -62,10 +62,11 @@ const HOLD: Pred = Pred::All(&[MESSAGE_ROW, ASSISTANT, Pred::Not(&Pred::Truthy(S
 
 static DB: Sqlite = Sqlite {
     json: &["event", "header"],
+    binary: &[],
     requires: &[("transcript_events", &["session_id", "seq", "event_json", "message_role"])],
-    usage: Some(Rows { sql: PAGE, id: "seq", newest: "", page: 512, restart_below: false, hold_last: Some(HOLD), partition: Some(SESSIONS) }),
+    usage: Some(Rows { sql: PAGE, id: "seq", newest: "", page: 512, restart_below: false, hold_last: Some(HOLD), partition: Some(SESSIONS), revisit: None, last_as: None }),
     // A session whose newest seq fell below its mark was rewritten: re-anchor there.
-    activity: Some(Rows { sql: PAGE, id: "seq", newest: "", page: 512, restart_below: true, hold_last: Some(HOLD), partition: Some(SESSIONS) }),
+    activity: Some(Rows { sql: PAGE, id: "seq", newest: "", page: 512, restart_below: true, hold_last: Some(HOLD), partition: Some(SESSIONS), revisit: None, last_as: None }),
 };
 
 pub static CLI: Cli = Cli {

@@ -3,7 +3,7 @@
 //! (main's own, so either reader can pick up where the other stopped). Keys
 //! the declaration does not name are left untouched.
 use super::activity::{ActivityState, TurnState};
-use crate::decl::{ActivitySpec, BagSlot, Cursor, TurnStamp};
+use crate::decl::{ActivitySpec, BagSlot, Cursor, Format, TurnStamp};
 use crate::expr::{py_int_raw, py_str, truthy};
 use serde_json::{Map, Value};
 
@@ -39,8 +39,19 @@ pub fn high_water(bag: &[String]) -> usize {
     find(bag, HW_PREFIX).and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
-pub fn load(spec: &ActivitySpec, bag: &[String]) -> ActivityState {
+/// The bag key of the rows still settling (`Rows::revisit`).
+fn revisit(format: &Format) -> Option<&'static str> {
+    match format {
+        Format::Sqlite(db) => db.activity.as_ref()?.revisit.as_ref().map(|r| r.bag),
+        Format::Jsonl => None,
+    }
+}
+
+pub fn load(spec: &ActivitySpec, format: &Format, bag: &[String]) -> ActivityState {
     let mut state = ActivityState { hw: high_water(bag), ..ActivityState::default() };
+    if let Some(prefix) = revisit(format) {
+        state.pending = find(bag, prefix).and_then(|raw| serde_json::from_str(raw).ok()).unwrap_or_default();
+    }
     for slot in spec.bag.slots {
         let (name, value) = match slot {
             BagSlot::Text { slot, prefix } | BagSlot::TextOnChange { slot, prefix } => (*slot, find(bag, prefix).map(str::to_owned)),
@@ -77,15 +88,21 @@ pub fn load(spec: &ActivitySpec, bag: &[String]) -> ActivityState {
             }
         }
         // main's `_int(prev)`: a key that is there but not a number is 0.
-        (Some(prefix), Cursor::Rows) => state.rows = find(bag, prefix).map(|raw| crate::expr::py_int(Some(&Value::String(raw.to_owned())))),
+        // (`-1` is "from the first row".)
+        (Some(prefix), Cursor::Rows) => state.rows = find(bag, prefix).map(|raw| py_int_raw(&Value::String(raw.to_owned())).unwrap_or(0)),
         _ => {}
     }
     state
 }
 
-pub fn store(spec: &ActivitySpec, after: &ActivityState, bag: &mut Vec<String>) {
+pub fn store(spec: &ActivitySpec, format: &Format, after: &ActivityState, bag: &mut Vec<String>) {
     if after.hw > high_water(bag) {
         replace(bag, HW_PREFIX, Some(after.hw.to_string()));
+    }
+    if let Some(prefix) = revisit(format) {
+        // `json.dumps(sorted(ids))`.
+        let ids: Vec<String> = after.pending.iter().map(i64::to_string).collect();
+        replace(bag, prefix, (!ids.is_empty()).then(|| format!("[{}]", ids.join(", "))));
     }
     let value = |state: &ActivityState, slot: &str| state.slots.get(slot).cloned().unwrap_or_default();
     for slot in spec.bag.slots {

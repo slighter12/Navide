@@ -81,6 +81,9 @@ pub fn read(
     checkpoint: &Map<String, Value>,
     full: bool,
 ) -> Result<UsageRead, Error> {
+    if let UsageMode::Legacy = spec.mode {
+        return Ok(UsageRead { events: Vec::new(), checkpoint: legacy(legacy_seen(checkpoint)) });
+    }
     if let Format::Sqlite(db) = format {
         return rows(spec, db, vendor, path, slots, checkpoint, full);
     }
@@ -110,6 +113,7 @@ pub fn read(
         UsageMode::Cumulative => cumulative(spec, vendor, path, slots, checkpoint, tail, restore),
         UsageMode::Snapshot { .. } => unreachable!("read above"),
         // tests/declarations.rs: only a SQLite declaration uses Counters.
+        UsageMode::Legacy => unreachable!("read above"),
         UsageMode::Counters { .. } | UsageMode::Watermarks { .. } => unreachable!("a SQLite mode"),
     }
 }
@@ -274,12 +278,20 @@ fn mark_totals(value: &str) -> (i64, i64) {
     }
 }
 
+/// main's base `parse_incremental` seen-set: `str(k)` of each key.
+fn legacy_seen(checkpoint: &Map<String, Value>) -> std::collections::BTreeSet<String> {
+    checkpoint.get("legacy_seen").and_then(Value::as_array).map(|keys| keys.iter().map(python_str).collect()).unwrap_or_default()
+}
+
+fn legacy(seen: std::collections::BTreeSet<String>) -> Map<String, Value> {
+    let mut next = Map::new();
+    next.insert("kind".into(), "legacy".into());
+    next.insert("legacy_seen".into(), seen.into_iter().collect::<Vec<_>>().into());
+    next
+}
+
 fn snapshot(spec: &'static UsageSpec, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, suffix: &str, mark: &str) -> UsageRead {
-    let mut seen: std::collections::BTreeSet<String> = checkpoint
-        .get("legacy_seen")
-        .and_then(Value::as_array)
-        .map(|keys| keys.iter().map(python_str).collect())
-        .unwrap_or_default();
+    let mut seen = legacy_seen(checkpoint);
     let mut events = Vec::new();
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let doc = std::fs::read_to_string(path.with_file_name(format!("{stem}{suffix}")))
@@ -310,10 +322,7 @@ fn snapshot(spec: &'static UsageSpec, vendor: &str, path: &Path, mut slots: Slot
             }
         }
     }
-    let mut next = Map::new();
-    next.insert("kind".into(), "legacy".into());
-    next.insert("legacy_seen".into(), seen.into_iter().collect::<Vec<_>>().into());
-    UsageRead { events, checkpoint: next }
+    UsageRead { events, checkpoint: legacy(seen) }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -33,6 +33,7 @@ from agent_team_backend import cli_runtime, osplat
 from agent_team_backend.cli_vendors.pi import encode_pi_cwd
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
 from agent_team_backend.log_readers.claude import encode_claude_cwd
+from tests.vendors import test_antigravity_activity as agy_t
 from tests.vendors import test_claude as claude_t
 from tests.vendors import test_cursor as cursor_t
 from tests.vendors import test_codex_0_163_fixture as codex_t
@@ -290,6 +291,37 @@ def _scenarios() -> dict[str, dict]:
         _db_step(["DELETE FROM blobs", cursor_blob("n1", cursor_t._assistant("old"))], 3, 4),
     ]
     cursor_steps[2]["sidecars"] = {f"{cursor_dir}/meta.json": json.dumps({"updatedAtMs": 1786844146562, "cwd": "/work"})}
+    def agy_step(idx: int, step_type: int, status: int, metadata: bytes | None, payload: bytes | None) -> str:
+        cell = lambda b: "NULL" if b is None else f"X'{b.hex()}'"  # noqa: E731
+        return f"INSERT INTO steps VALUES ({idx}, {step_type}, {status}, {cell(metadata)}, {cell(payload)})"
+
+    agy_uri = b"file:///usr"  # a directory on every test machine
+    agy_meta = b"\x12\x30" + agy_uri + b"\x00\x22\x41$9bc6-uuid:/" + agy_uri + b"z\xc2\x88"
+    agy_at = agy_t._metadata(1_770_000_100)
+    agy_steps = [
+        _db_step([
+            "CREATE TABLE `steps` (`idx` integer, `step_type` integer NOT NULL DEFAULT 0, `status` integer NOT NULL "
+            "DEFAULT 0, `metadata` blob, `step_payload` blob, PRIMARY KEY (`idx`)); "
+            "CREATE TABLE `trajectory_metadata_blob` (`id` text DEFAULT 'main', `data` blob, PRIMARY KEY (`id`));"
+            f"INSERT INTO trajectory_metadata_blob VALUES ('main', X'{agy_meta.hex()}');",
+            agy_step(0, 14, 3, b"", agy_t._user("hi")),
+            agy_step(1, 15, 3, agy_t._metadata(1_770_000_000), agy_t._assistant(reply="done")),
+        ], 0, 1),
+        _db_step([
+            agy_step(2, 14, 3, agy_at, agy_t._user("fix the build")),
+            agy_step(3, 15, 3, agy_at, agy_t._assistant(thinking="**Considering the deploy**")),
+            agy_step(4, 21, 3, None, None),
+            agy_step(5, 15, 3, agy_at, agy_t._assistant(reply="mid-turn narration")),
+            agy_step(6, 15, 5, b"", agy_t._assistant(reply="partial")),
+            agy_step(7, 15, 5, b"", agy_t._assistant(reply="partial too")),
+        ], 1, 2),
+        # Nothing new: the two streaming steps are read again and stay quiet.
+        _db_step([], 2, 3),
+        _db_step([f"UPDATE steps SET status = 3, step_payload = X'{agy_t._assistant(reply='final reply').hex()}' "
+                  "WHERE idx = 7"], 3, 4),
+        _db_step([f"UPDATE steps SET status = 3, step_payload = X'{agy_t._assistant(reply='late').hex()}' WHERE idx = 6",
+                  agy_step(8, 138, 3, agy_t._metadata(1_770_000_200), b"")], 4, 5),
+    ]
     grok = [grok_t._user(1, "hello grok"), grok_t._agent(2, "hi "), grok_t._agent(3, "there"), grok_t._turn(4),
             grok_t._user(5, "again"), grok_t._agent(6, "ok"), grok_t._turn(7, inp=50, out=5, stop="cancelled")]
     return {
@@ -379,6 +411,11 @@ def _scenarios() -> dict[str, dict]:
             "vendor": "hermes", "env": {"HERMES_HOME": "hermes"},
             "file": "hermes/state.db",
             "steps": hermes_steps,
+        },
+        "antigravity_db": {
+            "vendor": "antigravity", "env": {},
+            "file": "home/.gemini/antigravity-cli/conversations/aa11bb22.db",
+            "steps": agy_steps,
         },
         "cursor_db": {
             "vendor": "cursor", "env": {},

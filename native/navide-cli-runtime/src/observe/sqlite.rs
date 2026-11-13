@@ -112,7 +112,7 @@ impl Connection {
         (unsafe { sqlite3_busy_timeout(db.0, BUSY_TIMEOUT_MS) } == 0).then_some(db)
     }
 
-    fn query(&self, sql: &str, params: &[Param], json: &[&str]) -> Option<Vec<Value>> {
+    fn query(&self, sql: &str, params: &[Param], json: &[&str], binary: &[&str]) -> Option<Vec<Value>> {
         let sql = CString::new(sql).ok()?;
         let mut raw = std::ptr::null_mut();
         let code = unsafe { sqlite3_prepare_v2(self.0, sql.as_ptr(), -1, &mut raw, std::ptr::null_mut()) };
@@ -152,18 +152,21 @@ impl Connection {
                     1 => Value::from(unsafe { sqlite3_column_int64(statement.0, c) }),
                     2 => serde_json::Number::from_f64(unsafe { sqlite3_column_double(statement.0, c) }).map_or(Value::Null, Value::Number),
                     kind @ (3 | 4) => {
-                        let pointer = unsafe { sqlite3_column_text(statement.0, c) };
-                        let length = unsafe { sqlite3_column_bytes(statement.0, c) } as usize;
-                        let bytes = if pointer.is_null() || length == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(pointer, length) } };
+                        let bytes = unsafe { cell(statement.0, c) };
                         let text = std::str::from_utf8(bytes);
-                        match (kind, json.contains(&name.as_str())) {
-                            // Python decodes TEXT as UTF-8 and fails the whole query on a bad cell.
-                            (3, true) => serde_json::from_str(text.ok()?).unwrap_or(Value::Null),
-                            (3, false) => Value::String(text.ok()?.to_owned()),
-                            // A BLOB stays bytes there: JSON of them, else nothing to read
-                            // (cursor's protobuf nodes share the table with its JSON messages).
-                            (_, true) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
-                            (_, false) => text.map_or(Value::Null, |t| Value::String(t.to_owned())),
+                        let blob = kind == 4;
+                        if binary.contains(&name.as_str()) {
+                            if blob { Value::String(bytes.iter().map(|b| format!("{b:02x}")).collect()) } else { Value::Null }
+                        } else {
+                            match (blob, json.contains(&name.as_str())) {
+                                // Python decodes TEXT as UTF-8 and fails the whole query on a bad cell.
+                                (false, true) => serde_json::from_str(text.ok()?).unwrap_or(Value::Null),
+                                (false, false) => Value::String(text.ok()?.to_owned()),
+                                // A BLOB stays bytes there: JSON of them, else nothing to read
+                                // (cursor's protobuf nodes share the table with its JSON messages).
+                                (true, true) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
+                                (true, false) => text.map_or(Value::Null, |t| Value::String(t.to_owned())),
+                            }
                         }
                     }
                     _ => Value::Null,
@@ -192,20 +195,69 @@ pub enum Param<'a> {
 pub fn rows(path: &Path, db: &Sqlite, sql: &str, params: &[Param]) -> Result<Option<Vec<Value>>, Error> {
     let Some(con) = Connection::open(path) else { return Ok(None) };
     for (table, columns) in db.requires {
-        let Some(have) = con.query(&format!("PRAGMA table_info({table})"), &[], &[]) else { return Ok(None) };
+        let Some(have) = con.query(&format!("PRAGMA table_info({table})"), &[], &[], &[]) else { return Ok(None) };
         let has = |column: &str| have.iter().any(|row| row.get("name").and_then(Value::as_str) == Some(column));
         if let Some(missing) = columns.iter().find(|c| !has(c)) {
             return Err(Error::Unsupported(format!("table {table} lacks {missing}")));
         }
     }
-    Ok(con.query(sql, params, db.json))
+    Ok(con.query(sql, params, db.json, db.binary))
 }
 
-/// The first column of the first row, as main's `_int` reads it.
+/// The first column of the first row, as main's `_int` reads it; `None`
+/// when it is SQL `NULL` (`MAX` over no rows).
 pub fn scalar(path: &Path, db: &Sqlite, sql: &str) -> Result<Option<i64>, Error> {
     let Some(rows) = rows(path, db, sql, &[])? else { return Ok(None) };
     let first = rows.first().and_then(Value::as_object).and_then(|row| row.values().next().cloned());
-    Ok(Some(crate::expr::py_int(first.as_ref())))
+    Ok(first.filter(|v| !v.is_null()).map(|v| crate::expr::py_int_raw(&v).unwrap_or(0)))
+}
+
+/// `SlotInit::Joined`: the first column of every row, bytes decoded as
+/// UTF-8 with invalid sequences dropped (Python `errors="ignore"`).
+pub fn joined(path: &Path, sql: &str) -> String {
+    Connection::open(path)
+        .and_then(|con| con.joined(sql))
+        .or_else(|| std::fs::read(path).ok().map(|bytes| ignore_invalid(&bytes)))
+        .unwrap_or_default()
+}
+
+pub fn ignore_invalid(bytes: &[u8]) -> String {
+    bytes.utf8_chunks().map(|chunk| chunk.valid()).collect()
+}
+
+impl Connection {
+    fn joined(&self, sql: &str) -> Option<String> {
+        let sql = CString::new(sql).ok()?;
+        let mut raw = std::ptr::null_mut();
+        let code = unsafe { sqlite3_prepare_v2(self.0, sql.as_ptr(), -1, &mut raw, std::ptr::null_mut()) };
+        let statement = (!raw.is_null()).then_some(Statement(raw));
+        if code != 0 {
+            return None;
+        }
+        let statement = statement?;
+        let mut out = String::new();
+        loop {
+            match unsafe { sqlite3_step(statement.0) } {
+                DONE => return Some(out),
+                ROW => {}
+                _ => return None,
+            }
+            let bytes = unsafe { cell(statement.0, 0) };
+            match unsafe { sqlite3_column_type(statement.0, 0) } {
+                4 => out.push_str(&ignore_invalid(bytes)),
+                // A TEXT cell that is not UTF-8 fails main's whole query.
+                3 => out.push_str(std::str::from_utf8(bytes).ok()?),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The bytes of a TEXT or BLOB cell (valid until the next step).
+unsafe fn cell<'s>(statement: *mut c_void, column: c_int) -> &'s [u8] {
+    let pointer = unsafe { sqlite3_column_text(statement, column) };
+    let length = unsafe { sqlite3_column_bytes(statement, column) } as usize;
+    if pointer.is_null() || length == 0 { &[] } else { unsafe { std::slice::from_raw_parts(pointer, length) } }
 }
 
 /// Does a last row match the query's `hold_last` (not consumed yet)?
