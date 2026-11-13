@@ -2,6 +2,7 @@
  "vendor": "codex",
  "file": "home/.codex/sessions/2026/10/20/rollout-2026-10-20T10-00-00-01a20000-0000-7000-8000-00000000c0de.jsonl",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "write",

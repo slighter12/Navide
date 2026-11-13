@@ -4,6 +4,7 @@
  "sidecars": {
   "kimi/sessions/wd_proj_c41def6fd06b/session_1c45769d-43e6-4fad-b36c-94ce2aa8b9aa/state.json": "{\"id\": \"session_1c45769d-43e6-4fad-b36c-94ce2aa8b9aa\", \"version\": 2, \"cwd\": \"/Users/me/proj\", \"createdAt\": 1, \"updatedAt\": 2, \"archived\": false, \"agents\": {\"main\": {\"homedir\": \"<session>/agents/main\", \"type\": \"main\"}}, \"custom\": {}, \"lastPrompt\": \"slow one\", \"title\": \"say hello\", \"titleKind\": \"replaceable\", \"lastTurnReason\": \"cancelled\", \"isCustomTitle\": false}"
  },
+ "as_written": [],
  "steps": [
   {
    "mode": "write",

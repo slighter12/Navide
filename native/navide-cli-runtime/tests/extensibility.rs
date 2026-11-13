@@ -1,28 +1,52 @@
 //! A CLI the crate has never heard of, declared only here, runs the whole
 //! lifecycle: launch argv and env, resume parsing, usage with a checkpoint,
 //! activity with a resumed walk, and inferred turns. Nothing in `src/`
-//! changes for it — that is the extension contract.
+//! changes for it — that is the extension contract. It also has a value no
+//! shared construct reads (its token counts are a list of parts), which it
+//! extracts with its own `Ext` function instead of a new core variant.
 use navide_cli_runtime::decl::*;
+use navide_cli_runtime::expr::Scope;
 use navide_cli_runtime::launch::{self, Refused, Request};
 use navide_cli_runtime::observe::{ActivityState, Observer};
 use navide_cli_runtime::resume::{self, Command};
-use serde_json::Map;
+use serde::Serialize;
+use serde_json::{Map, Value};
 use std::io::Write;
 use std::path::PathBuf;
 
-const TS: Text = Text::Py(&["ts"]);
-const LINE_KEY: Text = Text::Concat(&[Text::Lit("act:"), Text::Line]);
+#[derive(Debug)]
+struct Toy;
 
-const fn active(detail: Str, text: Text) -> Effect {
-    Effect::Emit(Emit { kind: EventKind::AgentActive, key: LINE_KEY, detail: Text::Lit(detail), text, timestamp: TS, session: None, require_text: false })
+slots! { Cwd = "cwd", SessionId = "session_id", Reply = "reply" }
+
+#[derive(Debug, Clone, Copy, Serialize)]
+enum Ext {
+    /// Number: the sum of `usage.in`, which this CLI writes as a list of parts.
+    InputParts,
 }
+
+impl Vendor for Toy {
+    type Slot = Slot;
+    type Ext = Ext;
+    type Backend = Jsonl;
+    const CLI: &'static Cli = &TOY;
+    const OBSERVE: Option<&'static Observe<Self>> = Some(&OBSERVE);
+
+    fn num(ext: Ext, scope: &Scope<'_, Self>) -> Option<i64> {
+        match ext {
+            Ext::InputParts => Some(scope.get(&["usage", "in"])?.as_array()?.iter().filter_map(Value::as_i64).sum()),
+        }
+    }
+}
+
+const TS: Text<Toy> = Text::Py(&["ts"]);
+const LINE_KEY: Text<Toy> = Text::Concat(&[Text::Lit("act:"), Text::Line]);
 
 static TOY: Cli = Cli {
     key: "toy",
     label: "Toy CLI",
     kind: Kind::Cli,
     launch: Launch {
-        program: "toy",
         base_args: &["chat"],
         yolo_args: &["--yes"],
         model: Some(&["-m", "{}"]),
@@ -30,6 +54,7 @@ static TOY: Cli = Cli {
         efforts: &["low", "high"],
         env_defaults: &[("TOY_COLOR", "never")],
         env_strip: &["TOY_HOME"],
+        ..Launch::of("toy")
     },
     resume: Resume {
         args: Some(&["--continue", "{id}"]),
@@ -45,83 +70,63 @@ static TOY: Cli = Cli {
         }),
     },
     interrupt: b"\x03",
-    observe: Some(Observe {
-        store: Store { env: &[("TOY_HOME", &["logs"])], home: &[&[".toy", "logs"]], files: &[&["*.jsonl"]] },
-        format: Format::Jsonl,
-        accept: None,
-        slots: &[
-            Slot { name: "cwd", init: SlotInit::Header { lines: 1, when: Pred::Eq(&["type"], "meta"), field: Text::Py(&["cwd"]), first_line: true } },
-            Slot { name: "session_id", init: SlotInit::FileStem },
-        ],
-        usage: Some(UsageSpec {
-            slots: &[],
-            rules: &[UsageRule {
+};
+
+static OBSERVE: Observe<Toy> = Observe {
+    store: Store { env: &[("TOY_HOME", &["logs"])], home: &[&[".toy", "logs"]], files: &[&["*.jsonl"]] },
+    file_name: None,
+    other_files: OtherFiles::Empty,
+    slots: &[
+        Seed { slot: Slot::Cwd, init: SlotInit::Header { lines: 1, when: Pred::Eq(&["type"], "meta"), field: Text::Py(&["cwd"]), first_line: true } },
+        Seed { slot: Slot::SessionId, init: SlotInit::FileStem },
+    ],
+    cwd: Some(Slot::Cwd),
+    session: Some(Slot::SessionId),
+    cwd_form: Form::Written,
+    records: JsonlRecords {
+        usage: Some(FileUsage::per_record(
+            &[UsageRule {
                 when: Pred::All(&[Pred::Eq(&["type"], "reply"), Pred::IsObject(&["usage"])]),
                 effects: &[],
                 reading: Some(Reading {
-                    input: Num::Sum(&[Num::Of(&["usage", "in"]), Num::Of(&["usage", "cached"])]),
-                    output: Num::Of(&["usage", "out"]),
                     cache_read: Num::Of(&["usage", "cached"]),
-                    cache_creation: Num::Zero,
-                    key: Text::Py(&["id"]),
                     key_required: true,
-                    key_invalid: "",
                     model: Text::Py(&["model"]),
                     timestamp: TS,
-                    cli_version: Text::Lit(""),
-                    cwd: Text::Slot("cwd"),
-                    session_id: Text::Slot("session_id"),
-                    raw: &[],
+                    cwd: Text::Slot(Slot::Cwd),
+                    session_id: Text::Slot(Slot::SessionId),
+                    ..Reading::of(Num::Sum(&[Num::Ext(Ext::InputParts), Num::Of(&["usage", "cached"])]), Num::Of(&["usage", "out"]), Text::Py(&["id"]))
                 }),
             }],
-            mode: UsageMode::PerRecord { window: 8, keep_on_rotation: false, credited: false },
-            persist: &[],
-            flags: &[],
-            restore: Restore::UnlessRotated,
-            stamp: &[],
-        }),
-        activity: ActivitySpec {
-            slots: &[],
-            cursor: Cursor::Lines,
-            rules: &[
-                Rule {
-                    when: Pred::Eq(&["type"], "user"),
-                    effects: &[Effect::Turn(TurnOp::Open { boundary: "boundary", ts: TS, ms: Num::Zero }), active("user", Text::UserPrompt(&Text::Str(&["text"])))],
-                },
-                Rule {
-                    when: Pred::Eq(&["type"], "reply"),
-                    effects: &[
-                        Effect::Turn(TurnOp::EnsureOpen { ts: TS, ms: Num::Zero }),
-                        Effect::Turn(TurnOp::Touch { ts: Some(TS), ms: None }),
-                        Effect::SetIfNonEmpty("reply", Text::Strip(&Text::Str(&["text"]))),
-                        active("assistant", Text::Lit("")),
-                    ],
-                },
-                Rule { when: Pred::Eq(&["type"], "done"), effects: &[Effect::Turn(TurnOp::Close { detail: "end_turn", ms: None })] },
-            ],
-            idle: None,
-            turn_stamp: TurnStamp::Text,
-            turn_text: "reply",
-            persist: &["reply"],
-            bag: Bag {
-                slots: &[BagSlot::Text { slot: "reply", prefix: "toy_text::" }],
-                turn: Some(BagTurn { prefix: "toy_turn::", compact: true, keep_null: false }),
-                cursor: None,
-                anchor: None,
+            8,
+        )),
+        cursor: LineCursor::Lines,
+    },
+    activity: Activity {
+        turn_text: Some(Slot::Reply),
+        kept: &[Kept { slot: Slot::Reply, prefix: "toy_text::", form: KeptForm::Text }],
+        turn_key: Some(TurnKey { prefix: "toy_turn::", compact: true, keep_null: false }),
+        ..Activity::rules(&[
+            Rule {
+                when: Pred::Eq(&["type"], "user"),
+                effects: &[
+                    Effect::Turn(TurnOp::Open { boundary: "boundary", ts: TS, ms: Num::Zero }),
+                    Emit::active(LINE_KEY, Text::Lit("user"), Text::UserPrompt(&Text::Str(&["text"])), TS).effect(),
+                ],
             },
-        },
-        turns: TurnsSpec {
-            slots: &[],
-            method: TurnMethod::Inferred,
-            filter: SessionFilter::Ignore,
-            effects: &[],
-            skip: Pred::Not(&Pred::True),
-            open: None,
-            call: None,
-            close: None,
-            session: "session_id",
-        },
-    }),
+            Rule {
+                when: Pred::Eq(&["type"], "reply"),
+                effects: &[
+                    Effect::Turn(TurnOp::EnsureOpen { ts: TS, ms: Num::Zero }),
+                    Effect::Turn(TurnOp::Touch { ts: Some(TS), ms: None }),
+                    Effect::SetIfNonEmpty(Slot::Reply, Text::Strip(&Text::Str(&["text"]))),
+                    Emit::active(LINE_KEY, Text::Lit("assistant"), Text::Lit(""), TS).effect(),
+                ],
+            },
+            Rule { when: Pred::Eq(&["type"], "done"), effects: &[Effect::Turn(TurnOp::Close { detail: "end_turn", ms: None })] },
+        ])
+    },
+    turns: Turns::Inferred,
 };
 
 struct Dir(PathBuf);
@@ -173,10 +178,10 @@ fn observe_runs_end_to_end() {
         &[
             r#"{"type":"meta","cwd":"/work/toy"}"#,
             r#"{"type":"user","text":"  fix the build  ","ts":"2026-01-01T00:00:01Z"}"#,
-            r#"{"type":"reply","id":"r1","model":"toy-1","text":" working ","ts":"2026-01-01T00:00:02Z","usage":{"in":10,"cached":5,"out":3}}"#,
+            r#"{"type":"reply","id":"r1","model":"toy-1","text":" working ","ts":"2026-01-01T00:00:02Z","usage":{"in":[7,3],"cached":5,"out":3}}"#,
         ],
     );
-    let mut observer = Observer::new(&TOY).expect("toy declares observe");
+    let mut observer = Observer::<Toy>::new().expect("toy declares observe");
 
     let first = observer.usage(&path, &Map::new()).unwrap();
     assert_eq!(first.events.len(), 1);
@@ -195,7 +200,7 @@ fn observe_runs_end_to_end() {
     append(
         &path,
         &[
-            r#"{"type":"reply","id":"r2","model":"toy-1","text":"done it","ts":"2026-01-01T00:00:04Z","usage":{"in":4,"cached":0,"out":2}}"#,
+            r#"{"type":"reply","id":"r2","model":"toy-1","text":"done it","ts":"2026-01-01T00:00:04Z","usage":{"in":[4],"cached":0,"out":2}}"#,
             r#"{"type":"done","ts":"2026-01-01T00:00:05Z"}"#,
         ],
     );
@@ -211,4 +216,8 @@ fn observe_runs_end_to_end() {
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0].prompt_excerpt, "fix the build");
     assert_eq!((turns[0].input, turns[0].output, turns[0].calls.len()), (19, 5, 2));
+
+    // A record whose `usage.in` is not a list carries no reading at all.
+    append(&path, &[r#"{"type":"reply","id":"r3","model":"toy-1","text":"x","ts":"2026-01-01T00:00:06Z","usage":{"in":9,"out":1}}"#]);
+    assert!(observer.usage(&path, &second.checkpoint).unwrap().events.is_empty());
 }

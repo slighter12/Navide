@@ -2,6 +2,7 @@
  "vendor": "antigravity",
  "file": "home/.gemini/antigravity-cli/conversations/aa11bb22.db",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "db",

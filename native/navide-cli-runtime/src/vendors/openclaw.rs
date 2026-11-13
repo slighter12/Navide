@@ -6,6 +6,67 @@
 //! message with a final `stopReason` ends the turn. Rows are read per session
 //! (`Partition`), and each session's events carry its Navide session key.
 use crate::decl::*;
+use crate::expr::{py_float, Scope};
+use crate::time;
+use serde::Serialize;
+use serde_json::Value;
+
+#[derive(Debug)]
+pub struct V;
+
+/// What only OpenClaw's store needs.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum Ext {
+    /// Text: the event's `timestamp`, else its message's: an ISO string as
+    /// is, or a number as epoch seconds (milliseconds above 1e11).
+    Stamp,
+    /// Numbers: main's `_num` of the message's `usage` counters, which may be
+    /// strings or floats. No `input` or no `output` is no reading at all; a
+    /// missing cache counter is 0.
+    Input,
+    Output,
+    CacheRead,
+    CacheWrite,
+}
+
+fn counter(scope: &Scope<'_, V>, key: &str) -> Option<i64> {
+    py_float(scope.get(&["event", "message", "usage", key])).filter(|f| f.is_finite()).map(|f| f.trunc() as i64)
+}
+
+impl Vendor for V {
+    type Slot = NoSlot;
+    type Ext = Ext;
+    type Backend = Sqlite;
+    const CLI: &'static Cli = &CLI;
+    const OBSERVE: Option<&'static Observe<Self>> = Some(&OBSERVE);
+
+    fn text(ext: Ext, scope: &Scope<'_, Self>) -> String {
+        if !matches!(ext, Ext::Stamp) {
+            return String::new();
+        }
+        for path in [&["event", "timestamp"][..], &["event", "message", "timestamp"][..]] {
+            match scope.get(path) {
+                Some(Value::String(stamp)) if !stamp.is_empty() => return stamp.clone(),
+                value => match py_float(value) {
+                    Some(n) if n != 0.0 => return time::iso_from_float(if n > 1e11 { n / 1000.0 } else { n }),
+                    _ => {}
+                },
+            }
+        }
+        String::new()
+    }
+
+    fn num(ext: Ext, scope: &Scope<'_, Self>) -> Option<i64> {
+        let cache = |key| counter(scope, key).unwrap_or(0);
+        match ext {
+            Ext::Input => Some(counter(scope, "input")?.saturating_add(cache("cacheRead")).saturating_add(cache("cacheWrite"))),
+            Ext::Output => counter(scope, "output"),
+            Ext::CacheRead => Some(cache("cacheRead")),
+            Ext::CacheWrite => Some(cache("cacheWrite")),
+            Ext::Stamp => None,
+        }
+    }
+}
 
 /// The value at the path, only when it is a session key Navide handed out.
 macro_rules! keyed {
@@ -15,36 +76,32 @@ macro_rules! keyed {
 }
 
 /// A readable `message` event (main's `_message`).
-const MESSAGE_ROW: Pred = Pred::All(&[Pred::Eq(&["event", "type"], "message"), Pred::IsObject(&["event", "message"])]);
+const MESSAGE_ROW: Pred<V> = Pred::All(&[Pred::Eq(&["event", "type"], "message"), Pred::IsObject(&["event", "message"])]);
 /// The message's role, else the row's `message_role`.
-const ROLE: Text = Text::FirstOf(&[Text::Py(&["event", "message", "role"]), Text::Py(&["role"])]);
-const ASSISTANT: Pred = Pred::Eq(&["event", "message", "role"], "assistant");
-const CONTENT: Text = Text::Blocks(&["event", "message", "content"], "text");
+const ROLE: Text<V> = Text::FirstOf(&[Text::Py(&["event", "message", "role"]), Text::Py(&["role"])]);
+const ASSISTANT: Pred<V> = Pred::Eq(&["event", "message", "role"], "assistant");
+const CONTENT: Text<V> = Text::Blocks(&["event", "message", "content"], "text");
 const STOP: Path = &["event", "message", "stopReason"];
-const TS: Text = Text::Stamp(&[&["event", "timestamp"], &["event", "message", "timestamp"]]);
-const KEY: Text = Text::Py(&["key"]);
+const TS: Text<V> = Text::Ext(Ext::Stamp);
+const KEY: Text<V> = Text::Py(&["key"]);
+const SEQ_KEY: Text<V> = Text::Concat(&[Text::Lit("seq:"), Text::Py(&["sid"]), Text::Lit(":"), Text::Py(&["seq"])]);
 
-const fn event(kind: EventKind, detail: Text, text: Text, require_text: bool) -> [Effect; 2] {
-    [
-        Effect::Emit(Emit {
-            kind,
-            key: Text::Concat(&[Text::Lit("seq:"), Text::Py(&["sid"]), Text::Lit(":"), Text::Py(&["seq"])]),
-            detail,
-            text,
-            timestamp: TS,
-            session: Some(KEY),
-            require_text,
-        }),
-        Effect::Stop,
-    ]
+const fn event(emit: Emit<V>) -> [Effect<V>; 2] {
+    emit.of_session(KEY).last()
 }
 
-/// One page of a session's rows after its watermark.
-const PAGE: Str = "SELECT seq, session_id AS sid, message_role AS role, event_json AS event FROM transcript_events \
-                   WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3";
+/// One page of a session's rows after its watermark; a trailing assistant
+/// message without its stopReason yet is read again next pass.
+const PAGE: Page<V> = Page {
+    sql: "SELECT seq, session_id AS sid, message_role AS role, event_json AS event FROM transcript_events \
+          WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
+    id: "seq",
+    size: 512,
+    hold_last: Some(Pred::All(&[MESSAGE_ROW, ASSISTANT, Pred::Not(&Pred::Truthy(STOP))])),
+};
 /// A session's key: the id itself when it is one, else what the session
 /// tables map it to (absent in some builds), else the session header's.
-const SESSIONS: Partition = Partition {
+const SESSIONS: Partition<V> = Partition {
     tops: "SELECT session_id AS part, MAX(seq) AS top FROM transcript_events GROUP BY session_id",
     label: &[
         ("SELECT ?1 AS label", keyed!("label")),
@@ -56,34 +113,16 @@ const SESSIONS: Partition = Partition {
         ),
     ],
     label_as: "key",
-};
-/// A trailing assistant message without its stopReason yet is read again next pass.
-const HOLD: Pred = Pred::All(&[MESSAGE_ROW, ASSISTANT, Pred::Not(&Pred::Truthy(STOP))]);
-
-static DB: Sqlite = Sqlite {
-    json: &["event", "header"],
-    binary: &[],
-    requires: &[("transcript_events", &["session_id", "seq", "event_json", "message_role"])],
-    usage: Some(Rows { sql: PAGE, id: "seq", newest: "", page: 512, restart_below: false, hold_last: Some(HOLD), partition: Some(SESSIONS), revisit: None, last_as: None }),
-    // A session whose newest seq fell below its mark was rewritten: re-anchor there.
-    activity: Some(Rows { sql: PAGE, id: "seq", newest: "", page: 512, restart_below: true, hold_last: Some(HOLD), partition: Some(SESSIONS), revisit: None, last_as: None }),
+    // main's own warning, word for word.
+    unlabelled: "openclaw store {path}: session {part} names no session key in transcript_events, session_windows or session_nodes — its turns reach no pane",
 };
 
 pub static CLI: Cli = Cli {
     key: "openclaw",
     label: "OpenClaw",
     kind: Kind::Agent,
-    launch: Launch {
-        program: "openclaw",
-        // The TUI on the local embedded runtime (a bare `openclaw` attaches to a gateway).
-        base_args: &["tui", "--local"],
-        yolo_args: &[],
-        model: None,
-        effort: None,
-        efforts: &[],
-        env_defaults: &[],
-        env_strip: &[],
-    },
+    // The TUI on the local embedded runtime (a bare `openclaw` attaches to a gateway).
+    launch: Launch { base_args: &["tui", "--local"], ..Launch::of("openclaw") },
     resume: Resume {
         args: Some(&["--session", "{id}"]),
         parse: Some(ResumeParse {
@@ -98,86 +137,60 @@ pub static CLI: Cli = Cli {
         }),
     },
     interrupt: b"\x03",
-    observe: Some(Observe {
-        store: Store {
-            env: &[("OPENCLAW_STATE_DIR", &["agents"])],
-            home: &[&[".openclaw", "agents"]],
-            files: &[&["*", "agent", "openclaw-agent.sqlite"]],
-        },
-        format: Format::Sqlite(&DB),
-        accept: Some(Accept { name: "openclaw-agent.sqlite", not_under: None, dir: None }),
-        slots: &[],
-        usage: Some(UsageSpec {
-            slots: &[],
+};
+
+static OBSERVE: Observe<V> = Observe {
+    store: Store { env: &[("OPENCLAW_STATE_DIR", &["agents"])], home: &[&[".openclaw", "agents"]], files: &[&["*", "agent", "openclaw-agent.sqlite"]] },
+    file_name: Some("openclaw-agent.sqlite"),
+    other_files: OtherFiles::Empty,
+    slots: &[],
+    // The store records no cwd, and every row names its own session.
+    cwd: None,
+    session: None,
+    cwd_form: Form::Written,
+    records: SqliteRecords {
+        json: &["event", "header"],
+        binary: &[],
+        requires: &[("transcript_events", &["session_id", "seq", "event_json", "message_role"])],
+        usage: SqlUsage::Watermarks {
             rules: &[UsageRule {
                 when: Pred::All(&[MESSAGE_ROW, ASSISTANT, Pred::IsObject(&["event", "message", "usage"])]),
                 effects: &[],
                 reading: Some(Reading {
-                    input: Num::Sum(&[
-                        Num::Float(&["event", "message", "usage", "input"]),
-                        Num::OrZero(&Num::Float(&["event", "message", "usage", "cacheRead"])),
-                        Num::OrZero(&Num::Float(&["event", "message", "usage", "cacheWrite"])),
-                    ]),
-                    output: Num::Float(&["event", "message", "usage", "output"]),
-                    cache_read: Num::OrZero(&Num::Float(&["event", "message", "usage", "cacheRead"])),
-                    cache_creation: Num::OrZero(&Num::Float(&["event", "message", "usage", "cacheWrite"])),
-                    key: Text::Concat(&[Text::Lit("openclaw:"), Text::Py(&["sid"]), Text::Lit(":"), Text::Py(&["seq"])]),
-                    key_required: false,
-                    key_invalid: "",
+                    cache_read: Num::Ext(Ext::CacheRead),
+                    cache_creation: Num::Ext(Ext::CacheWrite),
                     model: Text::Py(&["event", "message", "model"]),
                     timestamp: TS,
-                    cli_version: Text::Lit(""),
-                    cwd: Text::Lit(""),
                     session_id: KEY,
-                    raw: &[],
+                    ..Reading::of(
+                        Num::Ext(Ext::Input),
+                        Num::Ext(Ext::Output),
+                        Text::Concat(&[Text::Lit("openclaw:"), Text::Py(&["sid"]), Text::Lit(":"), Text::Py(&["seq"])]),
+                    )
                 }),
             }],
-            mode: UsageMode::Watermarks { kind: "openclaw_seq", map: "sessions" },
-            persist: &[],
-            flags: &[],
-            restore: Restore::UnlessReplaced,
-            stamp: &[],
-        }),
-        activity: ActivitySpec {
-            slots: &[],
-            cursor: Cursor::Rows,
-            rules: &[
-                Rule { when: Pred::Not(&MESSAGE_ROW), effects: &[Effect::Stop] },
-                Rule {
-                    when: Pred::Text(ROLE, StrTest::Eq("user")),
-                    effects: &event(EventKind::AgentActive, Text::Lit("user"), Text::UserPrompt(&CONTENT), true),
-                },
-                Rule {
-                    when: Pred::All(&[Pred::Text(ROLE, StrTest::Eq("assistant")), Pred::Truthy(STOP), Pred::Not(&Pred::Eq(STOP, "toolUse"))]),
-                    effects: &event(EventKind::TurnComplete, Text::Py(STOP), Text::Cap(&CONTENT, 8000), false),
-                },
-                Rule {
-                    when: Pred::Text(ROLE, StrTest::Eq("assistant")),
-                    effects: &event(EventKind::AgentActive, Text::Lit("assistant"), Text::Lit(""), false),
-                },
-                Rule {
-                    when: Pred::Text(ROLE, StrTest::In(&["toolResult", "tool"])),
-                    effects: &event(EventKind::AgentActive, Text::Lit("tool"), Text::Lit(""), false),
-                },
-            ],
-            idle: None,
-            turn_stamp: TurnStamp::Text,
-            turn_text: "reply",
-            persist: &[],
-            bag: Bag { slots: &[], turn: None, cursor: Some("openclaw_seq::"), anchor: Some("openclaw_anchor::") },
+            page: PAGE,
+            part: SESSIONS,
+            kind: "openclaw_seq",
+            map: "sessions",
         },
-        turns: TurnsSpec {
-            slots: &[],
-            // The generic cut re-reads activity from first sight, which anchors
-            // every session (no replay): there would be no boundaries at all.
-            method: TurnMethod::Unsupported,
-            filter: SessionFilter::Ignore,
-            effects: &[],
-            skip: Pred::Not(&Pred::True),
-            open: None,
-            call: None,
-            close: None,
-            session: "session_id",
+        // A session whose newest seq fell below its mark was rewritten: re-anchor there.
+        activity: SqlWalk::Partitions { page: PAGE, part: SESSIONS, restart_below: true, key: "openclaw_seq::", anchor: "openclaw_anchor::" },
+    },
+    activity: Activity::rules(&[
+        Rule { when: Pred::Not(&MESSAGE_ROW), effects: &[Effect::Stop] },
+        Rule {
+            when: Pred::Text(ROLE, StrTest::Eq("user")),
+            effects: &event(Emit::active(SEQ_KEY, Text::Lit("user"), Text::UserPrompt(&CONTENT), TS).with_text()),
         },
-    }),
+        Rule {
+            when: Pred::All(&[Pred::Text(ROLE, StrTest::Eq("assistant")), Pred::Truthy(STOP), Pred::Not(&Pred::Eq(STOP, "toolUse"))]),
+            effects: &event(Emit::done(SEQ_KEY, Text::Py(STOP), Text::Cap(&CONTENT, 8000), TS)),
+        },
+        Rule { when: Pred::Text(ROLE, StrTest::Eq("assistant")), effects: &event(Emit::active(SEQ_KEY, Text::Lit("assistant"), Text::Lit(""), TS)) },
+        Rule { when: Pred::Text(ROLE, StrTest::In(&["toolResult", "tool"])), effects: &event(Emit::active(SEQ_KEY, Text::Lit("tool"), Text::Lit(""), TS)) },
+    ]),
+    // The generic cut re-reads activity from first sight, which anchors
+    // every session (no replay): there would be no boundaries at all.
+    turns: Turns::None,
 };

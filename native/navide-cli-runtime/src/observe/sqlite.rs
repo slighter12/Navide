@@ -1,16 +1,17 @@
-//! The SQLite backend: one short-lived read-only connection per query, as
-//! main's readers open one (`sqlite3.connect("file:…?mode=ro")`, a 250 ms
-//! busy wait). A row is read into a JSON object keyed by column name, so the
-//! declaration's predicates and texts read rows exactly as they read JSONL
-//! records. Any failure (busy, locked, missing, a schema the query does not
-//! fit) is "no rows this cycle", as main treats it.
+//! SQLite access: a read-only connection opened the way main's readers open
+//! one (`sqlite3.connect("file:…?mode=ro")`, a 250 ms busy wait), kept for
+//! one observer call. A row is read into a JSON object keyed by column name,
+//! so the declaration's predicates and texts read rows exactly as they read
+//! JSONL records; binary columns stay bytes beside it. Any failure (busy,
+//! locked, missing, a schema the query does not fit) is "no rows this
+//! cycle", as main treats it.
 //!
 //! The FFI connection is the evaluation crate's: macOS links the system
 //! SQLite, Linux the bundled one `libsqlite3-sys` builds, Windows the OS's
 //! `winsqlite3.dll`.
 use super::Error;
-use crate::decl::{Partition, Rows, Sqlite};
-use crate::expr::{self, Scope, Slots};
+use crate::expr::Blob;
+use crate::text::ignore_invalid;
 use serde_json::{Map, Value};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::Path;
@@ -112,7 +113,7 @@ impl Connection {
         (unsafe { sqlite3_busy_timeout(db.0, BUSY_TIMEOUT_MS) } == 0).then_some(db)
     }
 
-    fn query(&self, sql: &str, params: &[Param], json: &[&str], binary: &[&str]) -> Option<Vec<Value>> {
+    fn prepare(&self, sql: &str, params: &[Param]) -> Option<Statement> {
         let sql = CString::new(sql).ok()?;
         let mut raw = std::ptr::null_mut();
         let code = unsafe { sqlite3_prepare_v2(self.0, sql.as_ptr(), -1, &mut raw, std::ptr::null_mut()) };
@@ -125,13 +126,18 @@ impl Connection {
             let index = index as c_int + 1;
             let code = match value {
                 Param::Int(n) => unsafe { sqlite3_bind_int64(statement.0, index, *n) },
-                // SQLITE_STATIC (null): the text outlives the statement, which is finalised below.
+                // SQLITE_STATIC (null): the text outlives the statement, which the caller finalises.
                 Param::Text(t) => unsafe { sqlite3_bind_text(statement.0, index, t.as_ptr().cast(), c_int::try_from(t.len()).ok()?, std::ptr::null()) },
             };
             if code != 0 {
                 return None;
             }
         }
+        Some(statement)
+    }
+
+    fn query(&self, sql: &str, params: &[Param], json: &[&str], binary: &[&str]) -> Option<Vec<Row>> {
+        let statement = self.prepare(sql, params)?;
         let columns: Vec<String> = (0..unsafe { sqlite3_column_count(statement.0) })
             .map(|c| {
                 let name = unsafe { sqlite3_column_name(statement.0, c) };
@@ -146,6 +152,7 @@ impl Connection {
                 _ => return None,
             }
             let mut row = Map::new();
+            let mut blobs = Vec::new();
             for (c, name) in columns.iter().enumerate() {
                 let c = c as c_int;
                 let value = match unsafe { sqlite3_column_type(statement.0, c) } {
@@ -156,14 +163,18 @@ impl Connection {
                         let text = std::str::from_utf8(bytes);
                         let blob = kind == 4;
                         if binary.contains(&name.as_str()) {
-                            if blob { Value::String(bytes.iter().map(|b| format!("{b:02x}")).collect()) } else { Value::Null }
+                            // Only a BLOB is binary (main's `x if isinstance(x, bytes) else b""`).
+                            if blob {
+                                blobs.push((name.clone(), bytes.to_vec()));
+                            }
+                            Value::Null
                         } else {
                             match (blob, json.contains(&name.as_str())) {
                                 // Python decodes TEXT as UTF-8 and fails the whole query on a bad cell.
                                 (false, true) => serde_json::from_str(text.ok()?).unwrap_or(Value::Null),
                                 (false, false) => Value::String(text.ok()?.to_owned()),
                                 // A BLOB stays bytes there: JSON of them, else nothing to read
-                                // (cursor's protobuf nodes share the table with its JSON messages).
+                                // (protobuf nodes can share a table with JSON messages).
                                 (true, true) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
                                 (true, false) => text.map_or(Value::Null, |t| Value::String(t.to_owned())),
                             }
@@ -173,68 +184,13 @@ impl Connection {
                 };
                 row.insert(name.clone(), value);
             }
-            rows.push(Value::Object(row));
+            rows.push(Row { value: Value::Object(row), blobs });
         }
         Some(rows)
     }
-}
 
-/// A bound query parameter.
-#[derive(Clone, Copy)]
-pub enum Param<'a> {
-    Int(i64),
-    Text(&'a str),
-}
-
-/// The rows of `sql`, each an object by column name (the declaration's JSON
-/// columns parsed, `null` when malformed). `None`: the database could not be
-/// read this cycle.
-///
-/// A store without the declared columns is an `Error::Unsupported`: the
-/// caller's own reader takes the call (main's readers report such a store).
-pub fn rows(path: &Path, db: &Sqlite, sql: &str, params: &[Param]) -> Result<Option<Vec<Value>>, Error> {
-    let Some(con) = Connection::open(path) else { return Ok(None) };
-    for (table, columns) in db.requires {
-        let Some(have) = con.query(&format!("PRAGMA table_info({table})"), &[], &[], &[]) else { return Ok(None) };
-        let has = |column: &str| have.iter().any(|row| row.get("name").and_then(Value::as_str) == Some(column));
-        if let Some(missing) = columns.iter().find(|c| !has(c)) {
-            return Err(Error::Unsupported(format!("table {table} lacks {missing}")));
-        }
-    }
-    Ok(con.query(sql, params, db.json, db.binary))
-}
-
-/// The first column of the first row, as main's `_int` reads it; `None`
-/// when it is SQL `NULL` (`MAX` over no rows).
-pub fn scalar(path: &Path, db: &Sqlite, sql: &str) -> Result<Option<i64>, Error> {
-    let Some(rows) = rows(path, db, sql, &[])? else { return Ok(None) };
-    let first = rows.first().and_then(Value::as_object).and_then(|row| row.values().next().cloned());
-    Ok(first.filter(|v| !v.is_null()).map(|v| crate::expr::py_int_raw(&v).unwrap_or(0)))
-}
-
-/// `SlotInit::Joined`: the first column of every row, bytes decoded as
-/// UTF-8 with invalid sequences dropped (Python `errors="ignore"`).
-pub fn joined(path: &Path, sql: &str) -> String {
-    Connection::open(path)
-        .and_then(|con| con.joined(sql))
-        .or_else(|| std::fs::read(path).ok().map(|bytes| ignore_invalid(&bytes)))
-        .unwrap_or_default()
-}
-
-pub fn ignore_invalid(bytes: &[u8]) -> String {
-    bytes.utf8_chunks().map(|chunk| chunk.valid()).collect()
-}
-
-impl Connection {
     fn joined(&self, sql: &str) -> Option<String> {
-        let sql = CString::new(sql).ok()?;
-        let mut raw = std::ptr::null_mut();
-        let code = unsafe { sqlite3_prepare_v2(self.0, sql.as_ptr(), -1, &mut raw, std::ptr::null_mut()) };
-        let statement = (!raw.is_null()).then_some(Statement(raw));
-        if code != 0 {
-            return None;
-        }
-        let statement = statement?;
+        let statement = self.prepare(sql, &[])?;
         let mut out = String::new();
         loop {
             match unsafe { sqlite3_step(statement.0) } {
@@ -260,54 +216,68 @@ unsafe fn cell<'s>(statement: *mut c_void, column: c_int) -> &'s [u8] {
     if pointer.is_null() || length == 0 { &[] } else { unsafe { std::slice::from_raw_parts(pointer, length) } }
 }
 
-/// Does a last row match the query's `hold_last` (not consumed yet)?
-pub fn held(query: &Rows, row: &Value) -> bool {
-    let slots = Slots::new();
-    let scope = Scope::of(row, &slots);
-    query.hold_last.as_ref().is_some_and(|p| expr::pred(p, &scope))
+/// A bound query parameter.
+#[derive(Clone, Copy)]
+pub enum Param<'a> {
+    Int(i64),
+    Text(&'a str),
 }
 
-/// Every partition with its newest id, in the query's order (main iterates
-/// its `GROUP BY` result); rows without either are skipped.
-pub fn tops(path: &Path, db: &Sqlite, part: &Partition) -> Result<Option<Vec<(String, i64)>>, Error> {
-    let Some(rows) = rows(path, db, part.tops, &[])? else { return Ok(None) };
-    Ok(Some(
-        rows.iter()
-            .filter_map(|row| {
-                let name = row.get("part").filter(|v| !v.is_null())?;
-                let top = row.get("top").and_then(expr::py_int_raw)?;
-                Some((expr::py_str(name), top))
-            })
-            .collect(),
-    ))
+/// One row: its columns as a JSON object, its binary columns as bytes.
+pub struct Row {
+    pub value: Value,
+    pub blobs: Vec<Blob>,
 }
 
-/// One page of a partition's rows after `after`, a held last row dropped and
-/// every row labelled. `None`: not readable this cycle.
-pub fn page(path: &Path, db: &Sqlite, query: &Rows, part: &Partition, name: &str, after: i64) -> Result<Option<Vec<Value>>, Error> {
-    let label = label(path, db, part, name)?;
-    let Some(mut rows) = rows(path, db, query.sql, &[Param::Text(name), Param::Int(after), Param::Int(query.page)])? else { return Ok(None) };
-    if rows.last().is_some_and(|row| held(query, row)) {
-        rows.pop();
-    }
-    for row in &mut rows {
-        if let Value::Object(object) = row {
-            object.insert(part.label_as.to_owned(), label.clone().into());
+/// One database, open for one observer call.
+pub struct Db {
+    connection: Connection,
+    json: &'static [&'static str],
+    binary: &'static [&'static str],
+}
+
+impl Db {
+    /// `Ok(None)`: the database cannot be read this cycle. A store without
+    /// the declared columns is `Error::Unsupported`: the caller's own reader
+    /// takes the call (main's readers report such a store).
+    pub fn open(
+        path: &Path,
+        json: &'static [&'static str],
+        binary: &'static [&'static str],
+        requires: &[(&str, &[&str])],
+    ) -> Result<Option<Db>, Error> {
+        let Some(connection) = Connection::open(path) else { return Ok(None) };
+        for (table, columns) in requires {
+            let Some(have) = connection.query(&format!("PRAGMA table_info({table})"), &[], &[], &[]) else { return Ok(None) };
+            let has = |column: &str| have.iter().any(|row| row.value.get("name").and_then(Value::as_str) == Some(column));
+            if let Some(missing) = columns.iter().find(|c| !has(c)) {
+                return Err(Error::Unsupported(format!("table {table} lacks {missing}")));
+            }
         }
+        Ok(Some(Db { connection, json, binary }))
     }
-    Ok(Some(rows))
+
+    /// The rows of `sql`; `None`: not readable this cycle.
+    pub fn rows(&self, sql: &str, params: &[Param]) -> Option<Vec<Row>> {
+        self.connection.query(sql, params, self.json, self.binary)
+    }
+
+    /// The first column of the first row, as main's `_int` reads it; `None`
+    /// when it is SQL `NULL` (`MAX` over no rows) or the query fails.
+    pub fn scalar(&self, sql: &str) -> Option<i64> {
+        let rows = self.rows(sql, &[])?;
+        let first = rows.first().and_then(|row| row.value.as_object()).and_then(|row| row.values().next().cloned());
+        first.filter(|v| !v.is_null()).map(|v| crate::expr::py_int_raw(&v).unwrap_or(0))
+    }
 }
 
-fn label(path: &Path, db: &Sqlite, part: &Partition, name: &str) -> Result<String, Error> {
-    let slots = Slots::new();
-    for (sql, text) in part.label {
-        let Some(rows) = rows(path, db, sql, &[Param::Text(name)])? else { continue };
-        let Some(first) = rows.first() else { continue };
-        let scope = Scope::of(first, &slots);
-        let value = expr::text(text, &scope);
-        if !value.is_empty() {
-            return Ok(value);
-        }
-    }
-    Err(Error::Unsupported(format!("partition {name} has no label")))
+/// The first column of every row of `sql`, bytes decoded as UTF-8 with
+/// invalid sequences dropped (Python `errors="ignore"`), concatenated; when
+/// the query fails, the database file's own bytes the same way (a live store
+/// mid-write). For a slot initialiser that reads a blob table whole.
+pub fn joined(path: &Path, sql: &str) -> String {
+    Connection::open(path)
+        .and_then(|connection| connection.joined(sql))
+        .or_else(|| std::fs::read(path).ok().map(|bytes| ignore_invalid(&bytes)))
+        .unwrap_or_default()
 }

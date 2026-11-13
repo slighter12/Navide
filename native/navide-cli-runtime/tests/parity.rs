@@ -2,7 +2,9 @@
 //! Python readers by `backend/tests/test_cli_runtime_parity.py`: the same
 //! bytes, mtimes and clock, read the way the log watcher reads them, must give
 //! the same usage events and checkpoints, activity events and turns.
-use navide_cli_runtime::observe::Observer;
+use navide_cli_runtime::decl::Form;
+use navide_cli_runtime::observe::Error;
+use navide_cli_runtime::registry;
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -63,7 +65,6 @@ fn replay(fixture: &Path) -> Vec<String> {
     let scenario: Value = serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
     let name = fixture.file_stem().unwrap().to_string_lossy().into_owned();
     let vendor = str_of(&scenario, "vendor");
-    let cli = navide_cli_runtime::cli(vendor).unwrap_or_else(|| panic!("{name}: unknown vendor {vendor}"));
     let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     let dir = Dir(std::env::temp_dir().join(format!("navide-parity-{name}-{}-{nanos}", std::process::id())));
     std::fs::create_dir_all(&dir.0).unwrap();
@@ -79,7 +80,18 @@ fn replay(fixture: &Path) -> Vec<String> {
     let path = dir.0.join(str_of(&scenario, "file"));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
 
-    let mut observer = Observer::new(cli).unwrap_or_else(|| panic!("{name}: {vendor} declares no observe"));
+    let mut observer = registry::observer(vendor).unwrap_or_else(|| panic!("{name}: {vendor} declares no observe"));
+    // What Python recorded, with each normalised cwd put back as the
+    // transcript wrote it: the runtime hands it on as written, and the seam
+    // applies the form the declaration names.
+    let as_written = observer.cwd_form() != Form::Written;
+    let expected = |value: &Value| -> Value {
+        let mut text = value.to_string();
+        for pair in scenario["as_written"].as_array().into_iter().flatten().filter(|_| as_written) {
+            text = text.replace(pair[0].as_str().unwrap(), pair[1].as_str().unwrap());
+        }
+        serde_json::from_str(&text).unwrap()
+    };
     let mut checkpoint = Map::new();
     let mut bag: Vec<String> = Vec::new();
     let mut failures = Vec::new();
@@ -91,26 +103,54 @@ fn replay(fixture: &Path) -> Vec<String> {
             let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
             file.set_modified(UNIX_EPOCH + Duration::from_secs_f64(step["mtime"].as_f64().unwrap())).unwrap();
         } else {
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .append(str_of(step, "mode") == "append")
-                .truncate(str_of(step, "mode") == "write")
-                .open(&path)
-                .unwrap();
+            let mode = str_of(step, "mode");
+            // "replace": a new file renamed over the old one (its identity changes).
+            let target = if mode == "replace" { path.with_extension("new") } else { path.clone() };
+            let mut file = std::fs::OpenOptions::new().create(true).write(true).append(mode == "append").truncate(mode != "append").open(&target).unwrap();
             file.write_all(str_of(step, "text").as_bytes()).unwrap();
+            if let Some(raw) = step["b64"].as_str() {
+                file.write_all(&base64(raw)).unwrap();
+            }
+            drop(file);
+            if mode == "replace" {
+                std::fs::rename(&target, &path).unwrap();
+            }
+            let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
             file.set_modified(UNIX_EPOCH + Duration::from_secs_f64(step["mtime"].as_f64().unwrap())).unwrap();
         }
+        for key in step["checkpoint_drop"].as_array().into_iter().flatten() {
+            checkpoint.shift_remove(key.as_str().unwrap());
+        }
+        for key in step["bag_add"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            if !bag.iter().any(|k| k == key) {
+                bag.push(key.to_owned());
+            }
+        }
         observer.set_clock(step["now"].as_f64());
-        let read = observer.usage(&path, &checkpoint).unwrap_or_else(|e| panic!("{name} step {n}: usage {e}"));
+        let read = match observer.usage(&path, &checkpoint) {
+            Ok(read) => read,
+            Err(err) => {
+                failures.push(format!("{name} step {n}: usage {err}"));
+                continue;
+            }
+        };
         checkpoint = read.checkpoint.clone();
         let usage = norm(serde_json::to_value(&read).unwrap(), &root);
-        if usage != step["expect"]["usage"] {
+        if usage != expected(&step["expect"]["usage"]) {
             failures.push(format!("{name} step {n} usage\n  rust:   {usage}\n  python: {}", step["expect"]["usage"]));
         }
-        let events = observer.activity_bag(&path, &mut bag).unwrap_or_else(|e| panic!("{name} step {n}: activity {e}"));
+        // main's walk raises on a line that is not UTF-8, after saving its state.
+        let wants_error = step["expect"]["activity_error"].as_str();
+        let events = match (observer.activity_bag(&path, &mut bag), wants_error) {
+            (Ok(events), None) => events,
+            (Err(Error::Decode { .. }), Some("decode")) => Vec::new(),
+            (other, _) => {
+                failures.push(format!("{name} step {n} activity: got {:?}, python error: {wants_error:?}", other.map(|e| e.len())));
+                Vec::new()
+            }
+        };
         let activity = norm(serde_json::to_value(&events).unwrap(), &root);
-        if activity != step["expect"]["activity"] {
+        if activity != expected(&step["expect"]["activity"]) {
             failures.push(format!("{name} step {n} activity\n  rust:   {activity}\n  python: {}", step["expect"]["activity"]));
         }
         bag.sort();
@@ -119,13 +159,15 @@ fn replay(fixture: &Path) -> Vec<String> {
             failures.push(format!("{name} step {n} seen-keys bag\n  rust:   {got}\n  python: {}", step["expect"]["bag"]));
         }
     }
-    // `null`: a recorded divergence (see the scenario's comment in the Python test).
-    if scenario["turns"].is_null() {
-        return failures;
-    }
-    let turns = norm(serde_json::to_value(observer.turns(&path, "").unwrap()).unwrap(), &root);
-    if turns != scenario["turns"] {
-        failures.push(format!("{name} turns\n  rust:   {turns}\n  python: {}", scenario["turns"]));
+    match (observer.turns(&path, ""), scenario["turns"]["error"].as_str()) {
+        (Ok(turns), None) => {
+            let turns = norm(serde_json::to_value(turns).unwrap(), &root);
+            if turns != scenario["turns"] {
+                failures.push(format!("{name} turns\n  rust:   {turns}\n  python: {}", scenario["turns"]));
+            }
+        }
+        (Err(Error::Decode { .. }), Some("decode")) => {}
+        (other, wanted) => failures.push(format!("{name} turns: got {:?}, python error: {wanted:?}", other.map(|t| t.len()))),
     }
     failures
 }

@@ -1,15 +1,131 @@
-//! The JSONL backend: a byte-offset tail with identity, shrink and anchor
-//! checks (main's `read_jsonl_tail`), and the dense line walk activity uses
-//! (main's `ActivityLines` plus the readers' shared walk loop).
+//! The file backends. `Jsonl`: a byte-offset tail with identity, shrink and
+//! anchor checks (main's `read_jsonl_tail`), and the dense line walk activity
+//! uses (main's `ActivityLines` plus the readers' shared walk loop).
+//! `TextLog`: the same tail over plain text, and a walk that replays the
+//! whole file.
+use super::activity::{At, Walk};
+use super::{bag, usage, ActivityState, Backend, Error, File, Memo, TurnUsage, UsageRead};
 use crate::blake2b;
+use crate::decl::{ExactTurns, JsonlRecords, LineCursor, TextRecords, Vendor};
 use crate::expr::{py_int, py_str_opt, py_strip};
+use crate::text::ignore_invalid;
 use serde_json::{Map, Value};
-use std::fs::{File, Metadata};
+use std::fs::{File as FsFile, Metadata};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
+/// One transcript per session, a JSON object per line.
+#[derive(Debug)]
+pub struct Jsonl;
+
+/// One plain-text transcript per session.
+#[derive(Debug)]
+pub struct TextLog;
+
+impl<V: Vendor<Backend = Jsonl>> Backend<V> for Jsonl {
+    type Spec = JsonlRecords<V>;
+
+    fn usage(file: &File<'_, V>, checkpoint: &Map<String, Value>, full: bool, _memo: &mut Memo) -> Result<UsageRead, Error> {
+        match &file.records().usage {
+            Some(spec) => usage::from_file(file, spec, checkpoint, full, |from| read_tail(file.path, from)),
+            None => Ok(UsageRead::unchanged(checkpoint)),
+        }
+    }
+
+    fn has_usage(spec: &Self::Spec) -> bool {
+        spec.usage.is_some()
+    }
+
+    fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, memo: &mut Memo) -> Result<(), Error> {
+        let path = walk.file.path;
+        match walk.file.records().cursor {
+            LineCursor::Lines => {
+                walk.restore(state);
+                // main's readers test `high_water > 0` for "the header was read on an earlier poll".
+                walk.resumed = state.hw > 0;
+                let resume = memo.resume.get(path).copied();
+                let end = walk_lines(path, state.hw, resume, |line| walk.record(line.value, At::line(line.number, line.end)))?;
+                state.hw = state.hw.max(end.last_line);
+                match end.resume {
+                    Some(resume) => memo.resume.insert(path.to_owned(), resume),
+                    None => memo.resume.remove(path),
+                };
+                walk.decode_error = end.decode_error;
+            }
+            LineCursor::Bytes { .. } => {
+                let tail = read_tail(path, &state.cursor)?;
+                if !tail.rotated {
+                    walk.restore(state);
+                }
+                for (end, record) in &tail.records {
+                    if let Some(record) = record {
+                        walk.record(record, At::line(0, *end));
+                    }
+                }
+                state.cursor = tail.checkpoint;
+            }
+        }
+        Ok(())
+    }
+
+    fn load(spec: &'static Self::Spec, bag: &[String], state: &mut ActivityState) {
+        if let LineCursor::Bytes { key } = spec.cursor {
+            if let Some(Value::Object(cursor)) = bag::find(bag, key).and_then(|raw| serde_json::from_str::<Value>(raw).ok()) {
+                state.cursor = cursor;
+            }
+        }
+    }
+
+    fn store(spec: &'static Self::Spec, state: &ActivityState, bag: &mut Vec<String>) {
+        if let LineCursor::Bytes { key } = spec.cursor {
+            let cursor = (!state.cursor.is_empty()).then(|| bag::py_json(&Value::Object(state.cursor.clone()), false, true));
+            bag::replace(bag, key, cursor);
+        }
+    }
+
+    const EXACT_TURNS: bool = true;
+
+    fn exact_turns(file: &File<'_, V>, turns: &'static ExactTurns<V>, session_id: &str) -> Result<Vec<TurnUsage>, Error> {
+        super::turns::exact(file, turns, session_id)
+    }
+}
+
+impl<V: Vendor<Backend = TextLog>> Backend<V> for TextLog {
+    type Spec = TextRecords<V>;
+
+    fn usage(file: &File<'_, V>, checkpoint: &Map<String, Value>, full: bool, _memo: &mut Memo) -> Result<UsageRead, Error> {
+        let records = file.records();
+        match &records.usage {
+            // main's whole-file pass opens the file in text mode: every line
+            // counts, the unterminated last one included.
+            Some(spec) if full => usage::from_file(file, spec, checkpoint, true, |_| whole_text(file.path, records.kind)),
+            Some(spec) => usage::from_file(file, spec, checkpoint, false, |from| read_text_tail(file.path, from, records.kind)),
+            None => Ok(UsageRead::unchanged(checkpoint)),
+        }
+    }
+
+    fn has_usage(spec: &Self::Spec) -> bool {
+        spec.usage.is_some()
+    }
+
+    fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, _memo: &mut Memo) -> Result<(), Error> {
+        walk.restore(state);
+        let last = walk_text(walk.file.path, state.hw, |line, record, fresh| walk.record(record, At { fresh, ..At::line(line, 0) }))?;
+        state.hw = state.hw.max(last);
+        Ok(())
+    }
+
+    fn load(_spec: &'static Self::Spec, _bag: &[String], _state: &mut ActivityState) {}
+
+    fn store(_spec: &'static Self::Spec, _state: &ActivityState, _bag: &mut Vec<String>) {}
+}
+
 const ANCHOR_BYTES: u64 = 512;
 
+/// `st_dev:st_ino`, the identity main's checkpoints carry. `None` where the
+/// platform gives none through `std` (Windows): a checkpoint shared with the
+/// Python reader would then never match, so nothing is observed there
+/// (`wire`'s `observes` answers an empty list).
 #[cfg(unix)]
 pub fn identity(meta: &Metadata) -> String {
     use std::os::unix::fs::MetadataExt;
@@ -18,9 +134,11 @@ pub fn identity(meta: &Metadata) -> String {
 
 #[cfg(not(unix))]
 pub fn identity(_meta: &Metadata) -> String {
-    // Not built: Windows has no stable st_ino through std (see REDESIGN-REPORT).
     String::from("0:0")
 }
+
+/// Whether this build can tell one file from its replacement.
+pub const HAS_FILE_IDENTITY: bool = cfg!(unix);
 
 #[cfg(unix)]
 pub fn inode(meta: &Metadata) -> u64 {
@@ -33,7 +151,7 @@ pub fn inode(_meta: &Metadata) -> u64 {
     0
 }
 
-fn anchor(file: &mut File, end: u64) -> io::Result<String> {
+fn anchor(file: &mut FsFile, end: u64) -> io::Result<String> {
     let start = end.saturating_sub(ANCHOR_BYTES);
     file.seek(SeekFrom::Start(start))?;
     let mut buf = vec![0u8; (end - start) as usize];
@@ -59,10 +177,21 @@ pub fn read_tail(path: &Path, checkpoint: &Map<String, Value>) -> io::Result<Tai
     })
 }
 
-/// The same tail over a plain-text transcript (`Format::Text`): every
-/// complete line is a `{"line": text}` record.
+/// The same tail over a plain-text transcript: every complete line is a
+/// `{"line": text}` record.
 pub fn read_text_tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str) -> io::Result<Tail> {
-    tail(path, checkpoint, kind, |line| Some(text_record(&super::sqlite::ignore_invalid(line))))
+    tail(path, checkpoint, kind, |line| Some(text_record(&ignore_invalid(line))))
+}
+
+/// Every line of a plain-text transcript as main's text-mode file yields
+/// them (see `text_lines`), the unterminated last one included. The offsets
+/// only tell the lines apart.
+fn whole_text(path: &Path, kind: &str) -> io::Result<Tail> {
+    let text = ignore_invalid(&std::fs::read(path)?);
+    let records = text_lines(&text).map(|line| (line.end as u64, Some(text_record(line.text)))).collect();
+    let mut checkpoint = Map::new();
+    checkpoint.insert("kind".into(), kind.into());
+    Ok(Tail { records, checkpoint, rotated: false, replaced: false })
 }
 
 fn text_record(line: &str) -> Value {
@@ -78,7 +207,7 @@ fn tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str, decode: impl F
     let prior_anchor = py_str_opt(checkpoint.get("anchor"));
     let mut offset = py_int(checkpoint.get("offset")) as u64;
     let mut rotated = offset != 0 && (prior_identity != identity || meta.len() < offset);
-    let mut file = File::open(path)?;
+    let mut file = FsFile::open(path)?;
     if offset != 0 && !rotated && !prior_anchor.is_empty() && anchor(&mut file, offset)? != prior_anchor {
         rotated = true;
     }
@@ -143,7 +272,7 @@ pub fn walk_lines(
     resume: Option<LineResume>,
     mut visit: impl FnMut(Line<'_>),
 ) -> io::Result<WalkEnd> {
-    let mut file = File::open(path)?;
+    let mut file = FsFile::open(path)?;
     let meta = file.metadata()?;
     let inode = inode(&meta);
     let (mut first_line, mut offset) = (1usize, 0u64);
@@ -201,46 +330,71 @@ pub fn walk_lines(
     Ok(WalkEnd { last_line, resume, decode_error })
 }
 
-/// A replay walk (`Cursor::Replay`) over a plain-text transcript: every line
-/// from the top, read as main's text-mode `open(errors="ignore")` reads it
-/// (invalid UTF-8 dropped, `\r\n` and a lone `\r` ending a line too), with
-/// whether it is past `high_water`. A new line still unterminated ends the
-/// walk before it. Returns the last line walked.
-pub fn walk_text(path: &Path, high_water: usize, mut visit: impl FnMut(usize, &Value, bool)) -> io::Result<usize> {
-    let mut data = Vec::new();
-    File::open(path)?.read_to_end(&mut data)?;
-    let text = super::sqlite::ignore_invalid(&data);
-    let mut last_line = high_water;
-    let mut rest = text.as_str();
+/// One line of a text-mode read.
+pub struct TextLine<'t> {
+    /// 1-based.
+    pub number: usize,
+    pub text: &'t str,
+    /// False for a last line with no line ending yet.
+    pub terminated: bool,
+    /// Offset just past the line (and its ending) in the decoded text.
+    pub end: usize,
+}
+
+/// The lines of a text as Python's text-mode file yields them (universal
+/// newlines): `\n`, `\r\n` and a lone `\r` each end a line, and what follows
+/// the last ending is a line too.
+pub fn text_lines(text: &str) -> impl Iterator<Item = TextLine<'_>> {
+    let mut at = 0;
     let mut number = 0;
-    while !rest.is_empty() {
+    std::iter::from_fn(move || {
+        let rest = &text[at..];
+        if rest.is_empty() {
+            return None;
+        }
         number += 1;
-        let (line, terminated) = match rest.find(['\r', '\n']) {
-            Some(at) => {
-                let width = if rest[at..].starts_with("\r\n") { 2 } else { 1 };
-                let line = &rest[..at];
-                rest = &rest[at + width..];
-                (line, true)
-            }
-            None => (std::mem::take(&mut rest), false),
+        let (len, width) = match rest.find(['\r', '\n']) {
+            Some(found) => (found, if rest[found..].starts_with("\r\n") { 2 } else { 1 }),
+            None => (rest.len(), 0),
         };
-        let fresh = number > high_water;
-        if fresh && !terminated {
+        at += len + width;
+        Some(TextLine { number, text: &rest[..len], terminated: width > 0, end: at })
+    })
+}
+
+/// A replay walk over a plain-text transcript: every line from the top, read
+/// as main's text-mode `open(errors="ignore")` reads it (invalid UTF-8
+/// dropped), with whether it is past `high_water`. A new line still
+/// unterminated ends the walk before it. Returns the last line walked.
+pub fn walk_text(path: &Path, high_water: usize, mut visit: impl FnMut(usize, &Value, bool)) -> io::Result<usize> {
+    let text = ignore_invalid(&std::fs::read(path)?);
+    let mut last_line = high_water;
+    for line in text_lines(&text) {
+        let fresh = line.number > high_water;
+        if fresh && !line.terminated {
             break;
         }
-        last_line = number;
-        visit(number, &text_record(line), fresh);
+        last_line = line.number;
+        visit(line.number, &text_record(line.text), fresh);
     }
     Ok(last_line)
 }
 
 /// Every JSON record of the file with its 1-based line number, for the
 /// whole-file passes (turns, header slots). Blank and malformed lines are
-/// skipped but still counted.
-pub fn all_lines(path: &Path, limit: usize, mut visit: impl FnMut(usize, &str, Option<&Value>) -> bool) -> io::Result<()> {
-    let mut data = Vec::new();
-    File::open(path)?.read_to_end(&mut data)?;
-    let text = String::from_utf8_lossy(&data);
+/// skipped but still counted. `strict`: a file that is not UTF-8 is an
+/// error, as main's strict text-mode open raises (else its bad bytes are
+/// replaced).
+pub fn all_lines(path: &Path, limit: usize, strict: bool, mut visit: impl FnMut(usize, &str, Option<&Value>) -> bool) -> Result<(), Error> {
+    let data = std::fs::read(path)?;
+    let text = match std::str::from_utf8(&data) {
+        Ok(text) => std::borrow::Cow::Borrowed(text),
+        Err(err) if strict => {
+            let line = data[..err.valid_up_to()].iter().filter(|b| **b == b'\n').count() + 1;
+            return Err(Error::Decode { line });
+        }
+        Err(_) => String::from_utf8_lossy(&data),
+    };
     for (index, raw) in text.split_inclusive('\n').enumerate() {
         if limit != 0 && index >= limit {
             break;
@@ -314,6 +468,27 @@ mod tests {
         let mut seen = Vec::new();
         walk_lines(&f.path, 3, Some(resume), |line| seen.push((line.number, line.value["n"].as_i64()))).unwrap();
         assert_eq!(seen, [(4, Some(14))], "counted from the head: line 4 is the first past the mark");
+    }
+
+    #[test]
+    fn text_lines_follow_universal_newlines() {
+        let lines: Vec<(usize, &str, bool)> = text_lines("a\r\nb\rc\n\nd").map(|l| (l.number, l.text, l.terminated)).collect();
+        assert_eq!(lines, [(1, "a", true), (2, "b", true), (3, "c", true), (4, "", true), (5, "d", false)]);
+        assert_eq!(text_lines("").count(), 0);
+        assert_eq!(text_lines("x\n").map(|l| l.end).collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn a_strict_pass_refuses_a_file_that_is_not_utf8() {
+        let f = file_with(b"{\"n\":1}\n{\"n\":\"\xff\"}\n");
+        let mut seen = 0;
+        all_lines(&f.path, 0, false, |_, _, _| {
+            seen += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!(seen, 2);
+        assert!(matches!(all_lines(&f.path, 0, true, |_, _, _| true), Err(Error::Decode { line: 2 })));
     }
 }
 

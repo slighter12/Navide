@@ -6,12 +6,74 @@
 //! a protobuf blob. An assistant step still streaming is read again until it
 //! finishes; a finished reply ends the turn only as the pass's newest step.
 use crate::decl::*;
+use crate::expr::Scope;
+use crate::observe::sqlite;
+use crate::proto;
+use crate::text::{posix_normalise, unquote};
+use crate::time;
+use serde::Serialize;
 
-/// Hook: the workspace is a `file://` URI that the metadata blob repeats,
-/// some copies followed by protobuf bytes that read as printable junk. main
-/// picks among the candidates by whether the path is a directory on disk,
-/// then by how often it occurs, then the shortest — a file-system heuristic
-/// the record vocabulary has no form for.
+#[derive(Debug)]
+pub struct V;
+
+slots! { SessionId = "session_id", Cwd = "cwd" }
+
+/// What only Antigravity's store needs: its text is inside protobuf blobs.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum Ext {
+    /// Slot: the workspace is a `file://` URI that the metadata blob repeats,
+    /// some copies followed by protobuf bytes that read as printable junk.
+    /// main picks among the candidates by whether the path is a directory on
+    /// disk, then by how often it occurs, then the shortest — a file-system
+    /// heuristic no record can carry. Read once per walk.
+    Workspace,
+    /// Text: the user's prompt (payload field 19, text field 2).
+    Prompt,
+    /// Text: the assistant's reply (payload field 20, text fields 1 or 8).
+    Reply,
+    /// Text: its thinking (payload field 20, text field 3).
+    Thinking,
+    /// Text: the step's end time, else its start: the first of the metadata's
+    /// `google.protobuf.Timestamp` fields 8, 7, 6 with non-zero seconds.
+    Stamp,
+}
+
+impl Vendor for V {
+    type Slot = Slot;
+    type Ext = Ext;
+    type Backend = Sqlite;
+    const CLI: &'static Cli = &CLI;
+    const OBSERVE: Option<&'static Observe<Self>> = Some(&OBSERVE);
+
+    fn text(ext: Ext, scope: &Scope<'_, Self>) -> String {
+        let payload = |path: &[u64], fields: &[u64]| proto::clean_text(proto::at(scope.blob("payload"), path), fields).to_owned();
+        match ext {
+            Ext::Prompt => payload(&[19], &[2]),
+            Ext::Reply => payload(&[20], &[1, 8]),
+            Ext::Thinking => payload(&[20], &[3]),
+            Ext::Stamp => {
+                let metadata = scope.blob("metadata");
+                [8, 7, 6]
+                    .iter()
+                    .map(|field| proto::bytes(metadata, *field))
+                    .filter(|stamp| !stamp.is_empty())
+                    .find_map(|stamp| proto::varint_field(stamp, 1).filter(|seconds| *seconds != 0))
+                    .and_then(|seconds| i64::try_from(seconds).ok()?.checked_mul(1_000_000))
+                    .map(time::iso_from_micros)
+                    .unwrap_or_default()
+            }
+            Ext::Workspace => String::new(),
+        }
+    }
+
+    fn init(ext: Ext, path: &std::path::Path) -> String {
+        match ext {
+            Ext::Workspace => workspace(&sqlite::joined(path, "SELECT data FROM trajectory_metadata_blob")),
+            _ => String::new(),
+        }
+    }
+}
+
 fn workspace(text: &str) -> String {
     let mut counts: Vec<(String, usize)> = Vec::new();
     let mut from = 0;
@@ -31,7 +93,7 @@ fn workspace(text: &str) -> String {
         let path = unquote(strip_drive_slashes(run));
         let path = path.trim_end_matches('/');
         if !path.is_empty() {
-            let key = normalise(path);
+            let key = posix_normalise(path);
             match counts.iter_mut().find(|(p, _)| *p == key) {
                 Some((_, n)) => *n += 1,
                 None => counts.push((key, 1)),
@@ -53,114 +115,23 @@ fn strip_drive_slashes(run: &str) -> &str {
     }
 }
 
-/// `urllib.parse.unquote`: escapes are decoded within each ASCII run, as
-/// UTF-8 with replacement; other characters pass through.
-fn unquote(text: &str) -> String {
-    if !text.contains('%') {
-        return text.to_owned();
-    }
-    let mut out = String::new();
-    let mut ascii = Vec::new();
-    let flush = |ascii: &mut Vec<u8>, out: &mut String| {
-        let mut bytes = Vec::new();
-        let mut i = 0;
-        while i < ascii.len() {
-            let hex = |b: u8| (b as char).to_digit(16);
-            match (ascii[i], ascii.get(i + 1).and_then(|b| hex(*b)), ascii.get(i + 2).and_then(|b| hex(*b))) {
-                (b'%', Some(hi), Some(lo)) => {
-                    bytes.push((hi * 16 + lo) as u8);
-                    i += 3;
-                }
-                (b, _, _) => {
-                    bytes.push(b);
-                    i += 1;
-                }
-            }
-        }
-        out.push_str(&String::from_utf8_lossy(&bytes));
-        ascii.clear();
-    };
-    for c in text.chars() {
-        if c.is_ascii() {
-            ascii.push(c as u8);
-        } else {
-            flush(&mut ascii, &mut out);
-            out.push(c);
-        }
-    }
-    flush(&mut ascii, &mut out);
-    out
-}
-
-/// `str(PurePosixPath(path))`: empty and `.` parts dropped, a leading `//`
-/// (exactly two) kept.
-fn normalise(path: &str) -> String {
-    let root = if path.starts_with("//") && !path.starts_with("///") {
-        "//"
-    } else if path.starts_with('/') {
-        "/"
-    } else {
-        ""
-    };
-    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
-    let joined = format!("{root}{}", parts.join("/"));
-    if joined.is_empty() { ".".to_owned() } else { joined }
-}
-
-const STEP: Text = Text::Num(&Num::Of(&["step_type"]));
-const DONE: Pred = Pred::Text(Text::Num(&Num::Of(&["status"])), StrTest::Eq("3"));
-const ASSISTANT: Pred = Pred::Text(STEP, StrTest::Eq("15"));
-const REPLY: Text = Text::ProtoText { column: &["payload"], path: &[20], fields: &[1, 8] };
-const THINKING: Text = Text::ProtoText { column: &["payload"], path: &[20], fields: &[3] };
-
-const fn event(kind: EventKind, detail: Text, text: Text) -> [Effect; 2] {
-    [
-        Effect::Emit(Emit {
-            kind,
-            key: Text::Concat(&[Text::Lit("step:"), Text::Slot("session_id"), Text::Lit(":"), Text::Num(&Num::Of(&["idx"]))]),
-            detail,
-            text,
-            // The step's end time, else its start.
-            timestamp: Text::ProtoStamp { column: &["metadata"], at: &[8, 7, 6] },
-            session: None,
-            require_text: false,
-        }),
-        Effect::Stop,
-    ]
-}
-
-static DB: Sqlite = Sqlite {
-    json: &[],
-    binary: &["metadata", "payload"],
-    requires: &[],
-    usage: None,
-    activity: Some(Rows {
-        sql: "SELECT idx, step_type, status, metadata, step_payload AS payload FROM steps \
-              WHERE idx > ?1 OR idx IN (SELECT value FROM json_each(?3)) ORDER BY idx LIMIT ?2",
-        id: "idx",
-        newest: "SELECT MAX(idx) FROM steps",
-        page: 256,
-        restart_below: false,
-        hold_last: None,
-        partition: None,
-        revisit: Some(Revisit { when: Pred::All(&[ASSISTANT, Pred::Not(&DONE)]), bag: "agy_pending::" }),
-        last_as: Some("last"),
-    }),
-};
+const STEP: Text<V> = Text::Num(&Num::Of(&["step_type"]));
+const DONE: Pred<V> = Pred::Text(Text::Num(&Num::Of(&["status"])), StrTest::Eq("3"));
+const ASSISTANT: Pred<V> = Pred::Text(STEP, StrTest::Eq("15"));
+const REPLY: Text<V> = Text::Ext(Ext::Reply);
+const KEY: Text<V> = Text::Concat(&[Text::Lit("step:"), Text::Slot(Slot::SessionId), Text::Lit(":"), Text::Num(&Num::Of(&["idx"]))]);
+const TS: Text<V> = Text::Ext(Ext::Stamp);
 
 pub static CLI: Cli = Cli {
     key: "antigravity",
     label: "Antigravity CLI (Google)",
     kind: Kind::Cli,
     launch: Launch {
-        program: "agy",
-        base_args: &[],
         yolo_args: &["--dangerously-skip-permissions"],
         model: Some(&["--model", "{}"]),
         effort: Some(&["--effort", "{}"]),
         efforts: &["low", "medium", "high"],
-        env_defaults: &[],
-        env_strip: &[],
+        ..Launch::of("agy")
     },
     resume: Resume {
         args: Some(&["--conversation", "{id}"]),
@@ -176,73 +147,65 @@ pub static CLI: Cli = Cli {
         }),
     },
     interrupt: b"\x03",
-    observe: Some(Observe {
-        store: Store { env: &[], home: &[&[".gemini", "antigravity-cli", "conversations"]], files: &[&["*.db"]] },
-        format: Format::Sqlite(&DB),
-        accept: None,
-        slots: &[
-            Slot { name: "session_id", init: SlotInit::FileStem },
-            Slot { name: "meta", init: SlotInit::Joined("SELECT data FROM trajectory_metadata_blob") },
-        ],
+};
+
+static OBSERVE: Observe<V> = Observe {
+    store: Store { env: &[], home: &[&[".gemini", "antigravity-cli", "conversations"]], files: &[&["*.db"]] },
+    file_name: None,
+    other_files: OtherFiles::Empty,
+    slots: &[Seed { slot: Slot::SessionId, init: SlotInit::FileStem }],
+    cwd: Some(Slot::Cwd),
+    session: Some(Slot::SessionId),
+    cwd_form: Form::Written,
+    records: SqliteRecords {
+        json: &[],
+        binary: &["metadata", "payload"],
+        requires: &[],
         // main's base reader: no token records, its legacy checkpoint kept.
-        usage: Some(UsageSpec {
-            slots: &[],
-            rules: &[],
-            mode: UsageMode::Legacy,
-            persist: &[],
-            flags: &[],
-            restore: Restore::UnlessReplaced,
-            stamp: &[],
+        usage: SqlUsage::Legacy,
+        activity: SqlWalk::Rows(RowWalk {
+            sql: "SELECT idx, step_type, status, metadata, step_payload AS payload FROM steps \
+                  WHERE idx > ?1 OR idx IN (SELECT value FROM json_each(?3)) ORDER BY idx LIMIT ?2",
+            id: "idx",
+            newest: "SELECT MAX(idx) FROM steps",
+            page: 256,
+            restart_below: false,
+            hold_last: None,
+            revisit: Some(Revisit { when: Pred::All(&[ASSISTANT, Pred::Not(&DONE)]), key: "agy_pending::" }),
+            last_as: Some("last"),
+            key: "agy_idx::",
         }),
-        activity: ActivitySpec {
-            slots: &[],
-            cursor: Cursor::Rows,
-            rules: &[
-                Rule { when: Pred::True, effects: &[Effect::Set("cwd", Text::Hook(&Text::Slot("meta"), workspace))] },
-                Rule {
-                    when: Pred::Text(STEP, StrTest::Eq("14")),
-                    effects: &event(
-                        EventKind::AgentActive,
-                        Text::Lit("user"),
-                        Text::UserPrompt(&Text::ProtoText { column: &["payload"], path: &[19], fields: &[2] }),
-                    ),
-                },
-                // ask_question: the agent waits on the user, so the turn is over.
-                Rule { when: Pred::Text(STEP, StrTest::Eq("138")), effects: &event(EventKind::TurnComplete, Text::Lit("assistant:question"), Text::Lit("")) },
-                // A finished reply with no later step in this pass: the closest thing to an end of turn.
-                Rule {
-                    when: Pred::All(&[ASSISTANT, Pred::Text(REPLY, StrTest::NonEmpty), DONE, Pred::Truthy(&["last"])]),
-                    effects: &event(EventKind::TurnComplete, Text::Lit("assistant"), REPLY),
-                },
-                Rule {
-                    when: ASSISTANT,
-                    effects: &event(
-                        EventKind::AgentActive,
-                        Text::FirstOf(&[Text::If(&Pred::Text(THINKING, StrTest::NonEmpty), &Text::Lit("assistant:thinking")), Text::Lit("assistant")]),
-                        Text::Lit(""),
-                    ),
-                },
-                Rule { when: Pred::True, effects: &event(EventKind::AgentActive, Text::Concat(&[Text::Lit("step-"), STEP]), Text::Lit("")) },
-            ],
-            idle: None,
-            turn_stamp: TurnStamp::Text,
-            turn_text: "reply",
-            persist: &[],
-            bag: Bag { slots: &[], turn: None, cursor: Some("agy_idx::"), anchor: None },
-        },
-        turns: TurnsSpec {
-            slots: &[],
-            // Token counts live in undocumented protobuf: none read, no turns to cut.
-            method: TurnMethod::Unsupported,
-            filter: SessionFilter::Ignore,
-            effects: &[],
-            skip: Pred::Not(&Pred::True),
-            open: None,
-            call: None,
-            close: None,
-            session: "session_id",
-        },
-    }),
+    },
+    activity: Activity {
+        // Only a walk needs the workspace (usage reads nothing).
+        slots: &[Seed { slot: Slot::Cwd, init: SlotInit::Ext(Ext::Workspace) }],
+        ..Activity::rules(&[
+            Rule {
+                when: Pred::Text(STEP, StrTest::Eq("14")),
+                effects: &Emit::active(KEY, Text::Lit("user"), Text::UserPrompt(&Text::Ext(Ext::Prompt)), TS).last(),
+            },
+            // ask_question: the agent waits on the user, so the turn is over.
+            Rule { when: Pred::Text(STEP, StrTest::Eq("138")), effects: &Emit::done(KEY, Text::Lit("assistant:question"), Text::Lit(""), TS).last() },
+            // A finished reply with no later step in this pass: the closest thing to an end of turn.
+            Rule {
+                when: Pred::All(&[ASSISTANT, Pred::Text(REPLY, StrTest::NonEmpty), DONE, Pred::Truthy(&["last"])]),
+                effects: &Emit::done(KEY, Text::Lit("assistant"), REPLY, TS).last(),
+            },
+            Rule {
+                when: ASSISTANT,
+                effects: &Emit::active(
+                    KEY,
+                    Text::FirstOf(&[Text::If(&Pred::Text(Text::Ext(Ext::Thinking), StrTest::NonEmpty), &Text::Lit("assistant:thinking")), Text::Lit("assistant")]),
+                    Text::Lit(""),
+                    TS,
+                )
+                .last(),
+            },
+            Rule { when: Pred::True, effects: &Emit::active(KEY, Text::Concat(&[Text::Lit("step-"), STEP]), Text::Lit(""), TS).last() },
+        ])
+    },
+    // Token counts live in undocumented protobuf: none read, no turns to cut.
+    turns: Turns::None,
 };
 
 #[cfg(test)]
@@ -257,6 +220,5 @@ mod tests {
         assert_eq!(workspace("file:///no/such%20dir/\u{0}"), "/no/such dir");
         assert_eq!(workspace("file:///C:/work\u{0}"), "C:/work");
         assert_eq!(workspace("file:// nothing"), "");
-        assert_eq!(normalise("//a/./b//c"), "//a/b/c");
     }
 }

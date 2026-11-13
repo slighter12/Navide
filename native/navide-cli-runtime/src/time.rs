@@ -77,7 +77,8 @@ pub fn turn_timestamp(raw: &str) -> Option<String> {
 }
 
 /// `log_readers.base._turn_sort_key`: seconds since the epoch for an epoch-ms
-/// string or an ISO 8601 stamp. Naive stamps are read as UTC (Python: local).
+/// string or an ISO 8601 stamp. A stamp without an offset is local time, as
+/// `datetime.fromisoformat(…).timestamp()` reads it.
 pub fn sort_key(raw: &str) -> Option<f64> {
     if raw.is_empty() {
         return None;
@@ -86,6 +87,56 @@ pub fn sort_key(raw: &str) -> Option<f64> {
         return Some(ms / 1000.0);
     }
     parse_iso(raw)
+}
+
+/// The local wall clock at `utc` seconds since the epoch, as the seconds the
+/// same wall clock would be in UTC.
+#[cfg(unix)]
+fn local_wall(utc: i64) -> Option<i64> {
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let at = utc as libc::time_t;
+    // SAFETY: both pointers are to live values of the right types.
+    if unsafe { libc::localtime_r(&at, &mut tm) }.is_null() {
+        return None;
+    }
+    let days = civil_to_days(i64::from(tm.tm_year) + 1900, tm.tm_mon as u32 + 1, tm.tm_mday as u32);
+    Some(days * 86_400 + i64::from(tm.tm_hour) * 3600 + i64::from(tm.tm_min) * 60 + i64::from(tm.tm_sec))
+}
+
+/// Not built off Unix (the runtime observes nothing there): UTC.
+#[cfg(not(unix))]
+fn local_wall(utc: i64) -> Option<i64> {
+    Some(utc)
+}
+
+/// CPython's `local_to_seconds` with `fold=0`: the UTC second whose local
+/// wall clock is `wall`. In a repeated hour it is the earlier one; in a
+/// skipped hour, the time the clock would show had it not jumped.
+fn local_to_utc(wall: i64) -> Option<i64> {
+    const MAX_FOLD_SECONDS: i64 = 24 * 3600;
+    let a = local_wall(wall)? - wall;
+    let u1 = wall - a;
+    let t1 = local_wall(u1)?;
+    let b = if t1 == wall {
+        // One solution; an earlier one exists when the offset changed just before.
+        let u2 = u1 - MAX_FOLD_SECONDS;
+        let b = local_wall(u2)? - u2;
+        if a == b {
+            return Some(u1);
+        }
+        b
+    } else {
+        t1 - u1
+    };
+    let u2 = wall - b;
+    if local_wall(u2)? == wall {
+        return Some(u2);
+    }
+    if t1 == wall {
+        return Some(u1);
+    }
+    // Neither offset maps back: `wall` is in a gap.
+    Some(u1.max(u2))
 }
 
 pub fn parse_iso(raw: &str) -> Option<f64> {
@@ -98,7 +149,10 @@ pub fn parse_iso(raw: &str) -> Option<f64> {
     if b.get(4) != Some(&b'-') || b.get(7) != Some(&b'-') || !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
         return None;
     }
-    let mut seconds = civil_to_days(y, mo as u32, d as u32) as f64 * 86_400.0;
+    let mut wall = civil_to_days(y, mo as u32, d as u32) * 86_400;
+    let mut fraction = 0.0;
+    // Seconds east of UTC; `None`: the stamp names none (local time).
+    let mut offset = None;
     let mut i = 10;
     if i < b.len() {
         if b[i] != b'T' && b[i] != b' ' {
@@ -108,10 +162,10 @@ pub fn parse_iso(raw: &str) -> Option<f64> {
         if b.get(i + 3) != Some(&b':') {
             return None;
         }
-        seconds += (h * 3600 + mi * 60) as f64;
+        wall += h * 3600 + mi * 60;
         i += 6;
         if b.get(i) == Some(&b':') {
-            seconds += num(i + 1, 2)? as f64;
+            wall += num(i + 1, 2)?;
             i += 3;
             if matches!(b.get(i), Some(b'.') | Some(b',')) {
                 let start = i + 1;
@@ -122,22 +176,26 @@ pub fn parse_iso(raw: &str) -> Option<f64> {
                 if end == start {
                     return None;
                 }
-                seconds += format!("0.{}", &raw[start..end]).parse::<f64>().ok()?;
+                fraction = format!("0.{}", &raw[start..end]).parse::<f64>().ok()?;
                 i = end;
             }
         }
         match b.get(i) {
             None => {}
-            Some(b'Z') if i + 1 == b.len() => {}
+            Some(b'Z') if i + 1 == b.len() => offset = Some(0),
             Some(sign @ (b'+' | b'-')) => {
                 let (oh, om) = (num(i + 1, 2)?, num(i + 4, 2)?);
-                let offset = (oh * 3600 + om * 60) as f64;
-                seconds += if *sign == b'+' { -offset } else { offset };
+                let east = oh * 3600 + om * 60;
+                offset = Some(if *sign == b'+' { east } else { -east });
             }
             _ => return None,
         }
     }
-    Some(seconds)
+    let utc = match offset {
+        Some(east) => wall - east,
+        None => local_to_utc(wall)?,
+    };
+    Some(utc as f64 + fraction)
 }
 
 #[cfg(test)]

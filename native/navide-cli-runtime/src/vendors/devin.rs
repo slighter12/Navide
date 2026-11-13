@@ -5,18 +5,10 @@ pub static CLI: Cli = Cli {
     key: "devin",
     label: "Devin CLI (Cognition)",
     kind: Kind::Cli,
-    launch: Launch {
-        program: "devin",
-        base_args: &[],
-        yolo_args: &["--permission-mode", "dangerous"],
-        // `--model` is documented but unchecked against an invalid value.
-        model: None,
-        effort: None,
-        efforts: &[],
-        env_defaults: &[],
-        env_strip: &[],
-    },
-    resume: Resume { args: None, parse: None },
+    // `--model` is documented but unchecked against an invalid value.
+    launch: Launch { yolo_args: &["--permission-mode", "dangerous"], ..Launch::of("devin") },
+    resume: Resume::NONE,
     interrupt: b"\x03",
-    observe: None,
 };
+
+crate::unobserved!(CLI);

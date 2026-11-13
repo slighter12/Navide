@@ -2,6 +2,7 @@
  "vendor": "aider",
  "file": "ws/.aider.chat.history.0a1b2c3d.md",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "write",
@@ -843,6 +844,40 @@
      "aider_text::still going\n"
     ]
    }
+  },
+  {
+   "mode": "append",
+   "text": "> Tokens: 3 sent, 4 received.\r> Tokens: 9 sent, 1 received.",
+   "mtime": 1792000005,
+   "now": 1792000006,
+   "expect": {
+    "usage": {
+     "events": [],
+     "checkpoint": {
+      "kind": "aider-md",
+      "offset": 1187,
+      "anchor": "7b973eafc5b892ca",
+      "section": "aider-0a1b2c3d-20260729-080000",
+      "section_ts": "2026-07-29T08:00:00"
+     }
+    },
+    "activity": [
+     {
+      "vendor": "aider",
+      "event_type": "turn_complete",
+      "cwd": "<root>/ws",
+      "session_id": "aider-0a1b2c3d-20260729-080000",
+      "file_path": "<root>/ws/.aider.chat.history.0a1b2c3d.md",
+      "dedup_key": "turn:42",
+      "timestamp": "",
+      "detail": "usage",
+      "text": "still going\n"
+     }
+    ],
+    "bag": [
+     "act_hw::42"
+    ]
+   }
   }
  ],
  "turns": [
@@ -852,10 +887,10 @@
    "started_at": "2026-07-29T08:00:00",
    "ended_at": "2026-07-29T08:00:00",
    "prompt_excerpt": "",
-   "input": 131,
+   "input": 143,
    "cache_read": 0,
    "cache_creation": 0,
-   "output": 150,
+   "output": 155,
    "calls": [
     {
      "ts": "2026-07-29T08:00:00",
@@ -1026,6 +1061,24 @@
      "cache_read": 0,
      "cache_creation": 0,
      "output": 8,
+     "cli_version": ""
+    },
+    {
+     "ts": "2026-07-29T08:00:00",
+     "model": "",
+     "input": 3,
+     "cache_read": 0,
+     "cache_creation": 0,
+     "output": 4,
+     "cli_version": ""
+    },
+    {
+     "ts": "2026-07-29T08:00:00",
+     "model": "",
+     "input": 9,
+     "cache_read": 0,
+     "cache_creation": 0,
+     "output": 1,
      "cli_version": ""
     }
    ],

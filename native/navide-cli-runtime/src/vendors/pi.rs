@@ -3,22 +3,57 @@
 //! /tree), so usage keeps its dedup window and a credited count across
 //! rewrites. No end-of-turn record: turns are inferred like qwen's.
 use crate::decl::*;
+use serde::Serialize;
 
-const TS: Text = Text::Py(&["timestamp"]);
-const LINE_KEY: Text = Text::Concat(&[Text::Lit("act:"), Text::Line]);
+#[derive(Debug)]
+pub struct V;
+
+slots! { SessionId = "session_id", Cwd = "cwd", Reply = "reply" }
+
+/// What only Pi's sessions need.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum Ext {
+    /// Slot: the id is the file stem after its first `_` (`<ts>_<id>`), for
+    /// a file whose header names none.
+    StemId,
+}
+
+impl Vendor for V {
+    type Slot = Slot;
+    type Ext = Ext;
+    type Backend = Jsonl;
+    const CLI: &'static Cli = &CLI;
+    const OBSERVE: Option<&'static Observe<Self>> = Some(&OBSERVE);
+
+    fn init(ext: Ext, path: &std::path::Path) -> String {
+        match ext {
+            Ext::StemId => {
+                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+                stem.split_once('_').map(|(_, rest)| rest.to_owned()).unwrap_or_default()
+            }
+        }
+    }
+}
+
+const TS: Text<V> = Text::Py(&["timestamp"]);
+const LINE_KEY: Text<V> = Text::Concat(&[Text::Lit("act:"), Text::Line]);
 const CONTENT: Path = &["message", "content"];
+const NOT_HEADER: Pred<V> = Pred::Not(&Pred::Eq(&["type"], "session"));
 
-const fn header(field: Text) -> SlotInit {
+const fn header(field: Text<V>) -> SlotInit<V> {
     SlotInit::Header { lines: 0, when: Pred::Eq(&["type"], "session"), field, first_line: true }
 }
 
-/// main's `_usage_of`: on the message object for assistant messages, at the
-/// top level for compaction / branch-summary entries.
-const MESSAGE_USAGE: Pred = Pred::All(&[Pred::IsObject(&["message"]), Pred::IsObject(&["message", "usage"])]);
-const TOP_USAGE: Pred = Pred::All(&[Pred::Not(&Pred::IsObject(&["message"])), Pred::IsObject(&["usage"])]);
-
-const fn active(detail: Str, text: Text) -> Effect {
-    Effect::Emit(Emit { kind: EventKind::AgentActive, key: LINE_KEY, detail: Text::Lit(detail), text, timestamp: TS, session: None, require_text: false })
+/// One usage record, read at `input` / `output` / the two cache paths.
+const fn reading(input: Num<V>, output: Num<V>) -> Reading<V> {
+    Reading {
+        key_required: true,
+        model: Text::FirstOf(&[Text::Py(&["message", "model"]), Text::Py(&["model"])]),
+        timestamp: TS,
+        cwd: Text::Slot(Slot::Cwd),
+        session_id: Text::Slot(Slot::SessionId),
+        ..Reading::of(input, output, Text::Py(&["id"]))
+    }
 }
 
 pub static CLI: Cli = Cli {
@@ -26,15 +61,11 @@ pub static CLI: Cli = Cli {
     label: "Pi",
     kind: Kind::Cli,
     launch: Launch {
-        program: "pi",
-        base_args: &[],
         // pi has no permission system to bypass.
-        yolo_args: &[],
         model: Some(&["--model", "{}"]),
         effort: Some(&["--thinking", "{}"]),
         efforts: &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        env_defaults: &[],
-        env_strip: &[],
+        ..Launch::of("pi")
     },
     resume: Resume {
         args: Some(&["--session-id", "{id}"]),
@@ -50,93 +81,70 @@ pub static CLI: Cli = Cli {
         }),
     },
     interrupt: b"\x03",
-    observe: Some(Observe {
-        store: Store { env: &[("PI_CODING_AGENT_SESSION_DIR", &[]), ("PI_CODING_AGENT_DIR", &["sessions"])], home: &[&[".pi", "agent", "sessions"]], files: &[&["*", "*.jsonl"]] },
-        format: Format::Jsonl,
-        accept: None,
-        slots: &[
-            Slot { name: "session_id", init: SlotInit::FirstOf(&[header(Text::Py(&["id"])), SlotInit::StemAfterUnderscore]) },
-            Slot { name: "cwd", init: header(Text::Py(&["cwd"])) },
-        ],
-        usage: Some(UsageSpec {
-            slots: &[],
-            rules: &[UsageRule {
-                when: Pred::All(&[Pred::Not(&Pred::Eq(&["type"], "session")), Pred::Any(&[MESSAGE_USAGE, TOP_USAGE])]),
-                effects: &[],
-                reading: Some(Reading {
-                    input: Num::Case(&[
-                        (
-                            Pred::IsObject(&["message"]),
-                            Num::Sum(&[
-                                Num::Of(&["message", "usage", "input"]),
-                                Num::Of(&["message", "usage", "cacheRead"]),
-                                Num::Of(&["message", "usage", "cacheWrite"]),
-                            ]),
-                        ),
-                        (Pred::True, Num::Sum(&[Num::Of(&["usage", "input"]), Num::Of(&["usage", "cacheRead"]), Num::Of(&["usage", "cacheWrite"])])),
-                    ]),
-                    output: Num::Case(&[(Pred::IsObject(&["message"]), Num::Of(&["message", "usage", "output"])), (Pred::True, Num::Of(&["usage", "output"]))]),
-                    cache_read: Num::Zero,
-                    cache_creation: Num::Zero,
-                    key: Text::Py(&["id"]),
-                    key_required: true,
-                    key_invalid: "",
-                    model: Text::FirstOf(&[Text::Py(&["message", "model"]), Text::Py(&["model"])]),
-                    timestamp: TS,
-                    cli_version: Text::Lit(""),
-                    cwd: Text::Slot("cwd"),
-                    session_id: Text::Slot("session_id"),
-                    raw: &[],
-                }),
-            }],
-            mode: UsageMode::PerRecord { window: 256, keep_on_rotation: true, credited: true },
-            persist: &["session_id", "cwd"],
-            flags: &[],
-            restore: Restore::UnlessRotated,
-            stamp: &[],
-        }),
-        activity: ActivitySpec {
-            slots: &[],
-            cursor: Cursor::Lines,
+};
+
+static OBSERVE: Observe<V> = Observe {
+    store: Store { env: &[("PI_CODING_AGENT_SESSION_DIR", &[]), ("PI_CODING_AGENT_DIR", &["sessions"])], home: &[&[".pi", "agent", "sessions"]], files: &[&["*", "*.jsonl"]] },
+    file_name: None,
+    other_files: OtherFiles::Empty,
+    slots: &[
+        Seed { slot: Slot::SessionId, init: SlotInit::FirstOf(&[header(Text::Py(&["id"])), SlotInit::Ext(Ext::StemId)]) },
+        Seed { slot: Slot::Cwd, init: header(Text::Py(&["cwd"])) },
+    ],
+    cwd: Some(Slot::Cwd),
+    session: Some(Slot::SessionId),
+    cwd_form: Form::Written,
+    records: JsonlRecords {
+        usage: Some(FileUsage {
+            // main's `_usage_of`: on the message object for assistant
+            // messages, at the top level for compaction / branch-summary entries.
             rules: &[
-                Rule {
-                    when: Pred::All(&[Pred::Eq(&["type"], "message"), Pred::Eq(&["message", "role"], "user")]),
-                    effects: &[
-                        Effect::Turn(TurnOp::Open { boundary: "boundary", ts: TS, ms: Num::Zero }),
-                        active("user", Text::UserPrompt(&Text::Blocks(CONTENT, "text"))),
-                    ],
+                UsageRule {
+                    when: Pred::All(&[NOT_HEADER, Pred::IsObject(&["message"]), Pred::IsObject(&["message", "usage"])]),
+                    effects: &[],
+                    reading: Some(reading(
+                        Num::Sum(&[Num::Of(&["message", "usage", "input"]), Num::Of(&["message", "usage", "cacheRead"]), Num::Of(&["message", "usage", "cacheWrite"])]),
+                        Num::Of(&["message", "usage", "output"]),
+                    )),
                 },
-                Rule {
-                    when: Pred::All(&[Pred::Eq(&["type"], "message"), Pred::Eq(&["message", "role"], "assistant")]),
-                    effects: &[
-                        Effect::Turn(TurnOp::EnsureOpen { ts: TS, ms: Num::Zero }),
-                        Effect::Turn(TurnOp::Touch { ts: Some(TS), ms: None }),
-                        Effect::SetIfNonEmpty("reply", Text::Cap(&Text::Strip(&Text::Blocks(CONTENT, "text")), 4000)),
-                        active("assistant", Text::Lit("")),
-                    ],
+                UsageRule {
+                    when: Pred::All(&[NOT_HEADER, Pred::Not(&Pred::IsObject(&["message"])), Pred::IsObject(&["usage"])]),
+                    effects: &[],
+                    reading: Some(reading(
+                        Num::Sum(&[Num::Of(&["usage", "input"]), Num::Of(&["usage", "cacheRead"]), Num::Of(&["usage", "cacheWrite"])]),
+                        Num::Of(&["usage", "output"]),
+                    )),
                 },
             ],
-            idle: Some(Idle { after_ms: 8000, clock: Clock::FileMtime, detail: "idle" }),
-            turn_stamp: TurnStamp::Text,
-            turn_text: "reply",
-            persist: &["reply"],
-            bag: Bag {
-                slots: &[BagSlot::Text { slot: "reply", prefix: "pi_text::" }],
-                turn: Some(BagTurn { prefix: "pi_turn::", compact: false, keep_null: false }),
-                cursor: None,
-                anchor: None,
+            mode: FileMode::PerRecord { window: 256, keep_on_rotation: true, credited: true },
+            persist: &[Slot::SessionId, Slot::Cwd],
+            ..FileUsage::per_record(&[], 0)
+        }),
+        cursor: LineCursor::Lines,
+    },
+    activity: Activity {
+        idle: Some(Idle { after_ms: 8000, clock: Clock::FileMtime, detail: "idle" }),
+        turn_text: Some(Slot::Reply),
+        kept: &[Kept { slot: Slot::Reply, prefix: "pi_text::", form: KeptForm::Text }],
+        turn_key: Some(TurnKey { prefix: "pi_turn::", compact: false, keep_null: false }),
+        ..Activity::rules(&[
+            Rule {
+                when: Pred::All(&[Pred::Eq(&["type"], "message"), Pred::Eq(&["message", "role"], "user")]),
+                effects: &[
+                    Effect::Turn(TurnOp::Open { boundary: "boundary", ts: TS, ms: Num::Zero }),
+                    Emit::active(LINE_KEY, Text::Lit("user"), Text::UserPrompt(&Text::Blocks(CONTENT, "text")), TS).effect(),
+                ],
             },
-        },
-        turns: TurnsSpec {
-            slots: &[],
-            method: TurnMethod::Inferred,
-            filter: SessionFilter::Ignore,
-            effects: &[],
-            skip: Pred::Not(&Pred::True),
-            open: None,
-            call: None,
-            close: None,
-            session: "session_id",
-        },
-    }),
+            Rule {
+                when: Pred::All(&[Pred::Eq(&["type"], "message"), Pred::Eq(&["message", "role"], "assistant")]),
+                effects: &[
+                    Effect::Turn(TurnOp::EnsureOpen { ts: TS, ms: Num::Zero }),
+                    Effect::Turn(TurnOp::Touch { ts: Some(TS), ms: None }),
+                    Effect::SetIfNonEmpty(Slot::Reply, Text::Cap(&Text::Strip(&Text::Blocks(CONTENT, "text")), 4000)),
+                    Emit::active(LINE_KEY, Text::Lit("assistant"), Text::Lit(""), TS).effect(),
+                ],
+            },
+        ])
+    },
+    turns: Turns::Inferred,
 };

@@ -1,29 +1,26 @@
 //! Observe: read a CLI's records and turn them into main's three outputs —
 //! token usage (with a resumable checkpoint), activity events (with a
 //! resumable walk state) and per-turn usage. Everything here is generic; a
-//! vendor contributes only its `Observe` declaration.
+//! vendor contributes only its `Observe` declaration and its `Ext` functions.
 pub mod activity;
 pub mod bag;
-pub mod jsonl;
+pub mod db;
+pub mod file;
 pub mod sqlite;
 pub mod turns;
 pub mod usage;
 
-use crate::decl::{Cli, Observe, Slot, SlotInit};
-use crate::expr::{self, py_str, py_strip, truthy, Scope, Slots};
+use crate::decl::{Observe, OtherFiles, Seed, SlotInit, Turns, Vendor};
+use crate::expr::{self, py_str, truthy, Scope, Slots};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 
-pub use activity::{ActivityState, TurnState};
-
-/// Slot names the core itself reads.
-pub const CWD: &str = "cwd";
-pub const SESSION: &str = "session_id";
-/// Set by the core for a line walk that starts past line 0 (main's readers
-/// test `high_water > 0` for "the header was read on an earlier poll").
-pub const WALK_RESUMED: &str = "_walk_resumed";
+pub use activity::{ActivityState, TurnState, Walk};
+pub use db::Sqlite;
+pub use file::{Jsonl, TextLog, HAS_FILE_IDENTITY};
 
 #[derive(Debug)]
 pub enum Error {
@@ -31,7 +28,8 @@ pub enum Error {
     /// A line that is not UTF-8 ended the walk (main raises there too).
     Decode { line: usize },
     /// A store this declaration does not describe (a SQLite table without a
-    /// declared column): the caller's own reader takes the call.
+    /// declared column, another store of the same CLI): the caller's own
+    /// reader takes the call.
     Unsupported(String),
 }
 
@@ -74,6 +72,13 @@ pub struct UsageEvent {
 pub struct UsageRead {
     pub events: Vec<UsageEvent>,
     pub checkpoint: Map<String, Value>,
+}
+
+impl UsageRead {
+    /// Nothing read: no events, the checkpoint as it was.
+    pub(crate) fn unchanged(checkpoint: &Map<String, Value>) -> Self {
+        UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() }
+    }
 }
 
 /// main's `ActivityEvent`.
@@ -156,19 +161,115 @@ impl TurnUsage {
     }
 }
 
-/// One CLI's observer. Holds what main's readers keep in memory between
-/// calls (where each file's last activity walk stopped).
-pub struct Observer {
-    pub cli: &'static Cli,
-    spec: &'static Observe,
-    resume: HashMap<PathBuf, jsonl::LineResume>,
+/// How records are stored: the format, its cursor and the checkpoint a usage
+/// read keeps. The mechanics live in the implementation (`Jsonl`, `TextLog`,
+/// `Sqlite`); a declaration picks one with `Vendor::Backend` and fills that
+/// backend's own `Spec`, so the observer is compiled against exactly one
+/// backend and no combination has to be ruled out at run time.
+pub trait Backend<V: Vendor>: Sized + 'static {
+    /// The backend's declaration: usage mode, cursor, queries.
+    type Spec: Debug + Serialize + Sync + 'static;
+
+    /// Usage after `checkpoint`. `full`: main's `parse_session_file` pass
+    /// (every record from the top, an unbounded dedup set, no rewrite
+    /// bookkeeping), used by inferred turns.
+    fn usage(file: &File<'_, V>, checkpoint: &Map<String, Value>, full: bool, memo: &mut Memo) -> Result<UsageRead, Error>;
+
+    /// Whether the declaration reads usage at all (inferred turns need it).
+    fn has_usage(spec: &Self::Spec) -> bool;
+
+    /// Feed the records past the cursor to the walk and move the cursor.
+    fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, memo: &mut Memo) -> Result<(), Error>;
+
+    /// The cursor's part of the watcher's seen-keys bag.
+    fn load(spec: &'static Self::Spec, bag: &[String], state: &mut ActivityState);
+    fn store(spec: &'static Self::Spec, state: &ActivityState, bag: &mut Vec<String>);
+
+    /// Whether `exact_turns` is implemented.
+    const EXACT_TURNS: bool = false;
+
+    /// Turns the transcript names itself; only a line transcript has them.
+    fn exact_turns(_file: &File<'_, V>, _turns: &'static crate::decl::ExactTurns<V>, _session_id: &str) -> Result<Vec<TurnUsage>, Error> {
+        Err(Error::Unsupported("exact turns need a line transcript".to_owned()))
+    }
+}
+
+/// One transcript being read, with its declaration.
+pub struct File<'a, V: Vendor> {
+    pub path: &'a Path,
+    pub spec: &'static Observe<V>,
+}
+
+impl<'a, V: Vendor> File<'a, V> {
+    pub fn vendor(&self) -> &'static str {
+        V::CLI.key
+    }
+
+    pub fn records(&self) -> &'static <V::Backend as Backend<V>>::Spec {
+        &self.spec.records
+    }
+
+    pub fn path_text(&self) -> String {
+        self.path.to_string_lossy().into_owned()
+    }
+
+    /// The file's slots before any record: the declared initial values, with
+    /// the section's own in place of the file's.
+    pub fn slots(&self, section: &'static [Seed<V>]) -> Slots<V> {
+        let mut slots = Slots::default();
+        for slot in self.spec.slots.iter().filter(|s| !section.iter().any(|o| o.slot == s.slot)).chain(section) {
+            slots.set(slot.slot, init(&slot.init, self.path));
+        }
+        slots
+    }
+}
+
+/// What an observer keeps in memory between calls, as main's reader objects
+/// do: where each file's last line walk stopped, the partition labels it has
+/// resolved, and the notes of the call in progress.
+#[derive(Default)]
+pub struct Memo {
+    pub(crate) resume: HashMap<PathBuf, file::LineResume>,
+    pub(crate) labels: HashMap<(PathBuf, String), String>,
+    pub(crate) notes: Vec<Note>,
+}
+
+/// Something main's reader logs as a warning while it reads. The seam logs
+/// it through the reader's own logger, once per reader and `kind` (main
+/// warns once per reader, whatever the store or session).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Note {
+    pub kind: &'static str,
+    pub text: String,
+}
+
+impl Memo {
+    pub(crate) fn note(&mut self, kind: &'static str, text: String) {
+        if !self.notes.iter().any(|note| note.kind == kind) {
+            self.notes.push(Note { kind, text });
+        }
+    }
+}
+
+/// One CLI's observer.
+pub struct Observer<V: Vendor> {
+    spec: &'static Observe<V>,
+    memo: Memo,
     clock: Option<f64>,
 }
 
-impl Observer {
+impl<V: Vendor> Observer<V> {
     /// `None` when the CLI declares no observable records.
-    pub fn new(cli: &'static Cli) -> Option<Self> {
-        Some(Observer { cli, spec: cli.observe.as_ref()?, resume: HashMap::new(), clock: None })
+    pub fn new() -> Option<Self> {
+        Some(Observer { spec: V::OBSERVE?, memo: Memo::default(), clock: None })
+    }
+
+    pub fn key(&self) -> &'static str {
+        V::CLI.key
+    }
+
+    pub fn spec(&self) -> &'static Observe<V> {
+        self.spec
     }
 
     /// Pin "now" (seconds since the epoch) for idle flushes; `None` = the
@@ -183,128 +284,107 @@ impl Observer {
         })
     }
 
-    fn accepts(&self, path: &Path) -> bool {
-        self.spec.accept.as_ref().is_none_or(|accept| {
-            path.file_name().and_then(|n| n.to_str()) == Some(accept.name)
-                && accept.not_under.is_none_or(|(up, dir)| nth_dir(path, up).map(file_name).as_deref() != Some(dir))
-                && accept.dir.is_none_or(|shape| nth_dir(path, 1).is_some_and(|d| crate::resume::shaped(&file_name(d), shape).is_some()))
-        })
+    /// The notes the calls since the last take left (main's reader would
+    /// have logged them).
+    pub fn take_notes(&mut self) -> Vec<Note> {
+        std::mem::take(&mut self.memo.notes)
     }
 
-    /// The file's slots before any record: the shared ones, shadowed by the
-    /// section's own.
-    fn slots(&self, path: &Path, section: &'static [Slot]) -> Slots {
-        let mut slots = Slots::new();
-        for slot in self.spec.slots.iter().filter(|s| !section.iter().any(|o| o.name == s.name)).chain(section) {
-            slots.insert(slot.name.to_owned(), init(&slot.init, path));
+    fn named(&self, path: &Path) -> bool {
+        self.spec.file_name.is_none_or(|name| path.file_name().and_then(|n| n.to_str()) == Some(name))
+    }
+
+    /// `Ok(false)`: not a transcript, nothing to read.
+    fn accepts(&self, path: &Path) -> Result<bool, Error> {
+        if self.named(path) && V::accepts(path) {
+            return Ok(true);
         }
-        slots
+        match self.spec.other_files {
+            OtherFiles::Empty => Ok(false),
+            OtherFiles::Unsupported => Err(Error::Unsupported(format!("{} is not the declared store", path.display()))),
+        }
     }
 
     pub fn usage(&mut self, path: &Path, checkpoint: &Map<String, Value>) -> Result<UsageRead, Error> {
-        let Some(spec) = self.spec.usage.as_ref() else {
-            return Ok(UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() });
-        };
-        if !self.accepts(path) {
-            return Ok(UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() });
+        if !self.accepts(path)? {
+            return Ok(UsageRead::unchanged(checkpoint));
         }
-        let slots = self.slots(path, spec.slots);
-        usage::read(spec, &self.spec.format, self.cli.key, path, slots, checkpoint, false)
+        V::Backend::usage(&File { path, spec: self.spec }, checkpoint, false, &mut self.memo)
     }
 
     pub fn activity(&mut self, path: &Path, state: &mut ActivityState) -> Result<Vec<ActivityEvent>, Error> {
-        if !self.accepts(path) {
+        if !self.accepts(path)? {
             return Ok(Vec::new());
         }
-        let spec = &self.spec.activity;
-        let slots = self.slots(path, spec.slots);
-        let resume = self.resume.get(path).copied();
         let now = self.now();
-        let (events, walked) = activity::walk(spec, &self.spec.format, self.cli.key, path, slots, state, resume, now)?;
-        match walked {
-            Some(resume) => self.resume.insert(path.to_owned(), resume),
-            None => self.resume.remove(path),
-        };
-        Ok(events)
+        activity::walk(&File { path, spec: self.spec }, state, &mut self.memo, now)
     }
 
     /// `activity` over the watcher's seen-keys bag: the state is read from it
     /// and written back to it (also when a decode error ends the walk, as
     /// main's `finally` does; not when the file cannot be read).
     pub fn activity_bag(&mut self, path: &Path, bag: &mut Vec<String>) -> Result<Vec<ActivityEvent>, Error> {
-        let spec = &self.spec.activity;
-        let mut state = bag::load(spec, &self.spec.format, bag);
+        let mut state = bag::load(self.spec, bag);
         let result = self.activity(path, &mut state);
         if !matches!(result, Err(Error::Io(_) | Error::Unsupported(_))) {
-            bag::store(spec, &self.spec.format, &state, bag);
+            bag::store(self.spec, &state, bag);
         }
         result
     }
 
-    pub fn turns(&self, path: &Path, session_id: &str) -> Result<Vec<TurnUsage>, Error> {
-        if !self.accepts(path) {
-            return Ok(Vec::new());
+    /// Per-turn usage. The file's name is checked as everywhere; main's
+    /// whole-file usage pass behind an inferred cut does not apply the
+    /// narrower `Vendor::accepts`, its activity pass does.
+    pub fn turns(&mut self, path: &Path, session_id: &str) -> Result<Vec<TurnUsage>, Error> {
+        if !self.named(path) {
+            return match self.spec.other_files {
+                OtherFiles::Empty => Ok(Vec::new()),
+                OtherFiles::Unsupported => Err(Error::Unsupported(format!("{} is not the declared store", path.display()))),
+            };
         }
-        let spec = &self.spec.turns;
-        match spec.method {
-            crate::decl::TurnMethod::Unsupported => Ok(Vec::new()),
-            crate::decl::TurnMethod::Exact => turns::exact(spec, path, self.slots(path, spec.slots), session_id),
-            crate::decl::TurnMethod::Inferred => {
-                let usage = match self.spec.usage.as_ref() {
-                    Some(u) => usage::read(u, &self.spec.format, self.cli.key, path, self.slots(path, u.slots), &Map::new(), true)?.events,
-                    None => Vec::new(),
+        let file = File { path, spec: self.spec };
+        match &self.spec.turns {
+            Turns::None => Ok(Vec::new()),
+            Turns::Exact(exact) => V::Backend::exact_turns(&file, exact, session_id),
+            Turns::Inferred => {
+                let usage = V::Backend::usage(&file, &Map::new(), true, &mut self.memo)?.events;
+                let activity = if V::accepts(path) {
+                    let now = self.now();
+                    // A scratch walk: nothing it learns is kept.
+                    let mut scratch = Memo::default();
+                    activity::walk(&file, &mut ActivityState::default(), &mut scratch, now)?
+                } else {
+                    Vec::new()
                 };
-                let activity_spec = &self.spec.activity;
-                let mut fresh = ActivityState::default();
-                let slots = self.slots(path, activity_spec.slots);
-                let (activity, _) = activity::walk(activity_spec, &self.spec.format, self.cli.key, path, slots, &mut fresh, None, self.now())?;
                 Ok(turns::inferred(&usage, &activity, session_id))
             }
         }
     }
 }
 
-fn file_name(path: &Path) -> String {
+pub(crate) fn file_name(path: &Path) -> String {
     path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_owned()
 }
 
-fn nth_dir(path: &Path, n: usize) -> Option<&Path> {
+/// The `n`-th directory above the file (1 = its own directory).
+pub fn nth_dir(path: &Path, n: usize) -> Option<&Path> {
     path.ancestors().nth(n)
 }
 
-/// `urllib.parse.unquote`: `%XX` escapes decoded as UTF-8, invalid bytes replaced.
-fn unquote(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        let hex = |c: u8| (c as char).to_digit(16);
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                out.push((h * 16 + l) as u8);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
+/// The name of the `n`-th directory above the file ("" when there is none).
+pub fn dir_name(path: &Path, n: usize) -> String {
+    nth_dir(path, n).map(file_name).unwrap_or_default()
 }
 
-fn init(init_spec: &SlotInit, path: &Path) -> String {
+fn init<V: Vendor>(init_spec: &SlotInit<V>, path: &Path) -> String {
     match init_spec {
         SlotInit::Empty => String::new(),
         SlotInit::FileStem => path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_owned(),
-        SlotInit::DirName(n) => nth_dir(path, *n).map(file_name).unwrap_or_default(),
-        SlotInit::StemAfterUnderscore => {
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-            stem.split_once('_').map(|(_, rest)| rest.to_owned()).unwrap_or_default()
-        }
+        SlotInit::DirName(n) => dir_name(path, *n),
         SlotInit::Header { lines, when, field, first_line } => {
-            let empty = Slots::new();
+            let empty = Slots::<V>::default();
             let mut found = String::new();
-            let _ = jsonl::all_lines(path, *lines, |line, stripped, value| {
+            let _ = file::all_lines(path, *lines, false, |line, stripped, value| {
                 if stripped.is_empty() {
                     return true;
                 }
@@ -322,9 +402,6 @@ fn init(init_spec: &SlotInit, path: &Path) -> String {
             });
             found
         }
-        SlotInit::Joined(sql) => sqlite::joined(path, sql),
-        SlotInit::FilePath => path.to_string_lossy().into_owned(),
-        SlotInit::Parent => path.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
         SlotInit::SidecarJson { up, file, keys } => nth_dir(path, *up)
             .and_then(|dir| std::fs::read_to_string(dir.join(file)).ok())
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
@@ -333,37 +410,7 @@ fn init(init_spec: &SlotInit, path: &Path) -> String {
                 keys.iter().filter_map(|k| object.get(*k)).find(|v| truthy(v)).map(py_str)
             })
             .unwrap_or_default(),
-        SlotInit::GroupDir { up, override_file } => {
-            let Some(dir) = nth_dir(path, *up) else { return String::new() };
-            let marker = dir.join(override_file);
-            if marker.is_file() {
-                if let Ok(text) = std::fs::read_to_string(&marker) {
-                    return py_strip(&text).to_owned();
-                }
-            }
-            unquote(&file_name(dir))
-        }
-        SlotInit::DashDir => {
-            let name = nth_dir(path, 1).map(file_name).unwrap_or_default();
-            if name.starts_with('-') { name.replace('-', "/") } else { String::new() }
-        }
         SlotInit::FirstOf(options) => options.iter().map(|o| init(o, path)).find(|v| !v.is_empty()).unwrap_or_default(),
-    }
-}
-
-/// The observer for every declared CLI that has one, by key.
-pub fn observers() -> HashMap<&'static str, Observer> {
-    crate::vendors::ALL.iter().filter_map(|cli| Some((cli.key, Observer::new(cli)?))).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::unquote;
-
-    #[test]
-    fn unquote_matches_urllib() {
-        assert_eq!(unquote("%2FUsers%2Fme%2Fa%20b"), "/Users/me/a b");
-        assert_eq!(unquote("100%"), "100%");
-        assert_eq!(unquote("%zz%e4%b8%ad"), "%zz中");
+        SlotInit::Ext(ext) => V::init(*ext, path),
     }
 }

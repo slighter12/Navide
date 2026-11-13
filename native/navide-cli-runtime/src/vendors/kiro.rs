@@ -5,18 +5,10 @@ pub static CLI: Cli = Cli {
     key: "kiro",
     label: "Kiro CLI (AWS)",
     kind: Kind::Cli,
-    launch: Launch {
-        // `kiro` alone opens the IDE.
-        program: "kiro-cli",
-        base_args: &["chat", "--v3"],
-        yolo_args: &["--trust-all-tools"],
-        model: None,
-        effort: None,
-        efforts: &[],
-        env_defaults: &[],
-        env_strip: &[],
-    },
-    resume: Resume { args: None, parse: None },
+    // `kiro` alone opens the IDE.
+    launch: Launch { base_args: &["chat", "--v3"], yolo_args: &["--trust-all-tools"], ..Launch::of("kiro-cli") },
+    resume: Resume::NONE,
     interrupt: b"\x03",
-    observe: None,
 };
+
+crate::unobserved!(CLI);

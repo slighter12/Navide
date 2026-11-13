@@ -2,6 +2,7 @@
  "vendor": "pi",
  "file": "pi/--Users-me-proj--/2026-07-27T10-00-00-000Z_pi-sess.01_a.jsonl",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "write",

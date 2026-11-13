@@ -2,6 +2,7 @@
  "vendor": "qwen",
  "file": "qwen/projects/-Users-me-proj/chats/2a0c9d5e-2f4a-4c0e-9b7d-3a5c8e9f0a25.jsonl",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "write",

@@ -1,20 +1,24 @@
 //! The walk state in the log watcher's per-file `seen_keys` bag: read before
 //! a walk, written back after it, in the key formats the declaration names
 //! (main's own, so either reader can pick up where the other stopped). Keys
-//! the declaration does not name are left untouched.
+//! the declaration does not name are left untouched. The line mark, the kept
+//! slots and the turn tracker are handled here; the cursor's keys by the
+//! backend.
 use super::activity::{ActivityState, TurnState};
-use crate::decl::{ActivitySpec, BagSlot, Cursor, Format, TurnStamp};
+use super::Backend;
+use crate::decl::{KeptForm, Observe, SlotKey, TurnStamp, Vendor};
 use crate::expr::{py_int_raw, py_str, truthy};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 
 /// main's line mark (`log_readers.base._ACTIVITY_HW_PREFIX`).
 pub const HW_PREFIX: &str = "act_hw::";
 
-fn find<'a>(bag: &'a [String], prefix: &str) -> Option<&'a str> {
+pub(crate) fn find<'a>(bag: &'a [String], prefix: &str) -> Option<&'a str> {
     bag.iter().find_map(|k| k.strip_prefix(prefix))
 }
 
-fn replace(bag: &mut Vec<String>, prefix: &str, value: Option<String>) {
+pub(crate) fn replace(bag: &mut Vec<String>, prefix: &str, value: Option<String>) {
     bag.retain(|k| !k.starts_with(prefix));
     if let Some(value) = value {
         bag.push(format!("{prefix}{value}"));
@@ -23,7 +27,7 @@ fn replace(bag: &mut Vec<String>, prefix: &str, value: Option<String>) {
 
 /// Per-partition marks `prefix + part + "::" + id` (the part split off at the
 /// last `::`; an id that is not `-?digits` is ignored).
-fn marks(bag: &[String], prefix: &str) -> std::collections::BTreeMap<String, i64> {
+pub(crate) fn marks(bag: &[String], prefix: &str) -> BTreeMap<String, i64> {
     bag.iter()
         .filter_map(|k| k.strip_prefix(prefix))
         .filter_map(|rest| {
@@ -39,35 +43,22 @@ pub fn high_water(bag: &[String]) -> usize {
     find(bag, HW_PREFIX).and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
-/// The bag key of the rows still settling (`Rows::revisit`).
-fn revisit(format: &Format) -> Option<&'static str> {
-    match format {
-        Format::Sqlite(db) => db.activity.as_ref()?.revisit.as_ref().map(|r| r.bag),
-        Format::Jsonl | Format::Text { .. } => None,
-    }
-}
-
-pub fn load(spec: &ActivitySpec, format: &Format, bag: &[String]) -> ActivityState {
+pub fn load<V: Vendor>(spec: &'static Observe<V>, bag: &[String]) -> ActivityState {
     let mut state = ActivityState { hw: high_water(bag), ..ActivityState::default() };
-    if let Some(prefix) = revisit(format) {
-        state.pending = find(bag, prefix).and_then(|raw| serde_json::from_str(raw).ok()).unwrap_or_default();
-    }
-    for slot in spec.bag.slots {
-        let (name, value) = match slot {
-            BagSlot::Text { slot, prefix } | BagSlot::TextOnChange { slot, prefix } => (*slot, find(bag, prefix).map(str::to_owned)),
-            BagSlot::JsonText { slot, prefix } => (
-                *slot,
-                find(bag, prefix).and_then(|raw| serde_json::from_str::<Value>(raw).ok()).filter(truthy).map(|v| py_str(&v)),
-            ),
+    let activity = &spec.activity;
+    for kept in activity.kept {
+        let value = match kept.form {
+            KeptForm::Text | KeptForm::TextOnChange => find(bag, kept.prefix).map(str::to_owned),
+            KeptForm::JsonText => find(bag, kept.prefix).and_then(|raw| serde_json::from_str::<Value>(raw).ok()).filter(truthy).map(|v| py_str(&v)),
         };
         if let Some(value) = value.filter(|v| !v.is_empty()) {
-            state.slots.insert(name.to_owned(), value);
+            state.slots.insert(kept.slot.name().to_owned(), value);
         }
     }
-    if let Some(turn) = &spec.bag.turn {
+    if let Some(turn) = &activity.turn_key {
         let parsed = find(bag, turn.prefix).and_then(|raw| serde_json::from_str::<Value>(raw).ok());
         if let Some(Value::Object(t)) = parsed {
-            let millis = matches!(spec.turn_stamp, TurnStamp::Millis);
+            let millis = matches!(activity.turn_stamp, TurnStamp::Millis);
             state.turn = Some(TurnState {
                 idx: t.get("idx").and_then(py_int_raw).unwrap_or(0),
                 ts: if millis { String::new() } else { t.get("ts").filter(|v| truthy(v)).map(py_str).unwrap_or_default() },
@@ -77,57 +68,34 @@ pub fn load(spec: &ActivitySpec, format: &Format, bag: &[String]) -> ActivitySta
             });
         }
     }
-    match (spec.bag.cursor, spec.cursor) {
-        (Some(prefix), Cursor::Rows) if spec.bag.anchor.is_some() => {
-            state.marks = marks(bag, prefix);
-            state.anchored = spec.bag.anchor.is_some_and(|anchor| bag.iter().any(|k| k == anchor));
-        }
-        (Some(prefix), Cursor::Bytes) => {
-            if let Some(Value::Object(cursor)) = find(bag, prefix).and_then(|raw| serde_json::from_str::<Value>(raw).ok()) {
-                state.cursor = cursor;
-            }
-        }
-        // main's `_int(prev)`: a key that is there but not a number is 0.
-        // (`-1` is "from the first row".)
-        (Some(prefix), Cursor::Rows) => state.rows = find(bag, prefix).map(|raw| py_int_raw(&Value::String(raw.to_owned())).unwrap_or(0)),
-        _ => {}
-    }
+    V::Backend::load(&spec.records, bag, &mut state);
     state
 }
 
-pub fn store(spec: &ActivitySpec, format: &Format, after: &ActivityState, bag: &mut Vec<String>) {
+pub fn store<V: Vendor>(spec: &'static Observe<V>, after: &ActivityState, bag: &mut Vec<String>) {
     if after.hw > high_water(bag) {
         replace(bag, HW_PREFIX, Some(after.hw.to_string()));
     }
-    if let Some(prefix) = revisit(format) {
-        // `json.dumps(sorted(ids))`.
-        let ids: Vec<String> = after.pending.iter().map(i64::to_string).collect();
-        replace(bag, prefix, (!ids.is_empty()).then(|| format!("[{}]", ids.join(", "))));
-    }
-    let value = |state: &ActivityState, slot: &str| state.slots.get(slot).cloned().unwrap_or_default();
-    for slot in spec.bag.slots {
-        match slot {
-            BagSlot::Text { slot, prefix } => {
-                let v = value(after, slot);
-                replace(bag, prefix, (!v.is_empty()).then_some(v));
-            }
-            BagSlot::TextOnChange { slot, prefix } => {
-                if after.written.iter().any(|w| w == slot) {
-                    replace(bag, prefix, Some(value(after, slot)));
+    let activity = &spec.activity;
+    for kept in activity.kept {
+        let name = kept.slot.name();
+        let value = after.slots.get(name).cloned().unwrap_or_default();
+        match kept.form {
+            KeptForm::Text => replace(bag, kept.prefix, (!value.is_empty()).then_some(value)),
+            KeptForm::TextOnChange => {
+                if after.written.iter().any(|w| w == name) {
+                    replace(bag, kept.prefix, Some(value));
                 }
             }
-            BagSlot::JsonText { slot, prefix } => {
-                let v = value(after, slot);
-                replace(bag, prefix, (!v.is_empty()).then(|| py_json(&Value::String(v), false, true)));
-            }
+            KeptForm::JsonText => replace(bag, kept.prefix, (!value.is_empty()).then(|| py_json(&Value::String(value), false, true))),
         }
     }
-    if let Some(turn) = &spec.bag.turn {
+    if let Some(turn) = &activity.turn_key {
         let json = match &after.turn {
             Some(t) => {
                 let mut m = Map::new();
                 m.insert("idx".into(), t.idx.into());
-                if matches!(spec.turn_stamp, TurnStamp::Millis) {
+                if matches!(activity.turn_stamp, TurnStamp::Millis) {
                     m.insert("last_ms".into(), t.ms.into());
                     m.insert("flushed".into(), t.flushed.into());
                 } else {
@@ -143,30 +111,7 @@ pub fn store(spec: &ActivitySpec, format: &Format, after: &ActivityState, bag: &
         };
         replace(bag, turn.prefix, json);
     }
-    match (spec.bag.cursor, spec.cursor) {
-        (Some(prefix), Cursor::Rows) if spec.bag.anchor.is_some() => {
-            // Only the marks that moved are rewritten, as main remembers them.
-            let before = marks(bag, prefix);
-            for (part, id) in &after.marks {
-                if before.get(part) != Some(id) {
-                    replace(bag, &format!("{prefix}{part}::"), Some(id.to_string()));
-                }
-            }
-            if let Some(anchor) = spec.bag.anchor.filter(|a| after.anchored && !bag.iter().any(|k| k == a)) {
-                bag.push(anchor.to_owned());
-            }
-        }
-        (Some(prefix), Cursor::Bytes) => {
-            let cursor = (!after.cursor.is_empty()).then(|| py_json(&Value::Object(after.cursor.clone()), false, true));
-            replace(bag, prefix, cursor);
-        }
-        (Some(prefix), Cursor::Rows) => {
-            if let Some(id) = after.rows {
-                replace(bag, prefix, Some(id.to_string()));
-            }
-        }
-        _ => {}
-    }
+    V::Backend::store(&spec.records, after, bag);
 }
 
 /// Python `json.dumps(value, sort_keys=…, separators=…)` with its default

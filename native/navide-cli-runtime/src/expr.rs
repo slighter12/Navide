@@ -1,41 +1,92 @@
 //! Evaluation of the declaration's record-access language (`Pred`, `Text`,
 //! `Num`) over one JSON record. Semantics follow the Python readers exactly
 //! where they matter: `str(x or "")`, `max(0, int(x))`, `str.strip()`.
-use crate::decl::{Num, Path, Pred, StrTest, Text};
-use crate::time;
+//! Generic over the vendor, so each CLI gets its own compiled evaluator and
+//! its `Ext` values are direct calls.
+use crate::decl::{Num, Pred, SlotKey, StrTest, Text, Vendor};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::marker::PhantomData;
 
-pub type Slots = BTreeMap<String, String>;
+/// A file's slot values, indexed by the vendor's typed handles.
+pub struct Slots<V: Vendor> {
+    values: Vec<String>,
+    vendor: PhantomData<fn() -> V>,
+}
 
-/// Everything an expression can see.
-pub struct Scope<'a> {
+impl<V: Vendor> Default for Slots<V> {
+    fn default() -> Self {
+        Slots { values: vec![String::new(); V::Slot::ALL.len()], vendor: PhantomData }
+    }
+}
+
+impl<V: Vendor> Slots<V> {
+    pub fn get(&self, slot: V::Slot) -> &str {
+        &self.values[slot.index()]
+    }
+
+    /// An optional slot (the event's cwd or session id): "" when the CLI has none.
+    pub fn of(&self, slot: Option<V::Slot>) -> &str {
+        slot.map_or("", |s| self.get(s))
+    }
+
+    pub fn set(&mut self, slot: V::Slot, value: String) {
+        self.values[slot.index()] = value;
+    }
+
+    pub fn is_set(&self, slot: V::Slot) -> bool {
+        !self.get(slot).is_empty()
+    }
+}
+
+/// A binary column of a SQLite row, by column name.
+pub type Blob = (String, Vec<u8>);
+
+/// Everything an expression can see: the record, the slots, and the facts
+/// of the walk it is in.
+pub struct Scope<'a, V: Vendor> {
     pub record: &'a Value,
+    /// The row's binary columns (empty for a file record).
+    pub blobs: &'a [Blob],
     pub line: usize,
     pub offset: u64,
-    pub slots: &'a Slots,
+    pub slots: &'a Slots<V>,
+    /// The inferred-turn tracker's turn was cancelled.
     pub cancelled: bool,
+    /// The key of the map entry being iterated (turn calls over a map).
     pub entry_key: &'a str,
     /// The walk's clock (seconds since the epoch) and the events it has
-    /// emitted so far (`Text::PassClock`); 0 outside an activity walk.
+    /// emitted so far; 0 outside an activity walk.
     pub now: f64,
     pub emitted: usize,
-    /// `Pred::Fresh`: false only for a line a replay walk already walked.
+    /// False only for a line a replay walk already walked.
     pub fresh: bool,
+    /// The line walk started past the file's first line.
+    pub resumed: bool,
+    /// `Text::TotalIn` / `TotalOut`.
+    pub totals: (i64, i64),
 }
 
-impl<'a> Scope<'a> {
-    /// A record seen outside any walk: no slots of its own, no clock.
-    pub fn of(record: &'a Value, slots: &'a Slots) -> Scope<'a> {
-        Scope { record, line: 0, offset: 0, slots, cancelled: false, entry_key: "", now: 0.0, emitted: 0, fresh: true }
+impl<'a, V: Vendor> Scope<'a, V> {
+    /// A record seen outside any walk: no clock, no walk facts.
+    pub fn of(record: &'a Value, slots: &'a Slots<V>) -> Scope<'a, V> {
+        Scope { record, blobs: &[], line: 0, offset: 0, slots, cancelled: false, entry_key: "", now: 0.0, emitted: 0, fresh: true, resumed: false, totals: (0, 0) }
     }
 
-    pub fn with_record<'b>(&'b self, record: &'b Value) -> Scope<'b> {
+    pub fn with_record<'b>(&'b self, record: &'b Value) -> Scope<'b, V> {
         Scope { record, ..*self }
     }
+
+    /// A binary column's bytes (empty when it is absent or not a BLOB).
+    pub fn blob(&self, column: &str) -> &'a [u8] {
+        self.blobs.iter().find(|(name, _)| name == column).map_or(&[], |(_, bytes)| bytes)
+    }
+
+    pub fn get(&self, path: &[&str]) -> Option<&'a Value> {
+        get(self.record, path)
+    }
 }
 
-pub fn get<'v>(value: &'v Value, path: Path) -> Option<&'v Value> {
+pub fn get<'v>(value: &'v Value, path: &[&str]) -> Option<&'v Value> {
     let mut node = value;
     for key in path {
         node = node.as_object()?.get(*key)?;
@@ -149,7 +200,7 @@ pub const FULL_PROMPT_MAX_CHARS: usize = 16000;
 
 /// The `PromptText.full` of a text that is a `UserPrompt` (possibly chosen
 /// through `If` / `FirstOf`); "" for any other text.
-pub fn prompt_full(t: &Text, s: &Scope) -> String {
+pub fn prompt_full<V: Vendor>(t: &Text<V>, s: &Scope<V>) -> String {
     match t {
         Text::UserPrompt(inner) => user_prompt_full(&text(inner, s)),
         Text::If(p, inner) if pred(p, s) => prompt_full(inner, s),
@@ -182,7 +233,8 @@ pub fn join_blocks(content: Option<&Value>, block_type: &str) -> String {
     }
 }
 
-fn tag_values(text: &str, tag: &str, first_only: bool) -> Vec<String> {
+/// Values of `<tag>…</tag>` occurrences: non-empty, without a `<` inside.
+pub fn tag_values(text: &str, tag: &str, first_only: bool) -> Vec<String> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
     let mut out = Vec::new();
@@ -206,59 +258,14 @@ fn tag_values(text: &str, tag: &str, first_only: bool) -> Vec<String> {
 fn str_test(value: &str, test: StrTest) -> bool {
     match test {
         StrTest::Eq(s) => value == s,
-        StrTest::Ne(s) => value != s,
         StrTest::In(set) => set.contains(&value),
-        StrTest::NotIn(set) => !set.contains(&value),
         StrTest::StartsWith(s) => value.starts_with(s),
         StrTest::Contains(s) => value.contains(s),
         StrTest::NonEmpty => !value.is_empty(),
-        StrTest::Empty => value.is_empty(),
-        StrTest::SessionMarker => session_marker(value),
     }
 }
 
-/// `^(?:<!--\s*agent-team-session:\s*)?at-pane:<uuid>(?:\s*-->)?$`.
-fn session_marker(value: &str) -> bool {
-    let bare = |rest: &str| {
-        let Some(rest) = rest.strip_prefix("at-pane:") else { return false };
-        let (Some(id), Some(tail)) = (rest.get(..36), rest.get(36..)) else { return false };
-        let tail = tail.strip_suffix('\n').unwrap_or(tail);
-        crate::resume::shaped(id, crate::decl::ValueShape::Uuid).is_some()
-            && (tail.is_empty() || tail.trim_start_matches(py_space) == "-->")
-    };
-    let commented = value
-        .strip_prefix("<!--")
-        .map(|rest| rest.trim_start_matches(py_space))
-        .and_then(|rest| rest.strip_prefix("agent-team-session:"))
-        .map(|rest| rest.trim_start_matches(py_space));
-    commented.is_some_and(bare) || bare(value)
-}
-
-/// The text between the first `open` that a `close` follows and that close.
-fn enclosed<'t>(text: &'t str, open: &str, close: &str) -> Option<&'t str> {
-    let mut from = 0;
-    while let Some(found) = text[from..].find(open) {
-        let start = from + found + open.len();
-        if let Some(len) = text[start..].find(close) {
-            return Some(&text[start..start + len]);
-        }
-        from = start;
-    }
-    None
-}
-
-fn content_tree(value: Option<&Value>, test: StrTest) -> bool {
-    match value {
-        Some(Value::String(s)) => str_test(s, test),
-        Some(Value::Array(blocks)) => blocks.iter().filter(|b| b.is_object()).any(|b| {
-            let child = if b.get("type").and_then(Value::as_str) == Some("text") { b.get("text") } else { b.get("content") };
-            content_tree(child, test)
-        }),
-        _ => false,
-    }
-}
-
-pub fn pred(p: &Pred, s: &Scope) -> bool {
+pub fn pred<V: Vendor>(p: &Pred<V>, s: &Scope<V>) -> bool {
     match p {
         Pred::True => true,
         Pred::Eq(path, lit) => get(s.record, path).and_then(Value::as_str) == Some(*lit),
@@ -268,28 +275,24 @@ pub fn pred(p: &Pred, s: &Scope) -> bool {
         Pred::IsObject(path) => get(s.record, path).is_some_and(Value::is_object),
         Pred::IsList(path) => get(s.record, path).is_some_and(Value::is_array),
         Pred::IsString(path) => get(s.record, path).is_some_and(Value::is_string),
-        Pred::IsFalse(path) => get(s.record, path) == Some(&Value::Bool(false)),
         Pred::Text(t, test) => str_test(&text(t, s), *test),
         Pred::AnyItem(path, inner) => get(s.record, path)
             .and_then(Value::as_array)
             .is_some_and(|items| items.iter().any(|item| pred(inner, &s.with_record(item)))),
-        Pred::ContentTree(path, test) => content_tree(get(s.record, path), *test),
-        Pred::Encloses(t, open, close) => enclosed(&text(t, s), open, close).is_some(),
-        Pred::TurnCancelled => s.cancelled,
-        Pred::SlotSet(name) => s.slots.get(*name).is_some_and(|v| !v.is_empty()),
-        Pred::Fresh => s.fresh,
+        Pred::SlotSet(slot) => s.slots.is_set(*slot),
         Pred::All(ps) => ps.iter().all(|p| pred(p, s)),
         Pred::Any(ps) => ps.iter().any(|p| pred(p, s)),
         Pred::Not(p) => !pred(p, s),
+        Pred::Ext(ext) => V::pred(*ext, s),
     }
 }
 
-pub fn text(t: &Text, s: &Scope) -> String {
+pub fn text<V: Vendor>(t: &Text<V>, s: &Scope<V>) -> String {
     match t {
         Text::Lit(l) => (*l).to_owned(),
         Text::Py(path) => py_str_opt(get(s.record, path)),
         Text::Str(path) => get(s.record, path).and_then(Value::as_str).unwrap_or_default().to_owned(),
-        Text::Slot(name) => s.slots.get(*name).cloned().unwrap_or_default(),
+        Text::Slot(slot) => s.slots.get(*slot).to_owned(),
         Text::FirstOf(options) => options.iter().map(|o| text(o, s)).find(|v| !v.is_empty()).unwrap_or_default(),
         Text::Concat(parts) => parts.iter().map(|p| text(p, s)).collect(),
         Text::Blocks(path, kind) => join_blocks(get(s.record, path), kind),
@@ -307,133 +310,33 @@ pub fn text(t: &Text, s: &Scope) -> String {
                     .join(sep)
             })
             .unwrap_or_default(),
-        Text::FirstItem { list, filter, item } => get(s.record, list)
-            .and_then(Value::as_array)
-            .and_then(|items| items.iter().find(|element| pred(filter, &s.with_record(element))))
-            .map(|element| text(item, &s.with_record(element)))
-            .unwrap_or_default(),
         Text::TagValues(inner, tag) => tag_values(&text(inner, s), tag, false).join("\n"),
-        Text::TagFirst(inner, tag) => tag_values(&text(inner, s), tag, true).pop().unwrap_or_default(),
-        Text::AfterPrefix(inner, prefix) => {
-            let value = text(inner, s);
-            value
-                .strip_prefix(prefix)
-                .map(|rest| rest.split(py_space).next().unwrap_or_default().to_owned())
-                .unwrap_or_default()
-        }
         Text::UserPrompt(inner) => user_prompt(&text(inner, s)),
         Text::Strip(inner) => py_strip(&text(inner, s)).to_owned(),
-        Text::After(inner, prefix) => {
-            let value = text(inner, s);
-            value.strip_prefix(prefix).map_or_else(|| value.clone(), str::to_owned)
-        }
         Text::Cap(inner, max) => cap(&text(inner, s), *max),
         Text::If(p, inner) => if pred(p, s) { text(inner, s) } else { String::new() },
         Text::Num(n) => num(n, s).map(|v| v.to_string()).unwrap_or_default(),
-        Text::Millis(path) => get(s.record, path).and_then(py_int_raw).map(|v| v.to_string()).unwrap_or_default(),
-        Text::IsoFromEpoch(ms_path, s_path) => {
-            let seconds = match get(s.record, ms_path).filter(|v| !v.is_null()) {
-                Some(ms) => py_float(Some(ms)).unwrap_or(0.0) / 1000.0,
-                None => py_float(get(s.record, s_path)).unwrap_or(0.0),
-            };
-            if seconds == 0.0 { String::new() } else { time::iso_truncated_ms(seconds) }
-        }
-        Text::IsoFromFloat(path) => py_float(get(s.record, path)).map(time::iso_from_float).unwrap_or_default(),
-        Text::Stamp(paths) => {
-            for path in *paths {
-                match get(s.record, path) {
-                    Some(Value::String(v)) if !v.is_empty() => return v.clone(),
-                    value => match py_float(value) {
-                        Some(n) if n != 0.0 => return time::iso_from_float(if n > 1e11 { n / 1000.0 } else { n }),
-                        _ => {}
-                    },
-                }
-            }
-            String::new()
-        }
-        Text::PassClock(base) => {
-            let base = py_float(Some(&Value::String(text(base, s)))).filter(|ms| *ms != 0.0).map_or(s.now, |ms| ms / 1000.0);
-            time::iso_from_float(base + s.emitted as f64 * 0.001)
-        }
-        Text::ProtoText { column, path, fields } => {
-            let blob = crate::proto::unhex(get(s.record, column).and_then(Value::as_str).unwrap_or_default());
-            let message = path.iter().fold(&blob[..], |node, field| crate::proto::bytes(node, *field));
-            if message.is_empty() {
-                return String::new();
-            }
-            fn clean(b: &[u8]) -> Option<&str> {
-                std::str::from_utf8(b).ok().filter(|t| !t.chars().any(|c| c < ' ' && !matches!(c, '\t' | '\n' | '\r')))
-            }
-            fields
-                .iter()
-                .flat_map(|field| {
-                    crate::proto::scan(message).into_iter().filter_map(move |(f, v)| match v {
-                        crate::proto::Field::Bytes(b) if f == *field => Some(b),
-                        _ => None,
-                    })
-                })
-                .filter_map(clean)
-                .map(py_strip)
-                .find(|t| !t.is_empty())
-                .unwrap_or_default()
-                .to_owned()
-        }
-        Text::ProtoStamp { column, at } => {
-            let blob = crate::proto::unhex(get(s.record, column).and_then(Value::as_str).unwrap_or_default());
-            at.iter()
-                .map(|field| crate::proto::bytes(&blob, *field))
-                .filter(|ts| !ts.is_empty())
-                .find_map(|ts| crate::proto::varint_field(ts, 1).filter(|n| *n != 0))
-                .and_then(|seconds| i64::try_from(seconds).ok()?.checked_mul(1_000_000))
-                .map(time::iso_from_micros)
-                .unwrap_or_default()
-        }
-        Text::Enclosed(inner, open, close) => enclosed(&text(inner, s), open, close).map(|t| py_strip(t).to_owned()).unwrap_or_default(),
-        Text::Hook(inner, func) => func(&text(inner, s)),
-        Text::IsoFromSeconds(n) => num(n, s).and_then(|v| v.checked_mul(1_000_000)).map(time::iso_from_micros).unwrap_or_default(),
-        Text::IsoFromMicros(path) => get(s.record, path).and_then(py_int_raw).map(time::iso_from_micros).unwrap_or_default(),
-        Text::FirstKey(path) => get(s.record, path)
-            .and_then(Value::as_object)
-            .and_then(|o| o.keys().next().cloned())
-            .unwrap_or_default(),
         Text::Line => s.line.to_string(),
         Text::Offset => s.offset.to_string(),
-        Text::EntryKey => s.entry_key.to_owned(),
+        Text::TotalIn => s.totals.0.to_string(),
+        Text::TotalOut => s.totals.1.to_string(),
+        Text::Ext(ext) => V::text(*ext, s),
     }
 }
 
 /// `None` is "this record carries no reading".
-pub fn num(n: &Num, s: &Scope) -> Option<i64> {
+pub fn num<V: Vendor>(n: &Num<V>, s: &Scope<V>) -> Option<i64> {
     match n {
         Num::Zero => Some(0),
         Num::Of(path) => Some(py_int(get(s.record, path))),
         Num::Sum(parts) => parts.iter().try_fold(0i64, |acc, p| Some(acc.saturating_add(num(p, s)?))),
-        Num::Sub(a, rest) => {
-            let base = num(a, s)?;
-            let minus = rest.iter().try_fold(0i64, |acc, p| Some(acc.saturating_add(num(p, s)?)))?;
-            Some((base - minus).max(0))
-        }
-        Num::MapSum { map, object, field } => {
-            let entries = get(s.record, map)?.as_object()?;
-            let mut total = 0i64;
-            let mut usable = false;
-            for value in entries.values() {
-                if let Some(inner) = get(value, object).filter(|v| v.is_object()) {
-                    usable = true;
-                    total = total.saturating_add(py_int(get(inner, field)));
-                }
-            }
-            usable.then_some(total)
-        }
-        Num::Case(cases) => cases.iter().find(|(p, _)| pred(p, s)).and_then(|(_, n)| num(n, s)),
-        Num::Required(path, inner) => {
-            get(s.record, path).filter(|v| v.is_object())?;
-            num(inner, s)
-        }
-        Num::Float(path) => py_float(get(s.record, path)).filter(|f| f.is_finite()).map(|f| f.trunc() as i64),
-        Num::OrZero(inner) => Some(num(inner, s).unwrap_or(0)),
-        Num::Parse(inner) => text(inner, s).parse().ok(),
+        Num::Ext(ext) => V::num(*ext, s),
     }
+}
+
+/// `Num::Of` for a vendor function: Python `max(0, int(v))` of the value at the path.
+pub fn int_at(record: &Value, path: &[&str]) -> i64 {
+    py_int(get(record, path))
 }
 
 #[cfg(test)]

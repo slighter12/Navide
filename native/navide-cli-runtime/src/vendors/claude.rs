@@ -1,23 +1,78 @@
 //! Claude Code. Transcripts: `~/.claude/projects/<encoded cwd>/<session>.jsonl`.
 use crate::decl::*;
+use crate::expr::Scope;
+use crate::observe::dir_name;
+use serde::Serialize;
+use serde_json::Value;
 
-const TS: Text = Text::Py(&["timestamp"]);
-const LINE_KEY: Text = Text::Concat(&[Text::Lit("act:"), Text::Line]);
-const USAGE_KEY: Text = Text::Concat(&[Text::Py(&["message", "id"]), Text::Lit("::"), Text::Py(&["requestId"])]);
-const CONTENT: Path = &["message", "content"];
+#[derive(Debug)]
+pub struct V;
 
-const fn active(key: Text, detail: Text, text: Text, require_text: bool) -> Effect {
-    Effect::Emit(Emit { kind: EventKind::AgentActive, key, detail, text, timestamp: TS, session: None, require_text })
+slots! { Cwd = "cwd", SessionId = "session_id" }
+
+/// What only Claude Code's transcripts need.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum Ext {
+    /// Slot: the folder name `-a-b` read back as `/a/b` (lossy; a last resort
+    /// for a transcript that names no cwd).
+    DashDir,
+    /// Test: the message is the CLI's own "[Request interrupted by user…"
+    /// note, anywhere in its content tree (a string, or blocks whose `text`
+    /// or nested `content` is one).
+    Interrupted,
 }
 
+impl Vendor for V {
+    type Slot = Slot;
+    type Ext = Ext;
+    type Backend = Jsonl;
+    const CLI: &'static Cli = &CLI;
+    const OBSERVE: Option<&'static Observe<Self>> = Some(&OBSERVE);
+
+    fn pred(ext: Ext, scope: &Scope<'_, Self>) -> bool {
+        match ext {
+            Ext::Interrupted => interrupted(scope.get(CONTENT)),
+            Ext::DashDir => false,
+        }
+    }
+
+    fn init(ext: Ext, path: &std::path::Path) -> String {
+        match ext {
+            Ext::DashDir => {
+                let name = dir_name(path, 1);
+                if name.starts_with('-') { name.replace('-', "/") } else { String::new() }
+            }
+            Ext::Interrupted => String::new(),
+        }
+    }
+}
+
+fn interrupted(content: Option<&Value>) -> bool {
+    match content {
+        Some(Value::String(text)) => text.starts_with("[Request interrupted by user"),
+        Some(Value::Array(blocks)) => blocks.iter().filter(|b| b.is_object()).any(|b| {
+            let child = if b.get("type").and_then(Value::as_str) == Some("text") { b.get("text") } else { b.get("content") };
+            interrupted(child)
+        }),
+        _ => false,
+    }
+}
+
+const TS: Text<V> = Text::Py(&["timestamp"]);
+const LINE_KEY: Text<V> = Text::Concat(&[Text::Lit("act:"), Text::Line]);
+const BG_KEY: Text<V> = Text::Concat(&[Text::Lit("bg:"), Text::Line]);
+const USAGE_KEY: Text<V> = Text::Concat(&[Text::Py(&["message", "id"]), Text::Lit("::"), Text::Py(&["requestId"])]);
+const CONTENT: Path = &["message", "content"];
+const USAGE: Path = &["message", "usage"];
+
 /// A prompt with pasted images: text and image blocks, no tool result.
-const PASTED_IMAGES: Pred = Pred::All(&[
+const PASTED_IMAGES: Pred<V> = Pred::All(&[
     Pred::IsList(CONTENT),
     Pred::AnyItem(CONTENT, &Pred::Eq(&["type"], "image")),
     Pred::Not(&Pred::AnyItem(CONTENT, &Pred::Eq(&["type"], "tool_result"))),
 ]);
 
-const TYPED_PROMPT: Text = Text::If(
+const TYPED_PROMPT: Text<V> = Text::If(
     &Pred::All(&[Pred::Eq(&["type"], "user"), Pred::Not(&Pred::Truthy(&["isCompactSummary"])), Pred::Not(&Pred::Truthy(&["isMeta"]))]),
     &Text::FirstOf(&[
         Text::If(&Pred::IsString(CONTENT), &Text::UserPrompt(&Text::Str(CONTENT))),
@@ -26,7 +81,7 @@ const TYPED_PROMPT: Text = Text::If(
 );
 
 /// Ids an assistant message stops with TaskStop (or its older names).
-const STOPPED_TASKS: Text = Text::Join {
+const STOPPED_TASKS: Text<V> = Text::Join {
     list: CONTENT,
     filter: &Pred::All(&[Pred::Eq(&["type"], "tool_use"), Pred::In(&["name"], &["TaskStop", "KillShell", "KillBash"])]),
     item: &Text::FirstOf(&[Text::Py(&["input", "task_id"]), Text::Py(&["input", "shell_id"])]),
@@ -35,7 +90,7 @@ const STOPPED_TASKS: Text = Text::Join {
 };
 
 /// The id of a task a tool result launched in the background.
-const STARTED_TASK: Text = Text::If(
+const STARTED_TASK: Text<V> = Text::If(
     &Pred::IsObject(&["toolUseResult"]),
     &Text::FirstOf(&[
         Text::Py(&["toolUseResult", "backgroundTaskId"]),
@@ -49,21 +104,16 @@ const STARTED_TASK: Text = Text::If(
     ]),
 );
 
-const USAGE: Path = &["message", "usage"];
-
 pub static CLI: Cli = Cli {
     key: "claude",
     label: "Claude Code (Anthropic)",
     kind: Kind::Cli,
     launch: Launch {
-        program: "claude",
-        base_args: &[],
         yolo_args: &["--dangerously-skip-permissions"],
         model: Some(&["--model", "{}"]),
         effort: Some(&["--effort", "{}"]),
         efforts: &["low", "medium", "high", "xhigh", "max"],
-        env_defaults: &[],
-        env_strip: &[],
+        ..Launch::of("claude")
     },
     resume: Resume {
         args: Some(&["--resume", "{id}"]),
@@ -79,159 +129,138 @@ pub static CLI: Cli = Cli {
         }),
     },
     interrupt: b"\x03",
-    observe: Some(Observe {
-        store: Store { env: &[("CLAUDE_CONFIG_DIR", &["projects"])], home: &[&[".claude", "projects"]], files: &[&["*", "*.jsonl"]] },
-        format: Format::Jsonl,
-        accept: None,
-        slots: &[
-            Slot {
-                name: "cwd",
-                init: SlotInit::FirstOf(&[
-                    SlotInit::Header {
-                        lines: 50,
-                        when: Pred::All(&[Pred::IsString(&["cwd"]), Pred::Truthy(&["cwd"])]),
-                        field: Text::Str(&["cwd"]),
-                        first_line: false,
-                    },
-                    SlotInit::DashDir,
-                ]),
-            },
-            Slot { name: "session_id", init: SlotInit::FileStem },
-        ],
-        usage: Some(UsageSpec {
-            slots: &[],
-            rules: &[UsageRule {
+};
+
+static OBSERVE: Observe<V> = Observe {
+    store: Store { env: &[("CLAUDE_CONFIG_DIR", &["projects"])], home: &[&[".claude", "projects"]], files: &[&["*", "*.jsonl"]] },
+    file_name: None,
+    other_files: OtherFiles::Empty,
+    slots: &[
+        Seed {
+            slot: Slot::Cwd,
+            init: SlotInit::FirstOf(&[
+                SlotInit::Header {
+                    lines: 50,
+                    when: Pred::All(&[Pred::IsString(&["cwd"]), Pred::Truthy(&["cwd"])]),
+                    field: Text::Str(&["cwd"]),
+                    first_line: false,
+                },
+                SlotInit::Ext(Ext::DashDir),
+            ]),
+        },
+        Seed { slot: Slot::SessionId, init: SlotInit::FileStem },
+    ],
+    cwd: Some(Slot::Cwd),
+    session: Some(Slot::SessionId),
+    // A path typed on macOS can be recorded decomposed; main compares and
+    // stores the cwd composed.
+    cwd_form: Form::Nfc,
+    records: JsonlRecords {
+        usage: Some(FileUsage::per_record(
+            &[UsageRule {
                 when: Pred::All(&[Pred::Eq(&["type"], "assistant"), Pred::IsObject(&["message"]), Pred::IsObject(USAGE)]),
                 effects: &[],
                 reading: Some(Reading {
-                    input: Num::Sum(&[
-                        Num::Of(&["message", "usage", "input_tokens"]),
-                        Num::Of(&["message", "usage", "cache_read_input_tokens"]),
-                        Num::Of(&["message", "usage", "cache_creation_input_tokens"]),
-                    ]),
-                    output: Num::Of(&["message", "usage", "output_tokens"]),
                     cache_read: Num::Of(&["message", "usage", "cache_read_input_tokens"]),
                     cache_creation: Num::Of(&["message", "usage", "cache_creation_input_tokens"]),
-                    key: USAGE_KEY,
-                    key_required: false,
                     key_invalid: "::",
                     model: Text::Py(&["message", "model"]),
                     timestamp: TS,
                     cli_version: Text::Py(&["version"]),
-                    cwd: Text::Slot("cwd"),
-                    session_id: Text::Slot("session_id"),
+                    cwd: Text::Slot(Slot::Cwd),
+                    session_id: Text::Slot(Slot::SessionId),
                     // The 1-hour TTL share of cache creation, priced differently (cost ledger).
                     raw: &[(&["cache_write_1h"], RawValue::Num(Num::Of(&["message", "usage", "cache_creation", "ephemeral_1h_input_tokens"])))],
+                    ..Reading::of(
+                        Num::Sum(&[
+                            Num::Of(&["message", "usage", "input_tokens"]),
+                            Num::Of(&["message", "usage", "cache_read_input_tokens"]),
+                            Num::Of(&["message", "usage", "cache_creation_input_tokens"]),
+                        ]),
+                        Num::Of(&["message", "usage", "output_tokens"]),
+                        USAGE_KEY,
+                    )
                 }),
             }],
-            mode: UsageMode::PerRecord { window: 64, keep_on_rotation: false, credited: false },
-            persist: &[],
-            flags: &[],
-            restore: Restore::UnlessRotated,
-            stamp: &[],
-        }),
-        activity: ActivitySpec {
-            slots: &[],
-            cursor: Cursor::Lines,
-            rules: &[
-                Rule {
-                    when: Pred::Eq(&["type"], "assistant"),
-                    effects: &[
-                        active(LINE_KEY, Text::Lit("assistant"), Text::Lit(""), false),
-                        // AskUserQuestion parks the turn on the user without ending it.
-                        Effect::When(
-                            &Pred::AnyItem(CONTENT, &Pred::All(&[Pred::Eq(&["type"], "tool_use"), Pred::Eq(&["name"], "AskUserQuestion")])),
-                            &[active(Text::Concat(&[Text::Lit("q:"), Text::Line]), Text::Lit("assistant:question"), Text::Lit(""), false)],
-                        ),
-                        active(Text::Concat(&[Text::Lit("bg:"), Text::Line]), Text::Lit("background:end"), STOPPED_TASKS, true),
-                        Effect::When(
-                            &Pred::Text(Text::Py(&["message", "stop_reason"]), StrTest::Eq("end_turn")),
-                            &[Effect::Emit(Emit {
-                                kind: EventKind::TurnComplete,
-                                key: Text::Concat(&[Text::Lit("turn:"), Text::Line]),
-                                detail: Text::Lit("end_turn"),
-                                text: Text::Blocks(CONTENT, "text"),
-                                timestamp: TS,
-                                session: None,
-                                require_text: false,
-                            })],
-                        ),
-                    ],
-                },
-                Rule {
-                    when: Pred::In(&["type"], &["tool_use", "user"]),
-                    effects: &[
-                        active(LINE_KEY, Text::Py(&["type"]), TYPED_PROMPT, false),
-                        Effect::When(
-                            &Pred::All(&[
-                                Pred::Eq(&["type"], "user"),
-                                Pred::IsObject(&["message"]),
-                                Pred::ContentTree(CONTENT, StrTest::StartsWith("[Request interrupted by user")),
-                            ]),
-                            &[active(Text::Concat(&[Text::Lit("int:"), Text::Line]), Text::Lit("user:interrupted"), Text::Lit(""), false)],
-                        ),
-                        Effect::When(
-                            &Pred::Eq(&["type"], "user"),
-                            &[active(Text::Concat(&[Text::Lit("bg:"), Text::Line]), Text::Lit("background:start"), STARTED_TASK, true)],
-                        ),
-                    ],
-                },
-                Rule {
-                    when: Pred::All(&[
-                        Pred::Eq(&["type"], "queue-operation"),
-                        Pred::Eq(&["operation"], "enqueue"),
-                        Pred::IsString(&["content"]),
-                        Pred::Text(Text::Str(&["content"]), StrTest::Contains("<task-notification>")),
-                        Pred::Text(Text::Str(&["content"]), StrTest::Contains("<status>")),
-                    ]),
-                    effects: &[active(
-                        Text::Concat(&[Text::Lit("bg:"), Text::Line]),
-                        Text::Lit("background:end"),
-                        Text::TagValues(&Text::Str(&["content"]), "task-id"),
-                        true,
-                    )],
-                },
+            64,
+        )),
+        cursor: LineCursor::Lines,
+    },
+    activity: Activity::rules(&[
+        Rule {
+            when: Pred::Eq(&["type"], "assistant"),
+            effects: &[
+                Emit::active(LINE_KEY, Text::Lit("assistant"), Text::Lit(""), TS).effect(),
+                // AskUserQuestion parks the turn on the user without ending it.
+                Effect::When(
+                    &Pred::AnyItem(CONTENT, &Pred::All(&[Pred::Eq(&["type"], "tool_use"), Pred::Eq(&["name"], "AskUserQuestion")])),
+                    &[Emit::active(Text::Concat(&[Text::Lit("q:"), Text::Line]), Text::Lit("assistant:question"), Text::Lit(""), TS).effect()],
+                ),
+                Emit::active(BG_KEY, Text::Lit("background:end"), STOPPED_TASKS, TS).with_text().effect(),
+                Effect::When(
+                    &Pred::Text(Text::Py(&["message", "stop_reason"]), StrTest::Eq("end_turn")),
+                    &[Emit::done(Text::Concat(&[Text::Lit("turn:"), Text::Line]), Text::Lit("end_turn"), Text::Blocks(CONTENT, "text"), TS).effect()],
+                ),
             ],
-            idle: None,
-            turn_stamp: TurnStamp::Text,
-            turn_text: "reply",
-            persist: &[],
-            bag: Bag { slots: &[], turn: None, cursor: None, anchor: None },
         },
-        turns: TurnsSpec {
-            slots: &[],
-            method: TurnMethod::Exact,
-            filter: SessionFilter::Ignore,
-            effects: &[],
-            skip: Pred::Not(&Pred::IsObject(&["message"])),
-            // One turn per promptId: a prompt's attachments and images are
-            // extra user records under the same id.
-            open: Some(TurnOpen {
-                when: Pred::All(&[Pred::Eq(&["type"], "user"), Pred::Not(&Pred::Has(&["toolUseResult"]))]),
-                mode: OpenMode::ByKey(Text::FirstOf(&[Text::Py(&["promptId"]), Text::Concat(&[Text::Lit("line:"), Text::Line])])),
-                prompt: Text::Blocks(CONTENT, "text"),
-                merge: PromptMerge::Merge,
-                started: TS,
-            }),
-            call: Some(TurnCall {
-                when: Pred::All(&[Pred::Eq(&["type"], "assistant"), Pred::IsObject(USAGE)]),
-                each: None,
-                input: Num::Of(&["message", "usage", "input_tokens"]),
-                cache_read: Num::Of(&["message", "usage", "cache_read_input_tokens"]),
-                cache_creation: Num::Of(&["message", "usage", "cache_creation_input_tokens"]),
-                output: Num::Of(&["message", "usage", "output_tokens"]),
-                input_includes_cache: false,
-                cumulative: false,
-                skip_zero: true,
-                key: Some(USAGE_KEY),
-                key_invalid: "::",
-                model: Text::Py(&["message", "model"]),
-                ts: TS,
-                cli_version: Text::Py(&["version"]),
-                orphan: Orphan::Drop,
-            }),
-            close: None,
-            session: "session_id",
+        Rule {
+            when: Pred::In(&["type"], &["tool_use", "user"]),
+            effects: &[
+                Emit::active(LINE_KEY, Text::Py(&["type"]), TYPED_PROMPT, TS).effect(),
+                Effect::When(
+                    &Pred::All(&[Pred::Eq(&["type"], "user"), Pred::IsObject(&["message"]), Pred::Ext(Ext::Interrupted)]),
+                    &[Emit::active(Text::Concat(&[Text::Lit("int:"), Text::Line]), Text::Lit("user:interrupted"), Text::Lit(""), TS).effect()],
+                ),
+                Effect::When(
+                    &Pred::Eq(&["type"], "user"),
+                    &[Emit::active(BG_KEY, Text::Lit("background:start"), STARTED_TASK, TS).with_text().effect()],
+                ),
+            ],
         },
+        Rule {
+            when: Pred::All(&[
+                Pred::Eq(&["type"], "queue-operation"),
+                Pred::Eq(&["operation"], "enqueue"),
+                Pred::IsString(&["content"]),
+                Pred::Text(Text::Str(&["content"]), StrTest::Contains("<task-notification>")),
+                Pred::Text(Text::Str(&["content"]), StrTest::Contains("<status>")),
+            ]),
+            effects: &[Emit::active(BG_KEY, Text::Lit("background:end"), Text::TagValues(&Text::Str(&["content"]), "task-id"), TS).with_text().effect()],
+        },
+    ]),
+    turns: Turns::Exact(&ExactTurns {
+        slots: &[],
+        filter: SessionFilter::Ignore,
+        effects: &[],
+        skip: Some(Pred::Not(&Pred::IsObject(&["message"]))),
+        // One turn per promptId: a prompt's attachments and images are
+        // extra user records under the same id.
+        open: Some(TurnOpen {
+            when: Pred::All(&[Pred::Eq(&["type"], "user"), Pred::Not(&Pred::Has(&["toolUseResult"]))]),
+            mode: OpenMode::ByKey(Text::FirstOf(&[Text::Py(&["promptId"]), Text::Concat(&[Text::Lit("line:"), Text::Line])])),
+            prompt: Text::Blocks(CONTENT, "text"),
+            merge: PromptMerge::Merge,
+            started: TS,
+        }),
+        call: TurnCall {
+            when: Pred::All(&[Pred::Eq(&["type"], "assistant"), Pred::IsObject(USAGE)]),
+            each: None,
+            input: Num::Of(&["message", "usage", "input_tokens"]),
+            cache_read: Num::Of(&["message", "usage", "cache_read_input_tokens"]),
+            cache_creation: Num::Of(&["message", "usage", "cache_creation_input_tokens"]),
+            output: Num::Of(&["message", "usage", "output_tokens"]),
+            input_includes_cache: false,
+            cumulative: false,
+            skip_zero: true,
+            key: Some(USAGE_KEY),
+            key_invalid: "::",
+            model: Text::Py(&["message", "model"]),
+            ts: TS,
+            cli_version: Text::Py(&["version"]),
+            orphan: Orphan::Drop,
+        },
+        close: None,
+        // main opens the transcript strictly for this pass.
+        strict_utf8: true,
     }),
 };

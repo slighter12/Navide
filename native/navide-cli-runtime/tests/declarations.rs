@@ -1,108 +1,87 @@
-//! Every declaration is consistent with the core that runs it: the
-//! combinations the core treats as unreachable cannot be declared, so a new
-//! CLI that compiles and passes this test runs on the shared engine as is.
+//! What the compiler cannot check about a declaration. The combinations the
+//! core cannot run (a cursor without its backend, a SQLite usage mode on a
+//! file, a slot that does not exist) do not compile; what is left are a few
+//! cross-references inside one declaration, checked here for every CLI.
 use navide_cli_runtime::decl::*;
-use navide_cli_runtime::vendors::ALL;
+use navide_cli_runtime::observe::Backend;
+use navide_cli_runtime::registry::{self, Visit, ALL};
 
-fn activity_rows(format: &Format) -> Option<&'static Rows> {
-    match format {
-        Format::Sqlite(db) => db.activity.as_ref(),
-        _ => None,
-    }
+#[derive(Default)]
+struct Checks {
+    seen: Vec<&'static str>,
+    observed: usize,
 }
 
-fn usage_rows(format: &Format) -> Option<&'static Rows> {
-    match format {
-        Format::Sqlite(db) => db.usage.as_ref(),
-        _ => None,
-    }
-}
+impl Visit for Checks {
+    fn vendor<V: Vendor>(&mut self, file: &'static str) {
+        let key = V::CLI.key;
+        assert_eq!(key, file, "src/vendors/{file}.rs declares the CLI it is named after");
+        assert!(!self.seen.contains(&key), "{key} is declared twice");
+        self.seen.push(key);
+        let Some(observe) = V::OBSERVE else { return };
+        self.observed += 1;
 
-#[test]
-fn keys_are_unique() {
-    let mut keys: Vec<&str> = ALL.iter().map(|c| c.key).collect();
-    keys.sort_unstable();
-    let before = keys.len();
-    keys.dedup();
-    assert_eq!(keys.len(), before);
-}
-
-#[test]
-fn each_cursor_has_its_backend_and_its_bag_key() {
-    for cli in ALL {
-        let Some(observe) = &cli.observe else { continue };
         let activity = &observe.activity;
-        let key = cli.key;
-        match activity.cursor {
-            Cursor::Lines => assert!(matches!(observe.format, Format::Jsonl), "{key}: a line cursor walks JSONL"),
-            Cursor::Replay => assert!(matches!(observe.format, Format::Text { .. }), "{key}: a replay walks text"),
-            Cursor::Bytes => {
-                assert!(matches!(observe.format, Format::Jsonl), "{key}: a byte cursor tails JSONL");
-                assert!(activity.bag.cursor.is_some(), "{key}: a byte cursor is kept in the bag");
-            }
-            Cursor::Rows => {
-                let rows = activity_rows(&observe.format).unwrap_or_else(|| panic!("{key}: a row cursor needs an activity query"));
-                assert!(activity.bag.cursor.is_some(), "{key}: a row cursor is kept in the bag");
-                assert_eq!(rows.partition.is_some(), activity.bag.anchor.is_some(), "{key}: partitions and the anchor key go together");
-                if rows.revisit.is_some() {
-                    assert!(rows.sql.contains("?3"), "{key}: settling rows are bound at ?3");
-                }
-            }
+        for (n, kept) in activity.kept.iter().enumerate() {
+            assert!(activity.kept[..n].iter().all(|k| k.slot != kept.slot && k.prefix != kept.prefix), "{key}: a kept slot or its bag key is named twice");
         }
-        if activity_rows(&observe.format).is_some() {
-            assert_eq!(activity.cursor, Cursor::Rows, "{key}: an activity query is walked by rows");
+        if activity.turn_key.is_some() || activity.idle.is_some() {
+            let text = activity.turn_text.unwrap_or_else(|| panic!("{key}: a tracked turn carries a reply slot"));
+            assert!(activity.kept.iter().any(|k| k.slot == text), "{key}: the reply of an open turn is kept between walks");
         }
+        match &observe.turns {
+            Turns::Exact(_) => assert!(<V::Backend as Backend<V>>::EXACT_TURNS, "{key}: exact turns need a line transcript"),
+            Turns::Inferred => assert!(<V::Backend as Backend<V>>::has_usage(&observe.records), "{key}: inferred turns cut usage"),
+            Turns::None => {}
+        }
+        // The slots an event reads are real slots of this CLI (a type-level
+        // fact) and its declared seeds name each slot once.
+        for (n, seed) in observe.slots.iter().enumerate() {
+            assert!(observe.slots[..n].iter().all(|s| s.slot != seed.slot), "{key}: slot {} is seeded twice", seed.slot.name());
+        }
+        // The JSON export carries the whole declaration.
+        let json = export::<V>();
+        assert_eq!(json["key"], key);
+        assert!(json["observe"]["activity"]["rules"].is_array(), "{key}: the export holds its rules");
     }
 }
 
 #[test]
-fn kept_slots_are_stored_somewhere() {
-    for cli in ALL {
-        let Some(observe) = &cli.observe else { continue };
-        let activity = &observe.activity;
-        for name in activity.persist {
-            let in_bag = activity.bag.slots.iter().any(|slot| match slot {
-                BagSlot::Text { slot, .. } | BagSlot::TextOnChange { slot, .. } | BagSlot::JsonText { slot, .. } => slot == name,
-            });
-            assert!(in_bag, "{}: kept slot {name} has no bag key", cli.key);
-        }
-        if let Some(usage) = &observe.usage {
-            for flag in usage.flags {
-                assert!(usage.persist.contains(flag), "{}: flag {flag} is not persisted", cli.key);
-            }
-        }
-    }
+fn every_declaration_is_consistent() {
+    let mut checks = Checks::default();
+    registry::each(&mut checks);
+    assert_eq!(checks.seen, ALL.iter().map(|cli| cli.key).collect::<Vec<_>>(), "the registry lists every vendor file once, in order");
+    assert_eq!(checks.observed, registry::AnyObserver::all().len());
 }
 
 #[test]
-fn usage_modes_match_their_backend() {
-    for cli in ALL {
-        let Some(observe) = &cli.observe else { continue };
-        let Some(usage) = &observe.usage else { continue };
-        let key = cli.key;
-        let sqlite = matches!(observe.format, Format::Sqlite(_));
-        match usage.mode {
-            UsageMode::Counters { .. } => assert!(sqlite && usage_rows(&observe.format).is_some(), "{key}: counters are SQLite rows"),
-            UsageMode::Watermarks { .. } => {
-                let rows = usage_rows(&observe.format).unwrap_or_else(|| panic!("{key}: watermarks need a usage query"));
-                assert!(rows.partition.is_some(), "{key}: watermarks are kept per partition");
+fn settling_rows_are_bound_in_their_query() {
+    struct Bound;
+    impl Visit for Bound {
+        fn vendor<V: Vendor>(&mut self, _file: &'static str) {
+            let Some(observe) = V::OBSERVE else { return };
+            // Only a SQLite declaration serialises a row walk with `revisit`.
+            let records = serde_json::to_value(&observe.records).unwrap();
+            let walk = &records["activity"]["Rows"];
+            if !walk["revisit"].is_null() {
+                assert!(walk["sql"].as_str().unwrap().contains("?3"), "{}: settling rows are bound at ?3", V::CLI.key);
             }
-            UsageMode::Cumulative | UsageMode::Snapshot { .. } => assert!(!sqlite, "{key}: a file mode"),
-            UsageMode::PerRecord { .. } => assert!(!sqlite || usage_rows(&observe.format).is_some(), "{key}: SQLite records need a query"),
-            UsageMode::Legacy => {}
         }
     }
+    registry::each(&mut Bound);
 }
 
 #[test]
-fn exact_turns_name_their_rules() {
+fn launch_declarations_are_complete() {
     for cli in ALL {
-        let Some(observe) = &cli.observe else { continue };
-        if observe.turns.method == TurnMethod::Exact {
-            assert!(observe.turns.call.is_some(), "{}: exact turns need a call rule", cli.key);
+        let launch = &cli.launch;
+        assert!(!launch.program.is_empty(), "{}: a program", cli.key);
+        assert!(launch.efforts.is_empty() || launch.effort.is_some(), "{}: an effort vocabulary needs an effort flag", cli.key);
+        for template in [launch.model, launch.effort].into_iter().flatten() {
+            assert!(template.iter().any(|arg| arg.contains("{}")), "{}: a model or effort template takes the value", cli.key);
         }
-        if observe.turns.method == TurnMethod::Inferred {
-            assert!(observe.usage.is_some(), "{}: inferred turns cut usage", cli.key);
+        if let Some(args) = cli.resume.args {
+            assert!(args.iter().any(|arg| arg.contains("{id}")), "{}: resume arguments take the id", cli.key);
         }
     }
 }

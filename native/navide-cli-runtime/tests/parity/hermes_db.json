@@ -2,6 +2,7 @@
  "vendor": "hermes",
  "file": "hermes/state.db",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "db",

@@ -5,18 +5,10 @@ pub static CLI: Cli = Cli {
     key: "mcode",
     label: "MiniMax Code",
     kind: Kind::Cli,
-    launch: Launch {
-        program: "mcode",
-        base_args: &[],
-        // Unattended mode is the `permissionMode` setting, not a flag.
-        yolo_args: &[],
-        model: None,
-        effort: None,
-        efforts: &[],
-        env_defaults: &[],
-        env_strip: &[],
-    },
-    resume: Resume { args: None, parse: None },
+    // Unattended mode is the `permissionMode` setting, not a flag.
+    launch: Launch::of("mcode"),
+    resume: Resume::NONE,
     interrupt: b"\x03",
-    observe: None,
 };
+
+crate::unobserved!(CLI);

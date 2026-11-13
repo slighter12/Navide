@@ -2,6 +2,7 @@
  "vendor": "claude",
  "file": "claude/projects/-tmp-demo/turns-1.jsonl",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "write",

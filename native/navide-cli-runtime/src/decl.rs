@@ -1,21 +1,137 @@
 //! The declaration schema: everything one CLI is, as typed static data.
 //!
-//! A vendor file under `src/vendors/` fills one `Cli`. The core reads nothing
-//! else about a vendor, and nothing here names one. Every type is `'static`
-//! data (slices and string literals), so a declaration costs no allocation and
-//! no parsing, and is checked by the compiler.
+//! A vendor file under `src/vendors/` implements `Vendor` for one marker
+//! type. The core is generic over that type (`Observer<V>`), so a vendor is
+//! compiled into its own copy of the engine: no vendor is looked up by name
+//! and no call goes through a table.
+//!
+//! What is shared lives here as data the core runs: rules, slots, the
+//! inferred-turn tracker's operations, and a small record-access language
+//! (`Pred`, `Text`, `Num`) holding only what two or more CLIs use, or what is
+//! plainly generic (constants, slots, boolean and first-of combinators, the
+//! walk's line and offset). A value only one CLI reads its own way is an
+//! `Ext` of that CLI: a typed id, evaluated by the vendor's pure function
+//! (`Vendor::text`, `num`, `pred`), with the record and the slots as input.
+//!
+//! How records are *stored* (the file or database format, its cursor, the
+//! checkpoint a usage read keeps) is a `Backend`, and a new store shape is a
+//! change to the core by design: that is where tailing, state and
+//! checkpoints live. Each backend has its own declaration type, so a
+//! combination the core cannot run (a row cursor over a text file) cannot be
+//! written down.
+use crate::expr::Scope;
+use crate::observe::Backend;
 use serde::Serialize;
+use std::fmt::Debug;
 
 pub type Str = &'static str;
 
-/// A hook serialises as its input text and a marker.
-fn hook<S: serde::Serializer>(text: &&'static Text, _func: &fn(&str) -> String, out: S) -> Result<S::Ok, S::Error> {
-    use serde::ser::SerializeTuple;
-    let mut tuple = out.serialize_tuple(2)?;
-    tuple.serialize_element(*text)?;
-    tuple.serialize_element("<hook>")?;
-    tuple.end()
+/// One CLI: its launch and resume data, and (when its records are declared)
+/// how they are observed.
+pub trait Vendor: Sized + Debug + 'static {
+    /// The per-file values its rules keep (`slots!`).
+    type Slot: SlotKey;
+    /// The values only this CLI extracts (`NoExt` when it has none).
+    type Ext: Copy + Debug + Serialize + Send + Sync + 'static;
+    /// How its records are stored.
+    type Backend: Backend<Self>;
+
+    const CLI: &'static Cli;
+    /// `None`: not declared (no transcript, or its records are not described
+    /// yet); the backend keeps main's Python reader for it.
+    const OBSERVE: Option<&'static Observe<Self>>;
+
+    /// This CLI's own text extraction. Pure: the record, the slots and the
+    /// walk's facts in, the value out.
+    fn text(_ext: Self::Ext, _scope: &Scope<'_, Self>) -> String {
+        String::new()
+    }
+    /// Its own number (`None`: this record carries no reading).
+    fn num(_ext: Self::Ext, _scope: &Scope<'_, Self>) -> Option<i64> {
+        None
+    }
+    /// Its own test.
+    fn pred(_ext: Self::Ext, _scope: &Scope<'_, Self>) -> bool {
+        false
+    }
+    /// Its own slot initialiser, from the transcript's path. The one place a
+    /// vendor function may touch the file system, and each use says why.
+    fn init(_ext: Self::Ext, _path: &std::path::Path) -> String {
+        String::new()
+    }
+    /// Narrows `Observe::file_name`: is this file one of its transcripts?
+    fn accepts(_path: &std::path::Path) -> bool {
+        true
+    }
 }
+
+/// A typed slot handle: a misspelt slot does not compile, and a lookup is an
+/// array index.
+pub trait SlotKey: Copy + Eq + Debug + Serialize + Send + Sync + 'static {
+    const ALL: &'static [Self];
+    fn index(self) -> usize;
+    /// The key a persisted slot has in a checkpoint.
+    fn name(self) -> Str;
+}
+
+/// Declares a vendor's `Slot` enum: `slots! { Cwd = "cwd", Reply = "reply" }`.
+#[macro_export]
+macro_rules! slots {
+    ($($variant:ident = $name:literal),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Slot { $($variant),* }
+        impl $crate::decl::SlotKey for Slot {
+            const ALL: &'static [Self] = &[$(Slot::$variant),*];
+            fn index(self) -> usize {
+                self as usize
+            }
+            fn name(self) -> &'static str {
+                match self { $(Slot::$variant => $name),* }
+            }
+        }
+        impl $crate::serde::Serialize for Slot {
+            fn serialize<S: $crate::serde::Serializer>(&self, out: S) -> Result<S::Ok, S::Error> {
+                out.serialize_str($crate::decl::SlotKey::name(*self))
+            }
+        }
+    };
+}
+
+pub use crate::slots;
+
+/// A CLI that is launched and resumed but not observed here.
+#[macro_export]
+macro_rules! unobserved {
+    ($cli:ident) => {
+        #[derive(Debug)]
+        pub struct V;
+        impl $crate::decl::Vendor for V {
+            type Slot = $crate::decl::NoSlot;
+            type Ext = $crate::decl::NoExt;
+            type Backend = $crate::observe::file::Jsonl;
+            const CLI: &'static $crate::decl::Cli = &$cli;
+            const OBSERVE: Option<&'static $crate::decl::Observe<Self>> = None;
+        }
+    };
+}
+
+/// The slots of a CLI that keeps none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NoSlot {}
+
+impl SlotKey for NoSlot {
+    const ALL: &'static [Self] = &[];
+    fn index(self) -> usize {
+        match self {}
+    }
+    fn name(self) -> Str {
+        match self {}
+    }
+}
+
+/// The extractions of a CLI the shared vocabulary covers.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum NoExt {}
 
 #[derive(Debug, Serialize)]
 pub struct Cli {
@@ -26,9 +142,6 @@ pub struct Cli {
     pub resume: Resume,
     /// Byte(s) that interrupt the CLI in its PTY.
     pub interrupt: &'static [u8],
-    /// `None`: not declared here (no transcript, or its records are not yet
-    /// described); the backend keeps main's Python reader for it.
-    pub observe: Option<Observe>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -58,6 +171,13 @@ pub struct Launch {
     pub env_strip: &'static [Str],
 }
 
+impl Launch {
+    /// `program` alone: no arguments, no model or effort flag, no env.
+    pub const fn of(program: Str) -> Launch {
+        Launch { program, base_args: &[], yolo_args: &[], model: None, effort: None, efforts: &[], env_defaults: &[], env_strip: &[] }
+    }
+}
+
 // ---- resume -----------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
@@ -66,6 +186,11 @@ pub struct Resume {
     pub args: Option<&'static [Str]>,
     /// How a saved command names the session it resumes.
     pub parse: Option<ResumeParse>,
+}
+
+impl Resume {
+    /// The CLI cannot resume by id.
+    pub const NONE: Resume = Resume { args: None, parse: None };
 }
 
 #[derive(Debug, Serialize)]
@@ -116,28 +241,44 @@ pub enum ValueShape {
 // ---- observe ----------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-pub struct Observe {
+#[serde(bound = "")]
+pub struct Observe<V: Vendor> {
     pub store: Store,
-    pub format: Format,
-    /// Which files are transcripts (`None`: any file the store lists).
-    pub accept: Option<Accept>,
-    /// Per-file values (cwd, session id, last reply text, …). Their names are
-    /// also the keys they are persisted under in a checkpoint.
-    pub slots: &'static [Slot],
-    pub usage: Option<UsageSpec>,
-    pub activity: ActivitySpec,
-    pub turns: TurnsSpec,
+    /// The transcript's exact file name (`None`: any file the store lists).
+    /// `Vendor::accepts` narrows it further.
+    pub file_name: Option<Str>,
+    /// What a file that is not a transcript answers.
+    pub other_files: OtherFiles,
+    /// Slots that start with a value (every other slot starts empty).
+    pub slots: &'static [Seed<V>],
+    /// The slots an event's cwd and session id are read from.
+    pub cwd: Option<V::Slot>,
+    pub session: Option<V::Slot>,
+    /// The form the cwd reaches the application in. The runtime hands it on
+    /// as written; the seam applies the form.
+    pub cwd_form: Form,
+    /// The backend's own declaration: the usage mode, the cursor, the queries.
+    pub records: <V::Backend as Backend<V>>::Spec,
+    pub activity: Activity<V>,
+    pub turns: Turns<V>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct Accept {
-    /// The exact file name.
-    pub name: Str,
-    /// Not when the `n`-th directory above (1 = its own) has this name
-    /// (muse: a subagent's log sits under `subagent/<child>/`).
-    pub not_under: Option<(usize, Str)>,
-    /// Its own directory's name has this shape (cursor: the session's UUID).
-    pub dir: Option<ValueShape>,
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum OtherFiles {
+    /// Nothing to read: no events, the checkpoint as it was.
+    Empty,
+    /// Another store of the same CLI, which this declaration does not
+    /// describe: `Error::Unsupported`, so the caller's own reader reads it.
+    Unsupported,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Form {
+    /// As the transcript wrote it.
+    Written,
+    /// Unicode NFC (a path typed on macOS may be recorded decomposed).
+    Nfc,
 }
 
 /// Where records live: a root, then a glob below it.
@@ -152,125 +293,33 @@ pub struct Store {
     pub files: &'static [&'static [Str]],
 }
 
-/// The record backend.
+/// A slot's first value.
 #[derive(Debug, Serialize)]
-pub enum Format {
-    /// One transcript per session, a JSON object per line.
-    Jsonl,
-    /// One plain-text transcript per session (aider's Markdown history): each
-    /// complete line is a record `{"line": text}`, invalid UTF-8 dropped and
-    /// the line ending removed. A usage checkpoint names itself `kind`.
-    Text { kind: Str },
-    /// One database for every session: records are the rows of the
-    /// declared queries, read into JSON objects by column name.
-    Sqlite(&'static Sqlite),
+#[serde(bound = "")]
+pub struct Seed<V: Vendor> {
+    pub slot: V::Slot,
+    pub init: SlotInit<V>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct Sqlite {
-    /// Columns that hold JSON text: read as the parsed value (`null` when malformed).
-    pub json: &'static [Str],
-    /// Columns that hold binary blobs (protobuf): read as lowercase hex, and a
-    /// value that is not a BLOB as `null` (main's `x if isinstance(x, bytes) else b""`).
-    pub binary: &'static [Str],
-    /// Columns each table must have (`PRAGMA table_info`), checked before
-    /// every query: a store without them is not read at all.
-    pub requires: &'static [(Str, &'static [Str])],
-    /// Usage rows after the checkpoint's `row_id` (main's `{"kind": "sqlite",
-    /// "row_id", "identity"}`): the one `?` is that watermark.
-    pub usage: Option<Rows>,
-    /// Activity rows after the bag's watermark (`Cursor::Rows`): `?` is the
-    /// watermark, a second `?` the page size.
-    pub activity: Option<Rows>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Rows {
-    pub sql: Str,
-    /// The column holding the increasing row id the watermark follows.
-    pub id: Str,
-    /// The newest id (`SELECT COALESCE(MAX(id), 0) FROM …`): the first sight
-    /// of a database starts there, since everything in it is history.
-    pub newest: Str,
-    pub page: i64,
-    /// Activity: the newest id is read every pass, and one below the
-    /// watermark (a replaced database) starts over at it.
-    pub restart_below: bool,
-    /// A last row matching this is not consumed yet (it is read again next
-    /// pass, when it may have changed).
-    pub hold_last: Option<Pred>,
-    /// One watermark per partition (openclaw: per session in one table)
-    /// instead of one for the database.
-    pub partition: Option<Partition>,
-    /// Rows that are read again on later passes until they settle.
-    pub revisit: Option<Revisit>,
-    /// Each row gets this boolean column: it is the newest row of the pass.
-    pub last_as: Option<Str>,
-}
-
-/// Rows matching `when` (antigravity: an assistant step still streaming)
-/// stay pending: `sql` binds their ids as a JSON list (`?3`), a pending row
-/// read again yields nothing until it no longer matches, and the ids are kept
-/// in the bag as `bag + json(sorted ids)`.
-#[derive(Debug, Serialize)]
-pub struct Revisit {
-    pub when: Pred,
-    pub bag: Str,
-}
-
-/// Rows read per partition: `sql` then binds the partition (`?1`), its
-/// watermark (`?2`) and the page size (`?3`), and a partition whose newest id
-/// is not above its watermark is not queried.
-#[derive(Debug, Serialize)]
-pub struct Partition {
-    /// Every partition with its newest id, as columns `part` and `top`.
-    pub tops: Str,
-    /// The label each of a partition's rows carries (column `label_as`): the
-    /// first non-empty text, evaluated over the first row of its query with
-    /// the partition bound as `?1`. A query that fails (its table is absent
-    /// in this build) is skipped. No label at all is `Error::Unsupported`:
-    /// main's reader reports such a partition.
-    pub label: &'static [(Str, Text)],
-    pub label_as: Str,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Slot {
-    pub name: Str,
-    pub init: SlotInit,
-}
-
-#[derive(Debug, Serialize)]
-pub enum SlotInit {
+#[serde(bound = "")]
+pub enum SlotInit<V: Vendor> {
     Empty,
     /// File name without extension.
     FileStem,
     /// Name of the `n`-th directory above the file (1 = its own directory).
     DirName(usize),
-    /// Text after the first `_` of the stem ("" when there is none).
-    StemAfterUnderscore,
     /// `field` of the first JSON record matching `when` within the first
     /// `lines` lines (blank and malformed lines count; 0 = no limit). With
     /// `first_line`, only the first non-blank line is considered at all.
-    Header { lines: usize, when: Pred, field: Text, first_line: bool },
+    Header { lines: usize, when: Pred<V>, field: Text<V>, first_line: bool },
     /// A JSON object file in the `up`-th directory above the transcript
     /// (1 = its own directory); the first key with a truthy value wins.
     SidecarJson { up: usize, file: Str, keys: &'static [Str] },
-    /// The `up`-th directory's name, URL-decoded, unless `override_file` in
-    /// it holds the real value (stripped).
-    GroupDir { up: usize, override_file: Str },
-    /// Directory name `-a-b` read back as `/a/b` (lossy; a last resort).
-    DashDir,
     /// First non-empty of several initialisers.
-    FirstOf(&'static [SlotInit]),
-    /// The first column of every row of a SQLite query, as UTF-8 with
-    /// invalid bytes dropped, concatenated; when the query fails, the
-    /// database file's own bytes the same way (a live store mid-write).
-    Joined(Str),
-    /// The file's own path.
-    FilePath,
-    /// The directory holding the file, as a path.
-    Parent,
+    FirstOf(&'static [SlotInit<V>]),
+    /// The vendor's own (`Vendor::init`).
+    Ext(V::Ext),
 }
 
 // ---- record access ----------------------------------------------------------
@@ -279,7 +328,8 @@ pub enum SlotInit {
 pub type Path = &'static [Str];
 
 #[derive(Debug, Serialize)]
-pub enum Pred {
+#[serde(bound = "")]
+pub enum Pred<V: Vendor> {
     True,
     /// The value at the path is this string.
     Eq(Path, Str),
@@ -291,314 +341,198 @@ pub enum Pred {
     IsObject(Path),
     IsList(Path),
     IsString(Path),
-    /// The value is JSON `false` (Python `is False`).
-    IsFalse(Path),
     /// A test on computed text.
-    Text(Text, StrTest),
+    Text(Text<V>, StrTest),
     /// Some element of the list at the path satisfies the predicate.
-    AnyItem(Path, &'static Pred),
-    /// The text has an `open` followed later by a `close` (`Text::Enclosed`).
-    Encloses(Text, Str, Str),
-    /// Anthropic content tree: a string, or blocks whose `text` (type text) or
-    /// `content` (any other type) is itself a content tree.
-    ContentTree(Path, StrTest),
-    /// The inferred-turn tracker has a turn that was cancelled.
-    TurnCancelled,
+    AnyItem(Path, &'static Pred<V>),
     /// A slot is non-empty.
-    SlotSet(Str),
-    /// The record is past the cursor's mark: always, except in a
-    /// `Cursor::Replay` walk, which also replays the lines already walked.
-    Fresh,
-    All(&'static [Pred]),
-    Any(&'static [Pred]),
-    Not(&'static Pred),
+    SlotSet(V::Slot),
+    All(&'static [Pred<V>]),
+    Any(&'static [Pred<V>]),
+    Not(&'static Pred<V>),
+    /// The vendor's own (`Vendor::pred`).
+    Ext(V::Ext),
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]
 pub enum StrTest {
     Eq(Str),
-    Ne(Str),
     In(&'static [Str]),
-    NotIn(&'static [Str]),
     StartsWith(Str),
     Contains(Str),
     NonEmpty,
-    Empty,
-    /// The whole text is Navide's session marker, `at-pane:<uuid>`, bare or
-    /// in its `<!-- agent-team-session: … -->` comment (a CLI that cannot
-    /// take a session id at launch gets it typed in as a prompt).
-    SessionMarker,
 }
 
 #[derive(Debug, Serialize)]
-pub enum Text {
+#[serde(bound = "")]
+pub enum Text<V: Vendor> {
     Lit(Str),
     /// Python `str(value or "")`.
     Py(Path),
     /// The value only if it is a string, else "".
     Str(Path),
-    Slot(Str),
+    Slot(V::Slot),
     /// First non-empty.
-    FirstOf(&'static [Text]),
-    Concat(&'static [Text]),
+    FirstOf(&'static [Text<V>]),
+    Concat(&'static [Text<V>]),
     /// `join_text_blocks`: a string as is, else the `text` of blocks of this type.
     Blocks(Path, Str),
     /// Join `item` evaluated per element of the list at `list` (elements that
     /// fail `filter` skipped), with `sep`; empty results are kept only when
     /// `keep_empty`.
-    Join { list: Path, filter: &'static Pred, item: &'static Text, sep: Str, keep_empty: bool },
-    /// `item` of the first element of the list at `list` that satisfies `filter` ("" when none does).
-    FirstItem { list: Path, filter: &'static Pred, item: &'static Text },
+    Join { list: Path, filter: &'static Pred<V>, item: &'static Text<V>, sep: Str, keep_empty: bool },
     /// Values of `<tag>…</tag>` occurrences (non-empty, no `<`), joined by `\n`.
-    TagValues(&'static Text, Str),
-    /// The first `<tag>…</tag>` value.
-    TagFirst(&'static Text, Str),
-    /// When the text starts with `prefix`, the non-space token right after it.
-    AfterPrefix(&'static Text, Str),
+    TagValues(&'static Text<V>, Str),
     /// `user_prompt_text`: stripped, "" for `<`-wrappers, capped at 500 chars.
-    UserPrompt(&'static Text),
+    UserPrompt(&'static Text<V>),
     /// Stripped.
-    Strip(&'static Text),
-    /// The text without this prefix (unchanged when it lacks it).
-    After(&'static Text, Str),
+    Strip(&'static Text<V>),
     /// Over `n` chars: the first and last halves around `\n…\n`.
-    Cap(&'static Text, usize),
-    If(&'static Pred, &'static Text),
+    Cap(&'static Text<V>, usize),
+    If(&'static Pred<V>, &'static Text<V>),
     /// A number rendered as decimal.
-    Num(&'static Num),
-    /// Epoch milliseconds (number or numeric string) rendered as digits; "" when not a number.
-    Millis(Path),
-    /// ISO-8601 from epoch milliseconds at the first path, else epoch seconds at the second.
-    IsoFromEpoch(Path, Path),
-    /// ISO-8601 (`+00:00`, microseconds when non-zero) from epoch microseconds.
-    IsoFromMicros(Path),
-    /// The same from epoch seconds (`usage_common._epoch_to_iso` of an int).
-    IsoFromSeconds(&'static Num),
-    /// `usage_common._epoch_to_iso` of the value as a float ("" when it is not a number).
-    IsoFromFloat(Path),
-    /// The first path holding a non-empty string (as is) or a non-zero
-    /// number: epoch milliseconds above 1e11, else seconds, as `IsoFromFloat`.
-    Stamp(&'static [Path]),
-    /// One clock for a whole walk (cursor: its store has no per-record
-    /// time): epoch milliseconds from the text when it is a non-zero number,
-    /// else the walk's now, plus 1 ms per event already emitted, as `IsoFromFloat`.
-    PassClock(&'static Text),
-    /// Protobuf in a binary column: the submessage at `path` (field numbers,
-    /// first occurrence each), then the first of `fields` holding clean text
-    /// (UTF-8 without control characters but tab and newlines), stripped.
-    ProtoText { column: Path, path: &'static [u64], fields: &'static [u64] },
-    /// A `google.protobuf.Timestamp` in a binary column: the first of the
-    /// `at` submessages whose seconds (field 1) are non-zero, as ISO-8601.
-    ProtoStamp { column: Path, at: &'static [u64] },
-    /// Between the first `open` that a `close` follows and that `close`,
-    /// stripped ("" when there is none; `Pred::Encloses` tells the two apart).
-    Enclosed(&'static Text, Str, Str),
-    /// A vendor hook: a string function the vocabulary cannot express. The
-    /// declaration states why next to the function.
-    #[serde(serialize_with = "hook")]
-    Hook(&'static Text, fn(&str) -> String),
-    /// Key of the first entry of the object at the path.
-    FirstKey(Path),
+    Num(&'static Num<V>),
     /// 1-based line number of the record.
     Line,
     /// Byte offset just past the record.
     Offset,
-    /// The key of the map entry being iterated (turn calls over a map).
-    EntryKey,
+    /// The running input and output totals a cumulative or snapshot usage
+    /// read is crediting (decimal).
+    TotalIn,
+    TotalOut,
+    /// The vendor's own (`Vendor::text`).
+    Ext(V::Ext),
 }
 
 #[derive(Debug, Serialize)]
-pub enum Num {
+#[serde(bound = "")]
+pub enum Num<V: Vendor> {
     Zero,
     /// Python `max(0, int(v))`, 0 when not a number.
     Of(Path),
-    Sum(&'static [Num]),
-    /// `max(0, a - b - …)`.
-    Sub(&'static Num, &'static [Num]),
-    /// Sum of `field` over the values of the object at `map`; `None` when no
-    /// value carried `field`'s object (copilot modelMetrics).
-    MapSum { map: Path, object: Path, field: Path },
-    /// The value of the first alternative whose `when` holds (even when that
-    /// value is "no reading").
-    Case(&'static [(Pred, Num)]),
-    /// Only when the record holds the path at all (else this rule yields no reading).
-    Required(Path, &'static Num),
-    /// `int(usage_common._num(v))`: no reading when the value is not a number.
-    Float(Path),
-    /// 0 where the inner number has no reading (`int(_num(v) or 0)`).
-    OrZero(&'static Num),
-    /// Computed text read as a decimal integer (no reading when it is not one).
-    Parse(&'static Text),
+    Sum(&'static [Num<V>]),
+    /// The vendor's own (`Vendor::num`).
+    Ext(V::Ext),
 }
 
 // ---- usage ------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-pub struct UsageSpec {
-    /// Slots that shadow the file's same-named ones while reading usage.
-    pub slots: &'static [Slot],
-    pub rules: &'static [UsageRule],
-    pub mode: UsageMode,
-    /// Slots persisted in the checkpoint (and restored from it).
-    pub persist: &'static [Str],
-    /// The `persist` slots stored as JSON booleans (set = `true`), as main
-    /// keeps its flags (codex's `meta_seen`).
-    pub flags: &'static [Str],
-    /// When a checkpoint's persisted slots and totals are thrown away.
-    pub restore: Restore,
-    /// Constants every checkpoint carries (codex's `basis`). A cumulative
-    /// checkpoint with totals but without them re-derives its baseline from
-    /// the last totals record before its offset.
-    pub stamp: &'static [(Str, i64)],
-}
-
-#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
-pub enum Restore {
-    /// Whenever the cursor restarts (rewrite, shrink, replacement).
-    UnlessRotated,
-    /// Only when the file is a different one (identity changed).
-    UnlessReplaced,
-}
-
-#[derive(Debug, Serialize)]
-pub enum UsageMode {
-    /// One event per record. `window`: dedup keys remembered across reads
-    /// (`recent_keys`; 0 = none kept); `keep_on_rotation`: the window survives
-    /// a rewrite; `credited`: a full re-read after a rewrite replays the
-    /// already-credited count silently (`credited_count`).
-    PerRecord { window: usize, keep_on_rotation: bool, credited: bool },
-    /// The record carries running totals: one event per read with the delta.
-    Cumulative,
-    /// The running totals live in one JSON document beside the transcript
-    /// (`<stem><suffix>`, rewritten in place), not in its records: the rules
-    /// read that document, and each read yields the delta since the totals
-    /// last credited. The checkpoint is main's legacy seen-set
-    /// (`{"kind": "legacy", "legacy_seen": [...]}`): the credited keys plus one
-    /// `mark + "<in>:<out>"` key. A shrink re-baselines without an event.
-    Snapshot { suffix: Str, mark: Str },
-    /// SQLite rows that each hold one key's running counters (hermes: a row
-    /// per session). Every read reads them all; the checkpoint keeps each
-    /// key's last counters as `{"kind": kind, map: {key: [counters…]}}`. The
-    /// rules see the row with `delta` (column → growth, floored at 0) and
-    /// `counters` (`"a:b:…"`) added; a row that did not grow yields nothing.
-    Counters { kind: Str, map: Str, columns: &'static [Str] },
-    /// No token records on disk, read the way main's base reader reads them:
-    /// no events, and the legacy seen-set checkpoint kept as it was
-    /// (`{"kind": "legacy", "legacy_seen": [...]}`).
-    Legacy,
-    /// SQLite rows read per partition (`Rows::partition`), one event per
-    /// row with a reading; the checkpoint keeps each partition's last read
-    /// id, held rows excluded, as `{"kind": kind, map: {part: id}}`.
-    Watermarks { kind: Str, map: Str },
-}
-
-#[derive(Debug, Serialize)]
-pub struct UsageRule {
-    pub when: Pred,
+#[serde(bound = "")]
+pub struct UsageRule<V: Vendor> {
+    pub when: Pred<V>,
     /// Slot updates this record makes (before any reading).
-    pub effects: &'static [Effect],
-    pub reading: Option<Reading>,
+    pub effects: &'static [Effect<V>],
+    pub reading: Option<Reading<V>>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct Reading {
-    pub input: Num,
-    pub output: Num,
-    pub cache_read: Num,
-    pub cache_creation: Num,
+#[serde(bound = "")]
+pub struct Reading<V: Vendor> {
+    pub input: Num<V>,
+    pub output: Num<V>,
+    pub cache_read: Num<V>,
+    pub cache_creation: Num<V>,
     /// Dedup key; an empty key means "not a usage record" when `key_required`.
-    pub key: Text,
+    pub key: Text<V>,
     pub key_required: bool,
-    /// Key that is never valid (claude's `::`).
+    /// Key that is never valid (a key made of separators only).
     pub key_invalid: Str,
-    pub model: Text,
-    pub timestamp: Text,
-    pub cli_version: Text,
-    pub cwd: Text,
-    pub session_id: Text,
+    pub model: Text<V>,
+    pub timestamp: Text<V>,
+    pub cli_version: Text<V>,
+    pub cwd: Text<V>,
+    pub session_id: Text<V>,
     /// Extra values for the cost ledger: `(nested key path, value)`.
-    pub raw: &'static [(Path, RawValue)],
+    pub raw: &'static [(Path, RawValue<V>)],
+}
+
+impl<V: Vendor> Reading<V> {
+    /// A reading of `input` and `output` under `key`: no cache split, no
+    /// model, version, stamp, cwd or session, nothing for the ledger.
+    pub const fn of(input: Num<V>, output: Num<V>, key: Text<V>) -> Self {
+        Reading {
+            input,
+            output,
+            cache_read: Num::Zero,
+            cache_creation: Num::Zero,
+            key,
+            key_required: false,
+            key_invalid: "",
+            model: Text::Lit(""),
+            timestamp: Text::Lit(""),
+            cli_version: Text::Lit(""),
+            cwd: Text::Lit(""),
+            session_id: Text::Lit(""),
+            raw: &[],
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
-pub enum RawValue {
-    Num(Num),
-    Text(Text),
+#[serde(bound = "")]
+pub enum RawValue<V: Vendor> {
+    Num(Num<V>),
+    Text(Text<V>),
 }
 
 // ---- activity ---------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-pub struct ActivitySpec {
-    /// Slots that shadow the file's same-named ones during a walk.
-    pub slots: &'static [Slot],
-    pub cursor: Cursor,
-    pub rules: &'static [Rule],
+#[serde(bound = "")]
+pub struct Activity<V: Vendor> {
+    /// Slots that start a walk with another value than the file's.
+    pub slots: &'static [Seed<V>],
+    pub rules: &'static [Rule<V>],
     /// Close the latest inferred turn once the transcript has been quiet.
     pub idle: Option<Idle>,
     /// How the inferred-turn tracker stamps a closed turn.
     pub turn_stamp: TurnStamp,
-    /// Slot holding the reply text a closed turn carries.
-    pub turn_text: Str,
-    /// Slots kept across walks (all others are re-initialised per walk).
-    pub persist: &'static [Str],
-    /// How the kept state is stored in the watcher's per-file seen-keys bag.
-    pub bag: Bag,
-}
-
-/// The walk state as keys in the log watcher's per-file `seen_keys` bag,
-/// which the watcher persists. The line mark is always main's `act_hw::N`;
-/// the rest uses the key formats main's readers use, so the bag means the
-/// same thing whichever reader wrote it.
-#[derive(Debug, Serialize)]
-pub struct Bag {
-    pub slots: &'static [BagSlot],
+    /// Slot holding the reply text a tracker-closed turn carries.
+    pub turn_text: Option<V::Slot>,
+    /// Slots kept across walks (all others are re-initialised per walk), each
+    /// with the key it has in the watcher's per-file seen-keys bag. The key
+    /// formats are main's readers', so the bag means the same thing whichever
+    /// reader wrote it; the line mark is always main's `act_hw::N`.
+    pub kept: &'static [Kept<V>],
     /// The inferred-turn tracker as one JSON key: `{idx, flushed, ts}` for a
     /// `TurnStamp::Text` tracker, `{idx, last_ms, flushed[, cancelled]}` for `Millis`.
-    pub turn: Option<BagTurn>,
-    /// The cursor: `prefix + json(sort_keys)` for `Cursor::Bytes`,
-    /// `prefix + id` for `Cursor::Rows`, and `prefix + part + "::" + id` per
-    /// partition for partitioned rows.
-    pub cursor: Option<Str>,
-    /// Partitioned rows: the key that records the database's first sight
-    /// (every partition then present was anchored at its newest id).
-    pub anchor: Option<Str>,
+    pub turn_key: Option<TurnKey>,
+}
+
+impl<V: Vendor> Activity<V> {
+    /// Rules only: nothing kept between walks, no inferred-turn tracker.
+    pub const fn rules(rules: &'static [Rule<V>]) -> Self {
+        Activity { slots: &[], rules, idle: None, turn_stamp: TurnStamp::Text, turn_text: None, kept: &[], turn_key: None }
+    }
 }
 
 #[derive(Debug, Serialize)]
-pub enum BagSlot {
+#[serde(bound = "")]
+pub struct Kept<V: Vendor> {
+    pub slot: V::Slot,
+    pub prefix: Str,
+    pub form: KeptForm,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum KeptForm {
     /// `prefix + text`, rewritten every walk; no key while empty.
-    Text { slot: Str, prefix: Str },
+    Text,
     /// `prefix + text`, rewritten only when the walk wrote the slot (even
     /// with the same value); an empty value keeps its bare-prefix key.
-    TextOnChange { slot: Str, prefix: Str },
+    TextOnChange,
     /// `prefix + json(text)`; no key while empty.
-    JsonText { slot: Str, prefix: Str },
+    JsonText,
 }
 
 #[derive(Debug, Serialize)]
-pub struct BagTurn {
+pub struct TurnKey {
     pub prefix: Str,
     /// `json.dumps(separators=(",", ":"))` instead of the default `", "` / `": "`.
     pub compact: bool,
     /// No tracker is stored as `prefix + "null"` (else: no key).
     pub keep_null: bool,
-}
-
-#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
-pub enum Cursor {
-    /// Dense line high-water mark (resumable by byte offset).
-    Lines,
-    /// A byte cursor over complete records (rewrites restart it).
-    Bytes,
-    /// A database row-id watermark (`Format::Sqlite`), kept in the bag as
-    /// `Bag::cursor + id`.
-    Rows,
-    /// Every walk replays the whole file (`Format::Text`): the lines up to
-    /// the mark run the rules again with `Pred::Fresh` false, so the state
-    /// they set (the section) is rebuilt instead of stored; a new line still
-    /// unterminated ends the walk before it.
-    Replay,
 }
 
 #[derive(Debug, Serialize)]
@@ -623,37 +557,75 @@ pub enum TurnStamp {
 }
 
 #[derive(Debug, Serialize)]
-pub struct Rule {
-    pub when: Pred,
-    pub effects: &'static [Effect],
+#[serde(bound = "")]
+pub struct Rule<V: Vendor> {
+    pub when: Pred<V>,
+    pub effects: &'static [Effect<V>],
 }
 
 #[derive(Debug, Serialize)]
-pub enum Effect {
-    Emit(Emit),
-    Set(Str, Text),
-    /// Set only while the flag slot is empty, then set the flag.
-    SetOnce { flag: Str, slot: Str, text: Text },
-    SetIfNonEmpty(Str, Text),
+#[serde(bound = "")]
+pub enum Effect<V: Vendor> {
+    Emit(Emit<V>),
+    Set(V::Slot, Text<V>),
+    SetIfNonEmpty(V::Slot, Text<V>),
     /// Append, capped like `Text::Cap`.
-    Append(Str, Text, usize),
-    Turn(TurnOp),
-    When(&'static Pred, &'static [Effect]),
+    Append(V::Slot, Text<V>, usize),
+    Turn(TurnOp<V>),
+    When(&'static Pred<V>, &'static [Effect<V>]),
     /// Stop evaluating rules for this record.
     Stop,
 }
 
 #[derive(Debug, Serialize)]
-pub struct Emit {
+#[serde(bound = "")]
+pub struct Emit<V: Vendor> {
     pub kind: EventKind,
-    pub key: Text,
-    pub detail: Text,
-    pub text: Text,
-    pub timestamp: Text,
+    pub key: Text<V>,
+    pub detail: Text<V>,
+    pub text: Text<V>,
+    pub timestamp: Text<V>,
     /// Session id override (per-record ids); `None` = the file's.
-    pub session: Option<Text>,
+    pub session: Option<Text<V>>,
     /// Emit only when `text` is non-empty.
     pub require_text: bool,
+}
+
+impl<V: Vendor> Emit<V> {
+    pub const fn new(kind: EventKind, key: Text<V>, detail: Text<V>, text: Text<V>, timestamp: Text<V>) -> Self {
+        Emit { kind, key, detail, text, timestamp, session: None, require_text: false }
+    }
+
+    /// An `agent_active` event.
+    pub const fn active(key: Text<V>, detail: Text<V>, text: Text<V>, timestamp: Text<V>) -> Self {
+        Self::new(EventKind::AgentActive, key, detail, text, timestamp)
+    }
+
+    /// A `turn_complete` event.
+    pub const fn done(key: Text<V>, detail: Text<V>, text: Text<V>, timestamp: Text<V>) -> Self {
+        Self::new(EventKind::TurnComplete, key, detail, text, timestamp)
+    }
+
+    /// With a per-record session id.
+    pub const fn of_session(self, session: Text<V>) -> Self {
+        let Emit { kind, key, detail, text, timestamp, session: _, require_text } = self;
+        Emit { kind, key, detail, text, timestamp, session: Some(session), require_text }
+    }
+
+    /// Emitted only when its text is non-empty.
+    pub const fn with_text(self) -> Self {
+        let Emit { kind, key, detail, text, timestamp, session, require_text: _ } = self;
+        Emit { kind, key, detail, text, timestamp, session, require_text: true }
+    }
+
+    pub const fn effect(self) -> Effect<V> {
+        Effect::Emit(self)
+    }
+
+    /// The event, then no further rule for the record.
+    pub const fn last(self) -> [Effect<V>; 2] {
+        [Effect::Emit(self), Effect::Stop]
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -666,71 +638,77 @@ pub enum EventKind {
 
 /// Operations on the core's inferred-turn tracker (`{idx, ts, ms, flushed, cancelled}`).
 #[derive(Debug, Serialize)]
-pub enum TurnOp {
+#[serde(bound = "")]
+pub enum TurnOp<V: Vendor> {
     /// Close the open turn (emitting `boundary`), then open the next one at this record.
-    Open { boundary: Str, ts: Text, ms: Num },
+    Open { boundary: Str, ts: Text<V>, ms: Num<V> },
     /// Open the next turn only when none is open.
-    EnsureOpen { ts: Text, ms: Num },
+    EnsureOpen { ts: Text<V>, ms: Num<V> },
     /// Re-stamp the open turn with this record's time (text replaces, ms takes the max).
-    Touch { ts: Option<Text>, ms: Option<Num> },
+    Touch { ts: Option<Text<V>>, ms: Option<Num<V>> },
     /// Close the open turn with `detail` (stamped with the max of its ms and the record's).
-    Close { detail: Str, ms: Option<Num> },
+    Close { detail: Str, ms: Option<Num<V>> },
     /// Close (if open) with `detail` and mark the turn cancelled.
-    Cancel { detail: Str, ms: Option<Num> },
+    Cancel { detail: Str, ms: Option<Num<V>> },
 }
 
 // ---- turns ------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-pub struct TurnsSpec {
-    /// Slots that shadow the file's same-named ones while splitting turns.
-    pub slots: &'static [Slot],
-    pub method: TurnMethod,
-    pub filter: SessionFilter,
-    /// Slot updates made while walking (they run before `skip`).
-    pub effects: &'static [Rule],
-    /// Records skipped before any turn rule (claude: no `message` object).
-    pub skip: Pred,
-    pub open: Option<TurnOpen>,
-    pub call: Option<TurnCall>,
-    pub close: Option<TurnClose>,
-    /// Slot holding the turns' session id.
-    pub session: Str,
-}
-
-#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum TurnMethod {
-    /// The transcript names its own turns (the rules below).
-    Exact,
+#[serde(bound = "")]
+pub enum Turns<V: Vendor> {
+    /// No per-turn usage (no token records, or none a turn can be cut from).
+    None,
     /// Usage cut on `turn_complete` timestamps (main's base reader).
     Inferred,
-    Unsupported,
+    /// The transcript names its own turns.
+    Exact(&'static ExactTurns<V>),
 }
 
 #[derive(Debug, Serialize)]
-pub enum SessionFilter {
+#[serde(bound = "")]
+pub struct ExactTurns<V: Vendor> {
+    /// Slots that start the pass with another value than the file's.
+    pub slots: &'static [Seed<V>],
+    pub filter: SessionFilter<V>,
+    /// Slot updates made while walking (they run before `skip`).
+    pub effects: &'static [Rule<V>],
+    /// Records skipped before any turn rule.
+    pub skip: Option<Pred<V>>,
+    pub open: Option<TurnOpen<V>>,
+    pub call: TurnCall<V>,
+    pub close: Option<TurnClose<V>>,
+    /// The whole file must be UTF-8 (main opens it strictly and raises);
+    /// else a line that is not is skipped.
+    pub strict_utf8: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub enum SessionFilter<V: Vendor> {
     /// A requested session id is ignored.
     Ignore,
     /// A requested id must be the file's session slot or its stem.
     File,
     /// Records whose own session id differs are skipped.
-    Record(Text),
+    Record(Text<V>),
 }
 
 #[derive(Debug, Serialize)]
-pub struct TurnOpen {
-    pub when: Pred,
-    pub mode: OpenMode,
-    pub prompt: Text,
+#[serde(bound = "")]
+pub struct TurnOpen<V: Vendor> {
+    pub when: Pred<V>,
+    pub mode: OpenMode<V>,
+    pub prompt: Text<V>,
     pub merge: PromptMerge,
-    pub started: Text,
+    pub started: Text<V>,
 }
 
 #[derive(Debug, Serialize)]
-pub enum OpenMode {
+#[serde(bound = "")]
+pub enum OpenMode<V: Vendor> {
     /// One turn per key; a later record with the same key rejoins it.
-    ByKey(Text),
+    ByKey(Text<V>),
     /// Every matching record starts a new turn.
     Each,
     /// Join the open turn; start one when none is open.
@@ -746,32 +724,33 @@ pub enum PromptMerge {
 }
 
 #[derive(Debug, Serialize)]
-pub struct TurnCall {
-    pub when: Pred,
+#[serde(bound = "")]
+pub struct TurnCall<V: Vendor> {
+    pub when: Pred<V>,
     /// One call per entry of an object; `None`: one call, read off the record.
     pub each: Option<Each>,
     /// Paths are relative to the entry when iterating.
-    pub input: Num,
-    pub cache_read: Num,
-    pub cache_creation: Num,
-    pub output: Num,
+    pub input: Num<V>,
+    pub cache_read: Num<V>,
+    pub cache_creation: Num<V>,
+    pub output: Num<V>,
     /// `input` counts the cache parts too: subtract them.
     pub input_includes_cache: bool,
     /// The counters are running totals: calls are their deltas.
     pub cumulative: bool,
     /// A call whose counters are all zero is not a call.
     pub skip_zero: bool,
-    pub key: Option<Text>,
+    pub key: Option<Text<V>>,
     pub key_invalid: Str,
-    pub model: Text,
-    pub ts: Text,
-    pub cli_version: Text,
+    pub model: Text<V>,
+    pub ts: Text<V>,
+    pub cli_version: Text<V>,
     pub orphan: Orphan,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Each {
-    /// The object whose entries are calls (the entry key is `Text::EntryKey`).
+    /// The object whose entries are calls (the entry's key is `Scope::entry_key`).
     pub map: Path,
     /// Used as the single entry, with an empty key, when `map` is missing or empty.
     pub fallback: Path,
@@ -788,11 +767,234 @@ pub enum Orphan {
 }
 
 #[derive(Debug, Serialize)]
-pub struct TurnClose {
-    pub when: Pred,
-    pub ended: Text,
-    pub session: Option<Text>,
-    pub model_calls: Option<Num>,
+#[serde(bound = "")]
+pub struct TurnClose<V: Vendor> {
+    pub when: Pred<V>,
+    pub ended: Text<V>,
+    pub session: Option<Text<V>>,
+    pub model_calls: Option<Num<V>>,
     /// Drop a closed turn whose four counters are all zero.
     pub drop_empty: bool,
+}
+
+// ---- records: one declaration type per backend ------------------------------
+
+pub use crate::observe::{Jsonl, Sqlite, TextLog};
+
+/// `Jsonl`: one transcript per session, a JSON object per line.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct JsonlRecords<V: Vendor> {
+    pub usage: Option<FileUsage<V>>,
+    pub cursor: LineCursor,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum LineCursor {
+    /// Dense line high-water mark (resumable by byte offset).
+    Lines,
+    /// A byte cursor over complete records (rewrites restart it), kept in the
+    /// bag as `key + json(checkpoint, sort_keys)`.
+    Bytes { key: Str },
+}
+
+/// `TextLog`: one plain-text transcript per session (Markdown history). Each
+/// complete line is a record `{"line": text}`, invalid UTF-8 dropped and the
+/// line ending removed. Every activity walk replays the whole file: the
+/// lines up to the mark run the rules again with `Scope::fresh` false, so
+/// the state they set is rebuilt instead of stored; a new line still
+/// unterminated ends the walk before it. A usage checkpoint names itself
+/// `kind`.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct TextRecords<V: Vendor> {
+    pub kind: Str,
+    pub usage: Option<FileUsage<V>>,
+}
+
+/// Token usage read from a file's tail.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct FileUsage<V: Vendor> {
+    /// Slots that start a usage read with another value than the file's.
+    pub slots: &'static [Seed<V>],
+    pub rules: &'static [UsageRule<V>],
+    pub mode: FileMode,
+    /// Slots persisted in the checkpoint (and restored from it).
+    pub persist: &'static [V::Slot],
+    /// The `persist` slots stored as JSON booleans (set = `true`).
+    pub flags: &'static [V::Slot],
+    /// When a checkpoint's persisted slots and totals are thrown away.
+    pub restore: Restore,
+}
+
+impl<V: Vendor> FileUsage<V> {
+    /// One event per record, `window` dedup keys remembered across reads.
+    pub const fn per_record(rules: &'static [UsageRule<V>], window: usize) -> Self {
+        FileUsage {
+            slots: &[],
+            rules,
+            mode: FileMode::PerRecord { window, keep_on_rotation: false, credited: false },
+            persist: &[],
+            flags: &[],
+            restore: Restore::UnlessRotated,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum Restore {
+    /// Whenever the cursor restarts (rewrite, shrink, replacement).
+    UnlessRotated,
+    /// Only when the file is a different one (identity changed).
+    UnlessReplaced,
+}
+
+#[derive(Debug, Serialize, Clone, Copy)]
+pub enum FileMode {
+    /// One event per record. `window`: dedup keys remembered across reads
+    /// (`recent_keys`; 0 = none kept); `keep_on_rotation`: the window survives
+    /// a rewrite; `credited`: a full re-read after a rewrite replays the
+    /// already-credited count silently (`credited_count`).
+    PerRecord { window: usize, keep_on_rotation: bool, credited: bool },
+    /// The record carries running totals: one event per read with the delta.
+    /// `stamp`: constants every checkpoint carries; a checkpoint with totals
+    /// but without them re-derives its baseline from the last totals record
+    /// before its offset.
+    Cumulative { stamp: &'static [(Str, i64)] },
+    /// The running totals live in one JSON document beside the transcript
+    /// (`<stem><suffix>`, rewritten in place), not in its records: the rules
+    /// read that document, and each read yields the delta since the totals
+    /// last credited. The checkpoint is main's legacy seen-set
+    /// (`{"kind": "legacy", "legacy_seen": [...]}`): the credited keys plus one
+    /// `mark + "<in>:<out>"` key. A shrink re-baselines without an event.
+    Snapshot { suffix: Str, mark: Str },
+}
+
+/// `Sqlite`: one database for every session. Records are the rows of the
+/// declared queries, read into JSON objects by column name.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct SqliteRecords<V: Vendor> {
+    /// Columns that hold JSON text: read as the parsed value (`null` when malformed).
+    pub json: &'static [Str],
+    /// Columns that hold binary blobs: kept as bytes (`Scope::blob`), and
+    /// `null` in the record.
+    pub binary: &'static [Str],
+    /// Columns each table must have (`PRAGMA table_info`), checked once per
+    /// read: a store without them is `Error::Unsupported`.
+    pub requires: &'static [(Str, &'static [Str])],
+    pub usage: SqlUsage<V>,
+    pub activity: SqlWalk<V>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub enum SqlUsage<V: Vendor> {
+    /// No token usage is stored: nothing read, the checkpoint as it was.
+    None,
+    /// No token records, read the way main's base reader reads them: no
+    /// events, and its legacy seen-set checkpoint kept
+    /// (`{"kind": "legacy", "legacy_seen": [...]}`).
+    Legacy,
+    /// One event per row after the checkpoint's `row_id` (main's `{"kind":
+    /// "sqlite", "row_id", "identity"}`); `sql` binds that watermark as `?`.
+    After { rules: &'static [UsageRule<V>], sql: Str, id: Str },
+    /// Rows that each hold one key's running counters. Every read reads them
+    /// all; the checkpoint keeps each key's last counters as `{"kind": kind,
+    /// map: {key: [counters…]}}`. The rules see the row with `delta` (column →
+    /// growth, floored at 0) and `counters` (`"a:b:…"`) added; a row that did
+    /// not grow yields nothing.
+    Counters { rules: &'static [UsageRule<V>], sql: Str, id: Str, kind: Str, map: Str, columns: &'static [Str] },
+    /// Rows read per partition, one event per row with a reading; the
+    /// checkpoint keeps each partition's last read id, held rows excluded, as
+    /// `{"kind": kind, map: {part: id}}`.
+    Watermarks { rules: &'static [UsageRule<V>], page: Page<V>, part: Partition<V>, kind: Str, map: Str },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub enum SqlWalk<V: Vendor> {
+    /// Rows after one database-wide id, kept in the bag as `key + id`.
+    Rows(RowWalk<V>),
+    /// Rows after each partition's id, kept as `key + part + "::" + id`.
+    /// `anchor` is the bag key that records the database's first sight: every
+    /// partition then present starts at its newest id, and one that appears
+    /// later is read from its start. `restart_below`: a partition whose
+    /// newest id fell below its mark starts over at it.
+    Partitions { page: Page<V>, part: Partition<V>, restart_below: bool, key: Str, anchor: Str },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct RowWalk<V: Vendor> {
+    /// `?1` is the watermark, `?2` the page size (`?3`: see `revisit`).
+    pub sql: Str,
+    /// The column holding the increasing row id the watermark follows.
+    pub id: Str,
+    /// The newest id (`SELECT COALESCE(MAX(id), 0) FROM …`): the first sight
+    /// of a database starts there, since everything in it is history.
+    pub newest: Str,
+    pub page: i64,
+    /// The newest id is read every pass, and one below the watermark (a
+    /// replaced database) starts over at it.
+    pub restart_below: bool,
+    /// A last row matching this is not consumed yet (it is read again next
+    /// pass, when it may have changed).
+    pub hold_last: Option<Pred<V>>,
+    /// Rows that are read again on later passes until they settle.
+    pub revisit: Option<Revisit<V>>,
+    /// Each row gets this boolean column: it is the newest row of the pass.
+    pub last_as: Option<Str>,
+    pub key: Str,
+}
+
+/// Rows matching `when` (a step still streaming) stay pending: the walk's
+/// query binds their ids as a JSON list (`?3`), a pending row read again
+/// yields nothing until it no longer matches, and the ids are kept in the bag
+/// as `key + json(sorted ids)`.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct Revisit<V: Vendor> {
+    pub when: Pred<V>,
+    pub key: Str,
+}
+
+/// One page of a partition's rows: `sql` binds the partition (`?1`), its
+/// watermark (`?2`) and the page size (`?3`).
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct Page<V: Vendor> {
+    pub sql: Str,
+    pub id: Str,
+    pub size: i64,
+    pub hold_last: Option<Pred<V>>,
+}
+
+/// The partitions of one table (a session each), and the label a
+/// partition's rows carry.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct Partition<V: Vendor> {
+    /// Every partition with its newest id, as columns `part` and `top`. A
+    /// partition whose newest id is not above its watermark is not queried.
+    pub tops: Str,
+    /// The label (column `label_as` on each row): the first non-empty text,
+    /// evaluated over the first row of its query with the partition bound as
+    /// `?1`. A query that fails (its table is absent in this build) is
+    /// skipped. A resolved label is remembered; a partition with none is
+    /// labelled with its own name, looked up again next read, and reported
+    /// once through `unlabelled` (`{path}` and `{part}` filled in).
+    pub label: &'static [(Str, Text<V>)],
+    pub label_as: Str,
+    pub unlabelled: Str,
+}
+
+/// One CLI's whole declaration as JSON (`navide-cli-runtime declarations`).
+pub fn export<V: Vendor>() -> serde_json::Value {
+    let mut out = serde_json::to_value(V::CLI).unwrap_or_default();
+    if let Some(object) = out.as_object_mut() {
+        object.insert("observe".into(), serde_json::to_value(V::OBSERVE).unwrap_or_default());
+    }
+    out
 }

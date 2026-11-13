@@ -24,6 +24,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable
 
@@ -66,11 +67,19 @@ def _lines(records: list[dict]) -> str:
     return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
 
 
-def _step(mode: str, records: list[dict] | None, mtime: float, now: float, sidecars: dict[str, str] | None = None) -> dict:
-    """One watcher poll; `sidecars` are files (re)written beside the transcript first."""
-    step = {"mode": mode, "text": _lines(records or []), "mtime": B + mtime, "now": B + now}
+def _step(mode: str, records: list[dict] | None, mtime: float, now: float, sidecars: dict[str, str] | None = None,
+          **extra: Any) -> dict:
+    """One watcher poll; `sidecars` are files (re)written beside the transcript first.
+
+    `mode` is "write" (truncate and write), "append", or "replace" (a new file
+    renamed over the old one, so its identity changes). `extra`: `tail` (raw
+    text after the records), `b64` (raw bytes after that), `checkpoint_drop`
+    (keys removed from the usage checkpoint before the read, as an older build
+    left it) and `bag_add` (keys already in the seen-keys bag)."""
+    step = {"mode": mode, "text": _lines(records or []) + extra.pop("tail", ""), "mtime": B + mtime, "now": B + now}
     if sidecars:
         step["sidecars"] = sidecars
+    step.update(extra)
     return step
 
 
@@ -127,6 +136,54 @@ def _scenarios() -> dict[str, dict]:
         claude_t._prompt_line("p3", "after resume", "2026-09-16T01:00:00Z"),
         claude_t._assistant_line("m3", "r3", "2026-09-16T01:00:04Z", inp=1, cr=300, cc=5, out=7, stop="end_turn"),
     ]
+    # A workspace path with decomposed characters ("é" as e + U+0301): main
+    # NFC-normalises the cwd it reads from the transcript.
+    nfd_cwd = "/tmp/café"
+
+    def claude_tool_result(ts: str, result: dict) -> dict:
+        return {"type": "user", "promptId": "p1", "timestamp": ts, "toolUseResult": result,
+                "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]}}
+
+    def claude_tools(msg_id: str, ts: str, *tools: tuple[str, dict], text: str = "") -> dict:
+        content = ([{"type": "text", "text": text}] if text else []) + [
+            {"type": "tool_use", "name": name, "input": tool_input} for name, tool_input in tools]
+        return {"type": "assistant", "requestId": f"req-{msg_id}", "timestamp": ts,
+                "message": {"id": msg_id, "model": "claude-opus-4-7", "stop_reason": "tool_use", "content": content,
+                            "usage": {"input_tokens": 5, "cache_read_input_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "output_tokens": 2,
+                                      "cache_creation": {"ephemeral_1h_input_tokens": 3}}}}
+
+    notification = "<task-notification><task-id>ag-1</task-id><status>completed</status></task-notification>"
+    claude_rules = [
+        dict(claude_t._prompt_line("p1", "start the work", "2026-09-17T00:00:00Z"), cwd=nfd_cwd, version="2.1.304"),
+        claude_tools("q1", "2026-09-17T00:00:01Z", ("AskUserQuestion", {"questions": []}), text="asking"),
+        claude_tool_result("2026-09-17T00:00:02Z", {"backgroundTaskId": "bg-1"}),
+        claude_tool_result("2026-09-17T00:00:03Z", {"status": "async_launched", "agentId": "ag-1"}),
+        claude_tool_result("2026-09-17T00:00:04Z", {"status": "forked", "background": True, "agentId": "ag-2"}),
+        claude_tool_result("2026-09-17T00:00:05Z", {"status": "forked", "agentId": "ag-3"}),
+        claude_tools("s1", "2026-09-17T00:00:06Z", ("TaskStop", {"task_id": "bg-1"}), ("KillShell", {"shell_id": "sh-9"}),
+                     ("KillBash", {}), ("Read", {"file_path": "a.py"})),
+        {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-09-17T00:00:07Z", "content": notification},
+        {"type": "queue-operation", "operation": "dequeue", "timestamp": "2026-09-17T00:00:08Z"},
+        {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-09-17T00:00:08Z",
+         "content": "<task-notification><task-id>ag-2</task-id></task-notification>"},
+        {"type": "user", "isCompactSummary": True, "timestamp": "2026-09-17T00:00:09Z",
+         "message": {"role": "user", "content": "This session is being continued from a previous conversation."}},
+        {"type": "user", "isMeta": True, "timestamp": "2026-09-17T00:00:10Z",
+         "message": {"role": "user", "content": "<local-command-caveat>caveat</local-command-caveat>"}},
+        {"type": "tool_use", "timestamp": "2026-09-17T00:00:11Z"},
+        {"type": "user", "timestamp": "2026-09-17T00:00:12Z", "message": "not an object"},
+        claude_t._assistant_line("e1", "r9", "2026-09-17T00:00:13Z", inp=1, cr=2, cc=3, out=4, stop="end_turn"),
+    ]
+    claude_bad = [
+        claude_t._prompt_line("p1", "before the bad line", "2026-09-18T00:00:00Z"),
+        claude_t._assistant_line("m1", "r1", "2026-09-18T00:00:01Z", inp=4, cr=0, cc=0, out=2, stop="end_turn"),
+    ]
+    # A line that is not UTF-8, then a good one.
+    claude_bad_bytes = base64.b64encode(
+        b'{"type":"assistant","timestamp":"2026-09-18T00:00:02Z","message":{"content":"\xff\xfe"}}\n'
+        + _lines([claude_t._assistant_line("m2", "r2", "2026-09-18T00:00:03Z", inp=7, cr=0, cc=0, out=1,
+                                           stop="end_turn")]).encode()).decode("ascii")
     droid_dir = "droid/sessions/-tmp-demo"
     droid_sid = "d0c1e2f3-0000-4000-8000-000000000001"
     droid_settings = f"{droid_dir}/{droid_sid}.settings.json"
@@ -228,8 +285,9 @@ def _scenarios() -> dict[str, dict]:
         return ("INSERT INTO transcript_events(session_id, seq, event_json, message_role) VALUES (?, ?, ?, ?)",
                 (sid, seq, None if event is None else json.dumps(event), role))
 
-    oc_windows, oc_header, oc_nodes = (f"{n}0000000-0000-4000-8000-000000000000" for n in "abc")
+    oc_windows, oc_header, oc_nodes, oc_unkeyed = (f"{n}0000000-0000-4000-8000-000000000000" for n in "abcd")
     oc_key2 = "agent:main:navide-22222222-2222-4333-8444-555555555555"
+    oc_key3 = "agent:main:navide-33333333-2222-4333-8444-555555555555"
     oc_steps = [
         _db_step([oc_t._SCHEMA, oc_t._SESSION_TABLES, oc_row(oc_t.KEY, 0, {"type": "session"}),
                   oc_row(oc_t.KEY, 1, oc_t._msg("user", "old"), "user"),
@@ -267,6 +325,22 @@ def _scenarios() -> dict[str, dict]:
             oc_row(oc_nodes, 0, {"type": "session"}),
             oc_row(oc_nodes, 1, oc_t._msg("user", "late"), "user"),
         ], 3, 4),
+        # A session that no table and no header gives a key: its events carry
+        # the raw id (main logs it once), and the keyed session beside it is
+        # read as before.
+        _db_step([
+            oc_row(oc_unkeyed, 0, {"type": "session"}),
+            oc_row(oc_unkeyed, 1, oc_t._msg("user", "who am I"), "user"),
+            oc_row(oc_unkeyed, 2, oc_t._msg("assistant", "nobody", stopReason="stop",
+                                            usage={"input": 3, "output": 2}), "assistant"),
+            oc_row(oc_nodes, 2, oc_t._msg("assistant", "keyed still", stopReason="stop",
+                                          usage={"input": 8, "output": 1}), "assistant"),
+        ], 4, 5),
+        # Its mapping is written later: from then on its rows carry the key.
+        _db_step([
+            ("INSERT INTO session_windows(session_id, session_key) VALUES (?, ?)", (oc_unkeyed, oc_key3)),
+            oc_row(oc_unkeyed, 3, oc_t._msg("user", "now known"), "user"),
+        ], 5, 6),
     ]
     def cursor_blob(blob_id: str, message: dict | None = None) -> tuple | str:
         """A JSON message blob, or (no message) a protobuf structure node."""
@@ -353,6 +427,22 @@ def _scenarios() -> dict[str, dict]:
             "file": f"home/.codex/sessions/2026/10/20/rollout-2026-10-20T10-00-00-{codex_t._THREAD}.jsonl",
             "steps": [_step("write", codex[:12], 0, 1), _step("append", codex[12:], 1, 2)],
         },
+        # The rewrites a rollout can go through: an empty reply key left in the
+        # bag by an earlier build, a truncation, a replacement (new identity),
+        # and a checkpoint from before `basis` (its baseline is re-derived).
+        "codex_rewrites": {
+            "vendor": "codex", "env": {},
+            "file": f"home/.codex/sessions/2026/10/21/rollout-2026-10-21T10-00-00-{codex_t._THREAD}.jsonl",
+            "steps": [
+                _step("write", codex[:5], 0, 1, bag_add=["__lasttext__:"]),
+                _step("append", codex[5:], 1, 2),
+                _step("write", codex[:12], 2, 3),
+                _step("replace", codex, 3, 4),
+                _step("append", [], 3, 5, checkpoint_drop=["basis"]),
+                _step("append", codex_t._turn(3, "third prompt", "third reply", totals=(4000, 2000, 200, 40),
+                                              last=(1500, 600, 80, 10), start=22), 5, 6, checkpoint_drop=["basis"]),
+            ],
+        },
         "codex_subagent_parent": {
             "vendor": "codex", "env": {},
             "file": f"{sub_day}/rollout-2026-09-05T09-10-06-{sub_t.PARENT_ID}.jsonl",
@@ -368,6 +458,31 @@ def _scenarios() -> dict[str, dict]:
             "file": "claude/projects/-tmp-demo/turns-1.jsonl",
             "steps": [_step("write", claude[:4], 0, 1), _step("append", claude[4:7], 1, 2),
                       _step("append", claude[7:], 2, 3)],
+        },
+        # One record (at least) for every declared rule: questions, background
+        # tasks started and stopped, queued notifications, compaction and meta
+        # prompts, a bare tool_use record, a malformed line and a blank one. The
+        # transcript's cwd is written decomposed.
+        "claude_rules": {
+            "vendor": "claude", "env": {"CLAUDE_CONFIG_DIR": "claude"},
+            "file": "claude/projects/-tmp-caf-/rules-1.jsonl",
+            "as_written": [[unicodedata.normalize("NFC", nfd_cwd), nfd_cwd]],
+            "steps": [_step("write", claude_rules[:3], 0, 1),
+                      _step("append", claude_rules[3:8], 1, 2, tail="{not json}\n\n"),
+                      _step("append", claude_rules[8:], 2, 3)],
+        },
+        # No cwd in the transcript: the folder name is read back.
+        "claude_dash_dir": {
+            "vendor": "claude", "env": {"CLAUDE_CONFIG_DIR": "claude"},
+            "file": "claude/projects/-tmp-demo-app/dash-1.jsonl",
+            "steps": [_step("write", claude_bad, 0, 1)],
+        },
+        # A line that is not UTF-8 ends main's walk with an error, every poll.
+        "claude_bad_bytes": {
+            "vendor": "claude", "env": {"CLAUDE_CONFIG_DIR": "claude"},
+            "file": "claude/projects/-tmp-demo/bad-1.jsonl",
+            "steps": [_step("write", claude_bad, 0, 1), _step("append", [], 1, 2, b64=claude_bad_bytes),
+                      _step("append", [], 1, 3)],
         },
         "pi_rewrite": {
             "vendor": "pi", "env": {"PI_CODING_AGENT_SESSION_DIR": "pi"},
@@ -399,12 +514,12 @@ def _scenarios() -> dict[str, dict]:
             "steps": [_step("write", muse[:6], 0, 1), _step("append", muse[6:10], 1, 2),
                       _step("append", muse[10:], 2, 3)],
         },
-        # A subagent's log: not a transcript (its tokens are the parent's).
-        # main's turns_for_session does not apply that rule (parse_session_file
-        # credits the child's own usage); the runtime applies it everywhere, so
-        # turns are not compared here (REDESIGN-REPORT.md, Python defects).
+        # A subagent's log: not a transcript for usage or activity (its tokens
+        # are the parent's). main's turns_for_session does not apply that rule
+        # (parse_session_file credits the child's own usage), and neither does
+        # the runtime.
         "muse_subagent": {
-            "vendor": "muse", "env": {"XDG_DATA_HOME": "share"}, "skip_turns": True,
+            "vendor": "muse", "env": {"XDG_DATA_HOME": "share"},
             "file": f"{muse_dir}/subagent/child-1/session.jsonl",
             "steps": [_step("write", muse[:9], 0, 1)],
         },
@@ -455,6 +570,9 @@ def _scenarios() -> dict[str, dict]:
                 # Past the old mark, lines are new again; the reply text is kept for the next walk.
                 _text_step("append", "> Tokens: 0 sent, 0 received.\n> Tokens: 7 sent, 8 received.\n" * 18
                            + "#### next\nstill going\n", 4, 5),
+                # A usage line ended by a lone `\r` and one still unterminated:
+                # the whole-file pass behind turns_for_session counts both.
+                _text_step("append", "> Tokens: 3 sent, 4 received.\r> Tokens: 9 sent, 1 received.", 5, 6),
             ],
         },
         "grok_turns": {
@@ -530,20 +648,35 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
             con.commit()
             con.close()
             files.append(base64.b64encode(path.read_bytes()).decode("ascii"))
+        elif step["mode"] == "replace":
+            fresh = path.with_name(path.name + ".new")
+            with fresh.open("w", encoding="utf-8", newline="") as fh:
+                fh.write(step["text"])
+            os.replace(fresh, path)
         else:
             with path.open("w" if step["mode"] == "write" else "a", encoding="utf-8", newline="") as fh:
                 fh.write(step["text"])
+        if step.get("b64"):
+            with path.open("ab") as fh:
+                fh.write(base64.b64decode(step["b64"]))
         os.utime(path, (step["mtime"], step["mtime"]))
         clock[0] = step["now"]
+        checkpoint = {k: v for k, v in checkpoint.items() if k not in (step.get("checkpoint_drop") or ())}
+        seen.update(step.get("bag_add") or ())
         parsed = reader.parse_incremental(path, checkpoint)
         checkpoint = parsed.checkpoint
-        activity = reader.parse_activity(path, seen)
-        steps.append({
-            "usage": {"events": [_pick(e, USAGE_FIELDS) for e in parsed.events], "checkpoint": parsed.checkpoint},
-            "activity": [_activity_dict(e) for e in activity],
-            "bag": sorted(seen),
-        })
-    turns = None if scenario.get("skip_turns") else [_turn_dict(t) for t in reader.turns_for_session(path, "")]
+        got = {"usage": {"events": [_pick(e, USAGE_FIELDS) for e in parsed.events], "checkpoint": parsed.checkpoint}}
+        try:
+            got["activity"] = [_activity_dict(e) for e in reader.parse_activity(path, seen)]
+        except UnicodeDecodeError:
+            # main's walk raises on a line that is not UTF-8, after saving its state.
+            got["activity"], got["activity_error"] = [], "decode"
+        got["bag"] = sorted(seen)
+        steps.append(got)
+    try:
+        turns: Any = [_turn_dict(t) for t in reader.turns_for_session(path, "")]
+    except UnicodeDecodeError:
+        turns = {"error": "decode"}
     result = _norm({"steps": steps, "turns": turns}, str(root))
     if files:
         result["files"] = files
@@ -567,6 +700,9 @@ def test_python_readers_match_the_parity_fixtures(name: str, tmp_path: Path, mon
         "vendor": scenario["vendor"],
         "file": scenario["file"],
         "sidecars": scenario.get("sidecars") or {},
+        # `[normalised, as written]` pairs: the runtime hands a cwd on as
+        # written and the seam normalises it (the declaration says which form).
+        "as_written": scenario.get("as_written") or [],
         "steps": [
             {**step, **({"db": result["files"][i]} if step["mode"] == "db" else {}), "expect": got}
             for i, (step, got) in enumerate(zip(scenario["steps"], result["steps"]))
@@ -636,7 +772,7 @@ def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest
 
     def counting(vendor: str, op: str, **fields: Any):  # noqa: ANN202
         answer = real_call(vendor, op, **fields)
-        if answer is not None and answer[0]:
+        if answer is not None:
             calls.append(op)
         return answer
 
@@ -644,7 +780,6 @@ def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest
     wrapped = _run(scenario, tmp_path / "rt",
                    lambda: cli_runtime.wrap(cli_vendor(scenario["vendor"]).make_log_reader()), monkeypatch)
     # The Rust process answered every routed call (no silent fallback).
-    turns = 0 if scenario.get("skip_turns") else 1
-    assert set(calls) == {"usage", "activity", "turns"} - ({"turns"} if not turns else set())
-    assert len(calls) == 2 * len(scenario["steps"]) + turns
+    assert set(calls) == {"usage", "activity", "turns"}
+    assert len(calls) == 2 * len(scenario["steps"]) + 1
     assert json.loads(_compared(wrapped).replace("/rt", "/py")) == json.loads(_compared(expected))

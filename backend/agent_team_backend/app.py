@@ -2599,7 +2599,7 @@ async def _start_log_watcher() -> None:
     from . import acp_switch
 
     acp_switch.apply_settings(ui_settings_store.get())
-    # Settings → CLI Agents → Rust CLI runtime (experimental); off unless turned on.
+    # The `rustCliRuntime` setting (experimental, no Settings toggle yet); off unless set.
     _cli_runtime.apply_settings(ui_settings_store.get())
     # Per-pane watch files hold message text in the clear and belong to panes
     # that died with the previous process. Only a startup sweep ever removes
@@ -2906,6 +2906,9 @@ async def _stop_log_watcher() -> None:
             # LogWatcher.drain_pending_tokens.
             await _log_watcher.drain_pending_tokens()
             _log_watcher.stop()
+        # After the watcher (its readers call the runtime); off the loop, since
+        # it waits for the process to go.
+        await asyncio.to_thread(_cli_runtime.shutdown)
         try:
             tokens_store.flush()
         except Exception as err:  # noqa: BLE001
@@ -3010,6 +3013,8 @@ async def health() -> dict[str, Any]:
         body["diagnostics"] = {
             "loop_lag_ms": await _loop_lag_ms(loop),
             "default_pool": _default_pool_reading(loop),
+            # The switch, the process, and who answered each CLI's reader calls.
+            "cli_runtime": _cli_runtime.status(),
         }
     except Exception as err:  # noqa: BLE001 — fail open
         log.debug("health diagnostics unavailable: %s", err)

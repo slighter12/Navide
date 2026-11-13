@@ -2,6 +2,7 @@
  "vendor": "muse",
  "file": "share/muse/sessions/2026/08/12/b3ef50f0-e347-4887-a498-c7c16c3aa11e/subagent/child-1/session.jsonl",
  "sidecars": {},
+ "as_written": [],
  "steps": [
   {
    "mode": "write",
@@ -18,5 +19,30 @@
    }
   }
  ],
- "turns": null
+ "turns": [
+  {
+   "turn_index": 1,
+   "session_id": "",
+   "started_at": "2026-08-11T23:43:40.000006+00:00",
+   "ended_at": "2026-08-11T23:43:40.000006+00:00",
+   "prompt_excerpt": "",
+   "input": 900,
+   "cache_read": 0,
+   "cache_creation": 0,
+   "output": 40,
+   "calls": [
+    {
+     "ts": "2026-08-11T23:43:40.000006+00:00",
+     "model": "",
+     "input": 900,
+     "cache_read": 0,
+     "cache_creation": 0,
+     "output": 40,
+     "cli_version": ""
+    }
+   ],
+   "model_calls": null,
+   "cli_version": ""
+  }
+ ]
 }

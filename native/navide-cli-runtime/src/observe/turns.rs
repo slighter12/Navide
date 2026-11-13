@@ -1,26 +1,19 @@
 //! Per-turn usage. `exact`: the transcript names its turns (the declaration
 //! says which records open one, which are model calls, which close one).
 //! `inferred`: main's generic cut of usage on `turn_complete` timestamps.
-use super::{jsonl, ActivityEvent, Error, TurnCall, TurnUsage, UsageEvent};
-use crate::decl::{Each, OpenMode, Orphan, PromptMerge, SessionFilter, TurnsSpec};
-use crate::decl::Num;
+use super::activity::{self, At};
+use super::{file, ActivityEvent, Error, File, TurnCall, TurnUsage, UsageEvent};
+use crate::decl::{Each, ExactTurns, Num, OpenMode, Orphan, PromptMerge, SessionFilter, Vendor};
 use crate::expr::{self, get, user_prompt, Scope, Slots};
 use crate::time::{sort_key, turn_timestamp};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const TURN_EXCERPT_MAX_CHARS: usize = 80;
 
 /// `turn_excerpt`: whitespace collapsed, capped.
 fn excerpt(text: &str) -> String {
-    text.split(|c: char| c.is_whitespace() || ('\x1c'..='\x1f').contains(&c))
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(TURN_EXCERPT_MAX_CHARS)
-        .collect()
+    text.split(expr::py_space).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ").chars().take(TURN_EXCERPT_MAX_CHARS).collect()
 }
 
 /// `merge_prompt_excerpt`: the first typed prompt wins; a `<`-wrapper only
@@ -37,7 +30,7 @@ fn some(text: String) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn scope<'a>(record: &'a Value, line: usize, slots: &'a Slots, entry_key: &'a str) -> Scope<'a> {
+fn scope<'a, V: Vendor>(record: &'a Value, line: usize, slots: &'a Slots<V>, entry_key: &'a str) -> Scope<'a, V> {
     Scope { line, entry_key, ..Scope::of(record, slots) }
 }
 
@@ -50,7 +43,9 @@ fn entries<'v>(each: Option<&Each>, record: &'v Value) -> Vec<(String, &'v Value
     }
 }
 
-pub fn exact(spec: &'static TurnsSpec, path: &Path, mut slots: Slots, session_id: &str) -> Result<Vec<TurnUsage>, Error> {
+pub fn exact<V: Vendor>(file: &File<'_, V>, spec: &'static ExactTurns<V>, session_id: &str) -> Result<Vec<TurnUsage>, Error> {
+    let mut slots = file.slots(spec.slots);
+    let session = file.spec.session;
     let mut turns: Vec<TurnUsage> = Vec::new();
     let mut by_key: HashMap<String, usize> = HashMap::new();
     let mut current: Option<usize> = None;
@@ -58,21 +53,22 @@ pub fn exact(spec: &'static TurnsSpec, path: &Path, mut slots: Slots, session_id
     let mut saw_open = false;
     let mut seen: HashSet<String> = HashSet::new();
     let mut prev: [i64; 4] = [0; 4];
-    jsonl::all_lines(path, 0, |line, _stripped, value| {
+    let call = &spec.call;
+    file::all_lines(file.path, 0, spec.strict_utf8, |line, _stripped, value| {
         let Some(record) = value.filter(|v| v.is_object()) else { return true };
         if let SessionFilter::Record(t) = &spec.filter {
             if !session_id.is_empty() && expr::text(t, &scope(record, line, &slots, "")) != session_id {
                 return true;
             }
         }
-        super::activity::apply_slot_rules(spec.effects, record, line, &mut slots);
+        activity::slot_rules(file, spec.effects, record, At::line(line, 0), &mut slots);
         let s = scope(record, line, &slots, "");
-        if expr::pred(&spec.skip, &s) {
+        if spec.skip.as_ref().is_some_and(|skip| expr::pred(skip, &s)) {
             return true;
         }
         if let Some(open) = spec.open.as_ref().filter(|o| expr::pred(&o.when, &s)) {
             saw_open = true;
-            let sid = slots.get(spec.session).cloned().unwrap_or_default();
+            let sid = slots.of(session).to_owned();
             let started = some(expr::text(&open.started, &s));
             let turn = match &open.mode {
                 OpenMode::ByKey(key) => {
@@ -86,8 +82,9 @@ pub fn exact(spec: &'static TurnsSpec, path: &Path, mut slots: Slots, session_id
                 }
                 OpenMode::Each => {
                     turns.push(TurnUsage::new(sid, started));
-                    current = Some(turns.len() - 1);
-                    turns.last_mut().expect("just pushed")
+                    let index = turns.len() - 1;
+                    current = Some(index);
+                    &mut turns[index]
                 }
                 OpenMode::Join => {
                     let turn = pending.get_or_insert_with(|| TurnUsage::new(sid, None));
@@ -104,7 +101,9 @@ pub fn exact(spec: &'static TurnsSpec, path: &Path, mut slots: Slots, session_id
             };
             return true;
         }
-        let Some(call) = spec.call.as_ref().filter(|c| expr::pred(&c.when, &s)) else { return true };
+        if !expr::pred(&call.when, &s) {
+            return true;
+        }
         if call.orphan == Orphan::Drop && current.is_none() {
             return true;
         }
@@ -115,7 +114,7 @@ pub fn exact(spec: &'static TurnsSpec, path: &Path, mut slots: Slots, session_id
                 continue;
             }
             let es = scope(entry, line, &slots, &entry_key);
-            let n = |num: &Num| expr::num(num, &es).unwrap_or(0);
+            let n = |num: &Num<V>| expr::num(num, &es).unwrap_or(0);
             let mut counts = [n(&call.input), n(&call.cache_read), n(&call.cache_creation), n(&call.output)];
             if call.cumulative {
                 let delta = [counts[0] - prev[0], counts[1] - prev[1], counts[2] - prev[2], counts[3] - prev[3]];
@@ -155,8 +154,7 @@ pub fn exact(spec: &'static TurnsSpec, path: &Path, mut slots: Slots, session_id
                 let index = match current {
                     Some(i) if call.orphan == Orphan::Drop || saw_open => i,
                     _ => {
-                        let sid = slots.get(spec.session).cloned().unwrap_or_default();
-                        turns.push(TurnUsage::new(sid, ts.clone()));
+                        turns.push(TurnUsage::new(slots.of(session).to_owned(), ts.clone()));
                         current = Some(turns.len() - 1);
                         turns.len() - 1
                     }
@@ -167,28 +165,27 @@ pub fn exact(spec: &'static TurnsSpec, path: &Path, mut slots: Slots, session_id
             }
             return true;
         }
-        let sid = slots.get(spec.session).cloned().unwrap_or_default();
-        let turn = pending.get_or_insert_with(|| TurnUsage::new(sid, None));
+        let turn = pending.get_or_insert_with(|| TurnUsage::new(slots.of(session).to_owned(), None));
         for c in made {
             turn.add_call(c);
         }
         if let Some(close) = spec.close.as_ref().filter(|c| expr::pred(&c.when, &s)) {
-            let mut turn = pending.take().expect("pending was just filled");
-            turn.ended_at = some(expr::text(&close.ended, &s));
-            if let Some(t) = &close.session {
-                turn.session_id = expr::text(t, &s);
-            }
-            turn.model_calls = close.model_calls.as_ref().and_then(|n| expr::num(n, &s)).filter(|v| *v != 0);
-            if !(close.drop_empty && turn.total() == 0) {
-                turns.push(turn);
+            if let Some(mut turn) = pending.take() {
+                turn.ended_at = some(expr::text(&close.ended, &s));
+                if let Some(t) = &close.session {
+                    turn.session_id = expr::text(t, &s);
+                }
+                turn.model_calls = close.model_calls.as_ref().and_then(|n| expr::num(n, &s)).filter(|v| *v != 0);
+                if !(close.drop_empty && turn.total() == 0) {
+                    turns.push(turn);
+                }
             }
         }
         true
     })?;
     if matches!(spec.filter, SessionFilter::File) && !session_id.is_empty() {
-        let sid = slots.get(spec.session).cloned().unwrap_or_default();
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        if session_id != sid && session_id != stem {
+        let stem = file.path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+        if session_id != slots.of(session) && session_id != stem {
             return Ok(Vec::new());
         }
     }
@@ -222,7 +219,7 @@ pub fn inferred(usages: &[UsageEvent], activity: &[ActivityEvent], session_id: &
         }
     };
     let sid = if session_id.is_empty() { usages.first().map(|u| u.session_id.clone()).unwrap_or_default() } else { session_id.to_owned() };
-    let mut turns: std::collections::BTreeMap<usize, TurnUsage> = std::collections::BTreeMap::new();
+    let mut turns: BTreeMap<usize, TurnUsage> = BTreeMap::new();
     for (key, stamp, text) in &prompts {
         let turn = turns.entry(window(Some(*key))).or_insert_with(|| TurnUsage::new(sid.clone(), None));
         if turn.prompt_excerpt.is_empty() {

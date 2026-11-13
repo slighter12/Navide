@@ -69,10 +69,34 @@ pub fn varint_field(blob: &[u8], number: u64) -> Option<u64> {
     })
 }
 
-/// Lowercase hex (how a binary SQLite column reaches the record) back to bytes.
-pub fn unhex(text: &str) -> Vec<u8> {
-    let digit = |b: u8| (b as char).to_digit(16);
-    text.as_bytes().chunks(2).filter_map(|pair| Some((digit(pair[0])? * 16 + digit(*pair.get(1)?)?) as u8)).collect()
+/// The submessage at `path` (field numbers, first occurrence each); empty
+/// when any step is missing.
+pub fn at<'b>(blob: &'b [u8], path: &[u64]) -> &'b [u8] {
+    path.iter().fold(blob, |node, field| bytes(node, *field))
+}
+
+/// The first of `fields` in `message` holding clean text (UTF-8 without
+/// control characters but tab and newlines), stripped; "" when none does.
+pub fn clean_text<'b>(message: &'b [u8], fields: &[u64]) -> &'b str {
+    fn clean(b: &[u8]) -> Option<&str> {
+        std::str::from_utf8(b).ok().filter(|t| !t.chars().any(|c| c < ' ' && !matches!(c, '\t' | '\n' | '\r')))
+    }
+    if message.is_empty() {
+        return "";
+    }
+    let scanned = scan(message);
+    fields
+        .iter()
+        .flat_map(|field| {
+            scanned.iter().filter_map(move |(f, v)| match v {
+                Field::Bytes(b) if f == field => Some(*b),
+                _ => None,
+            })
+        })
+        .filter_map(clean)
+        .map(crate::expr::py_strip)
+        .find(|t| !t.is_empty())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -89,6 +113,9 @@ mod tests {
         assert_eq!(bytes(&blob, 2), b"hi");
         // A length past the end stops the scan.
         assert!(scan(&[0x12, 0x05, b'a']).is_empty());
-        assert_eq!(unhex("0a1f"), vec![0x0a, 0x1f]);
+        // field 20 { field 1: "\x01bad", field 8: " ok " }: the first clean text wins.
+        let nested = [0xa2, 0x01, 0x0c, 0x0a, 0x04, 0x01, b'b', b'a', b'd', 0x42, 0x04, b' ', b'o', b'k', b' '];
+        assert_eq!(clean_text(at(&nested, &[20]), &[1, 8]), "ok");
+        assert_eq!(clean_text(at(&nested, &[21]), &[1, 8]), "");
     }
 }
