@@ -151,6 +151,7 @@ static OBSERVE: Observe<V> = Observe {
         json: &["event", "header"],
         binary: &[],
         requires: &[("transcript_events", &["session_id", "seq", "event_json", "message_role"])],
+        unreadable: Unreadable::Quiet,
         usage: SqlUsage::Watermarks {
             rules: &[UsageRule {
                 when: Pred::All(&[MESSAGE_ROW, ASSISTANT, Pred::IsObject(&["event", "message", "usage"])]),

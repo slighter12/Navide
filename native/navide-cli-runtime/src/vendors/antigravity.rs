@@ -160,6 +160,7 @@ static OBSERVE: Observe<V> = Observe {
         json: &[],
         binary: &["metadata", "payload"],
         requires: &[],
+        unreadable: Unreadable::Quiet,
         // main's base reader: no token records, its legacy checkpoint kept.
         usage: SqlUsage::Legacy,
         activity: SqlWalk::Rows(RowWalk {
@@ -168,7 +169,8 @@ static OBSERVE: Observe<V> = Observe {
             id: "idx",
             newest: "SELECT MAX(idx) FROM steps",
             page: 256,
-            restart_below: false,
+            first_sight: FirstSight::Newest,
+            shrink: Shrink::Ignore,
             hold_last: None,
             revisit: Some(Revisit { when: Pred::All(&[ASSISTANT, Pred::Not(&DONE)]), key: "agy_pending::" }),
             last_as: Some("last"),

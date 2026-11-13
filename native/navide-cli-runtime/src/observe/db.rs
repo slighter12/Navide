@@ -1,22 +1,64 @@
 //! The SQLite backend: one database for every session, read through one
-//! connection per call. Usage follows a row-id watermark, per-key counters
-//! or per-partition watermarks; activity follows a row-id watermark (with
-//! held and settling rows) or one watermark per partition.
+//! connection per call. Usage follows a row-id watermark (plain or anchored),
+//! per-key counters or per-partition watermarks; activity follows one or more
+//! row-id watermarks (with held and settling rows) or one watermark per
+//! partition.
 use super::activity::{At, Walk};
 use super::sqlite::{Db, Param, Row};
 use super::{bag, file, usage, ActivityState, Backend, Error, File, Memo, UsageRead};
-use crate::decl::{Page, Partition, Pred, RowWalk, SqlUsage, SqlWalk, SqliteRecords, UsageRule, Vendor};
+use crate::decl::{FirstSight, Page, Partition, Pred, RowWalk, Shrink, SqlUsage, SqlWalk, SqliteRecords, Unreadable, UsageRule, Vendor};
 use crate::expr::{self, py_int, py_int_raw, py_str, py_str_opt, Scope, Slots};
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::cell::Cell;
+use std::collections::{BTreeSet, HashSet};
 
 /// One database for every session.
 #[derive(Debug)]
 pub struct Sqlite;
 
-fn open<V: Vendor<Backend = Sqlite>>(file: &File<'_, V>) -> Result<Option<Db>, Error> {
-    let spec = file.records();
-    Db::open(file.path, spec.json, spec.binary, spec.requires)
+/// The call's connection, remembering whether a read it needed failed.
+struct Conn {
+    db: Option<Db>,
+    failed: Cell<bool>,
+}
+
+impl Conn {
+    fn open<V: Vendor<Backend = Sqlite>>(file: &File<'_, V>) -> Result<Conn, Error> {
+        let spec = file.records();
+        let db = Db::open(file.path, spec.json, spec.binary, spec.requires)?;
+        Ok(Conn { failed: Cell::new(db.is_none()), db })
+    }
+
+    /// The rows of `sql`; `None`: not readable this cycle.
+    fn rows(&self, sql: &str, params: &[Param]) -> Option<Vec<Row>> {
+        let rows = self.optional(sql, params);
+        if rows.is_none() {
+            self.failed.set(true);
+        }
+        rows
+    }
+
+    /// The same for a query that may fail by design (a table some builds lack).
+    fn optional(&self, sql: &str, params: &[Param]) -> Option<Vec<Row>> {
+        self.db.as_ref()?.rows(sql, params)
+    }
+
+    /// The first column of the first row, as main's `_int` reads it; `None`
+    /// when it is SQL `NULL` (`MAX` over no rows) or the query fails.
+    fn scalar(&self, sql: &str) -> Option<i64> {
+        let rows = self.rows(sql, &[])?;
+        let first = rows.first().and_then(|row| row.value.as_object()).and_then(|row| row.values().next().cloned());
+        first.filter(|v| !v.is_null()).map(|v| py_int_raw(&v).unwrap_or(0))
+    }
+
+    /// A read that failed is the caller's reader's to report, where the
+    /// declaration says so.
+    fn checked<V: Vendor<Backend = Sqlite>, T>(&self, file: &File<'_, V>, done: T) -> Result<T, Error> {
+        if self.failed.get() && file.records().unreadable == Unreadable::Unsupported {
+            return Err(Error::Unsupported(format!("{} could not be read", file.path.display())));
+        }
+        Ok(done)
+    }
 }
 
 fn row_scope<'a, V: Vendor>(row: &'a Row, slots: &'a Slots<V>) -> Scope<'a, V> {
@@ -35,12 +77,29 @@ impl<V: Vendor<Backend = Sqlite>> Backend<V> for Sqlite {
     type Spec = SqliteRecords<V>;
 
     fn usage(file: &File<'_, V>, checkpoint: &Map<String, Value>, full: bool, memo: &mut Memo) -> Result<UsageRead, Error> {
+        let unchanged = || UsageRead::unchanged(checkpoint);
         match &file.records().usage {
-            SqlUsage::None => Ok(UsageRead::unchanged(checkpoint)),
+            SqlUsage::None => Ok(unchanged()),
             SqlUsage::Legacy => Ok(UsageRead { events: Vec::new(), checkpoint: usage::legacy(usage::legacy_seen(checkpoint)) }),
-            SqlUsage::After { rules, sql, id } => after(file, rules, sql, id, checkpoint, full),
-            SqlUsage::Counters { rules, sql, id, kind, map, columns } => counters(file, rules, (sql, id), (kind, map, columns), checkpoint, full),
-            SqlUsage::Watermarks { rules, page, part, kind, map } => watermarks(file, rules, (page, part), (kind, map), checkpoint, full, memo),
+            SqlUsage::After { rules, sql, id } => {
+                let Ok(meta) = std::fs::metadata(file.path) else { return Ok(unchanged()) };
+                let conn = Conn::open(file)?;
+                conn.checked(file, after(file, &conn, rules, (sql, id), &file::identity(&meta), checkpoint, full))
+            }
+            SqlUsage::Anchored { rules, sql, id, newest, anchor_sql, anchor } => {
+                let Ok(meta) = std::fs::metadata(file.path) else { return Ok(unchanged()) };
+                let conn = Conn::open(file)?;
+                let anchored = Anchored { sql, id, newest, anchor_sql, columns: anchor };
+                conn.checked(file, anchored.read(file, &conn, rules, &file::identity(&meta), checkpoint, full))
+            }
+            SqlUsage::Counters { rules, sql, id, kind, map, columns } => {
+                let conn = Conn::open(file)?;
+                conn.checked(file, counters(file, &conn, rules, (sql, id), (kind, map, columns), checkpoint, full))
+            }
+            SqlUsage::Watermarks { rules, page, part, kind, map } => {
+                let conn = Conn::open(file)?;
+                conn.checked(file, watermarks(file, &conn, rules, (page, part), (kind, map), checkpoint, full, memo))
+            }
         }
     }
 
@@ -50,22 +109,40 @@ impl<V: Vendor<Backend = Sqlite>> Backend<V> for Sqlite {
 
     fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, memo: &mut Memo) -> Result<(), Error> {
         walk.restore(state);
-        let db = open(walk.file)?;
+        let conn = Conn::open(walk.file)?;
         match &walk.file.records().activity {
-            SqlWalk::Rows(query) => walk_rows(walk, db.as_ref(), query, state),
-            SqlWalk::Partitions { page, part, restart_below, .. } => walk_partitions(walk, db.as_ref(), (page, part), *restart_below, state, memo),
+            SqlWalk::Rows(query) => walk_rows(walk, &conn, query, &mut state.rows, &mut state.pending),
+            SqlWalk::Tables(tables) => {
+                for query in *tables {
+                    let mut mark = state.marks.get(query.key).copied();
+                    walk_rows(walk, &conn, query, &mut mark, &mut state.pending);
+                    if let Some(mark) = mark {
+                        state.marks.insert(query.key.to_owned(), mark);
+                    }
+                }
+            }
+            SqlWalk::Partitions { page, part, restart_below, .. } => walk_partitions(walk, &conn, (page, part), *restart_below, state, memo),
         }
-        Ok(())
+        conn.checked(walk.file, ())
     }
 
     fn load(spec: &'static Self::Spec, bag: &[String], state: &mut ActivityState) {
+        // main's `_int(prev)`: a key that is there but not a number is 0.
+        // (`-1` is "from the first row".)
+        let mark = |key: &str| bag::find(bag, key).map(|raw| py_int_raw(&Value::String(raw.to_owned())));
         match &spec.activity {
             SqlWalk::Rows(query) => {
-                // main's `_int(prev)`: a key that is there but not a number is 0.
-                // (`-1` is "from the first row".)
-                state.rows = bag::find(bag, query.key).map(|raw| py_int_raw(&Value::String(raw.to_owned())).unwrap_or(0));
+                state.rows = mark(query.key).map(|id| id.unwrap_or(0));
                 if let Some(revisit) = &query.revisit {
                     state.pending = bag::find(bag, revisit.key).and_then(|raw| serde_json::from_str(raw).ok()).unwrap_or_default();
+                }
+            }
+            SqlWalk::Tables(tables) => {
+                // A mark that is not a number is a table not walked yet.
+                for query in *tables {
+                    if let Some(Some(id)) = mark(query.key) {
+                        state.marks.insert(query.key.to_owned(), id);
+                    }
                 }
             }
             SqlWalk::Partitions { key, anchor, .. } => {
@@ -87,6 +164,13 @@ impl<V: Vendor<Backend = Sqlite>> Backend<V> for Sqlite {
                     bag::replace(bag, query.key, Some(id.to_string()));
                 }
             }
+            SqlWalk::Tables(tables) => {
+                for query in *tables {
+                    if let Some(id) = state.marks.get(query.key) {
+                        bag::replace(bag, query.key, Some(id.to_string()));
+                    }
+                }
+            }
             SqlWalk::Partitions { key, anchor, .. } => {
                 // Only the marks that moved are rewritten, as main remembers them.
                 let before = bag::marks(bag, key);
@@ -103,34 +187,34 @@ impl<V: Vendor<Backend = Sqlite>> Backend<V> for Sqlite {
     }
 }
 
+fn sqlite_cursor(row_id: i64, identity: &str) -> Map<String, Value> {
+    let mut cp = Map::new();
+    cp.insert("kind".into(), "sqlite".into());
+    cp.insert("row_id".into(), row_id.into());
+    cp.insert("identity".into(), identity.into());
+    cp
+}
+
 /// Usage rows after a row-id watermark. The watermark follows the rows that
 /// gave an event (main advances it per event, so an all-zero row is read
 /// again next cycle); a replaced database starts over. `full`: every row,
 /// deduplicated by key (main's `parse_session_file`).
 fn after<V: Vendor<Backend = Sqlite>>(
     file: &File<'_, V>,
+    conn: &Conn,
     rules: &'static [UsageRule<V>],
-    sql: &str,
-    id: &str,
+    (sql, id): (&str, &str),
+    identity: &str,
     checkpoint: &Map<String, Value>,
     full: bool,
-) -> Result<UsageRead, Error> {
-    let Ok(meta) = std::fs::metadata(file.path) else { return Ok(UsageRead::unchanged(checkpoint)) };
-    let identity = file::identity(&meta);
+) -> UsageRead {
     let prior = py_str_opt(checkpoint.get("identity"));
     let replaced = !prior.is_empty() && prior != identity;
     let mut last = if replaced || full { 0 } else { py_int(checkpoint.get("row_id")) };
-    let cursor = |last: i64| {
-        let mut cp = Map::new();
-        cp.insert("kind".into(), "sqlite".into());
-        cp.insert("row_id".into(), last.into());
-        cp.insert("identity".into(), identity.clone().into());
-        cp
-    };
     let mut slots = file.slots(&[]);
     let mut events = Vec::new();
     let mut seen = HashSet::new();
-    let rows = open(file)?.and_then(|db| db.rows(sql, &[Param::Int(last)])).unwrap_or_default();
+    let rows = conn.rows(sql, &[Param::Int(last)]).unwrap_or_default();
     for row in &rows {
         let at = At::row(&row.blobs);
         let Some(reading) = usage::apply_rules(file, rules, &row.value, at, &mut slots) else { continue };
@@ -144,20 +228,115 @@ fn after<V: Vendor<Backend = Sqlite>>(
             continue;
         }
         last = last.max(py_int(row.value.get(id)));
-        events.push(usage::event(file, reading, &s, (input, output), key, cursor(last)));
+        events.push(usage::event(file, reading, &s, (input, output), key, sqlite_cursor(last, identity)));
     }
-    Ok(UsageRead { events, checkpoint: cursor(last) })
+    UsageRead { events, checkpoint: sqlite_cursor(last, identity) }
+}
+
+/// Python `str(v)` of a cell: `None`, an integer's digits, the text itself.
+fn python_str(value: &Value) -> String {
+    match value {
+        Value::Null => "None".to_owned(),
+        Value::Bool(b) => if *b { "True" } else { "False" }.to_owned(),
+        Value::String(s) => s.clone(),
+        Value::Number(n) => match (n.as_i64(), n.as_f64()) {
+            (Some(i), _) => i.to_string(),
+            (None, Some(f)) if f.fract() == 0.0 && f.abs() < 1e16 => format!("{f:.1}"),
+            _ => n.to_string(),
+        },
+        other => other.to_string(),
+    }
+}
+
+/// `SqlUsage::Anchored`.
+struct Anchored<'d> {
+    sql: &'d str,
+    id: &'d str,
+    newest: &'d str,
+    anchor_sql: &'d str,
+    columns: &'d [&'d str],
+}
+
+impl Anchored<'_> {
+    /// The fingerprint of one row: its anchor columns' `str()`, joined by `|`.
+    fn anchor(&self, row: &Row) -> String {
+        self.columns.iter().map(|column| python_str(row.value.get(*column).unwrap_or(&Value::Null))).collect::<Vec<_>>().join("|")
+    }
+
+    fn anchor_at(&self, conn: &Conn, row_id: i64) -> Option<String> {
+        Some(self.anchor(conn.rows(self.anchor_sql, &[Param::Int(row_id)])?.first()?))
+    }
+
+    fn read<V: Vendor<Backend = Sqlite>>(
+        &self,
+        file: &File<'_, V>,
+        conn: &Conn,
+        rules: &'static [UsageRule<V>],
+        identity: &str,
+        checkpoint: &Map<String, Value>,
+        full: bool,
+    ) -> UsageRead {
+        let cursor = |row_id: i64, anchor: &str| {
+            let mut cp = sqlite_cursor(row_id, identity);
+            cp.insert("anchor".into(), anchor.into());
+            cp
+        };
+        let prior = py_str_opt(checkpoint.get("identity"));
+        let fresh = full || (!prior.is_empty() && prior != identity);
+        let mut last = if fresh { 0 } else { py_int(checkpoint.get("row_id")).max(0) };
+        let mut anchor = if fresh { String::new() } else { py_str_opt(checkpoint.get("anchor")) };
+        if last != 0 && !anchor.is_empty() && self.anchor_at(conn, last).is_some_and(|now| now != anchor) {
+            // Another row stands under the watermark id: it was never
+            // credited. Start just below it; never rescan.
+            last -= 1;
+            anchor.clear();
+        }
+        // `full`: every row, whatever its id.
+        let from = if full { i64::MIN } else { last };
+        let Some(rows) = conn.rows(self.sql, &[Param::Int(from)]) else { return UsageRead::unchanged(checkpoint) };
+        if rows.is_empty() && last != 0 {
+            if let Some(top) = conn.scalar(self.newest).filter(|top| *top < last) {
+                // The watermark is above every id (the store was rebuilt):
+                // everything at or below the new top was credited under the
+                // old numbering, so re-anchor there.
+                last = top;
+                anchor = self.anchor_at(conn, last).unwrap_or_default();
+            }
+        }
+        let mut slots = file.slots(&[]);
+        let (mut events, mut seen) = (Vec::new(), HashSet::new());
+        let mut next = last;
+        for row in &rows {
+            next = next.max(id_of(row, self.id));
+            anchor = self.anchor(row);
+            let at = At::row(&row.blobs);
+            let Some(reading) = usage::apply_rules(file, rules, &row.value, at, &mut slots) else { continue };
+            let s = usage::scope(&row.value, at, &slots);
+            let Some((input, output)) = usage::counts(reading, &s) else { continue };
+            if input == 0 && output == 0 {
+                continue;
+            }
+            let key = expr::text(&reading.key, &s);
+            if full && !seen.insert(key.clone()) {
+                continue;
+            }
+            let at_row = if full { Map::new() } else { cursor(next, &anchor) };
+            events.push(usage::event(file, reading, &s, (input, output), key, at_row));
+        }
+        UsageRead { events, checkpoint: cursor(next, &anchor) }
+    }
 }
 
 fn counters<V: Vendor<Backend = Sqlite>>(
     file: &File<'_, V>,
+    conn: &Conn,
     rules: &'static [UsageRule<V>],
     (sql, id): (&str, &str),
     (kind, map, columns): (&str, &str, &[&str]),
     checkpoint: &Map<String, Value>,
     full: bool,
-) -> Result<UsageRead, Error> {
-    let Some(rows) = open(file)?.and_then(|db| db.rows(sql, &[])) else { return Ok(UsageRead::unchanged(checkpoint)) };
+) -> UsageRead {
+    let Some(rows) = conn.rows(sql, &[]) else { return UsageRead::unchanged(checkpoint) };
     let empty = Map::new();
     let last = match checkpoint.get(map) {
         Some(Value::Object(last)) if !full && checkpoint.get("kind").and_then(Value::as_str) == Some(kind) => last,
@@ -198,29 +377,30 @@ fn counters<V: Vendor<Backend = Sqlite>>(
     let mut next = Map::new();
     next.insert("kind".into(), kind.into());
     next.insert(map.into(), state.into());
-    Ok(UsageRead { events, checkpoint: next })
+    UsageRead { events, checkpoint: next }
 }
 
 /// Per-partition watermarks: every partition whose newest id is above its
 /// mark is read from the mark on, and each row read moves the mark (with or
 /// without a reading). Any unreadable query leaves the checkpoint as it was.
+#[allow(clippy::too_many_arguments)]
 fn watermarks<V: Vendor<Backend = Sqlite>>(
     file: &File<'_, V>,
+    conn: &Conn,
     rules: &'static [UsageRule<V>],
     (query, part): (&Page<V>, &Partition<V>),
     (kind, map): (&str, &str),
     checkpoint: &Map<String, Value>,
     full: bool,
     memo: &mut Memo,
-) -> Result<UsageRead, Error> {
+) -> UsageRead {
     let mut marks: Map<String, Value> = match checkpoint.get(map) {
         Some(Value::Object(last)) if !full && checkpoint.get("kind").and_then(Value::as_str) == Some(kind) => {
             last.iter().filter(|(_, v)| v.is_i64()).map(|(k, v)| (k.clone(), v.clone())).collect()
         }
         _ => Map::new(),
     };
-    let Some(db) = open(file)? else { return Ok(UsageRead::unchanged(checkpoint)) };
-    let Some(tops) = tops(&db, part) else { return Ok(UsageRead::unchanged(checkpoint)) };
+    let Some(tops) = tops(conn, part) else { return UsageRead::unchanged(checkpoint) };
     let mut slots = file.slots(&[]);
     let (mut events, mut seen) = (Vec::new(), HashSet::new());
     for (name, top) in tops {
@@ -228,7 +408,7 @@ fn watermarks<V: Vendor<Backend = Sqlite>>(
         if top <= after {
             continue;
         }
-        let Some(rows) = page(&db, file, query, part, &name, after, memo) else { return Ok(UsageRead::unchanged(checkpoint)) };
+        let Some(rows) = page(conn, file, query, part, &name, after, memo) else { return UsageRead::unchanged(checkpoint) };
         for row in &rows {
             marks.insert(name.clone(), id_of(row, query.id).into());
             let at = At::row(&row.blobs);
@@ -245,13 +425,13 @@ fn watermarks<V: Vendor<Backend = Sqlite>>(
     let mut next = Map::new();
     next.insert("kind".into(), kind.into());
     next.insert(map.into(), marks.into());
-    Ok(UsageRead { events, checkpoint: next })
+    UsageRead { events, checkpoint: next }
 }
 
 /// Every partition with its newest id, in the query's order (main iterates
 /// its `GROUP BY` result); rows without either are skipped.
-fn tops<V: Vendor>(db: &Db, part: &Partition<V>) -> Option<Vec<(String, i64)>> {
-    let rows = db.rows(part.tops, &[])?;
+fn tops<V: Vendor>(conn: &Conn, part: &Partition<V>) -> Option<Vec<(String, i64)>> {
+    let rows = conn.rows(part.tops, &[])?;
     Some(
         rows.iter()
             .filter_map(|row| {
@@ -265,14 +445,14 @@ fn tops<V: Vendor>(db: &Db, part: &Partition<V>) -> Option<Vec<(String, i64)>> {
 
 /// The partition's label: remembered once resolved; else looked up, and a
 /// partition no query labels keeps its own name (and is reported).
-fn label<V: Vendor>(db: &Db, file: &File<'_, V>, part: &Partition<V>, name: &str, memo: &mut Memo) -> String {
+fn label<V: Vendor>(conn: &Conn, file: &File<'_, V>, part: &Partition<V>, name: &str, memo: &mut Memo) -> String {
     let key = (file.path.to_owned(), name.to_owned());
     if let Some(found) = memo.labels.get(&key) {
         return found.clone();
     }
     let slots = Slots::<V>::default();
     for (sql, text) in part.label {
-        let Some(rows) = db.rows(sql, &[Param::Text(name)]) else { continue };
+        let Some(rows) = conn.optional(sql, &[Param::Text(name)]) else { continue };
         let Some(first) = rows.first() else { continue };
         let value = expr::text(text, &row_scope(first, &slots));
         if !value.is_empty() {
@@ -286,9 +466,9 @@ fn label<V: Vendor>(db: &Db, file: &File<'_, V>, part: &Partition<V>, name: &str
 
 /// One page of a partition's rows after `after`, a held last row dropped and
 /// every row labelled. `None`: not readable this cycle.
-fn page<V: Vendor>(db: &Db, file: &File<'_, V>, query: &Page<V>, part: &Partition<V>, name: &str, after: i64, memo: &mut Memo) -> Option<Vec<Row>> {
-    let label = label(db, file, part, name, memo);
-    let mut rows = db.rows(query.sql, &[Param::Text(name), Param::Int(after), Param::Int(query.size)])?;
+fn page<V: Vendor>(conn: &Conn, file: &File<'_, V>, query: &Page<V>, part: &Partition<V>, name: &str, after: i64, memo: &mut Memo) -> Option<Vec<Row>> {
+    let label = label(conn, file, part, name, memo);
+    let mut rows = conn.rows(query.sql, &[Param::Text(name), Param::Int(after), Param::Int(query.size)])?;
     if rows.last().is_some_and(|row| holds(&query.hold_last, row)) {
         rows.pop();
     }
@@ -300,45 +480,57 @@ fn page<V: Vendor>(db: &Db, file: &File<'_, V>, query: &Page<V>, part: &Partitio
     Some(rows)
 }
 
-/// Rows after one database-wide watermark.
-fn walk_rows<V: Vendor>(walk: &mut Walk<'_, V>, db: Option<&Db>, query: &RowWalk<V>, state: &mut ActivityState) {
-    let newest = || db.and_then(|db| db.scalar(query.newest));
-    let Some(after) = state.rows else {
-        // First sight: everything already in the database is history.
-        state.rows = newest();
-        return;
+/// Rows after one watermark (`mark`; `None` until the table is first walked).
+fn walk_rows<V: Vendor>(walk: &mut Walk<'_, V>, conn: &Conn, query: &RowWalk<V>, mark: &mut Option<i64>, pending: &mut BTreeSet<i64>) {
+    let after = match (*mark, query.first_sight) {
+        (Some(after), _) => after,
+        (None, FirstSight::Start) => 0,
+        (None, FirstSight::Newest) => {
+            // Everything already in the database is history.
+            *mark = conn.scalar(query.newest);
+            return;
+        }
     };
-    match if query.restart_below { newest() } else { Some(after) } {
-        None => {}
-        Some(top) if top < after => state.rows = Some(top),
-        Some(_) => {
-            let pending = serde_json::to_string(&state.pending).unwrap_or_default();
-            let params = [Param::Int(after), Param::Int(query.page), Param::Text(&pending)];
-            let params = if query.revisit.is_some() { &params[..] } else { &params[..2] };
-            let mut rows = db.and_then(|db| db.rows(query.sql, params)).unwrap_or_default();
-            if rows.last().is_some_and(|row| holds(&query.hold_last, row)) {
-                rows.pop();
+    let after = match query.shrink {
+        Shrink::Ignore => after,
+        Shrink::ToNewest => match conn.scalar(query.newest) {
+            None => return,
+            Some(top) if top < after => {
+                *mark = Some(top);
+                return;
             }
-            let Some(newest) = rows.last().map(|last| after.max(id_of(last, query.id))) else { return };
-            state.rows = Some(newest);
-            for row in &mut rows {
-                let at = id_of(row, query.id);
-                if let Some(revisit) = &query.revisit {
-                    if expr::pred(&revisit.when, &row_scope(row, &Slots::default())) {
-                        // Still settling: reported once, then quiet until it settles.
-                        if !state.pending.insert(at) {
-                            continue;
-                        }
-                    } else {
-                        state.pending.remove(&at);
-                    }
+            Some(_) => after,
+        },
+        Shrink::ToStart => {
+            let after = after.max(0);
+            if after > 0 && conn.scalar(query.newest).is_some_and(|top| top < after) { 0 } else { after }
+        }
+    };
+    let settling = serde_json::to_string(pending).unwrap_or_default();
+    let params = [Param::Int(after), Param::Int(query.page), Param::Text(&settling)];
+    let params = if query.revisit.is_some() { &params[..] } else { &params[..2] };
+    let Some(mut rows) = conn.rows(query.sql, params) else { return };
+    if rows.last().is_some_and(|row| holds(&query.hold_last, row)) {
+        rows.pop();
+    }
+    let newest = rows.last().map_or(after, |last| after.max(id_of(last, query.id)));
+    *mark = Some(newest);
+    for row in &mut rows {
+        let at = id_of(row, query.id);
+        if let Some(revisit) = &query.revisit {
+            if expr::pred(&revisit.when, &row_scope(row, &Slots::default())) {
+                // Still settling: reported once, then quiet until it settles.
+                if !pending.insert(at) {
+                    continue;
                 }
-                if let (Some(column), Value::Object(object)) = (query.last_as, &mut row.value) {
-                    object.insert(column.to_owned(), (at == newest).into());
-                }
-                walk.record(&row.value, At::row(&row.blobs));
+            } else {
+                pending.remove(&at);
             }
         }
+        if let (Some(column), Value::Object(object)) = (query.last_as, &mut row.value) {
+            object.insert(column.to_owned(), (at == newest).into());
+        }
+        walk.record(&row.value, At::row(&row.blobs));
     }
 }
 
@@ -347,14 +539,13 @@ fn walk_rows<V: Vendor>(walk: &mut Walk<'_, V>, db: Option<&Db>, query: &RowWalk
 /// from its start.
 fn walk_partitions<V: Vendor>(
     walk: &mut Walk<'_, V>,
-    db: Option<&Db>,
+    conn: &Conn,
     (query, part): (&Page<V>, &Partition<V>),
     restart_below: bool,
     state: &mut ActivityState,
     memo: &mut Memo,
 ) {
-    let Some(db) = db else { return };
-    let Some(tops) = tops(db, part) else { return };
+    let Some(tops) = tops(conn, part) else { return };
     if !state.anchored {
         state.marks.extend(tops);
         state.anchored = true;
@@ -369,7 +560,7 @@ fn walk_partitions<V: Vendor>(
         if top <= after {
             continue;
         }
-        for row in page(db, walk.file, query, part, &name, after, memo).unwrap_or_default() {
+        for row in page(conn, walk.file, query, part, &name, after, memo).unwrap_or_default() {
             state.marks.insert(name.clone(), id_of(&row, query.id));
             walk.record(&row.value, At::row(&row.blobs));
         }

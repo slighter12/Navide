@@ -872,8 +872,20 @@ pub struct SqliteRecords<V: Vendor> {
     /// Columns each table must have (`PRAGMA table_info`), checked once per
     /// read: a store without them is `Error::Unsupported`.
     pub requires: &'static [(Str, &'static [Str])],
+    /// What a database that cannot be read this cycle (missing, busy,
+    /// locked, a query its schema does not fit) answers.
+    pub unreadable: Unreadable,
     pub usage: SqlUsage<V>,
     pub activity: SqlWalk<V>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum Unreadable {
+    /// No rows this cycle, as main's reader treats it without a word.
+    Quiet,
+    /// `Error::Unsupported`: main's reader says so (a warning) when it cannot
+    /// read the store, so it takes the call.
+    Unsupported,
 }
 
 #[derive(Debug, Serialize)]
@@ -888,6 +900,16 @@ pub enum SqlUsage<V: Vendor> {
     /// One event per row after the checkpoint's `row_id` (main's `{"kind":
     /// "sqlite", "row_id", "identity"}`); `sql` binds that watermark as `?`.
     After { rules: &'static [UsageRule<V>], sql: Str, id: Str },
+    /// One event per row after the checkpoint's `row_id`, where the id alone
+    /// does not prove the store is the same one: the checkpoint also keeps
+    /// the watermark row's `anchor` columns (`str()` of each, joined by `|`).
+    /// A row standing under the watermark id with another anchor was never
+    /// credited (the read starts just below it); a store whose newest id fell
+    /// below the watermark is re-anchored at that id without a rescan. The
+    /// watermark follows every row read, with or without a reading.
+    /// `anchor_sql` binds an id (`?`) and returns the anchor columns; `sql`
+    /// returns them under the same names.
+    Anchored { rules: &'static [UsageRule<V>], sql: Str, id: Str, newest: Str, anchor_sql: Str, anchor: &'static [Str] },
     /// Rows that each hold one key's running counters. Every read reads them
     /// all; the checkpoint keeps each key's last counters as `{"kind": kind,
     /// map: {key: [counters…]}}`. The rules see the row with `delta` (column →
@@ -905,6 +927,10 @@ pub enum SqlUsage<V: Vendor> {
 pub enum SqlWalk<V: Vendor> {
     /// Rows after one database-wide id, kept in the bag as `key + id`.
     Rows(RowWalk<V>),
+    /// Several row walks in one pass, each with its own watermark and bag
+    /// key, in order (a store whose activity is spread over more than one
+    /// table). The rules tell their rows apart by a column the queries add.
+    Tables(&'static [RowWalk<V>]),
     /// Rows after each partition's id, kept as `key + part + "::" + id`.
     /// `anchor` is the bag key that records the database's first sight: every
     /// partition then present starts at its newest id, and one that appears
@@ -920,13 +946,12 @@ pub struct RowWalk<V: Vendor> {
     pub sql: Str,
     /// The column holding the increasing row id the watermark follows.
     pub id: Str,
-    /// The newest id (`SELECT COALESCE(MAX(id), 0) FROM …`): the first sight
-    /// of a database starts there, since everything in it is history.
+    /// The newest id (`SELECT COALESCE(MAX(id), 0) FROM …`).
     pub newest: Str,
+    /// Rows per pass (`-1`: no limit).
     pub page: i64,
-    /// The newest id is read every pass, and one below the watermark (a
-    /// replaced database) starts over at it.
-    pub restart_below: bool,
+    pub first_sight: FirstSight,
+    pub shrink: Shrink,
     /// A last row matching this is not consumed yet (it is read again next
     /// pass, when it may have changed).
     pub hold_last: Option<Pred<V>>,
@@ -935,6 +960,27 @@ pub struct RowWalk<V: Vendor> {
     /// Each row gets this boolean column: it is the newest row of the pass.
     pub last_as: Option<Str>,
     pub key: Str,
+}
+
+/// Where a row walk starts in a database it has never walked.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum FirstSight {
+    /// At the newest id: everything already in the database is history.
+    Newest,
+    /// At the first row: the watcher has not seen any of it.
+    Start,
+}
+
+/// What a newest id below the watermark (a replaced database) does.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum Shrink {
+    /// Nothing: the newest id is not looked at.
+    Ignore,
+    /// The walk starts over at the newest id (nothing is replayed).
+    ToNewest,
+    /// The walk starts over at the first row and reads on in the same pass:
+    /// under restarted ids nothing in the store has been delivered yet.
+    ToStart,
 }
 
 /// Rows matching `when` (a step still streaming) stay pending: the walk's

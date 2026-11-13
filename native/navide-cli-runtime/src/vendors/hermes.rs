@@ -126,6 +126,7 @@ static OBSERVE: Observe<V> = Observe {
             ),
             ("messages", &["id", "session_id", "role", "content", "tool_calls", "timestamp", "finish_reason"]),
         ],
+        unreadable: Unreadable::Quiet,
         usage: SqlUsage::Counters {
             rules: &[UsageRule {
                 when: Pred::True,
@@ -167,8 +168,9 @@ static OBSERVE: Observe<V> = Observe {
             id: "id",
             newest: "SELECT COALESCE(MAX(id), 0) FROM messages",
             page: 512,
+            first_sight: FirstSight::Newest,
             // A replaced store starts over at its newest row.
-            restart_below: true,
+            shrink: Shrink::ToNewest,
             // The newest row is an assistant reply with no finish_reason yet: read
             // it again next pass rather than lose its turn end.
             hold_last: Some(Pred::All(&[ASSISTANT, Pred::Not(&Pred::Truthy(&["finish"])), Pred::Not(&Pred::Truthy(&["tool_calls"]))])),

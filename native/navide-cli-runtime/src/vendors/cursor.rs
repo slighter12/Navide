@@ -134,14 +134,16 @@ static OBSERVE: Observe<V> = Observe {
         json: &["data"],
         binary: &[],
         requires: &[],
+        unreadable: Unreadable::Quiet,
         usage: SqlUsage::None,
         activity: SqlWalk::Rows(RowWalk {
             sql: "SELECT rowid AS row, id, data FROM blobs WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
             id: "row",
             newest: "SELECT COALESCE(MAX(rowid), 0) FROM blobs",
             page: 512,
+            first_sight: FirstSight::Newest,
             // A shrunk store (recreated, vacuumed) re-anchors at its newest row.
-            restart_below: true,
+            shrink: Shrink::ToNewest,
             hold_last: None,
             revisit: None,
             last_as: None,

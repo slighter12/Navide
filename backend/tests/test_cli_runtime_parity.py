@@ -40,6 +40,7 @@ from tests.vendors import test_claude as claude_t
 from tests.vendors import test_cursor as cursor_t
 from tests.vendors import test_codex_0_163_fixture as codex_t
 from tests.vendors import test_codex_subagent as sub_t
+from tests.vendors import test_copilot as cop_t
 from tests.vendors import test_droid as droid_t
 from tests.vendors import test_goose as goose_t
 from tests.vendors import test_grok as grok_t
@@ -249,6 +250,38 @@ def _scenarios() -> dict[str, dict]:
         ], 1, 2),
         _db_step([goose_msg("s1", "user", goose_t._text("again"), ts=1792513700), goose_usage("s1", 50, 5)], 2, 3),
     ]
+    def cop_usage(sid: str, inp: int | None, out: int | None, model: str = "claude-haiku-4.5",
+                  ts: str | None = cop_t._TS) -> tuple:
+        return ("INSERT INTO assistant_usage_events (session_id, turn_index, model, input_tokens, output_tokens,"
+                " created_at) VALUES (?, 0, ?, ?, ?, ?)", (sid, model, inp, out, ts))
+
+    def cop_turn(sid: str, index: int, user: str | None, assistant: str | None, ts: str = cop_t._TS) -> tuple:
+        return ("INSERT INTO turns (session_id, turn_index, user_message, assistant_response, timestamp)"
+                " VALUES (?, ?, ?, ?, ?)", (sid, index, user, assistant, ts))
+
+    cop_steps = [
+        # First sight: the store's whole history is read (usage and activity).
+        _db_step([cop_t._STORE_SCHEMA,
+                  ("INSERT INTO sessions (id, cwd, created_at) VALUES (?, ?, ?)", (cop_t._SID, cop_t._CWD, cop_t._TS)),
+                  cop_usage(cop_t._SID, 19898, 39), cop_turn(cop_t._SID, 0, "  fix the build  ", "built")], 0, 1),
+        # Rows with no tokens, with a NULL count and stamp, and of a session
+        # the store does not list; a turn with a wrapper prompt and no reply.
+        _db_step([cop_usage(cop_t._SID, 0, 0), cop_usage(cop_t._SID, None, 5, ts=None),
+                  cop_usage("unlisted", 7, 3, model="gpt-5"),
+                  cop_turn(cop_t._SID, 1, "<system-reminder>x</system-reminder>", None, ts="2026-07-27T18:40:00.000Z"),
+                  cop_turn("unlisted", 0, None, "p" * 9000)], 1, 2),
+        _db_step([], 2, 3),
+        # The store was rebuilt and its ids restarted below the watermarks:
+        # usage re-anchors at the newest id (credited under the old numbering),
+        # activity starts over at the first row.
+        _db_step(["DELETE FROM assistant_usage_events; DELETE FROM turns; DELETE FROM sqlite_sequence;",
+                  cop_usage(cop_t._SID, 11, 2), cop_turn(cop_t._SID, 0, "again", "ok")], 3, 4),
+        # Another row stands under the watermark id: it was never credited.
+        _db_step(["DELETE FROM assistant_usage_events; DELETE FROM sqlite_sequence WHERE name = 'assistant_usage_events';",
+                  cop_usage(cop_t._SID, 500, 50, model="gpt-5"), cop_turn(cop_t._SID, 1, "more", "done")], 4, 5),
+        _db_step([cop_usage(cop_t._SID, 60, 6)], 5, 6),
+    ]
+
     def hermes_session(sid: str, title: str | None, parent: str | None = None, cwd: str = "/work") -> tuple:
         return ("INSERT INTO sessions(id, source, title, parent_session_id, cwd, started_at, last_activity_at) "
                 "VALUES (?, 'cli', ?, ?, ?, 1000, 1000.25)", (sid, title, parent, cwd))
@@ -527,6 +560,12 @@ def _scenarios() -> dict[str, dict]:
             "vendor": "goose", "env": {"GOOSE_PATH_ROOT": "goose"},
             "file": "goose/data/sessions/sessions.db",
             "steps": goose_steps,
+        },
+        # The 1.0.78+ central store (the 1.0.75 events.jsonl stays main's reader's).
+        "copilot_store": {
+            "vendor": "copilot", "env": {"COPILOT_HOME": "copilot"},
+            "file": "copilot/session-store.db",
+            "steps": cop_steps,
         },
         "hermes_db": {
             "vendor": "hermes", "env": {"HERMES_HOME": "hermes"},

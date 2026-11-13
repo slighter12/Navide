@@ -106,6 +106,7 @@ static OBSERVE: Observe<V> = Observe {
         json: &["content", "meta"],
         binary: &[],
         requires: &[],
+        unreadable: Unreadable::Quiet,
         usage: SqlUsage::After {
             rules: &[UsageRule {
                 when: Pred::True,
@@ -135,7 +136,8 @@ static OBSERVE: Observe<V> = Observe {
             id: "id",
             newest: "SELECT COALESCE(MAX(id), 0) FROM messages",
             page: 256,
-            restart_below: false,
+            first_sight: FirstSight::Newest,
+            shrink: Shrink::Ignore,
             hold_last: None,
             revisit: None,
             last_as: None,

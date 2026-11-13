@@ -38,6 +38,8 @@ PYTHON_READ_METERS = (
 #: so that main's reader reads them and logs what it logs. A CLI that is not
 #: listed here must never decline.
 EXPECTED_UNSUPPORTED = {
+    "copilot": "a 1.0.75 events.jsonl (it reconciles against the store), or a store that cannot be read: "
+               "main's reader reads the one and warns about the other",
     "hermes": "a state.db without the declared columns: main's reader reports the schema",
     "openclaw": "a transcript_events table without the declared columns: main's reader reports the schema",
 }
