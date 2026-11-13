@@ -48,6 +48,17 @@ pub fn iso_from_micros(micros: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}{fraction}+00:00", secs / 3600, secs % 3600 / 60, secs % 60)
 }
 
+/// `datetime.fromtimestamp(seconds, timezone.utc).isoformat()` of a float:
+/// the fraction rounded half-even to microseconds, as CPython does.
+pub fn iso_from_float(seconds: f64) -> String {
+    if !seconds.is_finite() || seconds.abs() > 3.0e11 {
+        return String::new();
+    }
+    let whole = seconds.trunc();
+    let micros = ((seconds - whole) * 1e6).round_ties_even();
+    iso_from_micros(whole as i64 * 1_000_000 + micros as i64)
+}
+
 /// `log_readers.base.turn_timestamp`: epoch-ms strings become ISO 8601
 /// (microsecond-rounded, then truncated to ms, as `datetime` does), ISO passes
 /// through, "" becomes None.

@@ -8,6 +8,15 @@ use serde::Serialize;
 
 pub type Str = &'static str;
 
+/// A hook serialises as its input text and a marker.
+fn hook<S: serde::Serializer>(text: &&'static Text, _func: &fn(&str) -> String, out: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeTuple;
+    let mut tuple = out.serialize_tuple(2)?;
+    tuple.serialize_element(*text)?;
+    tuple.serialize_element("<hook>")?;
+    tuple.end()
+}
+
 #[derive(Debug, Serialize)]
 pub struct Cli {
     pub key: Str,
@@ -155,6 +164,9 @@ pub enum Format {
 pub struct Sqlite {
     /// Columns that hold JSON text: read as the parsed value (`null` when malformed).
     pub json: &'static [Str],
+    /// Columns each table must have (`PRAGMA table_info`), checked before
+    /// every query: a store without them is not read at all.
+    pub requires: &'static [(Str, &'static [Str])],
     /// Usage rows after the checkpoint's `row_id` (main's `{"kind": "sqlite",
     /// "row_id", "identity"}`): the one `?` is that watermark.
     pub usage: Option<Rows>,
@@ -172,6 +184,12 @@ pub struct Rows {
     /// of a database starts there, since everything in it is history.
     pub newest: Str,
     pub page: i64,
+    /// Activity: the newest id is read every pass, and one below the
+    /// watermark (a replaced database) starts over at it.
+    pub restart_below: bool,
+    /// Activity: a last row matching this is not consumed yet (it is read
+    /// again next pass, when it may have changed).
+    pub hold_last: Option<Pred>,
 }
 
 #[derive(Debug, Serialize)]
@@ -295,6 +313,12 @@ pub enum Text {
     IsoFromMicros(Path),
     /// The same from epoch seconds (`usage_common._epoch_to_iso` of an int).
     IsoFromSeconds(&'static Num),
+    /// `usage_common._epoch_to_iso` of the value as a float ("" when it is not a number).
+    IsoFromFloat(Path),
+    /// A vendor hook: a string function the vocabulary cannot express. The
+    /// declaration states why next to the function.
+    #[serde(serialize_with = "hook")]
+    Hook(&'static Text, fn(&str) -> String),
     /// Key of the first entry of the object at the path.
     FirstKey(Path),
     /// 1-based line number of the record.
@@ -368,6 +392,12 @@ pub enum UsageMode {
     /// (`{"kind": "legacy", "legacy_seen": [...]}`): the credited keys plus one
     /// `mark + "<in>:<out>"` key. A shrink re-baselines without an event.
     Snapshot { suffix: Str, mark: Str },
+    /// SQLite rows that each hold one key's running counters (hermes: a row
+    /// per session). Every read reads them all; the checkpoint keeps each
+    /// key's last counters as `{"kind": kind, map: {key: [counters…]}}`. The
+    /// rules see the row with `delta` (column → growth, floored at 0) and
+    /// `counters` (`"a:b:…"`) added; a row that did not grow yields nothing.
+    Counters { kind: Str, map: Str, columns: &'static [Str] },
 }
 
 #[derive(Debug, Serialize)]

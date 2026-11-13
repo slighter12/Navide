@@ -8,6 +8,7 @@
 //! The FFI connection is the evaluation crate's: macOS links the system
 //! SQLite, Linux the bundled one `libsqlite3-sys` builds, Windows the OS's
 //! `winsqlite3.dll`.
+use super::Error;
 use crate::decl::Sqlite;
 use serde_json::{Map, Value};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -167,13 +168,24 @@ impl Connection {
 /// The rows of `sql` with integer parameters, each an object by column name
 /// (the declaration's JSON columns parsed, `null` when malformed). `None`:
 /// the database could not be read this cycle.
-pub fn rows(path: &Path, db: &Sqlite, sql: &str, params: &[i64]) -> Option<Vec<Value>> {
-    Connection::open(path)?.query(sql, params, db.json)
+///
+/// A store without the declared columns is an `Error::Unsupported`: the
+/// caller's own reader takes the call (main's readers report such a store).
+pub fn rows(path: &Path, db: &Sqlite, sql: &str, params: &[i64]) -> Result<Option<Vec<Value>>, Error> {
+    let Some(con) = Connection::open(path) else { return Ok(None) };
+    for (table, columns) in db.requires {
+        let Some(have) = con.query(&format!("PRAGMA table_info({table})"), &[], &[]) else { return Ok(None) };
+        let has = |column: &str| have.iter().any(|row| row.get("name").and_then(Value::as_str) == Some(column));
+        if let Some(missing) = columns.iter().find(|c| !has(c)) {
+            return Err(Error::Unsupported(format!("table {table} lacks {missing}")));
+        }
+    }
+    Ok(con.query(sql, params, db.json))
 }
 
 /// The first column of the first row, as main's `_int` reads it.
-pub fn scalar(path: &Path, db: &Sqlite, sql: &str) -> Option<i64> {
-    let rows = rows(path, db, sql, &[])?;
+pub fn scalar(path: &Path, db: &Sqlite, sql: &str) -> Result<Option<i64>, Error> {
+    let Some(rows) = rows(path, db, sql, &[])? else { return Ok(None) };
     let first = rows.first().and_then(Value::as_object).and_then(|row| row.values().next().cloned());
-    Some(crate::expr::py_int(first.as_ref()))
+    Ok(Some(crate::expr::py_int(first.as_ref())))
 }

@@ -81,7 +81,7 @@ pub fn read(
     full: bool,
 ) -> Result<UsageRead, Error> {
     if let Format::Sqlite(db) = format {
-        return Ok(rows(spec, db, vendor, path, slots, checkpoint, full));
+        return rows(spec, db, vendor, path, slots, checkpoint, full);
     }
     if let UsageMode::Snapshot { suffix, mark } = spec.mode {
         return Ok(snapshot(spec, vendor, path, slots, checkpoint, suffix, mark));
@@ -108,6 +108,8 @@ pub fn read(
         }
         UsageMode::Cumulative => cumulative(spec, vendor, path, slots, checkpoint, tail, restore),
         UsageMode::Snapshot { .. } => unreachable!("read above"),
+        // tests/declarations.rs: only a SQLite declaration uses Counters.
+        UsageMode::Counters { .. } => unreachable!("Counters is a SQLite mode"),
     }
 }
 
@@ -115,9 +117,12 @@ pub fn read(
 /// gave an event (main advances it per event, so an all-zero row is read
 /// again next cycle); a replaced database starts over. `full`: every row,
 /// deduplicated by key (main's `parse_session_file`).
-fn rows(spec: &'static UsageSpec, db: &'static Sqlite, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, full: bool) -> UsageRead {
+fn rows(spec: &'static UsageSpec, db: &'static Sqlite, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, full: bool) -> Result<UsageRead, Error> {
+    if let UsageMode::Counters { kind, map, columns } = spec.mode {
+        return counters(spec, db, vendor, path, slots, checkpoint, full, (kind, map, columns));
+    }
     let (Some(query), Ok(meta)) = (db.usage.as_ref(), std::fs::metadata(path)) else {
-        return UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() };
+        return Ok(UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() });
     };
     let identity = jsonl::identity(&meta);
     let prior = py_str_opt(checkpoint.get("identity"));
@@ -132,7 +137,7 @@ fn rows(spec: &'static UsageSpec, db: &'static Sqlite, vendor: &str, path: &Path
     };
     let mut events = Vec::new();
     let mut seen = HashSet::new();
-    for row in super::sqlite::rows(path, db, query.sql, &[last]).unwrap_or_default() {
+    for row in super::sqlite::rows(path, db, query.sql, &[last])?.unwrap_or_default() {
         let Some(reading) = apply_rules(spec, &row, 0, &mut slots) else { continue };
         let s = scope(&row, 0, &slots);
         let (Some(input), Some(output)) = (expr::num(&reading.input, &s), expr::num(&reading.output, &s)) else { continue };
@@ -146,7 +151,62 @@ fn rows(spec: &'static UsageSpec, db: &'static Sqlite, vendor: &str, path: &Path
         last = last.max(py_int(row.get(query.id)));
         events.push(event(vendor, path, reading, &s, input, output, key, cursor(last)));
     }
-    UsageRead { events, checkpoint: cursor(last) }
+    Ok(UsageRead { events, checkpoint: cursor(last) })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn counters(
+    spec: &'static UsageSpec,
+    db: &'static Sqlite,
+    vendor: &str,
+    path: &Path,
+    mut slots: Slots,
+    checkpoint: &Map<String, Value>,
+    full: bool,
+    (kind, map, columns): (&'static str, &'static str, &'static [&'static str]),
+) -> Result<UsageRead, Error> {
+    let unchanged = || Ok(UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() });
+    let Some(query) = db.usage.as_ref() else { return unchanged() };
+    let Some(rows) = super::sqlite::rows(path, db, query.sql, &[])? else { return unchanged() };
+    let empty = Map::new();
+    let last = match checkpoint.get(map) {
+        Some(Value::Object(last)) if !full && checkpoint.get("kind").and_then(Value::as_str) == Some(kind) => last,
+        _ => &empty,
+    };
+    // `int(v or 0)`.
+    let int = |v: Option<&Value>| v.filter(|v| expr::truthy(v)).and_then(expr::py_int_raw).unwrap_or(0);
+    let (mut events, mut state, mut seen) = (Vec::new(), Map::new(), HashSet::new());
+    for mut row in rows {
+        let key = expr::py_str_opt(row.get(query.id));
+        let now: Vec<i64> = columns.iter().map(|c| int(row.get(*c))).collect();
+        let base: Vec<i64> = match last.get(&key) {
+            Some(Value::Array(prev)) if prev.len() == columns.len() => prev.iter().map(|v| expr::py_int_raw(v).unwrap_or(0)).collect(),
+            _ => vec![0; columns.len()],
+        };
+        let delta: Map<String, Value> = columns.iter().zip(now.iter().zip(&base)).map(|(c, (n, b))| ((*c).to_owned(), (n - b).max(0).into())).collect();
+        let grew = delta.values().any(|d| d.as_i64() != Some(0));
+        let joined = now.iter().map(i64::to_string).collect::<Vec<_>>().join(":");
+        state.insert(key, now.into());
+        if let Value::Object(object) = &mut row {
+            object.insert("delta".into(), delta.into());
+            object.insert("counters".into(), joined.into());
+        }
+        if !grew {
+            continue;
+        }
+        let Some(reading) = apply_rules(spec, &row, 0, &mut slots) else { continue };
+        let s = scope(&row, 0, &slots);
+        let (Some(input), Some(output)) = (expr::num(&reading.input, &s), expr::num(&reading.output, &s)) else { continue };
+        let dedup = expr::text(&reading.key, &s);
+        if full && !seen.insert(dedup.clone()) {
+            continue;
+        }
+        events.push(event(vendor, path, reading, &s, input, output, dedup, Map::new()));
+    }
+    let mut next = Map::new();
+    next.insert("kind".into(), kind.into());
+    next.insert(map.into(), state.into());
+    Ok(UsageRead { events, checkpoint: next })
 }
 
 /// `int()` of each half of a `"<in>:<out>"` mark; (0, 0) when it is not one.

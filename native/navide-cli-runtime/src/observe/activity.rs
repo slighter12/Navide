@@ -344,16 +344,32 @@ pub fn walk(
             let (Format::Sqlite(db), Some(query)) = (format, sqlite_activity(format)) else {
                 unreachable!("a Rows cursor is declared with a SQLite activity query")
             };
+            let newest = || super::sqlite::scalar(path, db, query.newest);
             match state.rows {
                 // First sight: everything already in the database is history.
-                None => state.rows = super::sqlite::scalar(path, db, query.newest).or(state.rows),
+                None => state.rows = newest()?.or(state.rows),
                 Some(after) => {
-                    let rows = super::sqlite::rows(path, db, query.sql, &[after, query.page]).unwrap_or_default();
-                    if let Some(last) = rows.last() {
-                        state.rows = Some(crate::expr::py_int(last.get(query.id)));
-                    }
-                    for row in &rows {
-                        ctx.record(spec.rules, row, At { line: 0, end: 0 });
+                    let top = if query.restart_below { newest()? } else { Some(after) };
+                    match top {
+                        None => {}
+                        Some(top) if top < after => state.rows = Some(top),
+                        Some(_) => {
+                            let mut rows = super::sqlite::rows(path, db, query.sql, &[after, query.page])?.unwrap_or_default();
+                            let held = |row: &Value| {
+                                let slots = Slots::new();
+                                let scope = Scope { record: row, line: 0, offset: 0, slots: &slots, cancelled: false, entry_key: "" };
+                                query.hold_last.as_ref().is_some_and(|p| expr::pred(p, &scope))
+                            };
+                            if rows.last().is_some_and(held) {
+                                rows.pop();
+                            }
+                            if let Some(last) = rows.last() {
+                                state.rows = Some(crate::expr::py_int(last.get(query.id)));
+                            }
+                            for row in &rows {
+                                ctx.record(spec.rules, row, At { line: 0, end: 0 });
+                            }
+                        }
                     }
                 }
             }

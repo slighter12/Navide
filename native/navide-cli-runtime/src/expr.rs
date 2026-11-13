@@ -289,6 +289,8 @@ pub fn text(t: &Text, s: &Scope) -> String {
             };
             if seconds == 0.0 { String::new() } else { time::iso_truncated_ms(seconds) }
         }
+        Text::IsoFromFloat(path) => py_float(get(s.record, path)).map(time::iso_from_float).unwrap_or_default(),
+        Text::Hook(inner, func) => func(&text(inner, s)),
         Text::IsoFromSeconds(n) => num(n, s).and_then(|v| v.checked_mul(1_000_000)).map(time::iso_from_micros).unwrap_or_default(),
         Text::IsoFromMicros(path) => get(s.record, path).and_then(py_int_raw).map(time::iso_from_micros).unwrap_or_default(),
         Text::FirstKey(path) => get(s.record, path)

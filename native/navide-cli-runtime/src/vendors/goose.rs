@@ -37,6 +37,7 @@ const fn active(detail: Str) -> [Effect; 2] {
 
 static DB: Sqlite = Sqlite {
     json: &["content", "meta"],
+    requires: &[],
     usage: Some(Rows {
         sql: "SELECT u.id AS id, u.session_id AS session_id, u.created_timestamp AS created, COALESCE(u.model, '') AS model, \
               u.input_tokens AS input, u.output_tokens AS output, u.cache_read_tokens AS cache_read, \
@@ -45,6 +46,8 @@ static DB: Sqlite = Sqlite {
         id: "id",
         newest: "SELECT COALESCE(MAX(id), 0) FROM usage_ledger",
         page: 0,
+        restart_below: false,
+        hold_last: None,
     }),
     activity: Some(Rows {
         sql: "SELECT m.id AS id, m.session_id AS session_id, m.role AS role, m.content_json AS content, \
@@ -54,6 +57,8 @@ static DB: Sqlite = Sqlite {
         id: "id",
         newest: "SELECT COALESCE(MAX(id), 0) FROM messages",
         page: 256,
+        restart_below: false,
+        hold_last: None,
     }),
 };
 

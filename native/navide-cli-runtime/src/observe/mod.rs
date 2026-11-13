@@ -30,6 +30,9 @@ pub enum Error {
     Io(std::io::Error),
     /// A line that is not UTF-8 ended the walk (main raises there too).
     Decode { line: usize },
+    /// A store this declaration does not describe (a SQLite table without a
+    /// declared column): the caller's own reader takes the call.
+    Unsupported(String),
 }
 
 impl std::fmt::Display for Error {
@@ -37,6 +40,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::Io(err) => write!(f, "io: {err}"),
             Error::Decode { line } => write!(f, "line {line} is not UTF-8"),
+            Error::Unsupported(why) => write!(f, "unsupported store: {why}"),
         }
     }
 }
@@ -230,7 +234,7 @@ impl Observer {
         let spec = &self.spec.activity;
         let mut state = bag::load(spec, bag);
         let result = self.activity(path, &mut state);
-        if !matches!(result, Err(Error::Io(_))) {
+        if !matches!(result, Err(Error::Io(_) | Error::Unsupported(_))) {
             bag::store(spec, &state, bag);
         }
         result

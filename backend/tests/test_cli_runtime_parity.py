@@ -39,6 +39,7 @@ from tests.vendors import test_codex_subagent as sub_t
 from tests.vendors import test_droid as droid_t
 from tests.vendors import test_goose as goose_t
 from tests.vendors import test_grok as grok_t
+from tests.vendors import test_hermes as hermes_t
 from tests.vendors import test_kimi_code_2_2_fixture as kimi_t
 from tests.vendors import test_muse as muse_t
 from tests.vendors import test_pi as pi_t
@@ -182,6 +183,38 @@ def _scenarios() -> dict[str, dict]:
         ], 1, 2),
         _db_step([goose_msg("s1", "user", goose_t._text("again"), ts=1792513700), goose_usage("s1", 50, 5)], 2, 3),
     ]
+    def hermes_session(sid: str, title: str | None, parent: str | None = None, cwd: str = "/work") -> tuple:
+        return ("INSERT INTO sessions(id, source, title, parent_session_id, cwd, started_at, last_activity_at) "
+                "VALUES (?, 'cli', ?, ?, ?, 1000, 1000.25)", (sid, title, parent, cwd))
+
+    def hermes_msg(sid: str, role: str, content: str | None = "", finish: str | None = None,
+                   tool_calls: str | None = None, ts: float = 1000.5) -> tuple:
+        return ("INSERT INTO messages(session_id, role, content, tool_calls, timestamp, finish_reason) "
+                "VALUES (?, ?, ?, ?, ?, ?)", (sid, role, content, tool_calls, ts, finish))
+
+    def hermes_tokens(sid: str, inp: int, out: int, cread: int, cwrite: int, at: float) -> tuple:
+        return ("UPDATE sessions SET input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, "
+                "cache_write_tokens = ?, last_activity_at = ? WHERE id = ?", (inp, out, cread, cwrite, at, sid))
+
+    hermes_steps = [
+        _db_step([hermes_t._SCHEMA, hermes_session("root", hermes_t.NAME),
+                  hermes_session("cont", "compacted", parent="root", cwd="/work/sub"),
+                  hermes_session("other", "my own chat"), hermes_msg("root", "user", "old")], 0, 1),
+        _db_step([
+            hermes_msg("cont", "user", "fix the parser at-pane:abc", ts=1001.123456),
+            hermes_msg("cont", "assistant", "", finish="tool_calls", tool_calls='[{"id": "t"}]'),
+            hermes_msg("cont", "tool", "ok"),
+            hermes_msg("cont", "assistant", json.dumps([{"type": "text", "text": "fixed"}]), finish="stop"),
+            hermes_msg("other", "user", "   "),
+            hermes_msg("other", "assistant", "streaming"),
+            hermes_tokens("cont", 1200, 80, 300, 20, 1001.75), hermes_tokens("other", 10, 1, 0, 0, 1002),
+        ], 1, 2),
+        _db_step([
+            "UPDATE messages SET content = 'done streaming', finish_reason = 'stop' WHERE role = 'assistant' "
+            "AND finish_reason IS NULL",
+            hermes_tokens("cont", 1500, 90, 300, 20, 1003.5),
+        ], 2, 3),
+    ]
     grok = [grok_t._user(1, "hello grok"), grok_t._agent(2, "hi "), grok_t._agent(3, "there"), grok_t._turn(4),
             grok_t._user(5, "again"), grok_t._agent(6, "ok"), grok_t._turn(7, inp=50, out=5, stop="cancelled")]
     return {
@@ -266,6 +299,11 @@ def _scenarios() -> dict[str, dict]:
             "vendor": "goose", "env": {"GOOSE_PATH_ROOT": "goose"},
             "file": "goose/data/sessions/sessions.db",
             "steps": goose_steps,
+        },
+        "hermes_db": {
+            "vendor": "hermes", "env": {"HERMES_HOME": "hermes"},
+            "file": "hermes/state.db",
+            "steps": hermes_steps,
         },
         "grok_turns": {
             "vendor": "grok", "env": {"GROK_HOME": "grok"},
