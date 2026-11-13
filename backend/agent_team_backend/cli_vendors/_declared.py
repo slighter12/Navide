@@ -13,8 +13,9 @@ binary to read it. A vendor module spreads ``declared(key)`` into its
 * whether a session can be resumed by id, and how a saved command names the
   session it resumes (``resume_id``).
 
-The frontend's agent specs read the same file for the arguments themselves
-(``src/renderer/src/platform/plugin-shell/agents/declared.ts``).
+The frontend's agent specs read the same output for the arguments themselves
+(``src/renderer/src/platform/plugin-shell/agents/_declared.ts``, from a copy
+generated beside it).
 """
 
 from __future__ import annotations

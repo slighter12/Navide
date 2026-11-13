@@ -148,15 +148,28 @@ def _binary() -> Path:
     return exe
 
 
+#: The same generated file inside the frontend module that reads it (plugin-shell
+#: imports nothing from outside itself).
+FRONTEND_FILE = (Path(__file__).resolve().parents[2] / "src" / "renderer" / "src" / "platform" / "plugin-shell"
+                 / "agents" / "cli_declarations.json")
+
+
 def test_the_checked_in_declarations_are_current() -> None:
-    """``NAVIDE_DECLARATIONS_WRITE=1`` rewrites the file from the binary."""
+    """``NAVIDE_DECLARATIONS_WRITE=1`` rewrites both files from the binary."""
     printed = subprocess.run([str(_binary()), "declarations", "launch"], capture_output=True, text=True,
                              encoding="utf-8", check=True, timeout=60).stdout
     if os.environ.get("NAVIDE_DECLARATIONS_WRITE") == "1":
-        cli_declarations.FILE.write_text(printed, encoding="utf-8")
+        for generated in (cli_declarations.FILE, FRONTEND_FILE):
+            generated.write_text(printed, encoding="utf-8")
         cli_declarations.declarations.cache_clear()
-    assert cli_declarations.FILE.read_text(encoding="utf-8") == printed, \
-        "cli_declarations.json is stale: rebuild the runtime and run this test with NAVIDE_DECLARATIONS_WRITE=1"
+    for generated in (cli_declarations.FILE, FRONTEND_FILE):
+        assert generated.read_text(encoding="utf-8") == printed, \
+            f"{generated.name} is stale: rebuild the runtime and run this test with NAVIDE_DECLARATIONS_WRITE=1"
+
+
+def test_backend_and_frontend_read_the_same_declarations() -> None:
+    """Needs no binary: the two generated files never differ."""
+    assert FRONTEND_FILE.read_bytes() == cli_declarations.FILE.read_bytes()
 
 
 @pytest.mark.parametrize("key", KEYS)
