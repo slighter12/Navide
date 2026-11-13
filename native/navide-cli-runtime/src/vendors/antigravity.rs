@@ -150,7 +150,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[], home: &[&[".gemini", "antigravity-cli", "conversations"]], files: &[&["*.db"]] },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[Seed { slot: Slot::SessionId, init: SlotInit::FileStem }],

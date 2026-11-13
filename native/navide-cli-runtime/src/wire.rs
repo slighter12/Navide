@@ -8,7 +8,6 @@
 use crate::observe::{Error, HAS_FILE_IDENTITY};
 use crate::registry::{AnyObserver, ALL};
 use crate::resume::{self, Command};
-use crate::launch;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -39,16 +38,9 @@ pub struct Request {
     pub bag: Vec<String>,
     #[serde(default)]
     pub session_id: String,
+    /// A saved launch command, as a string or an argv (`resume_id`).
     #[serde(default)]
     pub command: Value,
-    #[serde(default)]
-    pub yolo: bool,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub effort: Option<String>,
-    #[serde(default)]
-    pub resume: Option<String>,
     /// The caller's clock (seconds since the epoch) for idle flushes.
     #[serde(default)]
     pub now: Option<f64>,
@@ -144,11 +136,6 @@ pub fn handle(observers: &mut Observers, req: Request) -> Result<Value, Failure>
                 other => resume::id_from_command(cli, &Command::Text(&other.to_string())),
             };
             Ok(json!(id))
-        }
-        "argv" => {
-            let cli = crate::cli(&req.vendor).ok_or_else(|| bad("unknown vendor"))?;
-            let request = launch::Request { yolo: req.yolo, model: req.model, effort: req.effort, resume: req.resume };
-            launch::argv(cli, &request).map(|argv| json!(argv)).map_err(|refused| bad(format!("{refused:?}")))
         }
         other => Err(bad(format!("unknown op {other:?}"))),
     }

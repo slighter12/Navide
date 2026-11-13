@@ -110,7 +110,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[("HERMES_HOME", &[])], home: &[&[".hermes"]], files: &[&["state.db"]] },
     file_name: Some("state.db"),
     other_files: OtherFiles::Empty,
     slots: &[],

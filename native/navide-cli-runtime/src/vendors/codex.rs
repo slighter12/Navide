@@ -128,7 +128,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[("CODEX_HOME", &["sessions"])], home: &[&[".codex", "sessions"]], files: &[&["*", "*", "*", "rollout-*.jsonl"]] },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[

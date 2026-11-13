@@ -182,9 +182,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    // No global root: history files live in each workspace, found by
-    // main's workspace scan, which stays in Python.
-    store: Store { env: &[], home: &[], files: &[] },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[Seed { slot: Slot::Namespace, init: SlotInit::Ext(Ext::Namespace) }, Seed { slot: Slot::Cwd, init: SlotInit::Ext(Ext::Root) }],

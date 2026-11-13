@@ -76,7 +76,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[("KIMI_CODE_HOME", &["sessions"])], home: &[&[".kimi-code", "sessions"]], files: &[&["*", "agents", "*", "wire.jsonl"]] },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[

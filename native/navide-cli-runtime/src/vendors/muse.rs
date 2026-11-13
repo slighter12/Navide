@@ -102,11 +102,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store {
-        env: &[("XDG_DATA_HOME", &["muse", "sessions"])],
-        home: &[&[".local", "share", "muse", "sessions"]],
-        files: &[&["*", "*", "*", "*", "session.jsonl"]],
-    },
     file_name: Some("session.jsonl"),
     other_files: OtherFiles::Empty,
     slots: &[

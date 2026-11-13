@@ -96,11 +96,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store {
-        env: &[("GOOSE_PATH_ROOT", &["data", "sessions"]), ("XDG_DATA_HOME", &["goose", "sessions"])],
-        home: &[&[".local", "share", "goose", "sessions"]],
-        files: &[&["sessions.db"]],
-    },
     file_name: Some("sessions.db"),
     other_files: OtherFiles::Empty,
     slots: &[],

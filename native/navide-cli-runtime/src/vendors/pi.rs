@@ -85,7 +85,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[("PI_CODING_AGENT_SESSION_DIR", &[]), ("PI_CODING_AGENT_DIR", &["sessions"])], home: &[&[".pi", "agent", "sessions"]], files: &[&["*", "*.jsonl"]] },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[

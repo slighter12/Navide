@@ -74,11 +74,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store {
-        env: &[("QWEN_RUNTIME_DIR", &["projects"])],
-        home: &[&[".qwen", "projects"]],
-        files: &[&["*", "chats", "*.jsonl"], &["*", "chats", "archive", "*.jsonl"]],
-    },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[

@@ -120,7 +120,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[], home: &[&[".cursor", "chats"]], files: &[&["*", "*", "store.db"]] },
     file_name: Some("store.db"),
     other_files: OtherFiles::Empty,
     slots: &[

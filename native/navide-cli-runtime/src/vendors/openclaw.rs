@@ -140,7 +140,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[("OPENCLAW_STATE_DIR", &["agents"])], home: &[&[".openclaw", "agents"]], files: &[&["*", "agent", "openclaw-agent.sqlite"]] },
     file_name: Some("openclaw-agent.sqlite"),
     other_files: OtherFiles::Empty,
     slots: &[],

@@ -73,7 +73,6 @@ static TOY: Cli = Cli {
 };
 
 static OBSERVE: Observe<Toy> = Observe {
-    store: Store { env: &[("TOY_HOME", &["logs"])], home: &[&[".toy", "logs"]], files: &[&["*.jsonl"]] },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[

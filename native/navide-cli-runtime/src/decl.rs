@@ -243,8 +243,8 @@ pub enum ValueShape {
 #[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub struct Observe<V: Vendor> {
-    pub store: Store,
-    /// The transcript's exact file name (`None`: any file the store lists).
+    /// The transcript's exact file name (`None`: any file the caller hands
+    /// over; finding a CLI's transcripts stays the backend's scan).
     /// `Vendor::accepts` narrows it further.
     pub file_name: Option<Str>,
     /// What a file that is not a transcript answers.
@@ -279,18 +279,6 @@ pub enum Form {
     Written,
     /// Unicode NFC (a path typed on macOS may be recorded decomposed).
     Nfc,
-}
-
-/// Where records live: a root, then a glob below it.
-#[derive(Debug, Serialize)]
-pub struct Store {
-    /// Environment variables whose value is the root (first set wins), each
-    /// with the path appended below it.
-    pub env: &'static [(Str, &'static [Str])],
-    /// Home-relative fallbacks; the first existing directory wins.
-    pub home: &'static [&'static [Str]],
-    /// Glob segments below the root (`*` matches one name).
-    pub files: &'static [&'static [Str]],
 }
 
 /// A slot's first value.

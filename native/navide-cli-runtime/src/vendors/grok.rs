@@ -117,7 +117,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[("GROK_HOME", &["sessions"])], home: &[&[".grok", "sessions"]], files: &[&["*", "*", "updates.jsonl"]] },
     file_name: Some("updates.jsonl"),
     other_files: OtherFiles::Empty,
     slots: &[Seed { slot: Slot::Cwd, init: SlotInit::Ext(Ext::GroupDir) }, Seed { slot: Slot::SessionId, init: SlotInit::DirName(1) }],

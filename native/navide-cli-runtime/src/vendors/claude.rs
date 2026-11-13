@@ -135,7 +135,6 @@ pub static CLI: Cli = Cli {
 };
 
 static OBSERVE: Observe<V> = Observe {
-    store: Store { env: &[("CLAUDE_CONFIG_DIR", &["projects"])], home: &[&[".claude", "projects"]], files: &[&["*", "*.jsonl"]] },
     file_name: None,
     other_files: OtherFiles::Empty,
     slots: &[
