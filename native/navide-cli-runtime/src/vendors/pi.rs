@@ -65,6 +65,7 @@ pub static CLI: Cli = Cli {
         model: Some(&["--model", "{}"]),
         effort: Some(&["--thinking", "{}"]),
         efforts: &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+        env_strip: &["PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "PI_PACKAGE_DIR"],
         ..Launch::of("pi")
     },
     resume: Resume {

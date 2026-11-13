@@ -52,6 +52,7 @@ from pathlib import Path
 
 import re
 
+from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
 from .base import (
     PlatformInstall,
@@ -1053,14 +1054,9 @@ async def fetch_opencode(home: Path, env: dict | None = None) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^opencode\s+(?:\S+\s+)*(?:--session|-s)\s+([^-\s]\S*)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from an `opencode ... --session <id>` / `-s <id>` command
-    ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
+# The session id of an `opencode ... --session <id>` / `-s <id>` command is
+# read by the launch declaration (native/navide-cli-runtime/src/vendors/
+# opencode.rs; see _declared).
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -1089,7 +1085,6 @@ SPEC = VendorSpec(
     # Same XDG database/auth root as _data_dir("opencode").
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("XDG_DATA_HOME") or ctx.home / ".local" / "share") / "opencode",),
     data_dir_env_vars=("XDG_DATA_HOME",),
-    supports_model=True,
     skills_supported=True,
     # skills.paths registers extra roots; opencode deep-merges this document
     # over the user's own config, so their skills keep loading.
@@ -1185,9 +1180,10 @@ SPEC = VendorSpec(
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_opencode(home),
     fetch_usage_from_context=lambda ctx: fetch_opencode(ctx.home, dict(ctx.env)),
-    resume_id_from_command=_resume_id_from_command,
+    # Model support, the config variables a spawn strips and resume-id
+    # parsing: the launch declaration.
+    **declared("opencode"),
     session_exists=_session_exists,
-    home_env_vars=("OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"),
     make_log_reader=OpencodeLogReader,
     # OpenCode ships `opencode upgrade` but no doctor subcommand.
     install_dep=Dep("opencode", "OpenCode (Anomaly)", "OpenCode terminal coding agent", "agent_cli",

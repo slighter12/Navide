@@ -50,6 +50,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ._declared import declared
 from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, dotenv_extract, dotenv_merge
 from ..log_readers.base import (
     ActivityEvent,
@@ -662,8 +663,9 @@ SPEC = VendorSpec(
     # The only vendor here with no session ids at all: resume is
     # `--chat-history-file <path> --restore-chat-history`, so there is nothing
     # for a caller to name. cli_open_agent refuses `session_id` on this key
-    # rather than opening a pane that restores something else.
-    supports_session_resume=False,
+    # rather than opening a pane that restores something else. That, and the
+    # history-file variables a spawn strips, are the launch declaration's.
+    **declared("aider"),
     # Multi-account = one provider API key per profile, parked in and
     # restored to ``~/.aider/oauth-keys.env`` (see AIDER_KEYS_FILE_REL).
     # "manual": there is no conversation to resume — the pane is relaunched
@@ -690,7 +692,6 @@ SPEC = VendorSpec(
         todo="a project .env / .aider.conf.yml / --api-key flag overrides the parked key and is invisible to switch_preflight; --restore-chat-history is a lossy summary, so the user must accept a new conversation",
     ),
     session_path=_session_lookup_path,
-    home_env_vars=("AIDER_CHAT_HISTORY_FILE", "AIDER_INPUT_HISTORY_FILE"),
     make_log_reader=AiderLogReader,
     # Aider updates via the `--upgrade` FLAG (not a subcommand) and ships no
     # doctor. AIDER_CHECK_UPDATE=false is its own startup update-check

@@ -72,7 +72,8 @@ from ..log_readers.base import (
     join_text_blocks,
     user_prompt_text,
 )
-from .base import Dep, ExtensionsSpec, VendorSpec, simple_command_args
+from ._declared import declared
+from .base import Dep, ExtensionsSpec, VendorSpec
 from ..usage_common import _epoch_to_iso, _num
 
 log = logging.getLogger("agent_team_backend.log_readers.openclaw")
@@ -463,19 +464,9 @@ OpenclawLogReader.workspace_match = _workspace_match
 OpenclawLogReader.pane_cwd_match = _pane_cwd_match
 
 
-def _resume_id_from_command(command) -> str:
-    """The session key an `openclaw tui … --session <key>` launch targets."""
-    args = simple_command_args(command)
-    if not args or args[0] != "openclaw":
-        return ""
-    for index, arg in enumerate(args[1:], 1):
-        if arg == "--":
-            break
-        if arg == "--session" and index + 1 < len(args):
-            return _resume_key(args[index + 1])
-        if arg.startswith("--session="):
-            return _resume_key(arg.partition("=")[2])
-    return ""
+# The session key an `openclaw tui … --session <key>` launch targets is read
+# by the launch declaration (native/navide-cli-runtime/src/vendors/
+# openclaw.rs; see _declared).
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -498,8 +489,8 @@ SPEC = VendorSpec(
     # docs.openclaw.ai/concepts/agent-workspace), else ~/.openclaw.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("OPENCLAW_STATE_DIR") or ctx.home / ".openclaw"),),
     data_dir_env_vars=("OPENCLAW_STATE_DIR",),
-    supports_session_resume=True,
-    resume_id_from_command=_resume_id_from_command,
+    # Resume by session key: the launch declaration.
+    **declared("openclaw"),
     session_exists=_session_exists,
     make_log_reader=OpenclawLogReader,
     install_dep=Dep("openclaw", "OpenClaw", "OpenClaw personal AI assistant", "agent_cli",

@@ -59,7 +59,8 @@ from uuid import UUID
 
 from .. import osplat
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
-from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec, simple_command_args
+from ._declared import declared
+from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec
 from ..usage_common import _num, _snapshot, _window
 from ..log_readers.base import (
     ActivityEvent,
@@ -560,27 +561,10 @@ GrokLogReader.workspace_match = _workspace_match
 GrokLogReader.pane_cwd_match = _pane_cwd_match
 
 
-def _resume_id_from_command(command) -> str:
-    args = simple_command_args(command)
-    if not args or args[0] != "grok":
-        return ""
-    for index, arg in enumerate(args[1:], 1):
-        if arg == "--":
-            break
-        if arg in ("-r", "--resume") and index + 1 < len(args):
-            value = args[index + 1]
-        elif arg.startswith("--resume="):
-            value = arg.partition("=")[2]
-        else:
-            continue
-        # Grok also accepts titles. Only a UUID identifies the transcript for
-        # attribution and duplicate-PTY reaping without asking the CLI.
-        try:
-            session_id = str(UUID(value))
-        except ValueError:
-            return ""
-        return session_id if session_id == value.lower() else ""
-    return ""
+# How a launch names the session it resumes (`-r` / `--resume`, a UUID only:
+# grok also accepts titles, and only a UUID identifies the transcript) is
+# declared with the rest of the launch
+# (native/navide-cli-runtime/src/vendors/grok.rs; see _declared).
 
 
 def _session_path(workspace_path: str, session_id: str) -> Path | None:
@@ -803,7 +787,6 @@ SPEC = VendorSpec(
     # GrokLogReader._home layout, including GROK_HOME and the HOME shim.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("GROK_HOME") or ctx.home / ".grok"),),
     data_dir_env_vars=("GROK_HOME",),
-    supports_model=True,
     # ~/.agents/skills is still a scanned tier on the official CLI (docs
     # 08-skills.md lists .agents/skills alongside .grok/skills at every level),
     # and there is still no variable that relocates the skills root on its own
@@ -865,21 +848,10 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_grok(home),
-    home_env_vars=(
-        "GROK_HOME",
-        # Child/daemon runtime markers the community grok-cli stamped on its
-        # own subprocesses — same inheritance hazard class as claude's
-        # child-session marker. Kept after the move to the official CLI rather
-        # than dropped: a string scan of the official binary finds neither, but
-        # that scan is not evidence of absence — GROK_SANDBOX, which `grok
-        # --help` states outright, does not show up in it either. Stripping a
-        # marker that does exist would reintroduce the hazard; carrying one
-        # that does not costs nothing.
-        "GROK_BACKGROUND_CHILD",
-        "GROK_DAEMON_CHILD",
-    ),
+    # Model support, the home variables a spawn strips and resume-id
+    # parsing: the launch declaration.
+    **declared("grok"),
     make_log_reader=GrokLogReader,
-    resume_id_from_command=_resume_id_from_command,
     # Newly answerable: sessions live at a path derived from the cwd and the
     # id, so a resume preflight can check instead of assuming.
     session_path=_session_path,

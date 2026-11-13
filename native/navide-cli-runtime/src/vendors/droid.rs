@@ -33,7 +33,16 @@ pub static CLI: Cli = Cli {
     label: "Droid CLI (Factory)",
     kind: Kind::Cli,
     // The interactive command accepts an unknown `--model` and ignores it.
-    launch: Launch { yolo_args: &["--auto", "high"], ..Launch::of("droid") },
+    launch: Launch {
+        yolo_args: &["--auto", "high"],
+        // FACTORY_HOME_OVERRIDE relocates the whole ~/.factory tree;
+        // FACTORY_RUNTIME_SETTINGS_PATH points droid at a settings file for one
+        // process (--settings); droid stamps its own children with
+        // DROID_PARENT_SESSION_ID, and a pane that inherits it becomes a child
+        // of the parent's session instead of starting its own.
+        env_strip: &["FACTORY_HOME_OVERRIDE", "FACTORY_RUNTIME_SETTINGS_PATH", "DROID_PARENT_SESSION_ID"],
+        ..Launch::of("droid")
+    },
     resume: Resume {
         args: Some(&["--resume", "{id}"]),
         parse: Some(ResumeParse {

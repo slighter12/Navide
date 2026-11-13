@@ -89,7 +89,16 @@ pub static CLI: Cli = Cli {
     label: "Grok Build (SpaceXAI)",
     kind: Kind::Cli,
     // `--always-approve` exists but is deliberately not wired (see agents/grok.ts).
-    launch: Launch { model: Some(&["--model", "{}"]), ..Launch::of("grok") },
+    launch: Launch {
+        model: Some(&["--model", "{}"]),
+        // The two child markers are the community grok-cli's, stamped on its
+        // own subprocesses. Kept for the official CLI: a string scan of its
+        // binary finds neither, but that scan also misses GROK_SANDBOX, which
+        // `grok --help` states outright. Stripping a marker that does exist
+        // matters; carrying one that does not costs nothing.
+        env_strip: &["GROK_HOME", "GROK_BACKGROUND_CHILD", "GROK_DAEMON_CHILD"],
+        ..Launch::of("grok")
+    },
     resume: Resume {
         args: Some(&["-r", "{id}"]),
         parse: Some(ResumeParse {

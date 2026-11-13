@@ -46,7 +46,8 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from .base import Dep, ExtensionsSpec, PlatformInstall, VendorSpec, command_text
+from ._declared import declared
+from .base import Dep, ExtensionsSpec, PlatformInstall, VendorSpec
 from ..osplat import platform_id as _platform_id
 from ..usage_common import _epoch_to_iso
 from ..log_readers.base import (
@@ -369,16 +370,9 @@ GooseLogReader.pane_cwd_match = _pane_cwd_match
 
 
 # ---- resume / session ------------------------------------------------------
-
-# `goose session -r --session-id <id>` (also `s` for session, `--resume`).
-_RESUME_RE = re.compile(
-    r"^goose\s+(?:session|s)\s+(?:\S+\s+)*?--session-id[\s=]+([^-\s]\S*)"
-)
-
-
-def _resume_id_from_command(command) -> str:
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
+# `goose session -r --session-id <id>` (also `s` for session): how a launch
+# names the session it resumes is declared with the rest of the launch
+# (native/navide-cli-runtime/src/vendors/goose.rs; see _declared).
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -402,7 +396,7 @@ SPEC = VendorSpec(
     # The same data dir the reader opens, resolved against the pane's runtime.
     data_dirs=lambda ctx: (ctx.path(_data_dir(dict(ctx.env), ctx.home)),),
     data_dir_env_vars=("GOOSE_PATH_ROOT", "XDG_DATA_HOME", "APPDATA"),
-    resume_id_from_command=_resume_id_from_command,
+    **declared("goose"),
     session_exists=_session_exists,
     make_log_reader=GooseLogReader,
     # No usage/quota surface and no account switching: goose talks to the

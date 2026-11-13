@@ -11,6 +11,7 @@ pub static CLI: Cli = Cli {
         model: Some(&["--model", "{}"]),
         effort: Some(&["--reasoning-effort", "{}"]),
         efforts: &["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        env_strip: &["COPILOT_HOME"],
         ..Launch::of("copilot")
     },
     resume: Resume {

@@ -6,7 +6,7 @@ pub static CLI: Cli = Cli {
     label: "OpenCode (Anomaly)",
     kind: Kind::Cli,
     // Only `opencode run` has a permission bypass; the TUI has none.
-    launch: Launch { model: Some(&["--model", "{}"]), ..Launch::of("opencode") },
+    launch: Launch { model: Some(&["--model", "{}"]), env_strip: &["OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"], ..Launch::of("opencode") },
     resume: Resume {
         args: Some(&["--session", "{id}"]),
         parse: Some(ResumeParse {

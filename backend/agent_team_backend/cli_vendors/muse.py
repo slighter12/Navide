@@ -132,6 +132,7 @@ from ..log_readers.base import (
     set_activity_high_water,
     user_prompt_text,
 )
+from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
 from .base import (
     PlatformInstall,
@@ -687,13 +688,8 @@ class MuseLogReader(LogReader):
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^muse\s+resume\s+(\S+)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `muse resume <id> ...` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
+# The session id of a `muse resume <id> ...` command is read by the launch
+# declaration (native/navide-cli-runtime/src/vendors/muse.rs; see _declared).
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -769,9 +765,6 @@ SPEC = VendorSpec(
     # Same dedicated XDG root as muse_data_root, with the pane's HOME shim.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("XDG_DATA_HOME", "").strip() or ctx.home / ".local" / "share") / "muse",),
     data_dir_env_vars=("XDG_DATA_HOME",),
-    supports_model=True,
-    supports_effort=True,
-    known_efforts=('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'),
     # Verified 2026-08-15: `muse skills list --source user` reports skills
     # from ~/.claude/skills and ~/.agents/skills. Only HOME relocates those,
     # so this is the one vendor whose shim exists for skills alone.
@@ -817,7 +810,8 @@ SPEC = VendorSpec(
         resume="native",
         todo="layout from Meta's launcher script only (the binary's own writer not inspected); META_API_KEY in the pane env shadows the file; no real-account round-trip recorded",
     ),
-    resume_id_from_command=_resume_id_from_command,
+    # Model and effort support and resume-id parsing: the launch declaration.
+    **declared("muse"),
     session_exists=_session_exists,
     make_log_reader=MuseLogReader,
     install_dep=Dep(

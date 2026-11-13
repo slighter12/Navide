@@ -6,7 +6,7 @@ pub static CLI: Cli = Cli {
     key: "kilo",
     label: "Kilo Code CLI",
     kind: Kind::Cli,
-    launch: Launch { yolo_args: &["--auto"], model: Some(&["--model", "{}"]), ..Launch::of("kilo") },
+    launch: Launch { yolo_args: &["--auto"], model: Some(&["--model", "{}"]), env_strip: &["KILO_CONFIG_DIR", "KILO_CONFIG"], ..Launch::of("kilo") },
     resume: Resume {
         args: Some(&["--session", "{id}"]),
         parse: Some(ResumeParse {

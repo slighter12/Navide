@@ -6,7 +6,7 @@ pub static CLI: Cli = Cli {
     label: "MiniMax Code",
     kind: Kind::Cli,
     // Unattended mode is the `permissionMode` setting, not a flag.
-    launch: Launch::of("mcode"),
+    launch: Launch { env_strip: &["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"], ..Launch::of("mcode") },
     resume: Resume::NONE,
     interrupt: b"\x03",
 };

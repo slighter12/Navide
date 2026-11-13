@@ -50,6 +50,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ._declared import declared
 from .base import Dep, ExtensionsSpec, VendorRuntimeContext, VendorSpec
 from ..osplat import platform_id as _platform_id
 
@@ -71,8 +72,9 @@ SPEC = VendorSpec(
     ),
     data_dirs=lambda ctx: (_config_dir(ctx),),
     data_dir_env_vars=("APPDATA",),
-    # No reader can name a session Navide started (see the docstring).
-    supports_session_resume=False,
+    # No reader can name a session Navide started (see the docstring), so the
+    # launch declaration has no resume.
+    **declared("devin"),
     install_dep=Dep("devin", "Devin CLI (Cognition)", "Cognition terminal coding agent", "agent_cli",
         ["devin", "--version"], r"(\d+\.\d+\.\d+)",
         # The official installers are `curl | bash` and `irm … | iex`;

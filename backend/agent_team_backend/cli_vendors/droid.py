@@ -47,8 +47,9 @@ import os
 import re
 from pathlib import Path
 
+from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
-from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec, command_text
+from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec
 from ..osplat import platform_id as _platform_id
 from ..log_readers.base import (
     ActivityLines,
@@ -498,14 +499,9 @@ DroidLogReader.pane_cwd_match = _pane_cwd_match
 
 
 # ---- resume / session ------------------------------------------------------
-
-# `-r` and `--resume` are the same option (droid --help, 0.204.0).
-_RESUME_RE = re.compile(r"^droid\s+(?:\S+\s+)*(?:--resume|-r)\s+(\S+)")
-
-
-def _resume_id_from_command(command) -> str:  # noqa: ANN001
-    match = _RESUME_RE.match(command_text(command).strip())
-    return match.group(1) if match else ""
+# `-r` and `--resume` are the same option (droid --help, 0.204.0); how a launch
+# names the session it resumes is declared with the rest of the launch
+# (native/navide-cli-runtime/src/vendors/droid.rs; see _declared).
 
 
 def _session_path(workspace_path: str, session_id: str) -> Path | None:
@@ -581,20 +577,10 @@ SPEC = VendorSpec(
         resume="native",
         todo="key/blob layout read from the 0.206.0 bundle (machine-wide keyring key, no path binding); identity unreadable; keytar branch (Linux/Windows) not seen running; no real-account round-trip recorded",
     ),
-    resume_id_from_command=_resume_id_from_command,
+    # The home variables a spawn strips and resume-id parsing: the launch declaration.
+    **declared("droid"),
     session_path=_session_path,
     session_exists=_session_exists,
-    home_env_vars=(
-        # Relocates the whole ~/.factory tree.
-        "FACTORY_HOME_OVERRIDE",
-        # Points droid at a settings file for that process only (--settings).
-        "FACTORY_RUNTIME_SETTINGS_PATH",
-        # Droid stamps its own child processes with this. Inherited by a pane
-        # spawned from inside a droid session, it makes that pane a child of
-        # the parent's session instead of starting its own — the same class of
-        # bug CLAUDE_CODE_CHILD_SESSION causes for claude.
-        "DROID_PARENT_SESSION_ID",
-    ),
     make_log_reader=DroidLogReader,
     install_dep=Dep("droid", "Droid CLI (Factory)", "Factory AI coding agent", "agent_cli",
         ["droid", "--version"], r"(\d+\.\d+\.\d+)",

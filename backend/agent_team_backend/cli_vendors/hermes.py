@@ -76,7 +76,8 @@ from ..log_readers.base import (
     join_text_blocks,
     user_prompt_text,
 )
-from .base import Dep, ExtensionsSpec, VendorRuntimeContext, VendorSpec, simple_command_args
+from ._declared import declared
+from .base import Dep, ExtensionsSpec, VendorRuntimeContext, VendorSpec
 from ..osplat import platform_id as _platform_id
 from ..usage_common import _epoch_to_iso
 
@@ -437,23 +438,9 @@ HermesLogReader.workspace_match = _workspace_match
 HermesLogReader.pane_cwd_match = _pane_cwd_match
 
 
-def _resume_id_from_command(command) -> str:
-    """The Navide session name a `hermes chat --continue <name>` launch
-    targets ('' when the command names none)."""
-    args = simple_command_args(command)
-    if not args or args[0] != "hermes":
-        return ""
-    for index, arg in enumerate(args[1:], 1):
-        if arg == "--":
-            break
-        if arg in ("-c", "--continue") and index + 1 < len(args):
-            value = args[index + 1]
-        elif arg.startswith("--continue="):
-            value = arg.partition("=")[2]
-        else:
-            continue
-        return value if session_name(value) == value else ""
-    return ""
+# The Navide session name a `hermes chat --continue <name>` launch targets is
+# read by the launch declaration (native/navide-cli-runtime/src/vendors/
+# hermes.rs; see _declared).
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -473,11 +460,11 @@ SPEC = VendorSpec(
     expected_hosts=(),
     data_dirs=lambda ctx: (_home(ctx),),
     data_dir_env_vars=("HERMES_HOME", "LOCALAPPDATA"),
-    supports_session_resume=True,
-    resume_id_from_command=_resume_id_from_command,
+    # Resume by session name, and no model / effort (`-m` and `--reasoning`
+    # are refused on a `--continue` launch, see the module docstring): the
+    # launch declaration.
+    **declared("hermes"),
     session_exists=_session_exists,
-    # No model / effort: `-m` and `--reasoning` are refused on a `--continue`
-    # launch (see the module docstring).
     make_log_reader=HermesLogReader,
     install_dep=Dep("hermes", "Hermes Agent", "Nous Research general AI agent", "agent_cli",
         ["hermes", "--version"], r"(\d+\.\d+\.\d+)",

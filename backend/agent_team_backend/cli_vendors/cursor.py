@@ -79,6 +79,7 @@ from ..log_readers.base import (
     join_text_blocks,
     user_prompt_text,
 )
+from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
 from .base import (
     PlatformInstall,
@@ -794,16 +795,8 @@ async def fetch_cursor(home: Path) -> dict:
 
 # Cursor CLI's binary is `agent` (legacy installs: `cursor-agent`); both take
 # --resume=<id> / --resume <id>.
-_RESUME_RE = re.compile(
-    r"^(?:agent|cursor-agent)\s+(?:\S+\s+)*--resume(?:=(\S+)|\s+([^-\s]\S*))"
-)
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from an `agent ... --resume=<id>` /
-    `cursor-agent ... --resume <id>` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return (m.group(1) or m.group(2)) if m else ""
+# The launch declaration reads both forms, for `agent` and `cursor-agent`
+# (native/navide-cli-runtime/src/vendors/cursor.rs; see _declared).
 
 
 def _session_path(workspace_path: str, session_id: str) -> Path | None:
@@ -836,7 +829,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     # Verified CLI conversation store; exclude the IDE's other .cursor data.
     data_dirs=lambda ctx: (ctx.path(ctx.home / ".cursor" / "chats"),),
-    supports_model=True,
     # Verified 2026-08-15 (docs): .cursor/skills and .agents/skills in the
     # project, ~/.cursor/skills globally, and no relocation variable at all —
     # the same corner its MCP wiring is in, so the workspace file is again the
@@ -889,7 +881,8 @@ SPEC = VendorSpec(
     ),
     # Late-bound (module global at call time) so tests can monkeypatch.
     fetch_usage=lambda home: fetch_cursor(home),
-    resume_id_from_command=_resume_id_from_command,
+    # Model support and resume-id parsing: the launch declaration.
+    **declared("cursor"),
     session_path=_session_path,
     session_exists=_session_exists,
     make_log_reader=CursorLogReader,

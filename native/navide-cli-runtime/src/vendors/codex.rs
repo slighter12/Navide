@@ -108,6 +108,7 @@ pub static CLI: Cli = Cli {
         yolo_args: &["--dangerously-bypass-approvals-and-sandbox"],
         // Effort is a config override (`-c model_reasoning_effort=…`), not a flag.
         model: Some(&["--model", "{}"]),
+        env_strip: &["CODEX_HOME"],
         ..Launch::of("codex")
     },
     resume: Resume {

@@ -39,6 +39,7 @@ from ..log_readers.base import (
     user_prompt_text,
 )
 from ..log_readers.base import encode_claude_cwd
+from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
 from .base import (
     AccountSwitchSpec,
@@ -916,14 +917,9 @@ async def fetch_qwen(home: Path, env: dict | None = None) -> dict:
 
 # ---- resume / session ------------------------------------------------------
 
-_RESUME_RE = re.compile(r"^qwen\s+(?:\S+\s+)*(?:--resume|-r)\s+([^-\s]\S*)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `qwen ... --resume <id>` / `-r <id>` command
-    ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
+# The session id of a `qwen ... --resume <id>` / `-r <id>` command is read by
+# the launch declaration (native/navide-cli-runtime/src/vendors/qwen.rs; see
+# _declared).
 
 
 def _session_path(workspace_path: str, session_id: str) -> Path:
@@ -981,7 +977,6 @@ SPEC = VendorSpec(
     expected_hosts=(),
     data_dirs=_risk_data_dirs,
     data_dir_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),
-    supports_model=True,
     # Verified 2026-08-15: QWEN_HOME *is* the .qwen directory (its
     # resolveQwenHome falls back to ~/.qwen), so skills sit one level in.
     skills_supported=True,
@@ -1051,10 +1046,11 @@ SPEC = VendorSpec(
         resume="native",
         todo="a Coding Plan key in the pane environment outranks both files and cannot be switched; no real-account round-trip recorded",
     ),
-    resume_id_from_command=_resume_id_from_command,
+    # Model support, the home variables a spawn strips and resume-id
+    # parsing: the launch declaration.
+    **declared("qwen"),
     session_path=_session_path,
     session_exists=_session_exists,
-    home_env_vars=("QWEN_HOME", "QWEN_RUNTIME_DIR"),
     make_log_reader=QwenLogReader,
     # Qwen Code ships `qwen update` but no doctor subcommand; its autoupdate
     # opt-out is a settings.json key, not an env var — autoupdate_env stays empty.

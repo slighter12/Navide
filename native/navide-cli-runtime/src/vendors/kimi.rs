@@ -49,7 +49,16 @@ pub static CLI: Cli = Cli {
     label: "Kimi Code CLI (Moonshot AI)",
     kind: Kind::Cli,
     // Effort lives in config.toml, not on the command line.
-    launch: Launch { yolo_args: &["--yolo"], model: Some(&["--model", "{}"]), ..Launch::of("kimi") },
+    launch: Launch {
+        yolo_args: &["--yolo"],
+        model: Some(&["--model", "{}"]),
+        // pi-tui otherwise treats a split ESC prefix as Escape after 10 ms; pane
+        // input crosses the renderer, a WebSocket and the PTY, so Kimi gets the
+        // reassembly window pi-tui already uses for remote terminals.
+        env_defaults: &[("PI_TUI_ESC_TIMEOUT", "100")],
+        env_strip: &["KIMI_CODE_HOME"],
+        ..Launch::of("kimi")
+    },
     resume: Resume {
         args: Some(&["--session", "{id}"]),
         parse: Some(ResumeParse {

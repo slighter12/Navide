@@ -98,7 +98,9 @@ pub static CLI: Cli = Cli {
             subcommand: &[],
             id_after_subcommand: false,
             flags: &["-c", "--continue"],
-            // Only a Navide-started session name.
+            // Only a Navide-started session name. A continuation's name
+            // (`<name> #<n>`) never gets here: `#` is a shell metacharacter,
+            // so such a command is not a literal invocation.
             joined: Some(ValueShape::Prefix("navide-")),
             pick: Pick::First,
             value: ValueShape::Prefix("navide-"),

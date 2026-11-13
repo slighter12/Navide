@@ -51,6 +51,10 @@ a = Analysis(
         ('agent_team_backend/prompt_skill_seed.json', 'agent_team_backend'),
         # Model prices for the cost ledger, read via Path(__file__) by cost_ledger.py.
         ('agent_team_backend/cost_pricing.json', 'agent_team_backend'),
+        # How each CLI is launched and resumed, read via Path(__file__) by
+        # cli_vendors/_declared.py when the vendor registry is built (the
+        # renderer imports the same file at build time).
+        ('agent_team_backend/cli_declarations.json', 'agent_team_backend'),
         # Skills shipped with Navide, read via Path(__file__) by
         # skills_installer.py for a `navide:<folder>` source.
         # test_pyinstaller_spec.py fails when a file there is not listed.

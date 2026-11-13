@@ -47,8 +47,10 @@ NON_VENDOR_AGENT_KEYS = {"terminal"}
 # single allowed vendor→vendor edge (reader class inheritance).
 # `osplat` is a leaf (it imports nothing vendor-side), so reaching the
 # platform seam from a vendor cannot form a cycle.
+# `_declared` reads the launch and resume part of each CLI's declaration
+# (cli_declarations.json); it imports only `base`.
 ALLOWED_LOCAL_IMPORTS = {
-    "base", "_protocols", "applog", "log_readers.base", "osplat", "skills_store",
+    "base", "_declared", "_protocols", "applog", "log_readers.base", "osplat", "skills_store",
     "usage_common",
 }
 VENDOR_IMPORT_EXEMPTIONS = {"kilo": {"opencode"}}

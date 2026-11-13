@@ -31,6 +31,7 @@ import tomllib
 
 import psutil
 
+from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
 from .base import AccountSwitchSpec, Dep, McpWiring, SkillsWiring, VendorRuntimeContext, VendorSpec, command_text
 from ..applog import app_data_dir
@@ -1927,14 +1928,8 @@ async def fetch_codex(codex_home: Path) -> dict:
 
 
 # ---- resume / session ------------------------------------------------------
-
-_RESUME_RE = re.compile(r"^codex\s+resume\s+(\S+)")
-
-
-def _resume_id_from_command(command) -> str:
-    """Session id from a `codex resume <id> ...` command ('' otherwise)."""
-    m = _RESUME_RE.match(command_text(command).strip())
-    return m.group(1) if m else ""
+# How a launch names the session it resumes is declared with the rest of the
+# launch (native/navide-cli-runtime/src/vendors/codex.rs; see _declared).
 
 
 def _session_exists(workspace_path: str, session_id: str) -> bool:
@@ -1980,7 +1975,6 @@ SPEC = VendorSpec(
     # CODEX_HOME is assigned per pane, including resumes in an existing home.
     data_dirs=_risk_data_dirs,
     data_dir_env_vars=("CODEX_HOME", "CODEX_SQLITE_HOME"),
-    supports_model=True,
     # Verified 2026-08-15: codex resolves its skills from $CODEX_HOME/skills.
     skills_supported=True,
     skills_wiring=SkillsWiring(
@@ -2035,10 +2029,10 @@ SPEC = VendorSpec(
         Path(os.environ["CODEX_HOME"]) if os.environ.get("CODEX_HOME")
         else home / ".codex"
     ),
-    resume_id_from_command=_resume_id_from_command,
+    # Model support, the home variable a spawn strips, the interrupt byte
+    # (Esc) and resume-id parsing: the launch declaration.
+    **declared("codex"),
     session_exists=_session_exists,
-    home_env_vars=("CODEX_HOME",),
-    interrupt_key=b"\x1b",
     make_log_reader=CodexLogReader,
     install_dep=Dep("codex", "Codex CLI (OpenAI)", "OpenAI Codex CLI", "agent_cli",
         ["codex", "--version"], r"(\d+\.\d+\.\d+)",

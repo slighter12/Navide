@@ -113,6 +113,9 @@ pub static CLI: Cli = Cli {
         model: Some(&["--model", "{}"]),
         effort: Some(&["--effort", "{}"]),
         efforts: &["low", "medium", "high", "xhigh", "max"],
+        // Claude Code stamps its own subprocesses with CLAUDE_CODE_CHILD_SESSION;
+        // inherited, a spawned pane silently skips transcript saving.
+        env_strip: &["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CHILD_SESSION"],
         ..Launch::of("claude")
     },
     resume: Resume {

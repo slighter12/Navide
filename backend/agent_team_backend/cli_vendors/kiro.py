@@ -38,6 +38,7 @@ hook.
 
 from __future__ import annotations
 
+from ._declared import declared
 from .base import (
     Dep,
     ExtensionsSpec,
@@ -70,7 +71,8 @@ SPEC = VendorSpec(
     ),
     data_dirs=lambda ctx: (_home(ctx),),
     data_dir_env_vars=("KIRO_HOME",),
-    supports_session_resume=False,
+    # No resume by id, and the home variable a spawn strips: the launch declaration.
+    **declared("kiro"),
     mcp_wiring=McpWiring(
         config=McpServerConfig(
             section=("mcpServers",),
@@ -80,7 +82,6 @@ SPEC = VendorSpec(
         config_dir_env="KIRO_HOME",
         config_file=("settings", "mcp.json"),
     ),
-    home_env_vars=("KIRO_HOME",),
     install_hooks=_install_hooks,
     hook_pane_token=True,
     install_dep=Dep("kiro", "Kiro CLI (AWS)", "AWS Kiro terminal coding agent", "agent_cli",
