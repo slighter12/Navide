@@ -225,6 +225,7 @@ pub fn pred(p: &Pred, s: &Scope) -> bool {
         Pred::IsObject(path) => get(s.record, path).is_some_and(Value::is_object),
         Pred::IsList(path) => get(s.record, path).is_some_and(Value::is_array),
         Pred::IsString(path) => get(s.record, path).is_some_and(Value::is_string),
+        Pred::IsFalse(path) => get(s.record, path) == Some(&Value::Bool(false)),
         Pred::Text(t, test) => str_test(&text(t, s), *test),
         Pred::AnyItem(path, inner) => get(s.record, path)
             .and_then(Value::as_array)
@@ -261,6 +262,11 @@ pub fn text(t: &Text, s: &Scope) -> String {
                     .join(sep)
             })
             .unwrap_or_default(),
+        Text::FirstItem { list, filter, item } => get(s.record, list)
+            .and_then(Value::as_array)
+            .and_then(|items| items.iter().find(|element| pred(filter, &s.with_record(element))))
+            .map(|element| text(item, &s.with_record(element)))
+            .unwrap_or_default(),
         Text::TagValues(inner, tag) => tag_values(&text(inner, s), tag, false).join("\n"),
         Text::TagFirst(inner, tag) => tag_values(&text(inner, s), tag, true).pop().unwrap_or_default(),
         Text::AfterPrefix(inner, prefix) => {
@@ -283,6 +289,7 @@ pub fn text(t: &Text, s: &Scope) -> String {
             };
             if seconds == 0.0 { String::new() } else { time::iso_truncated_ms(seconds) }
         }
+        Text::IsoFromSeconds(n) => num(n, s).and_then(|v| v.checked_mul(1_000_000)).map(time::iso_from_micros).unwrap_or_default(),
         Text::IsoFromMicros(path) => get(s.record, path).and_then(py_int_raw).map(time::iso_from_micros).unwrap_or_default(),
         Text::FirstKey(path) => get(s.record, path)
             .and_then(Value::as_object)

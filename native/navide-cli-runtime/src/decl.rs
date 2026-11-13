@@ -141,12 +141,37 @@ pub struct Store {
     pub files: &'static [&'static [Str]],
 }
 
-/// The record backend. Only JSONL is built; a SQLite store (one database
-/// for every session, rows read after a watermark) is the planned second
-/// variant and its vendors stay on the Python readers until then.
+/// The record backend.
 #[derive(Debug, Serialize)]
 pub enum Format {
+    /// One transcript per session, a JSON object per line.
     Jsonl,
+    /// One database for every session: records are the rows of the
+    /// declared queries, read into JSON objects by column name.
+    Sqlite(&'static Sqlite),
+}
+
+#[derive(Debug, Serialize)]
+pub struct Sqlite {
+    /// Columns that hold JSON text: read as the parsed value (`null` when malformed).
+    pub json: &'static [Str],
+    /// Usage rows after the checkpoint's `row_id` (main's `{"kind": "sqlite",
+    /// "row_id", "identity"}`): the one `?` is that watermark.
+    pub usage: Option<Rows>,
+    /// Activity rows after the bag's watermark (`Cursor::Rows`): `?` is the
+    /// watermark, a second `?` the page size.
+    pub activity: Option<Rows>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Rows {
+    pub sql: Str,
+    /// The column holding the increasing row id the watermark follows.
+    pub id: Str,
+    /// The newest id (`SELECT COALESCE(MAX(id), 0) FROM …`): the first sight
+    /// of a database starts there, since everything in it is history.
+    pub newest: Str,
+    pub page: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,6 +223,8 @@ pub enum Pred {
     IsObject(Path),
     IsList(Path),
     IsString(Path),
+    /// The value is JSON `false` (Python `is False`).
+    IsFalse(Path),
     /// A test on computed text.
     Text(Text, StrTest),
     /// Some element of the list at the path satisfies the predicate.
@@ -243,6 +270,8 @@ pub enum Text {
     /// fail `filter` skipped), with `sep`; empty results are kept only when
     /// `keep_empty`.
     Join { list: Path, filter: &'static Pred, item: &'static Text, sep: Str, keep_empty: bool },
+    /// `item` of the first element of the list at `list` that satisfies `filter` ("" when none does).
+    FirstItem { list: Path, filter: &'static Pred, item: &'static Text },
     /// Values of `<tag>…</tag>` occurrences (non-empty, no `<`), joined by `\n`.
     TagValues(&'static Text, Str),
     /// The first `<tag>…</tag>` value.
@@ -264,6 +293,8 @@ pub enum Text {
     IsoFromEpoch(Path, Path),
     /// ISO-8601 (`+00:00`, microseconds when non-zero) from epoch microseconds.
     IsoFromMicros(Path),
+    /// The same from epoch seconds (`usage_common._epoch_to_iso` of an int).
+    IsoFromSeconds(&'static Num),
     /// Key of the first entry of the object at the path.
     FirstKey(Path),
     /// 1-based line number of the record.
@@ -403,7 +434,8 @@ pub struct Bag {
     /// The inferred-turn tracker as one JSON key: `{idx, flushed, ts}` for a
     /// `TurnStamp::Text` tracker, `{idx, last_ms, flushed[, cancelled]}` for `Millis`.
     pub turn: Option<BagTurn>,
-    /// The byte cursor (`Cursor::Bytes`) as `prefix + json(sort_keys)`.
+    /// The cursor: `prefix + json(sort_keys)` for `Cursor::Bytes`,
+    /// `prefix + id` for `Cursor::Rows`.
     pub cursor: Option<Str>,
 }
 
@@ -433,6 +465,9 @@ pub enum Cursor {
     Lines,
     /// A byte cursor over complete records (rewrites restart it).
     Bytes,
+    /// A database row-id watermark (`Format::Sqlite`), kept in the bag as
+    /// `Bag::cursor + id`.
+    Rows,
 }
 
 #[derive(Debug, Serialize)]

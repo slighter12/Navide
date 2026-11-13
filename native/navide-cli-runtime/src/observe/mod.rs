@@ -5,6 +5,7 @@
 pub mod activity;
 pub mod bag;
 pub mod jsonl;
+pub mod sqlite;
 pub mod turns;
 pub mod usage;
 
@@ -203,7 +204,7 @@ impl Observer {
             return Ok(UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() });
         }
         let slots = self.slots(path, spec.slots);
-        usage::read(spec, self.cli.key, path, slots, checkpoint, false)
+        usage::read(spec, &self.spec.format, self.cli.key, path, slots, checkpoint, false)
     }
 
     pub fn activity(&mut self, path: &Path, state: &mut ActivityState) -> Result<Vec<ActivityEvent>, Error> {
@@ -214,7 +215,7 @@ impl Observer {
         let slots = self.slots(path, spec.slots);
         let resume = self.resume.get(path).copied();
         let now = self.now();
-        let (events, walked) = activity::walk(spec, self.cli.key, path, slots, state, resume, now)?;
+        let (events, walked) = activity::walk(spec, &self.spec.format, self.cli.key, path, slots, state, resume, now)?;
         match walked {
             Some(resume) => self.resume.insert(path.to_owned(), resume),
             None => self.resume.remove(path),
@@ -245,13 +246,13 @@ impl Observer {
             crate::decl::TurnMethod::Exact => turns::exact(spec, path, self.slots(path, spec.slots), session_id),
             crate::decl::TurnMethod::Inferred => {
                 let usage = match self.spec.usage.as_ref() {
-                    Some(u) => usage::read(u, self.cli.key, path, self.slots(path, u.slots), &Map::new(), true)?.events,
+                    Some(u) => usage::read(u, &self.spec.format, self.cli.key, path, self.slots(path, u.slots), &Map::new(), true)?.events,
                     None => Vec::new(),
                 };
                 let activity_spec = &self.spec.activity;
                 let mut fresh = ActivityState::default();
                 let slots = self.slots(path, activity_spec.slots);
-                let (activity, _) = activity::walk(activity_spec, self.cli.key, path, slots, &mut fresh, None, self.now())?;
+                let (activity, _) = activity::walk(activity_spec, &self.spec.format, self.cli.key, path, slots, &mut fresh, None, self.now())?;
                 Ok(turns::inferred(&usage, &activity, session_id))
             }
         }

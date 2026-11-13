@@ -3,7 +3,7 @@
 //! or one event per read carrying the delta of running totals.
 use super::jsonl::{self, Tail};
 use super::{Error, UsageEvent, UsageRead};
-use crate::decl::{RawValue, Reading, Restore, UsageMode, UsageSpec};
+use crate::decl::{Format, RawValue, Reading, Restore, Sqlite, UsageMode, UsageSpec};
 use crate::expr::{self, py_int, py_str_opt, Scope, Slots};
 use serde_json::{Map, Value};
 use std::collections::{HashSet, VecDeque};
@@ -71,7 +71,18 @@ fn persist_into(spec: &UsageSpec, slots: &Slots, checkpoint: &mut Map<String, Va
 
 /// `full`: main's `parse_session_file` pass (every record from the top, an
 /// unbounded dedup set, no rewrite bookkeeping), used by inferred turns.
-pub fn read(spec: &'static UsageSpec, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, full: bool) -> Result<UsageRead, Error> {
+pub fn read(
+    spec: &'static UsageSpec,
+    format: &'static Format,
+    vendor: &str,
+    path: &Path,
+    mut slots: Slots,
+    checkpoint: &Map<String, Value>,
+    full: bool,
+) -> Result<UsageRead, Error> {
+    if let Format::Sqlite(db) = format {
+        return Ok(rows(spec, db, vendor, path, slots, checkpoint, full));
+    }
     if let UsageMode::Snapshot { suffix, mark } = spec.mode {
         return Ok(snapshot(spec, vendor, path, slots, checkpoint, suffix, mark));
     }
@@ -98,6 +109,44 @@ pub fn read(spec: &'static UsageSpec, vendor: &str, path: &Path, mut slots: Slot
         UsageMode::Cumulative => cumulative(spec, vendor, path, slots, checkpoint, tail, restore),
         UsageMode::Snapshot { .. } => unreachable!("read above"),
     }
+}
+
+/// Usage rows after a row-id watermark. The watermark follows the rows that
+/// gave an event (main advances it per event, so an all-zero row is read
+/// again next cycle); a replaced database starts over. `full`: every row,
+/// deduplicated by key (main's `parse_session_file`).
+fn rows(spec: &'static UsageSpec, db: &'static Sqlite, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, full: bool) -> UsageRead {
+    let (Some(query), Ok(meta)) = (db.usage.as_ref(), std::fs::metadata(path)) else {
+        return UsageRead { events: Vec::new(), checkpoint: checkpoint.clone() };
+    };
+    let identity = jsonl::identity(&meta);
+    let prior = py_str_opt(checkpoint.get("identity"));
+    let replaced = !prior.is_empty() && prior != identity;
+    let mut last = if replaced || full { 0 } else { py_int(checkpoint.get("row_id")) };
+    let cursor = |last: i64| {
+        let mut cp = Map::new();
+        cp.insert("kind".into(), "sqlite".into());
+        cp.insert("row_id".into(), last.into());
+        cp.insert("identity".into(), identity.clone().into());
+        cp
+    };
+    let mut events = Vec::new();
+    let mut seen = HashSet::new();
+    for row in super::sqlite::rows(path, db, query.sql, &[last]).unwrap_or_default() {
+        let Some(reading) = apply_rules(spec, &row, 0, &mut slots) else { continue };
+        let s = scope(&row, 0, &slots);
+        let (Some(input), Some(output)) = (expr::num(&reading.input, &s), expr::num(&reading.output, &s)) else { continue };
+        if input == 0 && output == 0 {
+            continue;
+        }
+        let key = expr::text(&reading.key, &s);
+        if full && !seen.insert(key.clone()) {
+            continue;
+        }
+        last = last.max(py_int(row.get(query.id)));
+        events.push(event(vendor, path, reading, &s, input, output, key, cursor(last)));
+    }
+    UsageRead { events, checkpoint: cursor(last) }
 }
 
 /// `int()` of each half of a `"<in>:<out>"` mark; (0, 0) when it is not one.

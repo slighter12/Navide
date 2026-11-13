@@ -17,7 +17,9 @@ finally ``turns_for_session``.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
+import sqlite3
 import json
 import os
 import re
@@ -35,6 +37,7 @@ from tests.vendors import test_claude as claude_t
 from tests.vendors import test_codex_0_163_fixture as codex_t
 from tests.vendors import test_codex_subagent as sub_t
 from tests.vendors import test_droid as droid_t
+from tests.vendors import test_goose as goose_t
 from tests.vendors import test_grok as grok_t
 from tests.vendors import test_kimi_code_2_2_fixture as kimi_t
 from tests.vendors import test_muse as muse_t
@@ -64,6 +67,13 @@ def _step(mode: str, records: list[dict] | None, mtime: float, now: float, sidec
     if sidecars:
         step["sidecars"] = sidecars
     return step
+
+
+def _db_step(statements: list[tuple[str, tuple] | str], mtime: float, now: float) -> dict:
+    """One poll of a SQLite CLI: the statements run (a bare string is a script), then the readers read.
+    The fixture records the database file's bytes after the step, which the Rust test writes back."""
+    sql = [[s, None] if isinstance(s, str) else [s[0], list(s[1])] for s in statements]
+    return {"mode": "db", "sql": sql, "mtime": B + mtime, "now": B + now}
 
 
 def _scenarios() -> dict[str, dict]:
@@ -141,6 +151,37 @@ def _scenarios() -> dict[str, dict]:
         muse_t._assistant("second", 13), muse_t._terminal(14, "failed"),
     ]
     muse_dir = "share/muse/sessions/2026/08/12/" + muse_t._SID
+    def goose_msg(sid: str, role: str, content: Any, meta: dict | None = None, ts: int = 1792513596) -> tuple:
+        return ("INSERT INTO messages (message_id, session_id, role, content_json, created_timestamp, metadata_json)"
+                " VALUES ('m', ?, ?, ?, ?, ?)",
+                (sid, role, json.dumps(content), ts, json.dumps(meta or {"userVisible": True, "agentVisible": True})))
+
+    def goose_session(sid: str, parent: str | None = None, kind: str = "user") -> tuple:
+        return ("INSERT INTO sessions (id, name, session_type, working_dir, parent_session_id) VALUES (?, '', ?, ?, ?)",
+                (sid, kind, goose_t.CWD, parent))
+
+    def goose_usage(sid: str, inp: int | None, out: int | None, cache_read: int | None = None) -> tuple:
+        return ("INSERT INTO usage_ledger (session_id, created_timestamp, model, input_tokens, output_tokens,"
+                " cache_read_tokens, cache_write_tokens) VALUES (?, 1792513603, 'm1', ?, ?, ?, 7)",
+                (sid, inp, out, cache_read))
+
+    goose_steps = [
+        _db_step([goose_t.SCHEMA, goose_session("s1"), goose_msg("s1", "user", goose_t._text("old history"))], 0, 1),
+        _db_step([
+            goose_msg("s1", "user", goose_t._text("fix the build"), ts=1792513600),
+            goose_msg("s1", "assistant", goose_t._tool("developer__shell")),
+            goose_msg("s1", "user", [{"type": "toolResponse", "id": "c"}]),
+            goose_msg("s1", "assistant", [{"type": "actionRequired"}]),
+            goose_msg("s1", "user", goose_t._text("injected"), meta={"turnContext": True}),
+            goose_msg("s1", "assistant", goose_t._text("  built  ") + goose_t._text("and tested"), ts=1792513610),
+            goose_usage("s1", 120, 30, cache_read=40), goose_usage("s1", 0, 0), goose_usage("s1", None, 5),
+            goose_session("s2", parent="s1", kind="sub_agent"),
+            goose_msg("s2", "assistant", goose_t._text("child done")),
+            goose_msg("s1", "assistant", goose_t._text("hidden"), meta={"agentVisible": False}),
+            goose_msg("s1", "system", goose_t._text("note")),
+        ], 1, 2),
+        _db_step([goose_msg("s1", "user", goose_t._text("again"), ts=1792513700), goose_usage("s1", 50, 5)], 2, 3),
+    ]
     grok = [grok_t._user(1, "hello grok"), grok_t._agent(2, "hi "), grok_t._agent(3, "there"), grok_t._turn(4),
             grok_t._user(5, "again"), grok_t._agent(6, "ok"), grok_t._turn(7, inp=50, out=5, stop="cancelled")]
     return {
@@ -221,6 +262,11 @@ def _scenarios() -> dict[str, dict]:
             "file": f"{muse_dir}/subagent/child-1/session.jsonl",
             "steps": [_step("write", muse[:9], 0, 1)],
         },
+        "goose_db": {
+            "vendor": "goose", "env": {"GOOSE_PATH_ROOT": "goose"},
+            "file": "goose/data/sessions/sessions.db",
+            "steps": goose_steps,
+        },
         "grok_turns": {
             "vendor": "grok", "env": {"GROK_HOME": "grok"},
             "file": f"grok/sessions/{grok_t.GROUP}/{grok_t.SID}/updates.jsonl",
@@ -279,12 +325,24 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
     checkpoint: dict = {}
     seen: set[str] = set()
     steps = []
+    files: list[str] = []
     for step in scenario["steps"]:
         for rel, text in (step.get("sidecars") or {}).items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text(text, encoding="utf-8")
-        with path.open("w" if step["mode"] == "write" else "a", encoding="utf-8", newline="") as fh:
-            fh.write(step["text"])
+        if step["mode"] == "db":
+            con = sqlite3.connect(path)
+            for sql, params in step["sql"]:
+                if params is None:
+                    con.executescript(sql)
+                else:
+                    con.execute(sql, params)
+            con.commit()
+            con.close()
+            files.append(base64.b64encode(path.read_bytes()).decode("ascii"))
+        else:
+            with path.open("w" if step["mode"] == "write" else "a", encoding="utf-8", newline="") as fh:
+                fh.write(step["text"])
         os.utime(path, (step["mtime"], step["mtime"]))
         clock[0] = step["now"]
         parsed = reader.parse_incremental(path, checkpoint)
@@ -296,7 +354,15 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
             "bag": sorted(seen),
         })
     turns = None if scenario.get("skip_turns") else [_turn_dict(t) for t in reader.turns_for_session(path, "")]
-    return _norm({"steps": steps, "turns": turns}, str(root))
+    result = _norm({"steps": steps, "turns": turns}, str(root))
+    if files:
+        result["files"] = files
+    return result
+
+
+def _compared(result: dict) -> str:
+    """A run's results without the database bytes (two runs' files differ in nothing a reader sees)."""
+    return json.dumps({k: v for k, v in result.items() if k != "files"})
 
 
 def _python_reader(vendor: str) -> Callable[[], Any]:
@@ -311,14 +377,22 @@ def test_python_readers_match_the_parity_fixtures(name: str, tmp_path: Path, mon
         "vendor": scenario["vendor"],
         "file": scenario["file"],
         "sidecars": scenario.get("sidecars") or {},
-        "steps": [{**step, "expect": got} for step, got in zip(scenario["steps"], result["steps"])],
+        "steps": [
+            {**step, **({"db": result["files"][i]} if step["mode"] == "db" else {}), "expect": got}
+            for i, (step, got) in enumerate(zip(scenario["steps"], result["steps"]))
+        ],
         "turns": result["turns"],
     }
     target = FIXTURES / f"{name}.json"
     if os.environ.get("NAVIDE_PARITY_WRITE") == "1":
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(fixture, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    assert json.loads(target.read_text(encoding="utf-8")) == json.loads(json.dumps(fixture, ensure_ascii=False))
+    def without_bytes(doc: dict) -> dict:
+        # The recorded database differs run to run (CURRENT_TIMESTAMP defaults); what is read from it does not.
+        return {**doc, "steps": [{k: v for k, v in s.items() if k != "db"} for s in doc["steps"]]}
+
+    recorded = json.loads(target.read_text(encoding="utf-8"))
+    assert without_bytes(recorded) == without_bytes(json.loads(json.dumps(fixture, ensure_ascii=False)))
 
 
 @pytest.fixture
@@ -337,7 +411,7 @@ def test_switch_off_is_mains_reader(name: str, tmp_path: Path, monkeypatch: pyte
     expected = _run(scenario, tmp_path / "py", _python_reader(scenario["vendor"]), monkeypatch)
     wrapped = _run(scenario, tmp_path / "rt", lambda: cli_runtime.wrap(cli_vendor(scenario["vendor"]).make_log_reader()),
                    monkeypatch)
-    assert json.dumps(wrapped).replace("/rt", "/py") == json.dumps(expected)
+    assert _compared(wrapped).replace("/rt", "/py") == _compared(expected)
     assert started == []
 
 
@@ -383,4 +457,4 @@ def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest
     turns = 0 if scenario.get("skip_turns") else 1
     assert set(calls) == {"usage", "activity", "turns"} - ({"turns"} if not turns else set())
     assert len(calls) == 2 * len(scenario["steps"]) + turns
-    assert json.loads(json.dumps(wrapped).replace("/rt", "/py")) == json.loads(json.dumps(expected))
+    assert json.loads(_compared(wrapped).replace("/rt", "/py")) == json.loads(_compared(expected))

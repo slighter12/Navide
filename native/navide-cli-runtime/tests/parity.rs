@@ -37,6 +37,24 @@ fn drop_identity(s: &str) -> String {
     }
 }
 
+fn base64(text: &str) -> Vec<u8> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => c - b'A',
+        b'a'..=b'z' => c - b'a' + 26,
+        b'0'..=b'9' => c - b'0' + 52,
+        b'+' => 62,
+        b'/' => 63,
+        _ => panic!("not base64: {c}"),
+    };
+    let digits: Vec<u8> = text.bytes().filter(|c| *c != b'=').map(value).collect();
+    let mut out = Vec::with_capacity(digits.len() * 3 / 4);
+    for chunk in digits.chunks(4) {
+        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, d)| acc | (u32::from(*d) << (18 - 6 * i)));
+        out.extend_from_slice(&n.to_be_bytes()[1..chunk.len()]);
+    }
+    out
+}
+
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or_else(|| panic!("fixture field {key}"))
 }
@@ -67,7 +85,12 @@ fn replay(fixture: &Path) -> Vec<String> {
     let mut failures = Vec::new();
     for (n, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
         write_sidecars(&step["sidecars"]);
-        {
+        if str_of(step, "mode") == "db" {
+            // The database file exactly as main's readers read it after the step.
+            std::fs::write(&path, base64(str_of(step, "db"))).unwrap();
+            let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.set_modified(UNIX_EPOCH + Duration::from_secs_f64(step["mtime"].as_f64().unwrap())).unwrap();
+        } else {
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
                 .write(true)

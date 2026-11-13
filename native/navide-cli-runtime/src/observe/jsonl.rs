@@ -11,13 +11,13 @@ use std::path::Path;
 const ANCHOR_BYTES: u64 = 512;
 
 #[cfg(unix)]
-fn identity(meta: &Metadata) -> String {
+pub fn identity(meta: &Metadata) -> String {
     use std::os::unix::fs::MetadataExt;
     format!("{}:{}", meta.dev(), meta.ino())
 }
 
 #[cfg(not(unix))]
-fn identity(_meta: &Metadata) -> String {
+pub fn identity(_meta: &Metadata) -> String {
     // Not built: Windows has no stable st_ino through std (see REDESIGN-REPORT).
     String::from("0:0")
 }

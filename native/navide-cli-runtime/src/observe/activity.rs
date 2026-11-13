@@ -4,7 +4,7 @@
 //! inferred-turn tracker) in one `ActivityState`.
 use super::jsonl::{self, LineResume};
 use super::{ActivityEvent, Error, CWD, SESSION, WALK_RESUMED};
-use crate::decl::{ActivitySpec, Clock, Cursor, Effect, Emit, EventKind, Rule, TurnOp, TurnStamp};
+use crate::decl::{ActivitySpec, Clock, Cursor, Effect, Emit, EventKind, Format, Rule, TurnOp, TurnStamp};
 use crate::expr::{self, Scope, Slots};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -38,6 +38,9 @@ pub struct ActivityState {
     pub slots: Slots,
     #[serde(default)]
     pub turn: Option<TurnState>,
+    /// Row cursor: the highest row id walked; `None` until the database is first seen.
+    #[serde(default)]
+    pub rows: Option<i64>,
     /// Persisted slots the last walk wrote (even with the value they had).
     #[serde(skip)]
     pub written: Vec<String>,
@@ -269,10 +272,19 @@ pub(crate) fn apply_slot_rules(rules: &'static [Rule], record: &Value, line: usi
     *slots = ctx.slots;
 }
 
+fn sqlite_activity(format: &'static Format) -> Option<&'static crate::decl::Rows> {
+    match format {
+        Format::Sqlite(db) => db.activity.as_ref(),
+        Format::Jsonl => None,
+    }
+}
+
 /// One walk of `path` from `state`. Returns the events and where a line walk
 /// can pick the file up again (main keeps that in reader memory).
+#[allow(clippy::too_many_arguments)]
 pub fn walk(
     spec: &'static ActivitySpec,
+    format: &'static Format,
     vendor: &str,
     path: &Path,
     mut slots: Slots,
@@ -325,6 +337,26 @@ pub fn walk(
                 }
             }
             state.cursor = tail.checkpoint;
+            ctx
+        }
+        Cursor::Rows => {
+            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new() };
+            let (Format::Sqlite(db), Some(query)) = (format, sqlite_activity(format)) else {
+                unreachable!("a Rows cursor is declared with a SQLite activity query")
+            };
+            match state.rows {
+                // First sight: everything already in the database is history.
+                None => state.rows = super::sqlite::scalar(path, db, query.newest).or(state.rows),
+                Some(after) => {
+                    let rows = super::sqlite::rows(path, db, query.sql, &[after, query.page]).unwrap_or_default();
+                    if let Some(last) = rows.last() {
+                        state.rows = Some(crate::expr::py_int(last.get(query.id)));
+                    }
+                    for row in &rows {
+                        ctx.record(spec.rules, row, At { line: 0, end: 0 });
+                    }
+                }
+            }
             ctx
         }
     };

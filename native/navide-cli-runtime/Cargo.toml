@@ -22,6 +22,11 @@ serde_json = { version = "=1.0.150", features = ["preserve_order"] }
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.186"
 
+# The SQLite backend (observe/sqlite.rs) links the system library on macOS
+# and Windows; Linux builds the bundled one, as the evaluation crate does.
+[target.'cfg(target_os = "linux")'.dependencies]
+libsqlite3-sys = { version = "=0.38.2", default-features = false, features = ["bundled", "min_sqlite_version_3_34_1"] }
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

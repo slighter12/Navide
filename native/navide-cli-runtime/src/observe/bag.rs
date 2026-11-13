@@ -53,10 +53,15 @@ pub fn load(spec: &ActivitySpec, bag: &[String]) -> ActivityState {
             });
         }
     }
-    if let (Some(prefix), Cursor::Bytes) = (spec.bag.cursor, spec.cursor) {
-        if let Some(Value::Object(cursor)) = find(bag, prefix).and_then(|raw| serde_json::from_str::<Value>(raw).ok()) {
-            state.cursor = cursor;
+    match (spec.bag.cursor, spec.cursor) {
+        (Some(prefix), Cursor::Bytes) => {
+            if let Some(Value::Object(cursor)) = find(bag, prefix).and_then(|raw| serde_json::from_str::<Value>(raw).ok()) {
+                state.cursor = cursor;
+            }
         }
+        // main's `_int(prev)`: a key that is there but not a number is 0.
+        (Some(prefix), Cursor::Rows) => state.rows = find(bag, prefix).map(|raw| crate::expr::py_int(Some(&Value::String(raw.to_owned())))),
+        _ => {}
     }
     state
 }
@@ -104,9 +109,17 @@ pub fn store(spec: &ActivitySpec, after: &ActivityState, bag: &mut Vec<String>) 
         };
         replace(bag, turn.prefix, json);
     }
-    if let (Some(prefix), Cursor::Bytes) = (spec.bag.cursor, spec.cursor) {
-        let cursor = (!after.cursor.is_empty()).then(|| py_json(&Value::Object(after.cursor.clone()), false, true));
-        replace(bag, prefix, cursor);
+    match (spec.bag.cursor, spec.cursor) {
+        (Some(prefix), Cursor::Bytes) => {
+            let cursor = (!after.cursor.is_empty()).then(|| py_json(&Value::Object(after.cursor.clone()), false, true));
+            replace(bag, prefix, cursor);
+        }
+        (Some(prefix), Cursor::Rows) => {
+            if let Some(id) = after.rows {
+                replace(bag, prefix, Some(id.to_string()));
+            }
+        }
+        _ => {}
     }
 }
 
