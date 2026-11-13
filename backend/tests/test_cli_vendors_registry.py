@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import re
 import sys
 from pathlib import Path
@@ -29,6 +30,25 @@ FRONTEND_AGENTS_DIR = (
 CLI_AGENTS_HELP = (
     REPO_ROOT / "src" / "renderer" / "src" / "components" / "CliAgentsHelp.vue"
 )
+
+def _frontend_declaration(path: Path, source: str) -> dict | None:
+    """The entry of `agents/cli_declarations.json` a frontend spec file takes
+    its launch and resume fields from, by spreading `...declared('<key>')`
+    (`agents/_declared.ts`); None for a file that spreads none (the plain
+    terminal). A spec must spread its own key: another vendor's declaration
+    would launch the wrong program under this vendor's name."""
+    spread = re.search(r"\.\.\.declared\('([a-z]+)'\)", source)
+    if spread is None:
+        return None
+    key = re.search(r"agentKey: '([a-z]+)'", source)
+    assert key and key.group(1) == spread.group(1), (
+        f"{path.name} spreads declared('{spread.group(1)}'), which is not its own agentKey"
+    )
+    declared = json.loads((FRONTEND_AGENTS_DIR / "cli_declarations.json").read_text(encoding="utf-8"))
+    entries = [entry for entry in declared if entry["key"] == spread.group(1)]
+    assert len(entries) == 1, f"{path.name}: no declaration for {spread.group(1)!r}"
+    return entries[0]
+
 
 EXPECTED_KEYS = {
     "aider", "antigravity", "claude", "codex", "copilot", "cursor", "devin", "kiro",
@@ -373,11 +393,11 @@ def test_help_panel_sign_in_column_matches_login_command_args() -> None:
             continue
         spec_source = path.read_text(encoding="utf-8")
         key = re.search(r"agentKey: '([a-z]+)'", spec_source)
-        command = re.search(r"defaultCommand: '([^']+)'", spec_source)
-        assert key and command, f"{path.name} declares no agentKey/defaultCommand"
-        # The binary is the first word: a default command may carry a
-        # subcommand (`hermes chat`).
-        bin_to_key[command.group(1).split()[0]] = key.group(1)
+        # The default command is the declared program and its base arguments
+        # (`hermes chat`); the binary is the program.
+        declaration = _frontend_declaration(path, spec_source)
+        assert key and declaration, f"{path.name} declares no agentKey, or spreads no declared(...)"
+        bin_to_key[declaration["launch"]["program"]] = key.group(1)
 
     help_panel = {}
     for binary, sign_in in rows:
@@ -581,13 +601,18 @@ def test_model_capability_matches_the_frontend_agent_spec() -> None:
         keys = set(re.findall(r"agentKey: '([a-z]+)'", source))
         assert len(keys) == 1, f"{path.name} declares agentKeys {sorted(keys)}"
         key = keys.pop()
-        if re.search(r"^\s+modelArgs:", source, re.M):
+        # What `declared(key)` hands the spec, and anything the file still
+        # types by hand on top of it.
+        launch = (_frontend_declaration(path, source) or {"launch": {}})["launch"]
+        if launch.get("model") or re.search(r"^\s+modelArgs:", source, re.M):
             frontend_model.add(key)
-        if re.search(r"^\s+effortArgs:", source, re.M):
+        if launch.get("effort") or re.search(r"^\s+effortArgs:", source, re.M):
             frontend_effort.add(key)
         listed = re.search(r"^\s+knownEfforts: \[([^\]]*)\]", source, re.M)
         if listed:
             frontend_efforts[key] = tuple(re.findall(r"'([^']+)'", listed.group(1)))
+        elif launch.get("efforts"):
+            frontend_efforts[key] = tuple(launch["efforts"])
 
     backend_model = {k for k, s in registry.VENDORS.items() if s.supports_model}
     backend_effort = {k for k, s in registry.VENDORS.items() if s.supports_effort}
@@ -631,8 +656,10 @@ def test_session_resume_capability_matches_the_frontend_agent_spec() -> None:
         assert len(keys) == 1, f"{path.name} declares agentKeys {sorted(keys)}"
         key = keys.pop()
         # resumeArgs takes an id; resumeWithoutId (aider) restores from a file
-        # and has no id to be named.
-        if re.search(r"^\s+resumeArgs:", source, re.M):
+        # and has no id to be named. The spec gets resumeArgs from its
+        # declaration's resume arguments (or still types it by hand).
+        declaration = _frontend_declaration(path, source)
+        if (declaration and declaration["resume"]["args"]) or re.search(r"^\s+resumeArgs:", source, re.M):
             frontend_id_resume.add(key)
 
     backend_id_resume = {
