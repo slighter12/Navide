@@ -6,6 +6,9 @@ on, so the readers tests build directly (``CodexLogReader()``) answer through
 the ``navide-cli-runtime`` process too. Vendors the runtime does not observe,
 and any call it cannot answer, stay on Python exactly as in production.
 
+The few tests that meter the Python reader's own file reads are skipped, with
+the reason shown (``PYTHON_READ_METERS``).
+
 Needs a release build: ``cargo build --release`` in native/navide-cli-runtime.
 """
 
@@ -30,6 +33,23 @@ def _route(cls: type, vendor: str) -> None:
             return _route(vendor, lambda *a, **k: _original(self, *a, **k), *args, **kwargs)
 
         setattr(cls, name, routed)
+
+
+#: Tests that meter the Python reader's own file reads (a counting
+#: ``Path.open``). With the switch on, that code does not run, so the meter has
+#: nothing to measure; the reads they pin are tested on the Rust side
+#: (``observe/jsonl.rs``: ``a_stale_resume_point_reads_from_the_head``).
+PYTHON_READ_METERS = (
+    "test_claude_activity_resume.py::test_append_reads_only_the_new_bytes",
+    "test_claude_activity_resume.py::test_truncated_file_is_read_from_the_head",
+    "test_claude_activity_resume.py::test_changed_mark_is_read_from_the_head",
+)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    for item in items:
+        if item.nodeid.endswith(PYTHON_READ_METERS):
+            item.add_marker(pytest.mark.skip(reason="meters Python's file reads, which the Rust path replaces"))
 
 
 @pytest.hookimpl(trylast=True)

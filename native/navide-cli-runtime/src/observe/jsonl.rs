@@ -294,6 +294,27 @@ mod tests {
         assert_eq!(more, [5]);
         assert_eq!(end.last_line, 5);
     }
+
+    /// main's `test_claude_activity_resume` read meters, on this side: a resume
+    /// point that no longer fits (the file shrank, or the mark is not the one
+    /// it was taken at) is ignored and the file is read from its first line.
+    #[test]
+    fn a_stale_resume_point_reads_from_the_head() {
+        let f = file_with(b"{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n");
+        let resume = walk_lines(&f.path, 0, None, |_| {}).unwrap().resume.unwrap();
+        assert_eq!(resume.offset, 24);
+        let mut seen = Vec::new();
+        walk_lines(&f.path, 0, Some(resume), |line| seen.push(line.number)).unwrap();
+        assert_eq!(seen, [1, 2, 3], "a fresh bag (mark 0) does not match the resume point");
+        // Rewritten in place with longer lines: byte 23 is no longer a line end.
+        let file = std::fs::OpenOptions::new().write(true).open(&f.path).unwrap();
+        file.set_len(0).unwrap();
+        drop(file);
+        std::fs::OpenOptions::new().append(true).open(&f.path).unwrap().write_all(b"{\"n\":11}\n{\"n\":12}\n{\"n\":13}\n{\"n\":14}\n").unwrap();
+        let mut seen = Vec::new();
+        walk_lines(&f.path, 3, Some(resume), |line| seen.push((line.number, line.value["n"].as_i64()))).unwrap();
+        assert_eq!(seen, [(4, Some(14))], "counted from the head: line 4 is the first past the mark");
+    }
 }
 
 /// A scratch file under the system temp dir, removed on drop (tests only;
