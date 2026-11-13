@@ -1,8 +1,9 @@
 //! Replays the parity fixtures (`tests/parity/*.json`) recorded from main's
 //! Python readers by `backend/tests/test_cli_runtime_parity.py`: the same
 //! bytes, mtimes and clock, read the way the log watcher reads them, must give
-//! the same usage events and checkpoints, activity events and turns.
-use navide_cli_runtime::decl::Form;
+//! the same usage events and checkpoints, activity events and turns, and
+//! (where a fixture records it) the same open read problem.
+use navide_cli_runtime::decl::{Form, Read};
 use navide_cli_runtime::observe::Error;
 use navide_cli_runtime::registry;
 use serde_json::{Map, Value};
@@ -57,6 +58,38 @@ fn base64(text: &str) -> Vec<u8> {
     out
 }
 
+/// main's read-problem registry for one CLI, as the seam keeps it from the
+/// runtime's `reads`: one entry per failing read, in the order first hit.
+#[derive(Default)]
+struct Problems(Vec<(&'static str, Value)>);
+
+impl Problems {
+    fn apply(&mut self, reads: Vec<Read>, path: &Path) {
+        for read in reads {
+            let at = self.0.iter().position(|(key, _)| *key == read.key);
+            match (read.problem, at) {
+                (None, Some(at)) => drop(self.0.remove(at)),
+                (None, None) => {}
+                (Some(problem), at) => {
+                    let entry = serde_json::json!({"status": problem.status, "reason": problem.reason, "path": path.to_string_lossy(), "detail": problem.detail});
+                    match at {
+                        Some(at) => self.0[at].1 = entry,
+                        None => self.0.push((read.key, entry)),
+                    }
+                }
+            }
+        }
+    }
+
+    /// `read_problem()`: the oldest open problem, with how many are open.
+    fn oldest(&self) -> Value {
+        let Some((_, first)) = self.0.first() else { return Value::Null };
+        let mut entry = first.clone();
+        entry["problems"] = self.0.len().into();
+        entry
+    }
+}
+
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or_else(|| panic!("fixture field {key}"))
 }
@@ -94,6 +127,7 @@ fn replay(fixture: &Path) -> Vec<String> {
     };
     let mut checkpoint = Map::new();
     let mut bag: Vec<String> = Vec::new();
+    let mut problems = Problems::default();
     let mut failures = Vec::new();
     for (n, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
         write_sidecars(&step["sidecars"]);
@@ -134,6 +168,7 @@ fn replay(fixture: &Path) -> Vec<String> {
                 continue;
             }
         };
+        problems.apply(observer.take_reads(), &path);
         checkpoint = read.checkpoint.clone();
         let usage = norm(serde_json::to_value(&read).unwrap(), &root);
         if usage != expected(&step["expect"]["usage"]) {
@@ -149,6 +184,13 @@ fn replay(fixture: &Path) -> Vec<String> {
                 Vec::new()
             }
         };
+        problems.apply(observer.take_reads(), &path);
+        if let Some(wanted) = step["expect"].get("problem") {
+            let got = norm(problems.oldest(), &root);
+            if got != *wanted {
+                failures.push(format!("{name} step {n} read problem\n  rust:   {got}\n  python: {wanted}"));
+            }
+        }
         let activity = norm(serde_json::to_value(&events).unwrap(), &root);
         if activity != expected(&step["expect"]["activity"]) {
             failures.push(format!("{name} step {n} activity\n  rust:   {activity}\n  python: {}", step["expect"]["activity"]));

@@ -471,6 +471,17 @@ class OpencodeLogReader(LogReader):
         if not entries:
             del _READ_PROBLEMS[self.vendor]
 
+    def reads_itself(self) -> bool:
+        """True while one of this reader's queries is on record as failing.
+
+        The Rust CLI runtime (cli_runtime) asks before it answers a read in
+        this reader's place. It reports what the schema check finds, under the
+        same "schema" entry, but a failing query it leaves to this reader: the
+        runtime declines that read, this code makes it and records why, and
+        goes on making it until the query works again and clears its entry.
+        """
+        return any(key != "schema" for key in _READ_PROBLEMS.get(self.vendor, ()))
+
     def _conditional_reads_ok(self, path: Path) -> None:
         """A usage pass over `path` worked: the reads that only run on some
         passes no longer hold a problem against it (review-485 NEW-1)."""

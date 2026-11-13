@@ -73,6 +73,10 @@ macro_rules! registry {
             pub fn take_notes(&mut self) -> Vec<Note> {
                 match self { $(AnyObserver::$vendor(observer) => observer.take_notes()),* }
             }
+
+            pub fn take_reads(&mut self) -> Vec<decl::Read> {
+                match self { $(AnyObserver::$vendor(observer) => observer.take_reads()),* }
+            }
         }
     };
 }

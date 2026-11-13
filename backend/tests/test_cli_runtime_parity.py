@@ -31,6 +31,7 @@ from typing import Any, Callable
 import pytest
 
 from agent_team_backend import cli_runtime, osplat
+from agent_team_backend.cli_vendors import opencode as opencode_vendor
 from agent_team_backend.cli_vendors.pi import encode_pi_cwd
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
 from agent_team_backend.log_readers.claude import encode_claude_cwd
@@ -48,6 +49,8 @@ from tests.vendors import test_hermes as hermes_t
 from tests.vendors import test_kimi_code_2_2_fixture as kimi_t
 from tests.vendors import test_muse as muse_t
 from tests.vendors import test_openclaw as oc_t
+from tests.vendors import test_opencode as opc_t
+from tests.vendors import test_opencode_v2 as opc2_t
 from tests.vendors import test_pi as pi_t
 from tests.vendors import test_qwen_0_25_fixture as qwen_t
 
@@ -89,11 +92,12 @@ def _text_step(mode: str, text: str, mtime: float, now: float) -> dict:
     return {"mode": mode, "text": text, "mtime": B + mtime, "now": B + now}
 
 
-def _db_step(statements: list[tuple[str, tuple] | str], mtime: float, now: float) -> dict:
+def _db_step(statements: list[tuple[str, tuple] | str], mtime: float, now: float, **extra: Any) -> dict:
     """One poll of a SQLite CLI: the statements run (a bare string is a script), then the readers read.
-    The fixture records the database file's bytes after the step, which the Rust test writes back."""
+    The fixture records the database file's bytes after the step, which the Rust test writes back.
+    `extra`: as for `_step` (`checkpoint_drop`, `bag_add`)."""
     sql = [[s, None] if isinstance(s, str) else [s[0], list(s[1])] for s in statements]
-    return {"mode": "db", "sql": sql, "mtime": B + mtime, "now": B + now}
+    return {"mode": "db", "sql": sql, "mtime": B + mtime, "now": B + now, **extra}
 
 
 def _scenarios() -> dict[str, dict]:
@@ -280,6 +284,116 @@ def _scenarios() -> dict[str, dict]:
         _db_step(["DELETE FROM assistant_usage_events; DELETE FROM sqlite_sequence WHERE name = 'assistant_usage_events';",
                   cop_usage(cop_t._SID, 500, 50, model="gpt-5"), cop_turn(cop_t._SID, 1, "more", "done")], 4, 5),
         _db_step([cop_usage(cop_t._SID, 60, 6)], 5, 6),
+    ]
+
+    oc_now, oc_assistant = opc_t._NOW_MS, opc_t._assistant_data
+
+    def oc_session(sid: str, parent: str | None = None, table: str = "session", version: str | None = "1.15.12") -> tuple:
+        return (f"INSERT INTO {table} (id, project_id, parent_id, slug, directory, title, version, time_created,"
+                " time_updated) VALUES (?, 'proj1', ?, 'slug', '/work/oc', 'title', ?, ?, ?)",
+                (sid, parent, version, oc_now, oc_now))
+
+    def oc_message(mid: str, sid: str, data: Any, updated: int = oc_now) -> tuple:
+        return ("INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+                (mid, sid, oc_now, updated, data if isinstance(data, str) else json.dumps(data)))
+
+    def oc_update(mid: str, data: dict) -> tuple:
+        return ("UPDATE message SET data = ?, time_updated = ? WHERE id = ?", (json.dumps(data), oc_now + 20_000, mid))
+
+    def oc_part(pid: str, mid: str, sid: str, data: Any, created: int = oc_now + 1234) -> tuple:
+        return ("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+                (pid, mid, sid, created, created, data if isinstance(data, str) else json.dumps(data)))
+
+    oc_tokens = {"input": 100, "output": 20, "reasoning": 5, "cache": {"read": 1000, "write": 50}}
+    opencode_steps = [
+        # First sight: usage credits what is complete; the parts are history.
+        _db_step([opc_t._SCHEMA, oc_session("ses_a"), oc_session("ses_child", parent="ses_a", version=None),
+                  oc_message("m0", "ses_a", {"role": "user"}), oc_part("p0", "m0", "ses_a", {"type": "text", "text": "old"}),
+                  oc_message("m1", "ses_a", oc_assistant(oc_tokens))], 0, 1),
+        # A prompt, and a reply still streaming: its parts are activity, its tokens are not credited yet.
+        _db_step([oc_message("m2", "ses_a", {"role": "user"}),
+                  oc_part("p1", "m2", "ses_a", {"type": "text", "text": "  fix the parser  "}),
+                  oc_message("m3", "ses_a", oc_assistant({"input": 7}, completed=None)),
+                  oc_part("p2", "m3", "ses_a", {"type": "reasoning", "text": "hm"}),
+                  oc_part("p3", "m3", "ses_a", {"type": "tool", "tool": "bash"}),
+                  oc_part("p4", "m3", "ses_a", {"type": "tool"}),
+                  oc_part("p5", "m3", "ses_a", {"type": "text", "text": "working on it"}),
+                  oc_part("p6", "m3", "ses_a", {"type": "step-finish", "reason": "tool-calls"}),
+                  oc_part("p7", "m3", "ses_a", {"type": "step-finish"})], 1, 2),
+        # It completes and the turn ends with its text; a subagent's end is
+        # not the pane's; rows that are not JSON, not assistant, or empty.
+        _db_step([oc_update("m3", oc_assistant({"input": 40, "output": 9, "cache": "none"}, model="")),
+                  oc_part("p8", "m3", "ses_a", {"type": "text", "text": "  All done.  "}),
+                  oc_part("p9", "m3", "ses_a", {"type": "text", "text": "   "}),
+                  oc_part("p10", "m3", "ses_a", "not json"), oc_part("p11", "m3", "ses_a", {"type": "patch"}),
+                  oc_part("p12", "m3", "ses_a", {}, created=0), oc_part("p13", "m3", "ses_a", [1]),
+                  oc_part("p14", "m3", "ses_a", {"type": "step-finish", "reason": "stop"}),
+                  oc_message("c1", "ses_child", oc_assistant({})),
+                  oc_part("p15", "c1", "ses_child", {"type": "step-finish", "reason": "stop"}),
+                  oc_message("m4", "ses_a", "not json"), oc_message("m5", "ses_a", {"role": "system"}),
+                  oc_message("m6", "ses_a", oc_assistant({"input": 3, "output": 1}))], 2, 3),
+        _db_step([], 3, 4),
+        # The newest message was deleted and its rowid handed out again:
+        # another row stands under the watermark, and it was never credited.
+        _db_step([("DELETE FROM message WHERE id = ?", ("m6",)),
+                  oc_message("m7", "ses_a", oc_assistant({"input": 11, "output": 2}))], 4, 5),
+        # The newest rows are gone: re-anchor at the new top, credit nothing again.
+        _db_step([("DELETE FROM message WHERE id IN (?, ?)", ("m7", "m5"))], 5, 6),
+        _db_step([oc_message("m8", "ses_a", oc_assistant({"input": 60, "output": 6}, completed=None)),
+                  oc_message("m9", "ses_a", oc_assistant({"input": 5, "output": 5}))], 6, 7),
+        _db_step([oc_update("m8", oc_assistant({"input": 60, "output": 6}))], 7, 8),
+    ]
+
+    oc2_now = opc2_t._NOW_MS
+
+    def oc2_message(mid: str, sid: str, kind: str | None, seq: int, data: Any, at: int = 0) -> tuple:
+        return ("INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (mid, sid, kind, seq, oc2_now + at, oc2_now + at, data if isinstance(data, str) else json.dumps(data)))
+
+    def oc2_assistant(text: str = "", tokens: dict | None = None, completed: bool = True) -> dict:
+        data: dict = {"agent": "build", "model": {"id": "claude-sonnet-5-5", "providerID": "anthropic"},
+                      "content": [{"type": "reasoning", "text": "hm"}, {"type": "text", "text": text}, "x"] if text else [],
+                      "time": {"created": oc2_now}}
+        if tokens is not None:
+            data["tokens"] = tokens
+        if completed:
+            data["time"]["completed"] = oc2_now + 15_000
+        return data
+
+    def oc2_update(mid: str, data: dict, at: int) -> tuple:
+        return ("UPDATE session_message SET data = ?, time_updated = ? WHERE id = ?", (json.dumps(data), oc2_now + at, mid))
+
+    oc2_steps = [
+        # An upgraded database: both schemas, the 1.x tables left behind.
+        _db_step([opc2_t._V2_SCHEMA, opc2_t._V1_LEFTOVER_SCHEMA, oc_session("ses_b", table="session_v2", version="2.0.32"),
+                  oc_session("ses_kid", parent="ses_b", table="session_v2", version="2.0.32"),
+                  oc2_message("n0", "ses_b", "user", 0, {"text": "old prompt"}), oc2_message("n1", "ses_b", "idle", 1, {})], 0, 1),
+        _db_step([oc2_message("n2", "ses_b", "user", 2, {"text": "  run the tests  "}, 1),
+                  oc2_message("n3", "ses_b", "assistant", 3, oc2_assistant("Running them."), 2),
+                  oc2_message("n4", "ses_b", "assistant", 4, oc2_assistant("  All 12 tests pass.  ", oc_tokens, completed=False), 3)],
+                 1, 2),
+        _db_step([oc2_update("n4", oc2_assistant("  All 12 tests pass.  ", oc_tokens), 4),
+                  oc2_message("n5", "ses_b", "idle", 5, {"outcome": "succeeded"}, 5),
+                  oc2_message("k0", "ses_kid", "assistant", 0, oc2_assistant("child"), 6),
+                  oc2_message("k1", "ses_kid", "idle", 1, {}, 7),
+                  oc2_message("n6", "ses_b", "compaction", 6, [1], 8), oc2_message("n7", "ses_b", "", 7, {}, 9),
+                  oc2_message("n8", "ses_b", "idle", 8, {}, 10)], 2, 3),
+        # A mark taken on 1.x's `message` table: the copies are not credited again.
+        _db_step([oc2_message("n9", "ses_b", "assistant", 9, oc2_assistant("more", oc_tokens), 11)], 3, 4,
+                 checkpoint_drop=["schema"]),
+        _db_step([oc2_message("n10", "ses_b", "assistant", 10, oc2_assistant("again", {"input": 8, "output": 2}), 12)], 4, 5),
+        # A 1.x binary writes to the shared database last: read as 1.x, and disclosed.
+        _db_step([oc_session("ses_v1"),
+                  oc_message("v1m", "ses_v1", oc_assistant(oc_tokens), updated=oc2_now + 500_000)], 5, 6),
+        # OpenCode 2 writes again: its side is the newer one, all clear.
+        _db_step([oc2_message("n11", "ses_b", "user", 11, {"text": "back"}, 900_000)], 6, 7),
+    ]
+    odd_steps = [
+        _db_step(["CREATE TABLE conversation_v3 (id TEXT);"], 0, 1),
+        # `session_v2` without `session_message` is not OpenCode 2's schema.
+        _db_step([opc2_t._V1_LEFTOVER_SCHEMA + "CREATE TABLE session_v2 (id TEXT);", oc_session("ses_a"),
+                  oc_message("m1", "ses_a", oc_assistant(oc_tokens))], 1, 2),
+        _db_step(["DROP TABLE session_v2;", oc_message("m2", "ses_a", oc_assistant({"input": 1, "output": 1}))], 2, 3),
     ]
 
     def hermes_session(sid: str, title: str | None, parent: str | None = None, cwd: str = "/work") -> tuple:
@@ -567,6 +681,29 @@ def _scenarios() -> dict[str, dict]:
             "file": "copilot/session-store.db",
             "steps": cop_steps,
         },
+        # One database in one of two schemas, told apart on every read; what
+        # that check finds is the reader's read problem (`problems`: recorded).
+        "opencode_v1": {
+            "vendor": "opencode", "env": {"XDG_DATA_HOME": "share"}, "problems": True,
+            "file": "share/opencode/opencode.db",
+            "steps": opencode_steps,
+        },
+        "opencode_v2": {
+            "vendor": "opencode", "env": {"XDG_DATA_HOME": "share"}, "problems": True,
+            "file": "share/opencode/opencode.db",
+            "steps": oc2_steps,
+        },
+        "opencode_odd_schema": {
+            "vendor": "opencode", "env": {"XDG_DATA_HOME": "share"}, "problems": True,
+            "file": "share/opencode/opencode.db",
+            "steps": odd_steps,
+        },
+        # The fork: the same store under its own name, its problems its own.
+        "kilo_store": {
+            "vendor": "kilo", "env": {"XDG_DATA_HOME": "share"}, "problems": True,
+            "file": "share/kilo/kilo.db",
+            "steps": opencode_steps[:3] + [_db_step(["CREATE TABLE session_v2 (id TEXT);"], 3, 4)],
+        },
         "hermes_db": {
             "vendor": "hermes", "env": {"HERMES_HOME": "hermes"},
             "file": "hermes/state.db",
@@ -669,6 +806,7 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
     clock = [0.0]
     monkeypatch.setattr(time, "time", lambda: clock[0])
     reader = make_reader()
+    opencode_vendor._READ_PROBLEMS.clear()
     checkpoint: dict = {}
     seen: set[str] = set()
     steps = []
@@ -711,6 +849,10 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
             # main's walk raises on a line that is not UTF-8, after saving its state.
             got["activity"], got["activity_error"] = [], "decode"
         got["bag"] = sorted(seen)
+        if scenario.get("problems"):
+            # What the CLI's status would say of the store now (`since` is the wall clock).
+            problem = opencode_vendor.read_problem(scenario["vendor"])
+            got["problem"] = problem and {k: v for k, v in problem.items() if k != "since"}
         steps.append(got)
     try:
         turns: Any = [_turn_dict(t) for t in reader.turns_for_session(path, "")]

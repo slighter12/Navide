@@ -1,5 +1,6 @@
-//! Kilo Code CLI (an opencode fork). One SQLite store; observe stays on
-//! main's reader.
+//! Kilo Code CLI: an OpenCode fork with the same store under another name,
+//! `$XDG_DATA_HOME|~/.local/share` + `/kilo/kilo.db` (only the stable
+//! channel's database), so its records are OpenCode's declaration.
 use crate::decl::*;
 
 pub static CLI: Cli = Cli {
@@ -23,4 +24,4 @@ pub static CLI: Cli = Cli {
     interrupt: b"\x03",
 };
 
-crate::unobserved!(CLI);
+crate::vendors::opencode::store!(CLI, "kilo.db");

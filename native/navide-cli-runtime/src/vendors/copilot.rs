@@ -85,8 +85,8 @@ static OBSERVE: Observe<V> = Observe {
         requires: &[],
         // main's reader warns (once) about a store it cannot read.
         unreadable: Unreadable::Unsupported,
-        usage: SqlUsage::Anchored {
-            rules: &[UsageRule {
+        usage: SqlUsage::Anchored(Anchored::of(
+            &[UsageRule {
                 when: Pred::True,
                 effects: &[],
                 reading: Some(Reading {
@@ -97,12 +97,12 @@ static OBSERVE: Observe<V> = Observe {
                     ..Reading::of(Num::Of(&["input_tokens"]), Num::Of(&["output_tokens"]), Text::Concat(&[Text::Lit("copilot_usage::"), ID]))
                 }),
             }],
-            sql: usage_rows!(""),
-            id: "id",
-            newest: "SELECT COALESCE(MAX(id), 0) FROM assistant_usage_events",
-            anchor_sql: "SELECT session_id, model, input_tokens, output_tokens, created_at FROM assistant_usage_events WHERE id = ?",
-            anchor: &["session_id", "model", "input_tokens", "output_tokens", "created_at"],
-        },
+            usage_rows!(""),
+            "id",
+            "SELECT COALESCE(MAX(id), 0) FROM assistant_usage_events",
+            "SELECT session_id, model, input_tokens, output_tokens, created_at FROM assistant_usage_events WHERE id = ?",
+            &["session_id", "model", "input_tokens", "output_tokens", "created_at"],
+        )),
         // Usage rows are the heartbeat inside a turn, and are walked first so
         // that the turn row's `turn_complete` closes the pass.
         activity: SqlWalk::Tables(&[

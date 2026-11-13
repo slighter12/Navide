@@ -90,8 +90,16 @@ fn observed(observers: &Observers) -> Value {
     Value::Object(observers.iter().map(|(key, observer)| ((*key).to_owned(), json!({"cwd": observer.cwd_form()}))).collect())
 }
 
-/// Answer one request. The result may carry `notes`: what main's reader
-/// would have logged while reading.
+/// What a read has to tell the caller beside its result: `notes`, which
+/// main's reader would have logged while reading, and `reads`, the outcomes
+/// main's reader would have recorded in its read-problem registry.
+fn said(observer: &mut AnyObserver, mut result: Value) -> Value {
+    result["notes"] = json!(observer.take_notes());
+    result["reads"] = json!(observer.take_reads());
+    result
+}
+
+/// Answer one request.
 pub fn handle(observers: &mut Observers, req: Request) -> Result<Value, Failure> {
     let path = Path::new(&req.path);
     match req.op.as_str() {
@@ -100,16 +108,16 @@ pub fn handle(observers: &mut Observers, req: Request) -> Result<Value, Failure>
         "usage" => {
             let observer = observer(observers, &req.vendor)?;
             let read = observer.usage(path, &req.checkpoint)?;
-            Ok(json!({"events": read.events, "checkpoint": read.checkpoint, "notes": observer.take_notes()}))
+            Ok(said(observer, json!({"events": read.events, "checkpoint": read.checkpoint})))
         }
         "activity" => {
             let mut bag = req.bag;
             let observer = observer(observers, &req.vendor)?;
             observer.set_clock(req.now);
             match observer.activity_bag(path, &mut bag) {
-                Ok(events) => Ok(json!({"events": events, "bag": bag, "notes": observer.take_notes()})),
+                Ok(events) => Ok(said(observer, json!({"events": events, "bag": bag}))),
                 // The walk's state still moved (main's `finally`), so the bag is returned with the error.
-                Err(err @ Error::Decode { .. }) => Ok(json!({"events": [], "bag": bag, "error": err.to_string(), "notes": observer.take_notes()})),
+                Err(err @ Error::Decode { .. }) => Ok(said(observer, json!({"events": [], "bag": bag, "error": err.to_string()}))),
                 // Unreadable: the caller's own reader decides (main returns no events).
                 Err(err) => Err(err.into()),
             }
@@ -118,9 +126,9 @@ pub fn handle(observers: &mut Observers, req: Request) -> Result<Value, Failure>
             let observer = observer(observers, &req.vendor)?;
             observer.set_clock(req.now);
             match observer.turns(path, &req.session_id) {
-                Ok(turns) => Ok(json!({"turns": turns})),
+                Ok(turns) => Ok(said(observer, json!({"turns": turns}))),
                 // main's strict text-mode pass raises on a file that is not UTF-8.
-                Err(err @ Error::Decode { .. }) => Ok(json!({"turns": [], "error": err.to_string()})),
+                Err(err @ Error::Decode { .. }) => Ok(said(observer, json!({"turns": [], "error": err.to_string()}))),
                 Err(err) => Err(err.into()),
             }
         }

@@ -88,9 +88,11 @@ _CLOSE_GRACE_S = 2.0
 #: ``unsupported``: the runtime declined a store its declaration does not
 #: describe, so the Python reader read it (expected; each case is a declared
 #: ``Unsupported``). ``unreadable``: the file could not be opened or read, and
-#: the Python reader decided what that means, as on main. ``fallback``: a
-#: fault — a stalled, dead or failing process, or an error answer.
-OUTCOMES = ("rust", "unsupported", "unreadable", "fallback")
+#: the Python reader decided what that means, as on main. ``deferred``: the
+#: reader asked to make its own reads (one with a failing query on record
+#: does, until that query works again). ``fallback``: a fault — a stalled,
+#: dead or failing process, or an error answer.
+OUTCOMES = ("rust", "unsupported", "unreadable", "deferred", "fallback")
 
 _enabled = False
 # Guards the few module values below. Held only to swap them, never while a
@@ -461,15 +463,52 @@ def _log_notes(reader: Any, notes: Any) -> None:
             reader_log.warning("%s", note.get("text") or kind)
 
 
+def _apply_reads(reader: Any, path: Path, reads: Any) -> None:
+    """What the runtime's reads have to tell the registry of read problems a
+    reader keeps (OpenCode's and Kilo's ``read_problem()``, which the CLI's
+    status shows): recorded and cleared through the reader's own methods, so
+    a store the runtime read is disclosed exactly as one the reader read."""
+    report, worked = getattr(reader, "_report_problem", None), getattr(reader, "_read_ok", None)
+    if not reads or report is None or worked is None:
+        return
+    for read in reads:
+        if read.get("ok"):
+            worked(read["key"])
+        else:
+            report(read["key"], path, read["reason"], read["detail"], status=read["status"])
+
+
+def _reads_itself(reader: Any) -> bool:
+    """A reader may ask to make its own reads for now (``reads_itself()``):
+    one with a failing query on record does, so that the query which recorded
+    the problem is the one that clears it."""
+    asks = getattr(reader, "reads_itself", None)
+    return bool(asks and asks())
+
+
+def _ask(reader: Any, op: str, path: Path, **fields: Any) -> "tuple[Any, dict] | None":
+    """The runtime's answer to one of `reader`'s calls, what it said beside
+    the result already passed on; None means the reader reads this one."""
+    vendor = str(reader.vendor)
+    if _reads_itself(reader):
+        if vendor in _known:
+            _count(vendor, "deferred")
+        return None
+    answer = _call(vendor, op, path=str(path), **fields)
+    if answer is not None:
+        _log_notes(reader, answer[0].get("notes"))
+        _apply_reads(reader, path, answer[0].get("reads"))
+    return answer
+
+
 # ---- the three routed reader calls ------------------------------------------
 
 
 def _usage(reader: Any, original: Callable[..., IncrementalParseResult], path: Path, checkpoint: dict) -> IncrementalParseResult:
-    answer = _call(str(reader.vendor), "usage", path=str(path), checkpoint=checkpoint or {})
+    answer = _ask(reader, "usage", path, checkpoint=checkpoint or {})
     if answer is None:
         return original(path, checkpoint)
     result, declared = answer
-    _log_notes(reader, result.get("notes"))
     events = [
         TokenUsage(
             vendor=e["vendor"],
@@ -501,11 +540,10 @@ def _prompt(text: str, full: str) -> str:
 
 
 def _activity(reader: Any, original: Callable[..., list[ActivityEvent]], path: Path, seen_keys: set[str]) -> list[ActivityEvent]:
-    answer = _call(str(reader.vendor), "activity", path=str(path), bag=sorted(seen_keys), now=time.time())
+    answer = _ask(reader, "activity", path, bag=sorted(seen_keys), now=time.time())
     if answer is None:
         return original(path, seen_keys)
     result, declared = answer
-    _log_notes(reader, result.get("notes"))
     seen_keys.clear()
     seen_keys.update(result["bag"])
     if result.get("error"):
@@ -528,7 +566,7 @@ def _activity(reader: Any, original: Callable[..., list[ActivityEvent]], path: P
 
 
 def _turns(reader: Any, original: Callable[..., list[TurnUsage]], path: Path, session_id: str = "") -> list[TurnUsage]:
-    answer = _call(str(reader.vendor), "turns", path=str(path), session_id=session_id or "", now=time.time())
+    answer = _ask(reader, "turns", path, session_id=session_id or "", now=time.time())
     if answer is None:
         return original(path, session_id)
     result = answer[0]

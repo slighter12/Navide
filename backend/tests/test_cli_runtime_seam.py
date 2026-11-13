@@ -206,9 +206,106 @@ def test_status_counts_who_answered(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     status = seam.status()
     assert status["state"] == "running" and status["failures"] == 0
     assert status["calls"] == {"qwen": {"rust": 2 * len(scenario["steps"]) + 1, "unsupported": 0, "unreadable": 0,
-                                        "fallback": 0}}
+                                        "deferred": 0, "fallback": 0}}
     seam.shutdown()
     assert seam.status()["state"] == "idle"
+
+
+@pytest.fixture
+def no_read_problems():
+    from agent_team_backend.cli_vendors import opencode
+
+    opencode._READ_PROBLEMS.clear()
+    yield opencode
+    opencode._READ_PROBLEMS.clear()
+
+
+def test_what_the_schema_check_finds_reaches_the_readers_problem_registry(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, no_read_problems) -> None:
+    """The runtime read the store; the CLI's status must say what main's reader would."""
+    if cli_runtime.binary() is None:
+        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
+    import sqlite3
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    db = tmp_path / "opencode" / "opencode.db"
+    db.parent.mkdir()
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE conversation_v3 (id TEXT)")
+    con.commit()
+    reader = cli_runtime.wrap(cli_vendor("opencode").make_log_reader())
+    seam.apply(True)
+
+    assert reader.parse_incremental(db, {}).events == []
+    problem = no_read_problems.read_problem("opencode")
+    assert (problem["status"], problem["reason"], problem["detail"]) == ("unreadable", "unrecognized-schema",
+                                                                         "tables: conversation_v3")
+    assert problem["path"] == str(db)
+    since = problem["since"]
+    assert reader.parse_activity(db, set()) == []
+    assert no_read_problems.read_problem("opencode")["since"] == since  # the same problem, not a new one
+
+    # A schema it knows: the same entry is cleared by the read that now works.
+    from tests.vendors import test_opencode as builders
+
+    con.executescript("DROP TABLE conversation_v3;" + builders._SCHEMA)
+    con.commit()
+    con.close()
+    reader.parse_incremental(db, {})
+    assert no_read_problems.read_problem("opencode") is None
+    calls = seam.status()["calls"]["opencode"]
+    assert (calls["rust"], calls["unsupported"], calls["deferred"], calls["fallback"]) == (3, 0, 0, 0)
+
+
+def test_a_failing_query_is_the_readers_to_record_and_to_clear(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, no_read_problems) -> None:
+    """The runtime declines a read whose query fails; main's reader makes it,
+    records why, and keeps making it until it works and clears its entry."""
+    if cli_runtime.binary() is None:
+        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
+    import sqlite3
+
+    from tests.vendors import test_opencode as builders
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    db = tmp_path / "opencode" / "opencode.db"
+    db.parent.mkdir()
+    con = sqlite3.connect(db)
+    # No `part` table: usage reads, activity cannot.
+    con.executescript(builders._SCHEMA + "DROP TABLE part;")
+    builders._add_session(con, "ses_a", "/ws")
+    builders._add_message(con, "m1", "ses_a", builders._assistant_data({"input": 5, "output": 2}))
+    reader = cli_runtime.wrap(cli_vendor("opencode").make_log_reader())
+    seam.apply(True)
+
+    def calls() -> tuple[int, int, int]:
+        counts = seam.status()["calls"]["opencode"]
+        return counts["rust"], counts["unsupported"], counts["deferred"]
+
+    assert len(reader.parse_incremental(db, {}).events) == 1
+    assert calls() == (1, 0, 0)
+    seen: set[str] = set()
+    assert reader.parse_activity(db, seen) == []
+    assert calls() == (1, 1, 0)  # declined: the reader read it, and recorded why
+    problem = no_read_problems.read_problem("opencode")
+    assert problem["reason"] == "query-failed" and "no such table: part" in problem["detail"]
+
+    # While the query is on record as failing, the reader makes every read.
+    reader.parse_incremental(db, {})
+    reader.parse_activity(db, seen)
+    assert calls() == (1, 1, 2)
+    assert no_read_problems.read_problem("opencode") == problem  # held still: same entry, same `since`
+
+    # The table is there again: the reader's own read clears its entry, and the runtime answers the next one.
+    con.executescript("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL,"
+                      " time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);")
+    con.commit()
+    con.close()
+    reader.parse_activity(db, seen)
+    assert no_read_problems.read_problem("opencode") is None
+    assert calls() == (1, 1, 3)
+    reader.parse_activity(db, seen)
+    assert calls() == (2, 1, 3)
 
 
 def test_what_the_reader_would_log_is_logged_once_through_its_own_logger(

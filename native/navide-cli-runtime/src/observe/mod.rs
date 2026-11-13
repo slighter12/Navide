@@ -10,7 +10,7 @@ pub mod sqlite;
 pub mod turns;
 pub mod usage;
 
-use crate::decl::{Observe, OtherFiles, Seed, SlotInit, Turns, Vendor};
+use crate::decl::{Observe, OtherFiles, Read, Seed, SlotInit, Turns, Vendor};
 use crate::expr::{self, py_str, truthy, Scope, Slots};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -226,12 +226,13 @@ impl<'a, V: Vendor> File<'a, V> {
 
 /// What an observer keeps in memory between calls, as main's reader objects
 /// do: where each file's last line walk stopped, the partition labels it has
-/// resolved, and the notes of the call in progress.
+/// resolved, and the notes and read outcomes of the call in progress.
 #[derive(Default)]
 pub struct Memo {
     pub(crate) resume: HashMap<PathBuf, file::LineResume>,
     pub(crate) labels: HashMap<(PathBuf, String), String>,
     pub(crate) notes: Vec<Note>,
+    pub(crate) reads: Vec<Read>,
 }
 
 /// Something main's reader logs as a warning while it reads. The seam logs
@@ -290,6 +291,12 @@ impl<V: Vendor> Observer<V> {
         std::mem::take(&mut self.memo.notes)
     }
 
+    /// What the last call's reads have to tell the registry main's reader
+    /// keeps (`decl::Read`); empty after a call that failed.
+    pub fn take_reads(&mut self) -> Vec<Read> {
+        std::mem::take(&mut self.memo.reads)
+    }
+
     fn named(&self, path: &Path) -> bool {
         self.spec.file_name.is_none_or(|name| path.file_name().and_then(|n| n.to_str()) == Some(name))
     }
@@ -305,19 +312,34 @@ impl<V: Vendor> Observer<V> {
         }
     }
 
+    /// A call the caller's own reader takes over (it could not be read, or
+    /// is not this declaration's) says nothing: that reader makes the same
+    /// reads and says it itself. A decode error still answers.
+    fn settled<T>(&mut self, result: Result<T, Error>) -> Result<T, Error> {
+        if matches!(result, Err(Error::Io(_) | Error::Unsupported(_))) {
+            self.memo.reads.clear();
+            self.memo.notes.clear();
+        }
+        result
+    }
+
     pub fn usage(&mut self, path: &Path, checkpoint: &Map<String, Value>) -> Result<UsageRead, Error> {
+        self.memo.reads.clear();
         if !self.accepts(path)? {
             return Ok(UsageRead::unchanged(checkpoint));
         }
-        V::Backend::usage(&File { path, spec: self.spec }, checkpoint, false, &mut self.memo)
+        let read = V::Backend::usage(&File { path, spec: self.spec }, checkpoint, false, &mut self.memo);
+        self.settled(read)
     }
 
     pub fn activity(&mut self, path: &Path, state: &mut ActivityState) -> Result<Vec<ActivityEvent>, Error> {
+        self.memo.reads.clear();
         if !self.accepts(path)? {
             return Ok(Vec::new());
         }
         let now = self.now();
-        activity::walk(&File { path, spec: self.spec }, state, &mut self.memo, now)
+        let events = activity::walk(&File { path, spec: self.spec }, state, &mut self.memo, now);
+        self.settled(events)
     }
 
     /// `activity` over the watcher's seen-keys bag: the state is read from it
@@ -342,23 +364,27 @@ impl<V: Vendor> Observer<V> {
                 OtherFiles::Unsupported => Err(Error::Unsupported(format!("{} is not the declared store", path.display()))),
             };
         }
+        self.memo.reads.clear();
         let file = File { path, spec: self.spec };
-        match &self.spec.turns {
+        let turns = match &self.spec.turns {
             Turns::None => Ok(Vec::new()),
             Turns::Exact(exact) => V::Backend::exact_turns(&file, exact, session_id),
-            Turns::Inferred => {
-                let usage = V::Backend::usage(&file, &Map::new(), true, &mut self.memo)?.events;
-                let activity = if V::accepts(path) {
-                    let now = self.now();
-                    // A scratch walk: nothing it learns is kept.
-                    let mut scratch = Memo::default();
-                    activity::walk(&file, &mut ActivityState::default(), &mut scratch, now)?
-                } else {
-                    Vec::new()
-                };
-                Ok(turns::inferred(&usage, &activity, session_id))
-            }
-        }
+            Turns::Inferred => self.inferred_turns(&file, session_id),
+        };
+        self.settled(turns)
+    }
+
+    fn inferred_turns(&mut self, file: &File<'_, V>, session_id: &str) -> Result<Vec<TurnUsage>, Error> {
+        let usage = V::Backend::usage(file, &Map::new(), true, &mut self.memo)?.events;
+        let activity = if V::accepts(file.path) {
+            let now = self.now();
+            // A scratch walk: nothing it learns is kept.
+            let mut scratch = Memo::default();
+            activity::walk(file, &mut ActivityState::default(), &mut scratch, now)?
+        } else {
+            Vec::new()
+        };
+        Ok(turns::inferred(&usage, &activity, session_id))
     }
 }
 

@@ -41,7 +41,9 @@ EXPECTED_UNSUPPORTED = {
     "copilot": "a 1.0.75 events.jsonl (it reconciles against the store), or a store that cannot be read: "
                "main's reader reads the one and warns about the other",
     "hermes": "a state.db without the declared columns: main's reader reports the schema",
+    "kilo": "a database with a query that fails, busy or gone: main's reader makes the read and records why",
     "openclaw": "a transcript_events table without the declared columns: main's reader reports the schema",
+    "opencode": "a database with a query that fails, busy or gone: main's reader makes the read and records why",
 }
 
 
@@ -104,7 +106,7 @@ def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pyte
         note = f"  ({EXPECTED_UNSUPPORTED[vendor]})" if counts["unsupported"] and vendor in EXPECTED_UNSUPPORTED else ""
         terminalreporter.write_line(
             f"{vendor:12} rust={counts['rust']:<6} unsupported={counts['unsupported']:<4} "
-            f"unreadable={counts['unreadable']:<4} fallback={counts['fallback']}{note}"
+            f"unreadable={counts['unreadable']:<4} deferred={counts['deferred']:<4} fallback={counts['fallback']}{note}"
         )
     for problem in unexpected(calls):
         terminalreporter.write_line(f"UNEXPECTED {problem}", red=True)

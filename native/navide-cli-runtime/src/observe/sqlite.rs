@@ -261,14 +261,6 @@ impl Db {
     pub fn rows(&self, sql: &str, params: &[Param]) -> Option<Vec<Row>> {
         self.connection.query(sql, params, self.json, self.binary)
     }
-
-    /// The first column of the first row, as main's `_int` reads it; `None`
-    /// when it is SQL `NULL` (`MAX` over no rows) or the query fails.
-    pub fn scalar(&self, sql: &str) -> Option<i64> {
-        let rows = self.rows(sql, &[])?;
-        let first = rows.first().and_then(|row| row.value.as_object()).and_then(|row| row.values().next().cloned());
-        first.filter(|v| !v.is_null()).map(|v| crate::expr::py_int_raw(&v).unwrap_or(0))
-    }
 }
 
 /// The first column of every row of `sql`, bytes decoded as UTF-8 with

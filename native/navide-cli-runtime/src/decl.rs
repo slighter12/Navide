@@ -22,6 +22,7 @@
 use crate::expr::Scope;
 use crate::observe::Backend;
 use serde::Serialize;
+use serde_json::Value;
 use std::fmt::Debug;
 
 pub type Str = &'static str;
@@ -62,6 +63,58 @@ pub trait Vendor: Sized + Debug + 'static {
     /// Narrows `Observe::file_name`: is this file one of its transcripts?
     fn accepts(_path: &std::path::Path) -> bool {
         true
+    }
+    /// Which of the declared variants this store holds (`SqlUsage::OneOf`,
+    /// `SqlWalk::OneOf`): `store` runs one query and returns its rows, `None`
+    /// when it cannot be read this cycle. Read-only, and only through `store`.
+    fn probe(_ext: Self::Ext, _store: &mut dyn FnMut(&str) -> Option<Vec<Value>>) -> Probed {
+        Probed { pick: Some(0), read: None }
+    }
+}
+
+/// What a probe found.
+#[derive(Debug)]
+pub struct Probed {
+    /// The variant to read; `None`: none of them, nothing is read.
+    pub pick: Option<usize>,
+    /// What the probe has to say about the store, for the caller's reader.
+    pub read: Option<Read>,
+}
+
+/// The outcome of one read that main's reader keeps a record of (its
+/// read-problem registry, which the CLI's status shows): the seam applies it
+/// to that registry, so a store the runtime reads is disclosed, and cleared,
+/// exactly as one main's reader reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Read {
+    /// The registry's name for the read.
+    pub key: Str,
+    /// `None`: the read worked.
+    pub problem: Option<Problem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Problem {
+    pub status: Str,
+    pub reason: Str,
+    pub detail: String,
+}
+
+/// On the wire: `{"key", "ok": true}`, or `{"key", "status", "reason", "detail"}`.
+impl Serialize for Read {
+    fn serialize<S: serde::Serializer>(&self, out: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = out.serialize_map(None)?;
+        map.serialize_entry("key", self.key)?;
+        match &self.problem {
+            None => map.serialize_entry("ok", &true)?,
+            Some(problem) => {
+                map.serialize_entry("status", problem.status)?;
+                map.serialize_entry("reason", problem.reason)?;
+                map.serialize_entry("detail", &problem.detail)?;
+            }
+        }
+        map.end()
     }
 }
 
@@ -900,16 +953,12 @@ pub enum SqlUsage<V: Vendor> {
     /// One event per row after the checkpoint's `row_id` (main's `{"kind":
     /// "sqlite", "row_id", "identity"}`); `sql` binds that watermark as `?`.
     After { rules: &'static [UsageRule<V>], sql: Str, id: Str },
-    /// One event per row after the checkpoint's `row_id`, where the id alone
-    /// does not prove the store is the same one: the checkpoint also keeps
-    /// the watermark row's `anchor` columns (`str()` of each, joined by `|`).
-    /// A row standing under the watermark id with another anchor was never
-    /// credited (the read starts just below it); a store whose newest id fell
-    /// below the watermark is re-anchored at that id without a rescan. The
-    /// watermark follows every row read, with or without a reading.
-    /// `anchor_sql` binds an id (`?`) and returns the anchor columns; `sql`
-    /// returns them under the same names.
-    Anchored { rules: &'static [UsageRule<V>], sql: Str, id: Str, newest: Str, anchor_sql: Str, anchor: &'static [Str] },
+    /// One event per row after an anchored `row_id` watermark.
+    Anchored(Anchored<V>),
+    /// One of several usage declarations, chosen per read by the vendor's
+    /// probe of the store (a database whose schema changed between versions
+    /// of the CLI). No variant: nothing read, the checkpoint as it was.
+    OneOf { probe: V::Ext, of: &'static [SqlUsage<V>] },
     /// Rows that each hold one key's running counters. Every read reads them
     /// all; the checkpoint keeps each key's last counters as `{"kind": kind,
     /// map: {key: [counters…]}}`. The rules see the row with `delta` (column →
@@ -922,9 +971,70 @@ pub enum SqlUsage<V: Vendor> {
     Watermarks { rules: &'static [UsageRule<V>], page: Page<V>, part: Partition<V>, kind: Str, map: Str },
 }
 
+/// One event per row after the checkpoint's `row_id`, where the id alone does
+/// not prove the store is the same one: the checkpoint also keeps the
+/// watermark row's `anchor` columns (`str()` of each, joined by `|`). A row
+/// standing under the watermark id with another anchor was never credited
+/// (the read starts just below it); a store whose newest id fell below the
+/// watermark is re-anchored at that id without a rescan. The watermark
+/// follows every row read, with or without a reading.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct Anchored<V: Vendor> {
+    pub rules: &'static [UsageRule<V>],
+    /// `?1` is the watermark (`?2`: see `settling`); the rows come oldest
+    /// first, with the anchor columns under their own names.
+    pub sql: Str,
+    pub id: Str,
+    /// The newest id (`SELECT COALESCE(MAX(id), 0) FROM …`).
+    pub newest: Str,
+    /// Binds an id (`?`) and returns that row's anchor columns.
+    pub anchor_sql: Str,
+    pub anchor: &'static [Str],
+    pub settling: Option<Settling<V>>,
+    /// A key and value the checkpoint carries. A watermark without it was
+    /// taken on another table of the same file (an older schema whose rows
+    /// were copied over): the read starts at the newest id, crediting nothing.
+    pub tag: Option<(Str, Str)>,
+    pub lookup: Option<Lookup>,
+}
+
+impl<V: Vendor> Anchored<V> {
+    /// Rows written once: nothing settles, no tag, no lookup.
+    pub const fn of(rules: &'static [UsageRule<V>], sql: Str, id: Str, newest: Str, anchor_sql: Str, anchor: &'static [Str]) -> Self {
+        Anchored { rules, sql, id, newest, anchor_sql, anchor, settling: None, tag: None, lookup: None }
+    }
+}
+
+/// Rows that are rewritten in place until they are complete. One matching
+/// `when` yields nothing and is read again on later passes: `sql` binds the
+/// ids still settling as a JSON list (`?2`), and the checkpoint keeps the
+/// newest `cap` of them as `pending`.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct Settling<V: Vendor> {
+    pub when: Pred<V>,
+    pub cap: usize,
+}
+
+/// A value each row gets from another query, which the store may not be
+/// able to answer (a column older versions lack): `sql` returns `key` and
+/// `value` columns, and a row whose `by` column equals a key gets the value
+/// as its `column` ("" when there is none, or the query fails).
+#[derive(Debug, Serialize)]
+pub struct Lookup {
+    pub sql: Str,
+    pub by: Str,
+    pub column: Str,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub enum SqlWalk<V: Vendor> {
+    /// One of several walks, chosen per pass by the vendor's probe of the
+    /// store. Each keeps its own mark (declare them as `Tables`, whose marks
+    /// are kept by key). No variant: nothing walked.
+    OneOf { probe: V::Ext, of: &'static [SqlWalk<V>] },
     /// Rows after one database-wide id, kept in the bag as `key + id`.
     Rows(RowWalk<V>),
     /// Several row walks in one pass, each with its own watermark and bag
