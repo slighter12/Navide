@@ -1,0 +1,28 @@
+[package]
+name = "navide-cli-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "navide-cli-runtime"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+# preserve_order: records keep their key order (a model map's first entry
+# is the model, as `next(iter(dict))` is in main), and checkpoints keep
+# main's key order.
+serde_json = { version = "=1.0.150", features = ["preserve_order"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.186"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

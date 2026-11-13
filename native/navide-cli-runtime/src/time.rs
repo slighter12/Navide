@@ -1,0 +1,132 @@
+//! UTC calendar arithmetic for the few timestamp conversions the readers make.
+
+fn days_to_civil(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+fn civil_to_days(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = if m > 2 { m - 3 } else { m + 9 } as i64;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn stamp(whole: i64, millis: i64) -> String {
+    let (days, secs) = (whole.div_euclid(86_400), whole.rem_euclid(86_400));
+    let (y, m, d) = days_to_civil(days);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z", secs / 3600, secs % 3600 / 60, secs % 60)
+}
+
+/// grok's `_iso`: `strftime(gmtime(s))` plus `int((s % 1) * 1000)` milliseconds.
+pub fn iso_truncated_ms(seconds: f64) -> String {
+    let whole = seconds.floor();
+    stamp(whole as i64, (((seconds - whole) * 1000.0) as i64).clamp(0, 999))
+}
+
+/// `log_readers.base.turn_timestamp`: epoch-ms strings become ISO 8601
+/// (microsecond-rounded, then truncated to ms, as `datetime` does), ISO passes
+/// through, "" becomes None.
+pub fn turn_timestamp(raw: &str) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+    match raw.trim().parse::<f64>() {
+        Ok(ms) if ms.is_finite() => {
+            let micros = (ms * 1000.0).round_ties_even() as i64;
+            let whole = micros.div_euclid(1_000_000);
+            Some(stamp(whole, micros.rem_euclid(1_000_000) / 1000))
+        }
+        _ => Some(raw.to_owned()),
+    }
+}
+
+/// `log_readers.base._turn_sort_key`: seconds since the epoch for an epoch-ms
+/// string or an ISO 8601 stamp. Naive stamps are read as UTC (Python: local).
+pub fn sort_key(raw: &str) -> Option<f64> {
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(ms) = raw.trim().parse::<f64>() {
+        return Some(ms / 1000.0);
+    }
+    parse_iso(raw)
+}
+
+pub fn parse_iso(raw: &str) -> Option<f64> {
+    let b = raw.as_bytes();
+    let num = |from: usize, len: usize| -> Option<i64> {
+        let s = raw.get(from..from + len)?;
+        s.bytes().all(|c| c.is_ascii_digit()).then(|| s.parse().ok())?
+    };
+    let (y, mo, d) = (num(0, 4)?, num(5, 2)?, num(8, 2)?);
+    if b.get(4) != Some(&b'-') || b.get(7) != Some(&b'-') || !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let mut seconds = civil_to_days(y, mo as u32, d as u32) as f64 * 86_400.0;
+    let mut i = 10;
+    if i < b.len() {
+        if b[i] != b'T' && b[i] != b' ' {
+            return None;
+        }
+        let (h, mi) = (num(i + 1, 2)?, num(i + 4, 2)?);
+        if b.get(i + 3) != Some(&b':') {
+            return None;
+        }
+        seconds += (h * 3600 + mi * 60) as f64;
+        i += 6;
+        if b.get(i) == Some(&b':') {
+            seconds += num(i + 1, 2)? as f64;
+            i += 3;
+            if matches!(b.get(i), Some(b'.') | Some(b',')) {
+                let start = i + 1;
+                let mut end = start;
+                while end < b.len() && b[end].is_ascii_digit() {
+                    end += 1;
+                }
+                if end == start {
+                    return None;
+                }
+                seconds += format!("0.{}", &raw[start..end]).parse::<f64>().ok()?;
+                i = end;
+            }
+        }
+        match b.get(i) {
+            None => {}
+            Some(b'Z') if i + 1 == b.len() => {}
+            Some(sign @ (b'+' | b'-')) => {
+                let (oh, om) = (num(i + 1, 2)?, num(i + 4, 2)?);
+                let offset = (oh * 3600 + om * 60) as f64;
+                seconds += if *sign == b'+' { -offset } else { offset };
+            }
+            _ => return None,
+        }
+    }
+    Some(seconds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conversions_round_trip() {
+        assert_eq!(turn_timestamp("1700000000123").unwrap(), "2023-11-14T22:13:20.123Z");
+        assert_eq!(turn_timestamp("2026-01-01T00:00:00Z").unwrap(), "2026-01-01T00:00:00Z");
+        assert_eq!(iso_truncated_ms(1_700_000_000.5), "2023-11-14T22:13:20.500Z");
+        assert_eq!(parse_iso("2023-11-14T22:13:20.123Z"), Some(1_700_000_000.123));
+        assert_eq!(parse_iso("2023-11-14T23:13:20+01:00"), Some(1_700_000_000.0));
+        assert_eq!(sort_key(""), None);
+    }
+}
