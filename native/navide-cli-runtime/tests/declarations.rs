@@ -54,17 +54,46 @@ fn every_declaration_is_consistent() {
     assert_eq!(checks.observed, registry::AnyObserver::all().len());
 }
 
+/// Every object of a serialised declaration, depth first.
+fn objects<'v>(value: &'v serde_json::Value, visit: &mut dyn FnMut(&'v serde_json::Map<String, serde_json::Value>)) {
+    match value {
+        serde_json::Value::Object(object) => {
+            visit(object);
+            object.values().for_each(|inner| objects(inner, visit));
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|inner| objects(inner, visit)),
+        _ => {}
+    }
+}
+
 #[test]
 fn settling_rows_are_bound_in_their_query() {
     struct Bound;
     impl Visit for Bound {
         fn vendor<V: Vendor>(&mut self, _file: &'static str) {
             let Some(observe) = V::OBSERVE else { return };
-            // Only a SQLite declaration serialises a row walk with `revisit`.
+            let key = V::CLI.key;
+            // Only a SQLite declaration serialises queries; a walk's settling
+            // rows are its third parameter, a usage read's its second.
             let records = serde_json::to_value(&observe.records).unwrap();
-            let walk = &records["activity"]["Rows"];
-            if !walk["revisit"].is_null() {
-                assert!(walk["sql"].as_str().unwrap().contains("?3"), "{}: settling rows are bound at ?3", V::CLI.key);
+            let mut marks = Vec::new();
+            objects(&records, &mut |query| {
+                let Some(sql) = query.get("sql").and_then(|sql| sql.as_str()) else { return };
+                if query.get("revisit").is_some_and(|revisit| !revisit.is_null()) {
+                    assert!(sql.contains("?3"), "{key}: a walk's settling rows are bound at ?3");
+                }
+                if query.get("settling").is_some_and(|settling| !settling.is_null()) {
+                    assert!(sql.contains("?2"), "{key}: a usage read's settling rows are bound at ?2");
+                }
+                if let (Some(mark), true) = (query.get("key").and_then(|mark| mark.as_str()), query.contains_key("first_sight")) {
+                    assert!(!marks.contains(&mark), "{key}: two walks keep their mark under {mark}");
+                    marks.push(mark);
+                }
+            });
+            // Which variant a store holds is known per pass, so each variant's
+            // walk keeps its marks by key.
+            for variant in records["activity"]["OneOf"]["of"].as_array().into_iter().flatten() {
+                assert!(variant.get("Tables").is_some(), "{key}: a probed walk's variants are `Tables`");
             }
         }
     }

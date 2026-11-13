@@ -1,9 +1,9 @@
-//! Navide's agent-CLI runtime, organised around a CLI's lifecycle: launch,
-//! session (PTY), observe (records → usage, activity, turns) and resume.
+//! Navide's agent-CLI runtime, organised around a CLI's lifecycle: launch
+//! (declared data the app's specs are built from), session (PTY; not wired
+//! in yet), observe (records → usage, activity, turns) and resume.
 //! See DESIGN.md. A CLI is one declaration under `src/vendors/`.
 pub mod decl;
 pub mod expr;
-pub mod launch;
 pub mod observe;
 pub mod proto;
 pub mod resume;

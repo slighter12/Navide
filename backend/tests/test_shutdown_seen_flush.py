@@ -65,6 +65,19 @@ async def test_the_ledger_is_flushed_after_the_links_stop(quiet_shutdown):
     assert steps.index("flush_seen_messages") > steps.index("channels.stop")
 
 
+async def test_the_rust_cli_runtime_is_stopped_off_the_event_loop(quiet_shutdown, monkeypatch):
+    """Its shutdown waits for a process to go, so it must not run on the loop."""
+    import threading
+
+    _steps, stop = quiet_shutdown
+    on_loop = threading.get_ident()
+    stopped_on: list[int] = []
+    monkeypatch.setattr(app._cli_runtime, "shutdown", lambda: stopped_on.append(threading.get_ident()))
+    with pytest.raises(stop):
+        await app._stop_log_watcher()
+    assert len(stopped_on) == 1 and stopped_on[0] != on_loop
+
+
 async def test_an_earlier_step_that_raises_does_not_skip_the_flush(quiet_shutdown, monkeypatch):
     steps, _stop = quiet_shutdown
 

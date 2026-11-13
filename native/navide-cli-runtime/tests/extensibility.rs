@@ -1,12 +1,11 @@
 //! A CLI the crate has never heard of, declared only here, runs the whole
-//! lifecycle: launch argv and env, resume parsing, usage with a checkpoint,
-//! activity with a resumed walk, and inferred turns. Nothing in `src/`
+//! lifecycle: its launch data exported, resume parsing, usage with a
+//! checkpoint, activity with a resumed walk, and inferred turns. Nothing in `src/`
 //! changes for it — that is the extension contract. It also has a value no
 //! shared construct reads (its token counts are a list of parts), which it
 //! extracts with its own `Ext` function instead of a new core variant.
 use navide_cli_runtime::decl::*;
 use navide_cli_runtime::expr::Scope;
-use navide_cli_runtime::launch::{self, Refused, Request};
 use navide_cli_runtime::observe::{ActivityState, Observer};
 use navide_cli_runtime::resume::{self, Command};
 use serde::Serialize;
@@ -154,14 +153,13 @@ fn append(path: &std::path::Path, lines: &[&str]) {
 
 #[test]
 fn launch_and_resume_come_from_the_declaration() {
-    let request = Request { yolo: true, model: Some("m1".into()), effort: Some("high".into()), resume: Some("s-9".into()) };
-    assert_eq!(launch::argv(&TOY, &request).unwrap(), ["toy", "chat", "--continue", "s-9", "-m", "m1", "--think=high", "--yes"]);
-    let bad = Request { effort: Some("max".into()), ..Request::default() };
-    assert_eq!(launch::argv(&TOY, &bad), Err(Refused::UnknownEffort("max".into())));
-
-    let inherited = vec![("TOY_HOME".to_owned(), "/elsewhere".to_owned()), ("PATH".to_owned(), "/bin".to_owned())];
-    let env = launch::env(&TOY, &inherited, &[]);
-    assert_eq!(env, [("PATH".to_owned(), "/bin".to_owned()), ("TOY_COLOR".to_owned(), "never".to_owned())]);
+    // What the app's specs are built from (`declarations launch`): the
+    // declaration as data, whole.
+    let exported = serde_json::to_value(&TOY).unwrap();
+    assert_eq!(exported["launch"]["program"], "toy");
+    assert_eq!(exported["launch"]["model"], serde_json::json!(["-m", "{}"]));
+    assert_eq!(exported["launch"]["env_strip"], serde_json::json!(["TOY_HOME"]));
+    assert_eq!(exported["resume"]["args"], serde_json::json!(["--continue", "{id}"]));
 
     assert_eq!(resume::id_from_command(&TOY, &Command::Text("toy chat -c old --continue new")), "new");
     assert_eq!(resume::id_from_command(&TOY, &Command::Text("toy chat --continue -x")), "");

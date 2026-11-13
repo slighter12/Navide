@@ -211,6 +211,35 @@ def test_status_counts_who_answered(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert seam.status()["state"] == "idle"
 
 
+def test_the_cost_ledgers_own_readers_go_through_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ledger builds a Claude and a Codex reader of its own; they are routed like the backend's."""
+    from agent_team_backend import cost_ledger
+
+    wrapped: list[str] = []
+    real_wrap = cli_runtime.wrap
+
+    def recording(reader: Any) -> Any:
+        wrapped.append(str(reader.vendor))
+        return real_wrap(reader)
+
+    monkeypatch.setattr(cli_runtime, "wrap", recording)
+    monkeypatch.setattr(cost_ledger, "_claude_reader", None)
+    usage = cost_ledger.TokenUsage(vendor="claude", input_tokens=1, output_tokens=1, cwd="/w", session_id="s",
+                                   file_path="/nowhere/s.jsonl", dedup_key="k")
+    cost_ledger.transcript_cwd(usage)
+    cost_ledger.transcript_cwd(usage)  # built once, kept
+    assert wrapped == ["claude"]
+
+    # The backfill command: both readers, wrapped, before any file is read.
+    handed_over: list[Any] = []
+    monkeypatch.setattr(cost_ledger, "CostLedger", lambda _db: None)
+    monkeypatch.setattr(cost_ledger, "Database", lambda _path: None)
+    monkeypatch.setattr(cost_ledger, "backfill", lambda _ledger, readers: handed_over.extend(readers) or (0, 0))
+    assert cost_ledger.main(["backfill", "unused.db"]) == 0
+    assert wrapped == ["claude", "claude", "codex"]
+    assert [reader.parse_incremental.__name__ for reader in handed_over] == ["routed", "routed"]
+
+
 @pytest.fixture
 def no_read_problems():
     from agent_team_backend.cli_vendors import opencode

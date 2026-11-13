@@ -1,5 +1,9 @@
-//! Resume: build the arguments that continue a session, and read back which
-//! session a saved command resumes (main's `resume_id_from_command`).
+//! Resume: which session a saved launch command resumes (main's
+//! `resume_id_from_command`), read by the declared `ResumeParse`. The
+//! backend's registry reads the same declarations with its own scan
+//! (`cli_vendors/_declared.py`, which has to work with no process running);
+//! `backend/tests/test_cli_declarations.py` holds the two to each other over
+//! every command main's parsers were recorded on.
 use crate::decl::{Cli, Pick, ResumeParse, Tokens, ValueShape};
 
 /// `base.command_text`: the last element of a shell-wrapped argv, or the string.
@@ -15,12 +19,6 @@ impl Command<'_> {
             Command::Argv(argv) => argv.last().map_or("", String::as_str),
         }
     }
-}
-
-/// The resume arguments for `id` (after the program), or `None` when the CLI
-/// cannot resume by id.
-pub fn args(cli: &Cli, id: &str) -> Option<Vec<String>> {
-    Some(cli.resume.args?.iter().map(|a| a.replace("{id}", id)).collect())
 }
 
 /// The session id the command resumes, "" when none.
