@@ -1,15 +1,28 @@
 # Adding a CLI vendor
 
 Navide supports one CLI agent per vendor file. Adding a vendor is a
-self-contained PR: two new files plus one registration line on each side,
-and the test lists and docs under [Other hand-kept lists](#other-hand-kept-lists).
+self-contained PR: its declaration, two new spec files plus one registration
+line on each side, and the test lists and docs under
+[Other hand-kept lists](#other-hand-kept-lists).
 You never need to read or modify the shared orchestration code.
+
+## Declaration
+
+How the CLI is launched and resumed (program, flags, environment, resume
+syntax, label, kind) is declared once, in
+`native/navide-cli-runtime/src/vendors/<key>.rs`, and both spec files read it
+through `declared(<key>)` instead of retyping it. Write that file first, build
+the runtime and regenerate the two `cli_declarations.json` files:
+["The declaration: launch and resume, declared once"](en-US/cli-extension-guide.md#the-declaration-launch-and-resume-declared-once)
+has the five steps. Reading the CLI's records through the Rust runtime is a
+separate, optional part of the same file, described in the section after it.
 
 ## Backend
 
 1. Copy `backend/agent_team_backend/cli_vendors/_template.py` to
    `cli_vendors/<key>.py` (short lowercase key, e.g. `mycli`) and fill in
-   the `SPEC`. Every capability you leave at its default is treated as
+   the `SPEC`, spreading `**declared("<key>")` for the launch and resume
+   fields. Every capability you leave at its default is treated as
    "unsupported" for your vendor — the app degrades gracefully.
 2. Register the spec in `cli_vendors/registry.py` (one line, alphabetical).
 3. If the CLI writes local conversation logs, implement the log reader in
@@ -119,9 +132,9 @@ You never need to read or modify the shared orchestration code.
 ## Frontend
 
 1. Copy `src/renderer/src/platform/plugin-shell/agents/_template.ts` to `agents/<key>.ts` and
-   fill in the spec (label, default command, resume syntax, capability
-   flags — the template lists every optional field with pointers to the
-   full docs in `agents/types.ts`).
+   fill in the spec: `...declared('<key>')` for the label, default command,
+   flags and resume syntax, then the capability flags — the template lists
+   every optional field with pointers to the full docs in `agents/types.ts`.
 2. Register it in `agents/index.ts` (one line, display order).
    Decide whether the vendor is a CLI or an Agent ("Two kinds of vendors" in
    `docs/en-US/cli-extension-guide.md`) and set the spec's `kind` field:
