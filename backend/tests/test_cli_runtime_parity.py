@@ -34,6 +34,7 @@ from agent_team_backend.cli_vendors.pi import encode_pi_cwd
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
 from agent_team_backend.log_readers.claude import encode_claude_cwd
 from tests.vendors import test_claude as claude_t
+from tests.vendors import test_cursor as cursor_t
 from tests.vendors import test_codex_0_163_fixture as codex_t
 from tests.vendors import test_codex_subagent as sub_t
 from tests.vendors import test_droid as droid_t
@@ -260,6 +261,35 @@ def _scenarios() -> dict[str, dict]:
             oc_row(oc_nodes, 1, oc_t._msg("user", "late"), "user"),
         ], 3, 4),
     ]
+    def cursor_blob(blob_id: str, message: dict | None = None) -> tuple | str:
+        """A JSON message blob, or (no message) a protobuf structure node."""
+        if message is None:
+            return f"INSERT INTO blobs VALUES ('{blob_id}', X'{cursor_t._PROTOBUF_BLOB.hex()}')"
+        return ("INSERT INTO blobs VALUES (?, CAST(? AS BLOB))", (blob_id, json.dumps(message)))
+
+    def cursor_query(text: str) -> dict:
+        return cursor_t._user(f"<timestamp>Sunday, Aug 16, 2026</timestamp>\n<user_query>\n{text}\n</user_query>")
+
+    marker = "at-pane:0198f6a2-71aa-4d02-9c11-2233445566aa"
+    cursor_dir = f"home/.cursor/chats/{'d' * 32}/{cursor_t._SID}"
+    cursor_steps = [
+        _db_step(["PRAGMA journal_mode=WAL; CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); "
+                  "CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB);",
+                  cursor_blob("b0"), cursor_blob("b1", cursor_t._user("<user_info>rules</user_info>"))], 0, 1),
+        _db_step([
+            cursor_blob("q1", cursor_query("  fix the parser  ")), cursor_blob("p1"),
+            cursor_blob("a1", cursor_t._assistant("done", reasoning="thinking")),
+            cursor_blob("m1", cursor_query(marker)), cursor_blob("m2", cursor_query(f"<!-- agent-team-session: {marker} -->")),
+            cursor_blob("q2", cursor_query(f"forward {marker} to them")),
+            cursor_blob("s1", {"role": "system", "content": "preamble"}),
+            cursor_blob("q3", cursor_t._user("<user_query></user_query>")),
+            cursor_blob("q4", cursor_query("<b>bold</b>")),
+        ], 1, 2),
+        _db_step([cursor_blob("a2", cursor_t._assistant("one")), cursor_blob("a3", cursor_t._assistant("two"))], 2, 3),
+        # The store was recreated: re-anchor at its newest row, replay nothing.
+        _db_step(["DELETE FROM blobs", cursor_blob("n1", cursor_t._assistant("old"))], 3, 4),
+    ]
+    cursor_steps[2]["sidecars"] = {f"{cursor_dir}/meta.json": json.dumps({"updatedAtMs": 1786844146562, "cwd": "/work"})}
     grok = [grok_t._user(1, "hello grok"), grok_t._agent(2, "hi "), grok_t._agent(3, "there"), grok_t._turn(4),
             grok_t._user(5, "again"), grok_t._agent(6, "ok"), grok_t._turn(7, inp=50, out=5, stop="cancelled")]
     return {
@@ -349,6 +379,11 @@ def _scenarios() -> dict[str, dict]:
             "vendor": "hermes", "env": {"HERMES_HOME": "hermes"},
             "file": "hermes/state.db",
             "steps": hermes_steps,
+        },
+        "cursor_db": {
+            "vendor": "cursor", "env": {},
+            "file": f"{cursor_dir}/store.db",
+            "steps": cursor_steps,
         },
         "openclaw_db": {
             "vendor": "openclaw", "env": {"OPENCLAW_STATE_DIR": "openclaw"},

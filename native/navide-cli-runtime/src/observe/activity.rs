@@ -66,6 +66,7 @@ struct Ctx<'a> {
     turn: Option<TurnState>,
     out: Vec<ActivityEvent>,
     written: Vec<String>,
+    now: f64,
 }
 
 /// Where a record is: its line (line cursor) and the byte offset just past it.
@@ -84,6 +85,8 @@ impl Ctx<'_> {
             slots: &self.slots,
             cancelled: self.turn.as_ref().is_some_and(|t| t.cancelled),
             entry_key: "",
+            now: self.now,
+            emitted: self.out.len(),
         }
     }
 
@@ -267,14 +270,14 @@ fn kind_name(kind: EventKind) -> &'static str {
 /// keep per-file values with the same vocabulary. Emits and turn operations
 /// have nothing to act on there and are ignored.
 pub(crate) fn apply_slot_effects(effects: &'static [Effect], record: &Value, offset: u64, slots: &mut Slots) {
-    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new() };
+    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new(), now: 0.0 };
     ctx.apply_all(effects, record, At { line: 0, end: offset });
     *slots = ctx.slots;
 }
 
 /// Run every matching rule's slot effects over one record (turns use this).
 pub(crate) fn apply_slot_rules(rules: &'static [Rule], record: &Value, line: usize, slots: &mut Slots) {
-    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new() };
+    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new(), now: 0.0 };
     ctx.record(rules, record, At { line, end: 0 });
     *slots = ctx.slots;
 }
@@ -366,7 +369,7 @@ pub fn walk(
             if state.hw > 0 {
                 slots.insert(WALK_RESUMED.to_owned(), "1".to_owned());
             }
-            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new() };
+            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new(), now };
             let end = jsonl::walk_lines(path, state.hw, resume, |line| {
                 ctx.record(spec.rules, line.value, At { line: line.number, end: line.end });
             });
@@ -391,7 +394,7 @@ pub fn walk(
                     }
                 }
             }
-            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new() };
+            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new(), now };
             for (end, record) in &tail.records {
                 if let Some(record) = record {
                     ctx.record(spec.rules, record, At { line: 0, end: *end });
@@ -401,7 +404,7 @@ pub fn walk(
             ctx
         }
         Cursor::Rows => {
-            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new() };
+            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new(), now };
             let (Format::Sqlite(db), Some(query)) = (format, sqlite_activity(format)) else {
                 unreachable!("a Rows cursor is declared with a SQLite activity query")
             };

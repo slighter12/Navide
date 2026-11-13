@@ -100,7 +100,7 @@ pub static CLI: Cli = Cli {
             files: &[&["sessions.db"]],
         },
         format: Format::Sqlite(&DB),
-        accept: Some(Accept { name: "sessions.db", not_under: None }),
+        accept: Some(Accept { name: "sessions.db", not_under: None, dir: None }),
         slots: &[],
         usage: Some(UsageSpec {
             slots: &[],

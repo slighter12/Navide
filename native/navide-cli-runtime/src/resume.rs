@@ -39,7 +39,7 @@ pub fn id_from_command(cli: &Cli, command: &Command) -> String {
     }
 }
 
-fn shaped(value: &str, shape: ValueShape) -> Option<String> {
+pub(crate) fn shaped(value: &str, shape: ValueShape) -> Option<String> {
     match shape {
         ValueShape::Any => (!value.is_empty()).then(|| value.to_owned()),
         ValueShape::NoDash => (!value.is_empty() && !value.starts_with('-')).then(|| value.to_owned()),

@@ -104,7 +104,7 @@ pub static CLI: Cli = Cli {
             files: &[&["*", "agent", "openclaw-agent.sqlite"]],
         },
         format: Format::Sqlite(&DB),
-        accept: Some(Accept { name: "openclaw-agent.sqlite", not_under: None }),
+        accept: Some(Accept { name: "openclaw-agent.sqlite", not_under: None, dir: None }),
         slots: &[],
         usage: Some(UsageSpec {
             slots: &[],

@@ -11,7 +11,7 @@ use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 
 fn scope<'a>(record: &'a Value, offset: u64, slots: &'a Slots) -> Scope<'a> {
-    Scope { record, line: 0, offset, slots, cancelled: false, entry_key: "" }
+    Scope { offset, ..Scope::of(record, slots) }
 }
 
 /// The first rule whose `when` holds: its slot effects run, and its reading

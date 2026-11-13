@@ -151,16 +151,19 @@ impl Connection {
                 let value = match unsafe { sqlite3_column_type(statement.0, c) } {
                     1 => Value::from(unsafe { sqlite3_column_int64(statement.0, c) }),
                     2 => serde_json::Number::from_f64(unsafe { sqlite3_column_double(statement.0, c) }).map_or(Value::Null, Value::Number),
-                    3 | 4 => {
+                    kind @ (3 | 4) => {
                         let pointer = unsafe { sqlite3_column_text(statement.0, c) };
                         let length = unsafe { sqlite3_column_bytes(statement.0, c) } as usize;
                         let bytes = if pointer.is_null() || length == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(pointer, length) } };
-                        // Python decodes TEXT as UTF-8 and fails the whole query on a bad cell.
-                        let text = std::str::from_utf8(bytes).ok()?.to_owned();
-                        if json.contains(&name.as_str()) {
-                            serde_json::from_str(&text).unwrap_or(Value::Null)
-                        } else {
-                            Value::String(text)
+                        let text = std::str::from_utf8(bytes);
+                        match (kind, json.contains(&name.as_str())) {
+                            // Python decodes TEXT as UTF-8 and fails the whole query on a bad cell.
+                            (3, true) => serde_json::from_str(text.ok()?).unwrap_or(Value::Null),
+                            (3, false) => Value::String(text.ok()?.to_owned()),
+                            // A BLOB stays bytes there: JSON of them, else nothing to read
+                            // (cursor's protobuf nodes share the table with its JSON messages).
+                            (_, true) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
+                            (_, false) => text.map_or(Value::Null, |t| Value::String(t.to_owned())),
                         }
                     }
                     _ => Value::Null,
@@ -208,7 +211,7 @@ pub fn scalar(path: &Path, db: &Sqlite, sql: &str) -> Result<Option<i64>, Error>
 /// Does a last row match the query's `hold_last` (not consumed yet)?
 pub fn held(query: &Rows, row: &Value) -> bool {
     let slots = Slots::new();
-    let scope = Scope { record: row, line: 0, offset: 0, slots: &slots, cancelled: false, entry_key: "" };
+    let scope = Scope::of(row, &slots);
     query.hold_last.as_ref().is_some_and(|p| expr::pred(p, &scope))
 }
 
@@ -248,7 +251,7 @@ fn label(path: &Path, db: &Sqlite, part: &Partition, name: &str) -> Result<Strin
     for (sql, text) in part.label {
         let Some(rows) = rows(path, db, sql, &[Param::Text(name)])? else { continue };
         let Some(first) = rows.first() else { continue };
-        let scope = Scope { record: first, line: 0, offset: 0, slots: &slots, cancelled: false, entry_key: "" };
+        let scope = Scope::of(first, &slots);
         let value = expr::text(text, &scope);
         if !value.is_empty() {
             return Ok(value);

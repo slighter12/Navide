@@ -38,7 +38,7 @@ fn some(text: String) -> Option<String> {
 }
 
 fn scope<'a>(record: &'a Value, line: usize, slots: &'a Slots, entry_key: &'a str) -> Scope<'a> {
-    Scope { record, line, offset: 0, slots, cancelled: false, entry_key }
+    Scope { line, entry_key, ..Scope::of(record, slots) }
 }
 
 /// The entries one call record is made of: `(entry key, entry object)`.

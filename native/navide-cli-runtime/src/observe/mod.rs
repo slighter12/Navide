@@ -187,6 +187,7 @@ impl Observer {
         self.spec.accept.as_ref().is_none_or(|accept| {
             path.file_name().and_then(|n| n.to_str()) == Some(accept.name)
                 && accept.not_under.is_none_or(|(up, dir)| nth_dir(path, up).map(file_name).as_deref() != Some(dir))
+                && accept.dir.is_none_or(|shape| nth_dir(path, 1).is_some_and(|d| crate::resume::shaped(&file_name(d), shape).is_some()))
         })
     }
 
@@ -309,7 +310,7 @@ fn init(init_spec: &SlotInit, path: &Path) -> String {
                 }
                 match value.filter(|v| v.is_object()) {
                     Some(record) => {
-                        let scope = Scope { record, line, offset: 0, slots: &empty, cancelled: false, entry_key: "" };
+                        let scope = Scope { line, ..Scope::of(record, &empty) };
                         if expr::pred(when, &scope) {
                             found = expr::text(field, &scope);
                             return false;

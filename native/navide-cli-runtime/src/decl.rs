@@ -136,6 +136,8 @@ pub struct Accept {
     /// Not when the `n`-th directory above (1 = its own) has this name
     /// (muse: a subagent's log sits under `subagent/<child>/`).
     pub not_under: Option<(usize, Str)>,
+    /// Its own directory's name has this shape (cursor: the session's UUID).
+    pub dir: Option<ValueShape>,
 }
 
 /// Where records live: a root, then a glob below it.
@@ -266,6 +268,8 @@ pub enum Pred {
     Text(Text, StrTest),
     /// Some element of the list at the path satisfies the predicate.
     AnyItem(Path, &'static Pred),
+    /// The text has an `open` followed later by a `close` (`Text::Enclosed`).
+    Encloses(Text, Str, Str),
     /// Anthropic content tree: a string, or blocks whose `text` (type text) or
     /// `content` (any other type) is itself a content tree.
     ContentTree(Path, StrTest),
@@ -288,6 +292,10 @@ pub enum StrTest {
     Contains(Str),
     NonEmpty,
     Empty,
+    /// The whole text is Navide's session marker, `at-pane:<uuid>`, bare or
+    /// in its `<!-- agent-team-session: … -->` comment (a CLI that cannot
+    /// take a session id at launch gets it typed in as a prompt).
+    SessionMarker,
 }
 
 #[derive(Debug, Serialize)]
@@ -337,6 +345,13 @@ pub enum Text {
     /// The first path holding a non-empty string (as is) or a non-zero
     /// number: epoch milliseconds above 1e11, else seconds, as `IsoFromFloat`.
     Stamp(&'static [Path]),
+    /// One clock for a whole walk (cursor: its store has no per-record
+    /// time): epoch milliseconds from the text when it is a non-zero number,
+    /// else the walk's now, plus 1 ms per event already emitted, as `IsoFromFloat`.
+    PassClock(&'static Text),
+    /// Between the first `open` that a `close` follows and that `close`,
+    /// stripped ("" when there is none; `Pred::Encloses` tells the two apart).
+    Enclosed(&'static Text, Str, Str),
     /// A vendor hook: a string function the vocabulary cannot express. The
     /// declaration states why next to the function.
     #[serde(serialize_with = "hook")]

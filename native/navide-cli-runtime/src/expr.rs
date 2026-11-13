@@ -16,11 +16,20 @@ pub struct Scope<'a> {
     pub slots: &'a Slots,
     pub cancelled: bool,
     pub entry_key: &'a str,
+    /// The walk's clock (seconds since the epoch) and the events it has
+    /// emitted so far (`Text::PassClock`); 0 outside an activity walk.
+    pub now: f64,
+    pub emitted: usize,
 }
 
 impl<'a> Scope<'a> {
+    /// A record seen outside any walk: no slots of its own, no clock.
+    pub fn of(record: &'a Value, slots: &'a Slots) -> Scope<'a> {
+        Scope { record, line: 0, offset: 0, slots, cancelled: false, entry_key: "", now: 0.0, emitted: 0 }
+    }
+
     pub fn with_record<'b>(&'b self, record: &'b Value) -> Scope<'b> {
-        Scope { record, line: self.line, offset: self.offset, slots: self.slots, cancelled: self.cancelled, entry_key: self.entry_key }
+        Scope { record, ..*self }
     }
 }
 
@@ -201,7 +210,38 @@ fn str_test(value: &str, test: StrTest) -> bool {
         StrTest::Contains(s) => value.contains(s),
         StrTest::NonEmpty => !value.is_empty(),
         StrTest::Empty => value.is_empty(),
+        StrTest::SessionMarker => session_marker(value),
     }
+}
+
+/// `^(?:<!--\s*agent-team-session:\s*)?at-pane:<uuid>(?:\s*-->)?$`.
+fn session_marker(value: &str) -> bool {
+    let bare = |rest: &str| {
+        let Some(rest) = rest.strip_prefix("at-pane:") else { return false };
+        let (Some(id), Some(tail)) = (rest.get(..36), rest.get(36..)) else { return false };
+        let tail = tail.strip_suffix('\n').unwrap_or(tail);
+        crate::resume::shaped(id, crate::decl::ValueShape::Uuid).is_some()
+            && (tail.is_empty() || tail.trim_start_matches(py_space) == "-->")
+    };
+    let commented = value
+        .strip_prefix("<!--")
+        .map(|rest| rest.trim_start_matches(py_space))
+        .and_then(|rest| rest.strip_prefix("agent-team-session:"))
+        .map(|rest| rest.trim_start_matches(py_space));
+    commented.is_some_and(bare) || bare(value)
+}
+
+/// The text between the first `open` that a `close` follows and that close.
+fn enclosed<'t>(text: &'t str, open: &str, close: &str) -> Option<&'t str> {
+    let mut from = 0;
+    while let Some(found) = text[from..].find(open) {
+        let start = from + found + open.len();
+        if let Some(len) = text[start..].find(close) {
+            return Some(&text[start..start + len]);
+        }
+        from = start;
+    }
+    None
 }
 
 fn content_tree(value: Option<&Value>, test: StrTest) -> bool {
@@ -231,6 +271,7 @@ pub fn pred(p: &Pred, s: &Scope) -> bool {
             .and_then(Value::as_array)
             .is_some_and(|items| items.iter().any(|item| pred(inner, &s.with_record(item)))),
         Pred::ContentTree(path, test) => content_tree(get(s.record, path), *test),
+        Pred::Encloses(t, open, close) => enclosed(&text(t, s), open, close).is_some(),
         Pred::TurnCancelled => s.cancelled,
         Pred::SlotSet(name) => s.slots.get(*name).is_some_and(|v| !v.is_empty()),
         Pred::All(ps) => ps.iter().all(|p| pred(p, s)),
@@ -302,6 +343,11 @@ pub fn text(t: &Text, s: &Scope) -> String {
             }
             String::new()
         }
+        Text::PassClock(base) => {
+            let base = py_float(Some(&Value::String(text(base, s)))).filter(|ms| *ms != 0.0).map_or(s.now, |ms| ms / 1000.0);
+            time::iso_from_float(base + s.emitted as f64 * 0.001)
+        }
+        Text::Enclosed(inner, open, close) => enclosed(&text(inner, s), open, close).map(|t| py_strip(t).to_owned()).unwrap_or_default(),
         Text::Hook(inner, func) => func(&text(inner, s)),
         Text::IsoFromSeconds(n) => num(n, s).and_then(|v| v.checked_mul(1_000_000)).map(time::iso_from_micros).unwrap_or_default(),
         Text::IsoFromMicros(path) => get(s.record, path).and_then(py_int_raw).map(time::iso_from_micros).unwrap_or_default(),

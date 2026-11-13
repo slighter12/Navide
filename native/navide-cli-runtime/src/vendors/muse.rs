@@ -56,7 +56,7 @@ pub static CLI: Cli = Cli {
             files: &[&["*", "*", "*", "*", "session.jsonl"]],
         },
         format: Format::Jsonl,
-        accept: Some(Accept { name: "session.jsonl", not_under: Some((2, "subagent")) }),
+        accept: Some(Accept { name: "session.jsonl", not_under: Some((2, "subagent")), dir: None }),
         slots: &[
             Slot { name: "cwd", init: metadata(CWD) },
             Slot { name: "cli_version", init: metadata(VERSION) },

@@ -144,7 +144,7 @@ pub static CLI: Cli = Cli {
     observe: Some(Observe {
         store: Store { env: &[("HERMES_HOME", &[])], home: &[&[".hermes"]], files: &[&["state.db"]] },
         format: Format::Sqlite(&DB),
-        accept: Some(Accept { name: "state.db", not_under: None }),
+        accept: Some(Accept { name: "state.db", not_under: None, dir: None }),
         slots: &[],
         usage: Some(UsageSpec {
             slots: &[],
