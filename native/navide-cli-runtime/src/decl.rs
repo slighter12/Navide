@@ -157,6 +157,10 @@ pub struct Store {
 pub enum Format {
     /// One transcript per session, a JSON object per line.
     Jsonl,
+    /// One plain-text transcript per session (aider's Markdown history): each
+    /// complete line is a record `{"line": text}`, invalid UTF-8 dropped and
+    /// the line ending removed. A usage checkpoint names itself `kind`.
+    Text { kind: Str },
     /// One database for every session: records are the rows of the
     /// declared queries, read into JSON objects by column name.
     Sqlite(&'static Sqlite),
@@ -263,6 +267,10 @@ pub enum SlotInit {
     /// invalid bytes dropped, concatenated; when the query fails, the
     /// database file's own bytes the same way (a live store mid-write).
     Joined(Str),
+    /// The file's own path.
+    FilePath,
+    /// The directory holding the file, as a path.
+    Parent,
 }
 
 // ---- record access ----------------------------------------------------------
@@ -298,6 +306,9 @@ pub enum Pred {
     TurnCancelled,
     /// A slot is non-empty.
     SlotSet(Str),
+    /// The record is past the cursor's mark: always, except in a
+    /// `Cursor::Replay` walk, which also replays the lines already walked.
+    Fresh,
     All(&'static [Pred]),
     Any(&'static [Pred]),
     Not(&'static Pred),
@@ -348,6 +359,8 @@ pub enum Text {
     UserPrompt(&'static Text),
     /// Stripped.
     Strip(&'static Text),
+    /// The text without this prefix (unchanged when it lacks it).
+    After(&'static Text, Str),
     /// Over `n` chars: the first and last halves around `\n…\n`.
     Cap(&'static Text, usize),
     If(&'static Pred, &'static Text),
@@ -414,6 +427,8 @@ pub enum Num {
     Float(Path),
     /// 0 where the inner number has no reading (`int(_num(v) or 0)`).
     OrZero(&'static Num),
+    /// Computed text read as a decimal integer (no reading when it is not one).
+    Parse(&'static Text),
 }
 
 // ---- usage ------------------------------------------------------------------
@@ -579,6 +594,11 @@ pub enum Cursor {
     /// A database row-id watermark (`Format::Sqlite`), kept in the bag as
     /// `Bag::cursor + id`.
     Rows,
+    /// Every walk replays the whole file (`Format::Text`): the lines up to
+    /// the mark run the rules again with `Pred::Fresh` false, so the state
+    /// they set (the section) is rebuilt instead of stored; a new line still
+    /// unterminated ends the walk before it.
+    Replay,
 }
 
 #[derive(Debug, Serialize)]

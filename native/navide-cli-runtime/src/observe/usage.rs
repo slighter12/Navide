@@ -90,7 +90,10 @@ pub fn read(
     if let UsageMode::Snapshot { suffix, mark } = spec.mode {
         return Ok(snapshot(spec, vendor, path, slots, checkpoint, suffix, mark));
     }
-    let tail = jsonl::read_tail(path, checkpoint)?;
+    let tail = match format {
+        Format::Text { kind } => jsonl::read_text_tail(path, checkpoint, kind)?,
+        _ => jsonl::read_tail(path, checkpoint)?,
+    };
     let restore = match spec.restore {
         Restore::UnlessRotated => !tail.rotated,
         Restore::UnlessReplaced => !tail.replaced,

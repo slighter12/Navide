@@ -323,6 +323,8 @@ fn init(init_spec: &SlotInit, path: &Path) -> String {
             found
         }
         SlotInit::Joined(sql) => sqlite::joined(path, sql),
+        SlotInit::FilePath => path.to_string_lossy().into_owned(),
+        SlotInit::Parent => path.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
         SlotInit::SidecarJson { up, file, keys } => nth_dir(path, *up)
             .and_then(|dir| std::fs::read_to_string(dir.join(file)).ok())
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())

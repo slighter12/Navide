@@ -33,6 +33,7 @@ from agent_team_backend import cli_runtime, osplat
 from agent_team_backend.cli_vendors.pi import encode_pi_cwd
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
 from agent_team_backend.log_readers.claude import encode_claude_cwd
+from tests.vendors import test_aider as aider_t
 from tests.vendors import test_antigravity_activity as agy_t
 from tests.vendors import test_claude as claude_t
 from tests.vendors import test_cursor as cursor_t
@@ -71,6 +72,11 @@ def _step(mode: str, records: list[dict] | None, mtime: float, now: float, sidec
     if sidecars:
         step["sidecars"] = sidecars
     return step
+
+
+def _text_step(mode: str, text: str, mtime: float, now: float) -> dict:
+    """One poll of a plain-text transcript (aider's Markdown history)."""
+    return {"mode": mode, "text": text, "mtime": B + mtime, "now": B + now}
 
 
 def _db_step(statements: list[tuple[str, tuple] | str], mtime: float, now: float) -> dict:
@@ -426,6 +432,30 @@ def _scenarios() -> dict[str, dict]:
             "vendor": "openclaw", "env": {"OPENCLAW_STATE_DIR": "openclaw"},
             "file": "openclaw/agents/main/agent/openclaw-agent.sqlite",
             "steps": oc_steps,
+        },
+        # A pane's own history file (its namespace is the pane token, not a
+        # hash of the scenario's temporary path).
+        "aider_history": {
+            "vendor": "aider", "env": {},
+            "file": "ws/.aider.chat.history.0a1b2c3d.md",
+            "steps": [
+                # The last line is still being written.
+                _text_step("write", aider_t._SECTION_1 + "\n#### go on\n\nfirst part.\nHalf ", 0, 1),
+                _text_step("append", "an answer.\n\n> Tokens: 100 sent, 50 received.\n" + aider_t._SECTION_2
+                           + "> Tokens: 1,000 sent", 1, 2),
+                # The usage line completes; a long prompt, a marker prompt, tool
+                # output, and lines ended by `\r\n` and a lone `\r`.
+                _text_step("append", ", 2k received.\n\n#### " + "p" * 600 + "\n#### more\n\n"
+                           "#### <!-- agent-team-session: at-pane:p1 -->\n\n> Applied edit to a.py\nwindows\r\n"
+                           "old\rmac\n" + "x" * 40_000 + "\n> TOKENS: 8.5K SENT, 0 received\n", 2, 3),
+                # Rewritten shorter: usage restarts from the top; activity's
+                # mark stays, so the rewritten lines count as walked.
+                _text_step("write", "# aider chat started at 2026-07-29 08:00:00\n#### again\n"
+                           "> Tokens: 5 sent, 6 received.\n", 3, 4),
+                # Past the old mark, lines are new again; the reply text is kept for the next walk.
+                _text_step("append", "> Tokens: 0 sent, 0 received.\n> Tokens: 7 sent, 8 received.\n" * 18
+                           + "#### next\nstill going\n", 4, 5),
+            ],
         },
         "grok_turns": {
             "vendor": "grok", "env": {"GROK_HOME": "grok"},

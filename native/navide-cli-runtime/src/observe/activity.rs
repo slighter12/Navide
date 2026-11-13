@@ -77,6 +77,13 @@ struct Ctx<'a> {
 struct At {
     line: usize,
     end: u64,
+    fresh: bool,
+}
+
+impl At {
+    fn new(line: usize, end: u64) -> Self {
+        At { line, end, fresh: true }
+    }
 }
 
 impl Ctx<'_> {
@@ -90,6 +97,7 @@ impl Ctx<'_> {
             entry_key: "",
             now: self.now,
             emitted: self.out.len(),
+            fresh: at.fresh,
         }
     }
 
@@ -274,21 +282,21 @@ fn kind_name(kind: EventKind) -> &'static str {
 /// have nothing to act on there and are ignored.
 pub(crate) fn apply_slot_effects(effects: &'static [Effect], record: &Value, offset: u64, slots: &mut Slots) {
     let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new(), now: 0.0 };
-    ctx.apply_all(effects, record, At { line: 0, end: offset });
+    ctx.apply_all(effects, record, At::new(0, offset));
     *slots = ctx.slots;
 }
 
 /// Run every matching rule's slot effects over one record (turns use this).
 pub(crate) fn apply_slot_rules(rules: &'static [Rule], record: &Value, line: usize, slots: &mut Slots) {
     let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new(), now: 0.0 };
-    ctx.record(rules, record, At { line, end: 0 });
+    ctx.record(rules, record, At::new(line, 0));
     *slots = ctx.slots;
 }
 
 fn sqlite_activity(format: &'static Format) -> Option<&'static crate::decl::Rows> {
     match format {
         Format::Sqlite(db) => db.activity.as_ref(),
-        Format::Jsonl => None,
+        Format::Jsonl | Format::Text { .. } => None,
     }
 }
 
@@ -329,7 +337,7 @@ fn walk_rows(ctx: &mut Ctx, spec: &'static ActivitySpec, path: &Path, db: &Sqlit
                 if let (Some(column), Value::Object(object)) = (query.last_as, &mut *row) {
                     object.insert(column.to_owned(), (at == newest).into());
                 }
-                ctx.record(spec.rules, row, At { line: 0, end: 0 });
+                ctx.record(spec.rules, row, At::new(0, 0));
             }
         }
     }
@@ -357,10 +365,19 @@ fn walk_partitions(ctx: &mut Ctx, spec: &'static ActivitySpec, path: &Path, db: 
         }
         for row in super::sqlite::page(path, db, query, part, &name, after)?.unwrap_or_default() {
             state.marks.insert(name.clone(), row.get(query.id).and_then(expr::py_int_raw).unwrap_or(0));
-            ctx.record(spec.rules, &row, At { line: 0, end: 0 });
+            ctx.record(spec.rules, &row, At::new(0, 0));
         }
     }
     Ok(())
+}
+
+/// The kept slots back into the walk's slots.
+fn restore(spec: &ActivitySpec, state: &ActivityState, slots: &mut Slots) {
+    for name in spec.persist {
+        if let Some(value) = state.slots.get(*name) {
+            slots.insert((*name).to_owned(), value.clone());
+        }
+    }
 }
 
 /// One walk of `path` from `state`. Returns the events and where a line walk
@@ -381,17 +398,13 @@ pub fn walk(
     let mut decode_error = None;
     let ctx = match spec.cursor {
         Cursor::Lines => {
-            for name in spec.persist {
-                if let Some(value) = state.slots.get(*name) {
-                    slots.insert((*name).to_owned(), value.clone());
-                }
-            }
+            restore(spec, state, &mut slots);
             if state.hw > 0 {
                 slots.insert(WALK_RESUMED.to_owned(), "1".to_owned());
             }
             let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new(), now };
             let end = jsonl::walk_lines(path, state.hw, resume, |line| {
-                ctx.record(spec.rules, line.value, At { line: line.number, end: line.end });
+                ctx.record(spec.rules, line.value, At::new(line.number, line.end));
             });
             let end = match end {
                 Ok(end) => end,
@@ -405,19 +418,31 @@ pub fn walk(
             decode_error = end.decode_error;
             ctx
         }
+        Cursor::Replay => {
+            restore(spec, state, &mut slots);
+            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new(), now };
+            let last = jsonl::walk_text(path, state.hw, |line, record, fresh| {
+                ctx.record(spec.rules, record, At { line, end: 0, fresh });
+            });
+            let last = match last {
+                Ok(last) => last,
+                Err(err) => {
+                    state.turn = ctx.turn;
+                    return Err(err.into());
+                }
+            };
+            state.hw = state.hw.max(last);
+            ctx
+        }
         Cursor::Bytes => {
             let tail = jsonl::read_tail(path, &state.cursor)?;
             if !tail.rotated {
-                for name in spec.persist {
-                    if let Some(value) = state.slots.get(*name) {
-                        slots.insert((*name).to_owned(), value.clone());
-                    }
-                }
+                restore(spec, state, &mut slots);
             }
             let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new(), now };
             for (end, record) in &tail.records {
                 if let Some(record) = record {
-                    ctx.record(spec.rules, record, At { line: 0, end: *end });
+                    ctx.record(spec.rules, record, At::new(0, *end));
                 }
             }
             state.cursor = tail.checkpoint;

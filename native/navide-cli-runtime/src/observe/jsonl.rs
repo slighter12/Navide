@@ -54,6 +54,24 @@ pub struct Tail {
 }
 
 pub fn read_tail(path: &Path, checkpoint: &Map<String, Value>) -> io::Result<Tail> {
+    tail(path, checkpoint, "jsonl", |line| {
+        std::str::from_utf8(line).ok().and_then(|text| serde_json::from_str::<Value>(text).ok()).filter(Value::is_object)
+    })
+}
+
+/// The same tail over a plain-text transcript (`Format::Text`): every
+/// complete line is a `{"line": text}` record.
+pub fn read_text_tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str) -> io::Result<Tail> {
+    tail(path, checkpoint, kind, |line| Some(text_record(&super::sqlite::ignore_invalid(line))))
+}
+
+fn text_record(line: &str) -> Value {
+    let mut record = Map::new();
+    record.insert("line".into(), line.trim_end_matches(['\r', '\n']).into());
+    Value::Object(record)
+}
+
+fn tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str, decode: impl Fn(&[u8]) -> Option<Value>) -> io::Result<Tail> {
     let meta = std::fs::metadata(path)?;
     let identity = identity(&meta);
     let prior_identity = py_str_opt(checkpoint.get("identity"));
@@ -78,15 +96,11 @@ pub fn read_tail(path: &Path, checkpoint: &Map<String, Value>) -> io::Result<Tai
         let line = &rest[start..start + nl + 1];
         start += nl + 1;
         committed = offset + start as u64;
-        let value = std::str::from_utf8(line)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-            .filter(Value::is_object);
-        records.push((committed, value));
+        records.push((committed, decode(line)));
     }
     let anchor = if committed != 0 { anchor(&mut file, committed)? } else { String::new() };
     let mut next = checkpoint.clone();
-    next.insert("kind".into(), "jsonl".into());
+    next.insert("kind".into(), kind.into());
     next.insert("offset".into(), committed.into());
     next.insert("identity".into(), identity.into());
     next.insert("anchor".into(), anchor.into());
@@ -185,6 +199,39 @@ pub fn walk_lines(
     }
     let resume = resume_at.map(|offset| LineResume { line: last_line, offset, inode });
     Ok(WalkEnd { last_line, resume, decode_error })
+}
+
+/// A replay walk (`Cursor::Replay`) over a plain-text transcript: every line
+/// from the top, read as main's text-mode `open(errors="ignore")` reads it
+/// (invalid UTF-8 dropped, `\r\n` and a lone `\r` ending a line too), with
+/// whether it is past `high_water`. A new line still unterminated ends the
+/// walk before it. Returns the last line walked.
+pub fn walk_text(path: &Path, high_water: usize, mut visit: impl FnMut(usize, &Value, bool)) -> io::Result<usize> {
+    let mut data = Vec::new();
+    File::open(path)?.read_to_end(&mut data)?;
+    let text = super::sqlite::ignore_invalid(&data);
+    let mut last_line = high_water;
+    let mut rest = text.as_str();
+    let mut number = 0;
+    while !rest.is_empty() {
+        number += 1;
+        let (line, terminated) = match rest.find(['\r', '\n']) {
+            Some(at) => {
+                let width = if rest[at..].starts_with("\r\n") { 2 } else { 1 };
+                let line = &rest[..at];
+                rest = &rest[at + width..];
+                (line, true)
+            }
+            None => (std::mem::take(&mut rest), false),
+        };
+        let fresh = number > high_water;
+        if fresh && !terminated {
+            break;
+        }
+        last_line = number;
+        visit(number, &text_record(line), fresh);
+    }
+    Ok(last_line)
 }
 
 /// Every JSON record of the file with its 1-based line number, for the

@@ -20,12 +20,14 @@ pub struct Scope<'a> {
     /// emitted so far (`Text::PassClock`); 0 outside an activity walk.
     pub now: f64,
     pub emitted: usize,
+    /// `Pred::Fresh`: false only for a line a replay walk already walked.
+    pub fresh: bool,
 }
 
 impl<'a> Scope<'a> {
     /// A record seen outside any walk: no slots of its own, no clock.
     pub fn of(record: &'a Value, slots: &'a Slots) -> Scope<'a> {
-        Scope { record, line: 0, offset: 0, slots, cancelled: false, entry_key: "", now: 0.0, emitted: 0 }
+        Scope { record, line: 0, offset: 0, slots, cancelled: false, entry_key: "", now: 0.0, emitted: 0, fresh: true }
     }
 
     pub fn with_record<'b>(&'b self, record: &'b Value) -> Scope<'b> {
@@ -111,7 +113,8 @@ pub fn py_float(value: Option<&Value>) -> Option<f64> {
     }
 }
 
-fn py_space(c: char) -> bool {
+/// Python's `str.isspace()` (and `\s`).
+pub fn py_space(c: char) -> bool {
     c.is_whitespace() || ('\x1c'..='\x1f').contains(&c)
 }
 
@@ -274,6 +277,7 @@ pub fn pred(p: &Pred, s: &Scope) -> bool {
         Pred::Encloses(t, open, close) => enclosed(&text(t, s), open, close).is_some(),
         Pred::TurnCancelled => s.cancelled,
         Pred::SlotSet(name) => s.slots.get(*name).is_some_and(|v| !v.is_empty()),
+        Pred::Fresh => s.fresh,
         Pred::All(ps) => ps.iter().all(|p| pred(p, s)),
         Pred::Any(ps) => ps.iter().any(|p| pred(p, s)),
         Pred::Not(p) => !pred(p, s),
@@ -319,6 +323,10 @@ pub fn text(t: &Text, s: &Scope) -> String {
         }
         Text::UserPrompt(inner) => user_prompt(&text(inner, s)),
         Text::Strip(inner) => py_strip(&text(inner, s)).to_owned(),
+        Text::After(inner, prefix) => {
+            let value = text(inner, s);
+            value.strip_prefix(prefix).map_or_else(|| value.clone(), str::to_owned)
+        }
         Text::Cap(inner, max) => cap(&text(inner, s), *max),
         Text::If(p, inner) => if pred(p, s) { text(inner, s) } else { String::new() },
         Text::Num(n) => num(n, s).map(|v| v.to_string()).unwrap_or_default(),
@@ -424,6 +432,7 @@ pub fn num(n: &Num, s: &Scope) -> Option<i64> {
         }
         Num::Float(path) => py_float(get(s.record, path)).filter(|f| f.is_finite()).map(|f| f.trunc() as i64),
         Num::OrZero(inner) => Some(num(inner, s).unwrap_or(0)),
+        Num::Parse(inner) => text(inner, s).parse().ok(),
     }
 }
 

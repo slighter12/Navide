@@ -43,7 +43,7 @@ pub fn high_water(bag: &[String]) -> usize {
 fn revisit(format: &Format) -> Option<&'static str> {
     match format {
         Format::Sqlite(db) => db.activity.as_ref()?.revisit.as_ref().map(|r| r.bag),
-        Format::Jsonl => None,
+        Format::Jsonl | Format::Text { .. } => None,
     }
 }
 
