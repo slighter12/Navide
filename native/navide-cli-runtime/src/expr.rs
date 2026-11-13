@@ -283,6 +283,7 @@ pub fn text(t: &Text, s: &Scope) -> String {
             };
             if seconds == 0.0 { String::new() } else { time::iso_truncated_ms(seconds) }
         }
+        Text::IsoFromMicros(path) => get(s.record, path).and_then(py_int_raw).map(time::iso_from_micros).unwrap_or_default(),
         Text::FirstKey(path) => get(s.record, path)
             .and_then(Value::as_object)
             .and_then(|o| o.keys().next().cloned())

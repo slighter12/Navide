@@ -50,11 +50,14 @@ fn replay(fixture: &Path) -> Vec<String> {
     let dir = Dir(std::env::temp_dir().join(format!("navide-parity-{name}-{}-{nanos}", std::process::id())));
     std::fs::create_dir_all(&dir.0).unwrap();
     let root = dir.0.to_string_lossy().into_owned();
-    for (rel, text) in scenario["sidecars"].as_object().unwrap() {
-        let path = dir.0.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, text.as_str().unwrap()).unwrap();
-    }
+    let write_sidecars = |files: &Value| {
+        for (rel, text) in files.as_object().into_iter().flatten() {
+            let path = dir.0.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text.as_str().unwrap()).unwrap();
+        }
+    };
+    write_sidecars(&scenario["sidecars"]);
     let path = dir.0.join(str_of(&scenario, "file"));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
 
@@ -63,6 +66,7 @@ fn replay(fixture: &Path) -> Vec<String> {
     let mut bag: Vec<String> = Vec::new();
     let mut failures = Vec::new();
     for (n, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
+        write_sidecars(&step["sidecars"]);
         {
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
@@ -91,6 +95,10 @@ fn replay(fixture: &Path) -> Vec<String> {
         if got != step["expect"]["bag"] {
             failures.push(format!("{name} step {n} seen-keys bag\n  rust:   {got}\n  python: {}", step["expect"]["bag"]));
         }
+    }
+    // `null`: a recorded divergence (see the scenario's comment in the Python test).
+    if scenario["turns"].is_null() {
+        return failures;
     }
     let turns = norm(serde_json::to_value(observer.turns(&path, "").unwrap()).unwrap(), &root);
     if turns != scenario["turns"] {

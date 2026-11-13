@@ -72,6 +72,9 @@ fn persist_into(spec: &UsageSpec, slots: &Slots, checkpoint: &mut Map<String, Va
 /// `full`: main's `parse_session_file` pass (every record from the top, an
 /// unbounded dedup set, no rewrite bookkeeping), used by inferred turns.
 pub fn read(spec: &'static UsageSpec, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, full: bool) -> Result<UsageRead, Error> {
+    if let UsageMode::Snapshot { suffix, mark } = spec.mode {
+        return Ok(snapshot(spec, vendor, path, slots, checkpoint, suffix, mark));
+    }
     let tail = jsonl::read_tail(path, checkpoint)?;
     let restore = match spec.restore {
         Restore::UnlessRotated => !tail.rotated,
@@ -93,7 +96,63 @@ pub fn read(spec: &'static UsageSpec, vendor: &str, path: &Path, mut slots: Slot
             Ok(per_record(spec, vendor, path, slots, checkpoint, tail, window, keep_on_rotation, credited && !full, full))
         }
         UsageMode::Cumulative => cumulative(spec, vendor, path, slots, checkpoint, tail, restore),
+        UsageMode::Snapshot { .. } => unreachable!("read above"),
     }
+}
+
+/// `int()` of each half of a `"<in>:<out>"` mark; (0, 0) when it is not one.
+fn mark_totals(value: &str) -> (i64, i64) {
+    let parts: Vec<&str> = value.split(':').collect();
+    let int = |s: &str| expr::py_int_raw(&Value::String(s.to_owned()));
+    match parts.as_slice() {
+        [a, b] => match (int(a), int(b)) {
+            (Some(a), Some(b)) => (a, b),
+            _ => (0, 0),
+        },
+        _ => (0, 0),
+    }
+}
+
+fn snapshot(spec: &'static UsageSpec, vendor: &str, path: &Path, mut slots: Slots, checkpoint: &Map<String, Value>, suffix: &str, mark: &str) -> UsageRead {
+    let mut seen: std::collections::BTreeSet<String> = checkpoint
+        .get("legacy_seen")
+        .and_then(Value::as_array)
+        .map(|keys| keys.iter().map(python_str).collect())
+        .unwrap_or_default();
+    let mut events = Vec::new();
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let doc = std::fs::read_to_string(path.with_file_name(format!("{stem}{suffix}")))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .filter(Value::is_object);
+    if let Some(doc) = doc {
+        if let Some(reading) = apply_rules(spec, &doc, 0, &mut slots) {
+            let s = scope(&doc, 0, &slots);
+            let totals = (expr::num(&reading.input, &s).unwrap_or(0), expr::num(&reading.output, &s).unwrap_or(0));
+            let marked = seen.iter().find_map(|k| k.strip_prefix(mark)).map_or((0, 0), mark_totals);
+            let (delta_in, delta_out) = (totals.0 - marked.0, totals.1 - marked.1);
+            let set_mark = |seen: &mut std::collections::BTreeSet<String>| {
+                seen.retain(|k| !k.starts_with(mark));
+                seen.insert(format!("{mark}{}:{}", totals.0, totals.1));
+            };
+            if delta_in < 0 || delta_out < 0 {
+                set_mark(&mut seen);
+            } else if delta_in != 0 || delta_out != 0 {
+                slots.insert("input_total".into(), totals.0.to_string());
+                slots.insert("output_total".into(), totals.1.to_string());
+                let s = scope(&doc, 0, &slots);
+                let key = expr::text(&reading.key, &s);
+                if seen.insert(key.clone()) {
+                    set_mark(&mut seen);
+                    events.push(event(vendor, path, reading, &s, delta_in, delta_out, key, Map::new()));
+                }
+            }
+        }
+    }
+    let mut next = Map::new();
+    next.insert("kind".into(), "legacy".into());
+    next.insert("legacy_seen".into(), seen.into_iter().collect::<Vec<_>>().into());
+    UsageRead { events, checkpoint: next }
 }
 
 #[allow(clippy::too_many_arguments)]

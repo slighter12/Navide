@@ -63,7 +63,7 @@ pub static CLI: Cli = Cli {
     observe: Some(Observe {
         store: Store { env: &[("GROK_HOME", &["sessions"])], home: &[&[".grok", "sessions"]], files: &[&["*", "*", "updates.jsonl"]] },
         format: Format::Jsonl,
-        accept: Some("updates.jsonl"),
+        accept: Some(Accept { name: "updates.jsonl", not_under: None }),
         slots: &[
             // A shortened group name cannot be decoded; its `.cwd` file holds the path.
             Slot { name: "cwd", init: SlotInit::GroupDir { up: 2, override_file: ".cwd" } },

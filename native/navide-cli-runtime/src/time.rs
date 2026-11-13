@@ -35,6 +35,19 @@ pub fn iso_truncated_ms(seconds: f64) -> String {
     stamp(whole as i64, (((seconds - whole) * 1000.0) as i64).clamp(0, 999))
 }
 
+/// `datetime.fromtimestamp(micros / 1e6, timezone.utc).isoformat()`: no
+/// fraction when it is zero; "" outside `datetime`'s years 1..=9999.
+pub fn iso_from_micros(micros: i64) -> String {
+    let (whole, frac) = (micros.div_euclid(1_000_000), micros.rem_euclid(1_000_000));
+    let (days, secs) = (whole.div_euclid(86_400), whole.rem_euclid(86_400));
+    let (y, m, d) = days_to_civil(days);
+    if !(1..=9999).contains(&y) {
+        return String::new();
+    }
+    let fraction = if frac == 0 { String::new() } else { format!(".{frac:06}") };
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}{fraction}+00:00", secs / 3600, secs % 3600 / 60, secs % 60)
+}
+
 /// `log_readers.base.turn_timestamp`: epoch-ms strings become ISO 8601
 /// (microsecond-rounded, then truncated to ms, as `datetime` does), ISO passes
 /// through, "" becomes None.
@@ -128,5 +141,7 @@ mod tests {
         assert_eq!(parse_iso("2023-11-14T22:13:20.123Z"), Some(1_700_000_000.123));
         assert_eq!(parse_iso("2023-11-14T23:13:20+01:00"), Some(1_700_000_000.0));
         assert_eq!(sort_key(""), None);
+        assert_eq!(iso_from_micros(1_700_000_000_000_000), "2023-11-14T22:13:20+00:00");
+        assert_eq!(iso_from_micros(1_700_000_000_000_042), "2023-11-14T22:13:20.000042+00:00");
     }
 }

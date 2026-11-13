@@ -179,7 +179,10 @@ impl Observer {
     }
 
     fn accepts(&self, path: &Path) -> bool {
-        self.spec.accept.is_none_or(|name| path.file_name().and_then(|n| n.to_str()) == Some(name))
+        self.spec.accept.as_ref().is_none_or(|accept| {
+            path.file_name().and_then(|n| n.to_str()) == Some(accept.name)
+                && accept.not_under.is_none_or(|(up, dir)| nth_dir(path, up).map(file_name).as_deref() != Some(dir))
+        })
     }
 
     /// The file's slots before any record: the shared ones, shadowed by the

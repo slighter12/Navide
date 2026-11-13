@@ -34,8 +34,10 @@ from agent_team_backend.log_readers.claude import encode_claude_cwd
 from tests.vendors import test_claude as claude_t
 from tests.vendors import test_codex_0_163_fixture as codex_t
 from tests.vendors import test_codex_subagent as sub_t
+from tests.vendors import test_droid as droid_t
 from tests.vendors import test_grok as grok_t
 from tests.vendors import test_kimi_code_2_2_fixture as kimi_t
+from tests.vendors import test_muse as muse_t
 from tests.vendors import test_pi as pi_t
 from tests.vendors import test_qwen_0_25_fixture as qwen_t
 
@@ -56,8 +58,12 @@ def _lines(records: list[dict]) -> str:
     return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
 
 
-def _step(mode: str, records: list[dict] | None, mtime: float, now: float) -> dict:
-    return {"mode": mode, "text": _lines(records or []), "mtime": B + mtime, "now": B + now}
+def _step(mode: str, records: list[dict] | None, mtime: float, now: float, sidecars: dict[str, str] | None = None) -> dict:
+    """One watcher poll; `sidecars` are files (re)written beside the transcript first."""
+    step = {"mode": mode, "text": _lines(records or []), "mtime": B + mtime, "now": B + now}
+    if sidecars:
+        step["sidecars"] = sidecars
+    return step
 
 
 def _scenarios() -> dict[str, dict]:
@@ -101,6 +107,40 @@ def _scenarios() -> dict[str, dict]:
         claude_t._prompt_line("p3", "after resume", "2026-09-16T01:00:00Z"),
         claude_t._assistant_line("m3", "r3", "2026-09-16T01:00:04Z", inp=1, cr=300, cc=5, out=7, stop="end_turn"),
     ]
+    droid_dir = "droid/sessions/-tmp-demo"
+    droid_sid = "d0c1e2f3-0000-4000-8000-000000000001"
+    droid_settings = f"{droid_dir}/{droid_sid}.settings.json"
+
+    def droid_totals(inp: int, out: int, cache_read: int = 0) -> dict[str, str]:
+        usage = {"inputTokens": inp, "outputTokens": out, "cacheReadTokens": cache_read,
+                 "cacheCreationTokens": 0, "thinkingTokens": 9}
+        return {droid_settings: json.dumps({"model": "glm-4.6", "tokenUsage": usage})}
+
+    droid = [
+        droid_t._session_start(droid_sid, "/tmp/filed", lastCwd="/tmp/demo"),
+        droid_t._msg("user", [{"type": "text", "text": "fix the build"}]),
+        droid_t._msg("assistant", [{"type": "text", "text": "looking"}, {"type": "tool_use", "id": "t1"}]),
+        droid_t._msg("user", [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]),
+        droid_t._msg("user", "echo hook", hookEventName="Stop"),
+        {"type": "agent_turn_outcome", "reason": "completed", "timestamp": "2026-08-26T17:59:00.000Z"},
+        droid_t._msg("user", "and the docs"),
+        droid_t._msg("assistant", [{"type": "text", "text": "done"}]),
+        {"type": "agent_turn_outcome", "reason": "cancelled", "timestamp": "2026-08-26T18:00:00.000Z"},
+    ]
+    muse_meta = muse_t._metadata()
+    muse_meta["payload"]["record"]["build"] = {"semver": "0.9.1"}
+    muse = [
+        muse_meta, muse_t._diagnostic(2), muse_t._intake("refactor the cache", 3),
+        muse_t._run({"kind": "started"}, 4), muse_t._assistant("  cache is now LRU  ", 5),
+        muse_t._usage_row("u-1", 6, input_tokens=900, output_tokens=40),
+        muse_t._usage_row("u-sub", 7, requester_kind="subagent"),
+        muse_t._usage_row("u-0", 8, input_tokens=0, output_tokens=0),
+        muse_t._terminal(9),
+        muse_t._intake("/compact", 10), muse_t._usage_row("u-1", 11),
+        muse_t._usage_row("u-2", 12, input_tokens=50, output_tokens=5),
+        muse_t._assistant("second", 13), muse_t._terminal(14, "failed"),
+    ]
+    muse_dir = "share/muse/sessions/2026/08/12/" + muse_t._SID
     grok = [grok_t._user(1, "hello grok"), grok_t._agent(2, "hi "), grok_t._agent(3, "there"), grok_t._turn(4),
             grok_t._user(5, "again"), grok_t._agent(6, "ok"), grok_t._turn(7, inp=50, out=5, stop="cancelled")]
     return {
@@ -153,6 +193,33 @@ def _scenarios() -> dict[str, dict]:
                 _step("write", [pi_head[0], pi_head[1], pi_t._assistant("a1", "u1", input=120, cache_read=30), *pi_more,
                                 pi_t._user("u3", "one more", "a2")], 30, 31),
             ],
+        },
+        "droid_sidecar": {
+            "vendor": "droid", "env": {"FACTORY_HOME_OVERRIDE": "droid"},
+            "file": f"{droid_dir}/{droid_sid}.jsonl",
+            "steps": [
+                _step("write", droid[:3], 0, 1),
+                _step("append", droid[3:6], 1, 2, droid_totals(100, 20, cache_read=50)),
+                _step("append", droid[6:], 2, 3, droid_totals(400, 60, cache_read=50)),
+                # The sidecar was replaced (a fork): re-baseline, no event; then growth again.
+                _step("append", [], 3, 4, droid_totals(30, 5)),
+                _step("append", [], 4, 5, droid_totals(70, 9)),
+            ],
+        },
+        "muse_session": {
+            "vendor": "muse", "env": {"XDG_DATA_HOME": "share"},
+            "file": f"{muse_dir}/session.jsonl",
+            "steps": [_step("write", muse[:6], 0, 1), _step("append", muse[6:10], 1, 2),
+                      _step("append", muse[10:], 2, 3)],
+        },
+        # A subagent's log: not a transcript (its tokens are the parent's).
+        # main's turns_for_session does not apply that rule (parse_session_file
+        # credits the child's own usage); the runtime applies it everywhere, so
+        # turns are not compared here (REDESIGN-REPORT.md, Python defects).
+        "muse_subagent": {
+            "vendor": "muse", "env": {"XDG_DATA_HOME": "share"}, "skip_turns": True,
+            "file": f"{muse_dir}/subagent/child-1/session.jsonl",
+            "steps": [_step("write", muse[:9], 0, 1)],
         },
         "grok_turns": {
             "vendor": "grok", "env": {"GROK_HOME": "grok"},
@@ -213,6 +280,9 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
     seen: set[str] = set()
     steps = []
     for step in scenario["steps"]:
+        for rel, text in (step.get("sidecars") or {}).items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, encoding="utf-8")
         with path.open("w" if step["mode"] == "write" else "a", encoding="utf-8", newline="") as fh:
             fh.write(step["text"])
         os.utime(path, (step["mtime"], step["mtime"]))
@@ -225,7 +295,7 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
             "activity": [_activity_dict(e) for e in activity],
             "bag": sorted(seen),
         })
-    turns = [_turn_dict(t) for t in reader.turns_for_session(path, "")]
+    turns = None if scenario.get("skip_turns") else [_turn_dict(t) for t in reader.turns_for_session(path, "")]
     return _norm({"steps": steps, "turns": turns}, str(root))
 
 
@@ -310,6 +380,7 @@ def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest
     wrapped = _run(scenario, tmp_path / "rt",
                    lambda: cli_runtime.wrap(cli_vendor(scenario["vendor"]).make_log_reader()), monkeypatch)
     # The Rust process answered every routed call (no silent fallback).
-    assert set(calls) == {"usage", "activity", "turns"}
-    assert len(calls) == 2 * len(scenario["steps"]) + 1
+    turns = 0 if scenario.get("skip_turns") else 1
+    assert set(calls) == {"usage", "activity", "turns"} - ({"turns"} if not turns else set())
+    assert len(calls) == 2 * len(scenario["steps"]) + turns
     assert json.loads(json.dumps(wrapped).replace("/rt", "/py")) == json.loads(json.dumps(expected))

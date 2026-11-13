@@ -110,14 +110,23 @@ pub enum ValueShape {
 pub struct Observe {
     pub store: Store,
     pub format: Format,
-    /// Only files with this exact name are transcripts (`None`: any file the store lists).
-    pub accept: Option<Str>,
+    /// Which files are transcripts (`None`: any file the store lists).
+    pub accept: Option<Accept>,
     /// Per-file values (cwd, session id, last reply text, …). Their names are
     /// also the keys they are persisted under in a checkpoint.
     pub slots: &'static [Slot],
     pub usage: Option<UsageSpec>,
     pub activity: ActivitySpec,
     pub turns: TurnsSpec,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Accept {
+    /// The exact file name.
+    pub name: Str,
+    /// Not when the `n`-th directory above (1 = its own) has this name
+    /// (muse: a subagent's log sits under `subagent/<child>/`).
+    pub not_under: Option<(usize, Str)>,
 }
 
 /// Where records live: a root, then a glob below it.
@@ -253,6 +262,8 @@ pub enum Text {
     Millis(Path),
     /// ISO-8601 from epoch milliseconds at the first path, else epoch seconds at the second.
     IsoFromEpoch(Path, Path),
+    /// ISO-8601 (`+00:00`, microseconds when non-zero) from epoch microseconds.
+    IsoFromMicros(Path),
     /// Key of the first entry of the object at the path.
     FirstKey(Path),
     /// 1-based line number of the record.
@@ -319,6 +330,13 @@ pub enum UsageMode {
     PerRecord { window: usize, keep_on_rotation: bool, credited: bool },
     /// The record carries running totals: one event per read with the delta.
     Cumulative,
+    /// The running totals live in one JSON document beside the transcript
+    /// (`<stem><suffix>`, rewritten in place), not in its records: the rules
+    /// read that document, and each read yields the delta since the totals
+    /// last credited. The checkpoint is main's legacy seen-set
+    /// (`{"kind": "legacy", "legacy_seen": [...]}`): the credited keys plus one
+    /// `mark + "<in>:<out>"` key. A shrink re-baselines without an event.
+    Snapshot { suffix: Str, mark: Str },
 }
 
 #[derive(Debug, Serialize)]
