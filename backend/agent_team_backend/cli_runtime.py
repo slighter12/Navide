@@ -28,12 +28,12 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
+from . import osplat
 from .log_readers.base import (
     ActivityEvent,
     IncrementalParseResult,
@@ -78,7 +78,8 @@ def binary() -> Path | None:
     if env:
         path = Path(env)
     else:
-        name = "navide-cli-runtime.exe" if sys.platform == "win32" else "navide-cli-runtime"
+        # A bare executable name gains `.exe` on Windows only (the osplat seam).
+        name = osplat.paths.backend_entry_on_disk("navide-cli-runtime")
         path = Path(__file__).resolve().parents[2] / "native" / "navide-cli-runtime" / "target" / "release" / name
     return path if path.is_file() else None
 

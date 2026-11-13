@@ -1,123 +1,134 @@
 # navide-cli-runtime: one declarative CLI lifecycle
 
-## Lifecycle model
+## Shape
 
-The runtime is organised around what a CLI *does*, not around its log files.
-Every agent CLI goes through the same five stages, and the core runs each one
-generically from that CLI's declaration:
+The crate is organised around what every agent CLI goes through, not around
+its log files. Each stage is a core module that runs from a CLI's declaration:
 
-| Stage   | The core owns                                              | The declaration supplies                         |
-|---------|------------------------------------------------------------|--------------------------------------------------|
-| launch  | argv assembly, env merge/strip                             | binary, base args, model/effort/yolo flags, env  |
-| session | PTY open, spawn (setsid + ctty), read/write/resize, kill   | nothing beyond launch (interrupt byte only)      |
-| observe | discovery, tailing, checkpoints, rotation, dedup, events   | where records live, their format, record rules   |
-| account | usage records, turn grouping, the inferred-turn tracker    | which fields are counters, which records open/close turns |
-| resume  | parsing a resume id out of a command, building resume argv | resume syntax as data                            |
+| Stage   | Core (`src/`)                                   | The declaration supplies                       |
+|---------|-------------------------------------------------|------------------------------------------------|
+| launch  | `launch.rs`: argv, env merge and strip          | program, base/yolo args, model/effort flags    |
+| session | `session.rs` (Unix): PTY, spawn, I/O, kill      | the interrupt byte                             |
+| observe | `observe/`: tails, cursors, usage, activity     | where records live, their format, record rules |
+| account | `observe/turns.rs`, the inferred-turn tracker   | which records open, call and close a turn      |
+| resume  | `resume.rs`: id from a saved command, argv      | resume syntax as data                          |
 
-`src/lifecycle.rs` holds the lifecycle types; `src/observe/` is the core
-engine; `src/vendors/<key>.rs` holds exactly one `pub static CLI: Cli` per
-CLI. Nothing in the core names a vendor.
+A CLI is one file, `src/vendors/<key>.rs`, holding one `pub static CLI: Cli`.
+`build.rs` lists that directory and generates `vendors::ALL`, so adding a CLI
+is that file plus its tests: no registry edit, no second declaration site, no
+generated per-vendor types. `navide-cli-runtime declarations` prints the same
+statics as JSON. Nothing in the core names a vendor (`tests/declarations.rs`
+checks every declaration against what the core can run;
+`tests/extensibility.rs` declares a CLI the crate has never seen and runs its
+whole lifecycle).
 
-## Declaration schema (`src/decl.rs`)
+## Declarations are typed static data (`src/decl.rs`)
 
-A declaration is plain typed static data (`&'static` slices, no heap, no
-vtables), checked by the compiler:
+Everything is `&'static` slices, string literals and enums: no allocation, no
+parsing, checked by the compiler, matched by the core with `match`, so a
+vendor costs no dynamic dispatch and no string comparison of vendor names.
+Record access is a small typed language evaluated by `expr.rs` with Python's
+semantics where main depends on them (`str(x or "")`, `max(0, int(x))`,
+`str.strip()`, truthiness):
 
-- `Launch { program, base_args, yolo_args, model_flag, effort_flag, efforts, env_defaults, env_strip }`
-- `Resume { syntax: ResumeSyntax, id_shape: IdShape }` — `Subcommand("resume")`,
-  `Flag("--resume")`, `FlagEq("--resume=")`, `Unsupported`; parsing and building
-  are the same table read in two directions.
-- `Observe { store, format, session_id, cwd, usage, activity, turns, cursor }`
-  - `store`: where records live (`Glob` under a root resolved from env vars +
-    home-relative defaults, or one SQLite file).
-  - `format`: `Format::Jsonl` or `Format::Sqlite { tables, queries }`. Both are
-    generic backends implementing `Source` (static dispatch: the walk is
-    monomorphised per backend).
-  - `usage`: `UsageRule { when, input, output, cache_read, cache_creation,
-    dedup, model, timestamp, mode }` with `mode = PerRecord { window, credited }`
-    or `Cumulative { floor }` (running totals differenced by the core).
-  - `activity`: ordered `Rule { when: Pred, effects: &[Effect] }`. Effects:
-    `Emit { kind, key, detail, text, require_text }`, `Set(slot, Text)`,
-    `Turn(TurnOp)` (open / ensure-open / touch / close / cancel on the core's
-    inferred-turn tracker), `Stop`.
-  - `turns`: `Turns { method, session_filter, open, call, close }` — grouping
-    by key (Claude `promptId`), a new turn per prompt record (Codex), a turn per
-    closing record (Grok), or the generic cut on `turn_complete` timestamps.
-- Record access is typed data too: `Path` (`&[Seg]`), `Pred` (eq / in / present /
-  starts-with / any-item / all / any / not), `Text` (field, first-of, join
-  blocks, user-prompt normalisation, cap, collect, tag values, slot), `Num`
-  (Python `max(0, int(v))` semantics, sums, differences, map sums).
+- `Pred`: equality, membership, presence, truthiness, shape, text tests,
+  any-item, slot set, `Fresh`, all/any/not.
+- `Text`: field, slot, first-of, concat, content blocks, joins, tag values,
+  prefixes, user-prompt normalisation, caps, ISO stamps from epochs, protobuf
+  text and timestamps out of binary columns, a per-walk clock, hooks.
+- `Num`: Python ints, floats, sums, differences, map sums, cases, parsed text.
+
+`Observe { store, format, accept, slots, usage, activity, turns }`:
+
+- **Formats.** `Jsonl` (a JSON object per line), `Text { kind }` (aider's
+  Markdown: each line a `{"line"}` record) and `Sqlite` (rows of declared
+  queries as JSON objects; JSON columns parsed, binary columns as hex).
+- **Slots.** Per-file values (cwd, session id, pending reply text) with their
+  initialisers: file stem, directory names, header records, JSON sidecars,
+  joined query text, the file path or its directory.
+- **Usage.** Ordered `UsageRule { when, effects, reading }`. Modes:
+  `PerRecord` (recent-key window, credited count across rewrites),
+  `Cumulative` (running totals differenced), `Snapshot` (totals in a sidecar
+  document), `Counters` (a row per key with running counters), `Watermarks`
+  (rows read per partition), and `Legacy` (no token records: main's base
+  checkpoint kept).
+- **Activity.** Ordered `Rule { when, effects }`; effects emit events, set or
+  append slots, drive the inferred-turn tracker (open, ensure-open, touch,
+  close, cancel) and stop. Cursors: `Lines` (dense line mark, resumable by
+  byte offset), `Bytes` (a byte tail), `Rows` (row-id watermark, optionally
+  per partition, with held last rows and settling rows re-read until done) and
+  `Replay` (the whole text file each walk; already-walked lines rebuild state
+  but do not emit).
+- **Turns.** `Exact` (the transcript names its turns: by key, per prompt, per
+  closing record), `Inferred` (main's base cut on `turn_complete` stamps) or
+  `Unsupported`.
+
+## Shared state with Python
+
+The backend seam (`backend/agent_team_backend/cli_runtime.py`) routes three
+reader calls (`parse_incremental`, `parse_activity`, `turns_for_session`) to
+one `navide-cli-runtime serve` process when the `rustCliRuntime` setting is on
+(off by default; off means main's readers and no process). Every other reader
+method stays Python. The two sides keep one state format, so the switch can
+flip mid-session: usage checkpoints are main's JSON (`{kind:"jsonl", offset,
+identity, anchor}`, `aider-md`, `sqlite`, per-partition maps, the legacy
+seen-set), and the activity state is the watcher's seen-keys bag in the key
+formats main's readers use (`act_hw::N`, pending-text prefixes, turn-tracker
+JSON, row cursors, partition marks and anchors, settling-row lists). Any error
+answer falls back to the Python reader for that call; the Rust side then does
+not store the bag. Where main's reader would log a warning as a side effect
+(a schema it does not know, a session it cannot key), the runtime answers
+`Unsupported`, so Python runs and logs.
 
 ## Hooks
 
-A hook is allowed only where behaviour cannot be data. Each is a plain `fn`
-pointer in `Hooks` (one indirect call per use, no trait object), and every
-declaration that sets one must give `reason` next to it (`Hook { reason, f }`).
-The full list:
+A hook is a plain `fn(&str) -> String` inside `Text::Hook`, allowed only where
+the behaviour cannot be data, with the reason written next to the function:
 
-| Hook                    | Used by | Why it cannot be data |
-|-------------------------|---------|-----------------------|
-| `decode_blob`           | cursor  | store.db `blobs` are undocumented protobuf; extracting text needs a byte walker, not a field path |
-| `split_sections`        | aider   | the transcript is Markdown, sectioned by `# aider chat started at` headings; a record is a section, not a line |
+| Hook                         | CLI         | Why it is not data |
+|------------------------------|-------------|--------------------|
+| `session_name`               | hermes      | `<name> #<n>` continuation names parsed with a digit pattern |
+| `workspace`                  | antigravity | picks among `file://` copies in a protobuf blob by "is a directory on disk", count, length |
+| `stamp` / `iso`              | aider       | the fixed-width `# aider chat started at` date pattern |
+| `sent` / `received`          | aider       | the loose `> Tokens: 1,234 sent, 8.5k received` number grammar |
+| `namespace`                  | aider       | a pane token from the file name, else MD5 of the resolved path |
 
-Everything else in main's 17 readers (cumulative deltas, recent-key windows,
-credited counts on rewrites, idle-flushed turns, background-task ids, Claude
-`promptId` turns, Codex sub-agent suppression, Grok byte cursors) is a core
-mechanism selected by data.
+No regex dependency: these replace main's `re` patterns with hand-written
+matchers, which are unit-tested against main's cases.
 
-## Where declarations live
+## Not declared here
 
-One place: `native/navide-cli-runtime/src/vendors/<key>.rs`. `build.rs` lists
-that directory and generates the registry (`ALL: &[&Cli]`), so adding a CLI is
-one new file plus its tests, with no edit to shared code. The binary exports
-the same statics as JSON (`navide-cli-runtime declarations`), and that output
-is what the Python side reads (`backend/agent_team_backend/cli_runtime.py`):
-which vendors the runtime observes, and their resume syntax. There is no
-second declaration site and no generated per-vendor code.
+Their readers stay Python whether the switch is on or off (`observe: None`):
 
-## Core state and checkpoints
-
-The core owns every cursor. Checkpoints keep main's JSON shape so a pane can
-move between the Python and the Rust path without re-crediting tokens:
-`{kind:"jsonl", offset, identity:"dev:ino", anchor}` (BLAKE2b-64 over the 512
-bytes before the offset), plus the declared slot names (`cwd`, `session_id`,
-`recent_keys`, `input_total`, …). SQLite stores use `{kind:"sqlite", row_id,
-identity, anchor}`. Activity state is one JSON object (`line`, `offset`,
-`inode`, slots, the turn tracker) that Python keeps as one opaque entry.
-
-Rotation (identity change, shrink, anchor mismatch) restarts at byte 0; a
-partial trailing line is never consumed; an unterminated line stops an activity
-walk before it, a terminated corrupt line is stepped over (main's GitHub #21
-rule).
-
-## Errors
-
-Every operation returns `Result<_, ObserveError>`; I/O errors on a missing file
-are an empty observation, not an error (main's behaviour). A line that is not
-UTF-8 aborts the activity walk with the mark already advanced, exactly as main
-does (listed as a defect in REDESIGN-REPORT.md, not changed).
-
-## Process and PTY
-
-`src/session.rs` (Unix): `openpty`, `fork`, `setsid`, `TIOCSCTTY`, signal
-dispositions reset to default, `execvp`; master non-blocking and close-on-exec.
-Windows ConPTY is not implemented in this round.
-
-## Wire
-
-`navide-cli-runtime serve`: one JSON request per stdin line, one JSON response
-per stdout line (`{"op":"usage"|"activity"|"turns"|"declarations"|"resume_id"|"launch", ...}`).
-The Python seam keeps one long-lived child per backend.
+- **opencode, kilo.** Every read updates a process-global problem registry
+  (`read_problem()`, shown by `cli_get_status`); a read served by Rust could
+  neither record nor clear an entry, so routing it would change main's
+  diagnostics. They also choose between two schemas at runtime from the
+  newest writes. Declaring them needs a diagnostics channel in the wire
+  answer first.
+- **copilot.** One reader serves two stores (`session-store.db` and
+  `session-state/*/events.jsonl`), and the JSONL branch defers to the database
+  for sessions it already lists, so one file's read depends on another
+  store. Its cwd comes from `workspace.yaml`, which needs a YAML parser (a new
+  dependency, not approved here).
+- **devin, kiro, mcode.** main has no log reader for them; launch and resume
+  are declared.
 
 ## Decisions recorded
 
-- Declarations are Rust statics, not JSON/TOML: typed at compile time, zero
-  parse cost, and the Python side reads the exported JSON instead of a second
-  copy.
-- No regex dependency: tag extraction (`<task-id>…</task-id>`) and the two
-  Qwen "background started" prefixes are `Text::TagValues` / `Text::AfterPrefix`.
-- Naive ISO timestamps (no zone) are read as UTC; Python reads them as local
-  time. Only the inferred-turn cut uses this, and no CLI in main writes naive
-  stamps.
-- `parse_session_file` (main's legacy whole-file parse) stays in Python; the
-  runtime serves the incremental usage, activity and turns calls.
+- Declarations are Rust statics, not JSON or TOML: typed at compile time,
+  zero parse cost, and exported as JSON instead of being kept twice.
+- BLAKE2b (checkpoint anchors) and MD5 (aider's namespace) are hand-written to
+  keep the dependency list at serde, serde_json, libc and libsqlite3-sys.
+- SQLite cells follow main's `sqlite3` reads: TEXT must be UTF-8 or the query
+  fails; a BLOB in a JSON column is parsed, else `null`; declared binary
+  columns are hex.
+- main's `\d` (any Unicode decimal digit) is approximated: ASCII digits in
+  aider's matchers, `char::is_numeric` in hermes's. Naive ISO stamps are read
+  as UTC (main: local time; only the inferred-turn cut uses them).
+- `Format::Text` reads like main's text-mode file: invalid UTF-8 dropped, and
+  in the activity walk `\r\n` and a lone `\r` end a line as `\n` does. The
+  byte tail (usage) splits on `\n` only, as main's binary `readline` does.
+- Resume memory (where a line walk stopped) lives in the process, as it does
+  in main's reader; it is an optimisation and never changes results.
+- Windows ConPTY and Windows file identity are not built in this round.
