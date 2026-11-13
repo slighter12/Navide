@@ -3,6 +3,7 @@
 //! resumable walk state) and per-turn usage. Everything here is generic; a
 //! vendor contributes only its `Observe` declaration.
 pub mod activity;
+pub mod bag;
 pub mod jsonl;
 pub mod turns;
 pub mod usage;
@@ -82,6 +83,9 @@ pub struct ActivityEvent {
     pub timestamp: String,
     pub detail: String,
     pub text: String,
+    /// `PromptText.full` of a user-prompt `text` (the chat mirror's longer copy).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub full: String,
 }
 
 /// main's `TurnCall`.
@@ -213,6 +217,19 @@ impl Observer {
             None => self.resume.remove(path),
         };
         Ok(events)
+    }
+
+    /// `activity` over the watcher's seen-keys bag: the state is read from it
+    /// and written back to it (also when a decode error ends the walk, as
+    /// main's `finally` does; not when the file cannot be read).
+    pub fn activity_bag(&mut self, path: &Path, bag: &mut Vec<String>) -> Result<Vec<ActivityEvent>, Error> {
+        let spec = &self.spec.activity;
+        let mut state = bag::load(spec, bag);
+        let result = self.activity(path, &mut state);
+        if !matches!(result, Err(Error::Io(_))) {
+            bag::store(spec, &state, bag);
+        }
+        result
     }
 
     pub fn turns(&self, path: &Path, session_id: &str) -> Result<Vec<TurnUsage>, Error> {

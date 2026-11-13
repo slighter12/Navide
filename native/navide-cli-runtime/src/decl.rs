@@ -371,6 +371,42 @@ pub struct ActivitySpec {
     pub turn_text: Str,
     /// Slots kept across walks (all others are re-initialised per walk).
     pub persist: &'static [Str],
+    /// How the kept state is stored in the watcher's per-file seen-keys bag.
+    pub bag: Bag,
+}
+
+/// The walk state as keys in the log watcher's per-file `seen_keys` bag,
+/// which the watcher persists. The line mark is always main's `act_hw::N`;
+/// the rest uses the key formats main's readers use, so the bag means the
+/// same thing whichever reader wrote it.
+#[derive(Debug, Serialize)]
+pub struct Bag {
+    pub slots: &'static [BagSlot],
+    /// The inferred-turn tracker as one JSON key: `{idx, flushed, ts}` for a
+    /// `TurnStamp::Text` tracker, `{idx, last_ms, flushed[, cancelled]}` for `Millis`.
+    pub turn: Option<BagTurn>,
+    /// The byte cursor (`Cursor::Bytes`) as `prefix + json(sort_keys)`.
+    pub cursor: Option<Str>,
+}
+
+#[derive(Debug, Serialize)]
+pub enum BagSlot {
+    /// `prefix + text`, rewritten every walk; no key while empty.
+    Text { slot: Str, prefix: Str },
+    /// `prefix + text`, rewritten only when the walk wrote the slot (even
+    /// with the same value); an empty value keeps its bare-prefix key.
+    TextOnChange { slot: Str, prefix: Str },
+    /// `prefix + json(text)`; no key while empty.
+    JsonText { slot: Str, prefix: Str },
+}
+
+#[derive(Debug, Serialize)]
+pub struct BagTurn {
+    pub prefix: Str,
+    /// `json.dumps(separators=(",", ":"))` instead of the default `", "` / `": "`.
+    pub compact: bool,
+    /// No tracker is stored as `prefix + "null"` (else: no key).
+    pub keep_null: bool,
 }
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]

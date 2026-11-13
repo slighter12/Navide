@@ -38,6 +38,9 @@ pub struct ActivityState {
     pub slots: Slots,
     #[serde(default)]
     pub turn: Option<TurnState>,
+    /// Persisted slots the last walk wrote (even with the value they had).
+    #[serde(skip)]
+    pub written: Vec<String>,
 }
 
 enum Flow {
@@ -52,6 +55,7 @@ struct Ctx<'a> {
     slots: Slots,
     turn: Option<TurnState>,
     out: Vec<ActivityEvent>,
+    written: Vec<String>,
 }
 
 /// Where a record is: its line (line cursor) and the byte offset just past it.
@@ -70,6 +74,14 @@ impl Ctx<'_> {
             slots: &self.slots,
             cancelled: self.turn.as_ref().is_some_and(|t| t.cancelled),
             entry_key: "",
+        }
+    }
+
+    /// Every slot write goes through here, so the walk knows what it wrote.
+    fn put(&mut self, name: &str, value: String) {
+        self.slots.insert(name.to_owned(), value);
+        if !self.written.iter().any(|w| w == name) {
+            self.written.push(name.to_owned());
         }
     }
 
@@ -98,26 +110,26 @@ impl Ctx<'_> {
             Effect::Emit(emit) => self.emit(emit, record, at),
             Effect::Set(name, t) => {
                 let value = expr::text(t, &self.scope(record, at));
-                self.slots.insert((*name).to_owned(), value);
+                self.put(name, value);
             }
             Effect::SetOnce { flag, slot, text } => {
                 if self.slots.get(*flag).is_none_or(String::is_empty) {
                     let value = expr::text(text, &self.scope(record, at));
-                    self.slots.insert((*slot).to_owned(), value);
-                    self.slots.insert((*flag).to_owned(), "1".to_owned());
+                    self.put(slot, value);
+                    self.put(flag, "1".to_owned());
                 }
             }
             Effect::SetIfNonEmpty(name, t) => {
                 let value = expr::text(t, &self.scope(record, at));
                 if !value.is_empty() {
-                    self.slots.insert((*name).to_owned(), value);
+                    self.put(name, value);
                 }
             }
             Effect::Append(name, t, max) => {
                 let more = expr::text(t, &self.scope(record, at));
                 if !more.is_empty() {
                     let joined = format!("{}{more}", self.slots.get(*name).map(String::as_str).unwrap_or_default());
-                    self.slots.insert((*name).to_owned(), expr::cap(&joined, *max));
+                    self.put(name, expr::cap(&joined, *max));
                 }
             }
             Effect::Turn(op) => self.turn_op(op, record, at),
@@ -149,6 +161,7 @@ impl Ctx<'_> {
             dedup_key: expr::text(&emit.key, &s),
             timestamp: expr::text(&emit.timestamp, &s),
             detail: expr::text(&emit.detail, &s),
+            full: if text.is_empty() { String::new() } else { expr::prompt_full(&emit.text, &s) },
             text,
         };
         self.out.push(event);
@@ -173,7 +186,8 @@ impl Ctx<'_> {
             TurnStamp::Millis => ms.map_or(turn.ms, |m| turn.ms.max(m)).to_string(),
         };
         let idx = turn.idx;
-        let text = self.slots.insert(spec.turn_text.to_owned(), String::new()).unwrap_or_default();
+        let text = self.slots.get(spec.turn_text).cloned().unwrap_or_default();
+        self.put(spec.turn_text, String::new());
         self.out.push(ActivityEvent {
             vendor: self.vendor.to_owned(),
             event_type: kind_name(EventKind::TurnComplete).to_owned(),
@@ -184,6 +198,7 @@ impl Ctx<'_> {
             timestamp,
             detail: detail.to_owned(),
             text,
+            full: String::new(),
         });
     }
 
@@ -222,7 +237,7 @@ impl Ctx<'_> {
                 if let Some(turn) = self.turn.as_mut() {
                     turn.cancelled = true;
                     if let Some(spec) = self.spec {
-                        self.slots.insert(spec.turn_text.to_owned(), String::new());
+                        self.put(spec.turn_text, String::new());
                     }
                 }
             }
@@ -242,14 +257,14 @@ fn kind_name(kind: EventKind) -> &'static str {
 /// keep per-file values with the same vocabulary. Emits and turn operations
 /// have nothing to act on there and are ignored.
 pub(crate) fn apply_slot_effects(effects: &'static [Effect], record: &Value, offset: u64, slots: &mut Slots) {
-    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new() };
+    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new() };
     ctx.apply_all(effects, record, At { line: 0, end: offset });
     *slots = ctx.slots;
 }
 
 /// Run every matching rule's slot effects over one record (turns use this).
 pub(crate) fn apply_slot_rules(rules: &'static [Rule], record: &Value, line: usize, slots: &mut Slots) {
-    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new() };
+    let mut ctx = Ctx { spec: None, vendor: "", file_path: "", slots: std::mem::take(slots), turn: None, out: Vec::new(), written: Vec::new() };
     ctx.record(rules, record, At { line, end: 0 });
     *slots = ctx.slots;
 }
@@ -278,7 +293,7 @@ pub fn walk(
             if state.hw > 0 {
                 slots.insert(WALK_RESUMED.to_owned(), "1".to_owned());
             }
-            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new() };
+            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new() };
             let end = jsonl::walk_lines(path, state.hw, resume, |line| {
                 ctx.record(spec.rules, line.value, At { line: line.number, end: line.end });
             });
@@ -303,7 +318,7 @@ pub fn walk(
                     }
                 }
             }
-            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new() };
+            let mut ctx = Ctx { spec: Some(spec), vendor, file_path: &file_path, slots, turn: state.turn.take(), out: Vec::new(), written: Vec::new() };
             for (end, record) in &tail.records {
                 if let Some(record) = record {
                     ctx.record(spec.rules, record, At { line: 0, end: *end });
@@ -338,6 +353,7 @@ pub fn walk(
         .iter()
         .filter_map(|name| ctx.slots.get(*name).filter(|v| !v.is_empty()).map(|v| ((*name).to_owned(), v.clone())))
         .collect();
+    state.written = ctx.written.into_iter().filter(|name| spec.persist.contains(&name.as_str())).collect();
     if let Some(line) = decode_error {
         return Err(Error::Decode { line });
     }

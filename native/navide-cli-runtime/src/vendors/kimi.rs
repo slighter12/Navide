@@ -119,6 +119,11 @@ pub static CLI: Cli = Cli {
             turn_stamp: TurnStamp::Millis,
             turn_text: "reply",
             persist: &["reply"],
+            bag: Bag {
+                slots: &[BagSlot::Text { slot: "reply", prefix: "kimi_text::" }],
+                turn: Some(BagTurn { prefix: "kimi_turn::", compact: true, keep_null: true }),
+                cursor: None,
+            },
         },
         turns: TurnsSpec {
             slots: &[],

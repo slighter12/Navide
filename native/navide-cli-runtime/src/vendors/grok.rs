@@ -127,6 +127,7 @@ pub static CLI: Cli = Cli {
             turn_stamp: TurnStamp::Text,
             turn_text: "pending",
             persist: &["pending"],
+            bag: Bag { slots: &[BagSlot::JsonText { slot: "pending", prefix: "grok_text::" }], turn: None, cursor: Some("grok_act::") },
         },
         turns: TurnsSpec {
             slots: &[],

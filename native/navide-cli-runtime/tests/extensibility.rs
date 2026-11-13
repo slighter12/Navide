@@ -103,6 +103,11 @@ static TOY: Cli = Cli {
             turn_stamp: TurnStamp::Text,
             turn_text: "reply",
             persist: &["reply"],
+            bag: Bag {
+                slots: &[BagSlot::Text { slot: "reply", prefix: "toy_text::" }],
+                turn: Some(BagTurn { prefix: "toy_turn::", compact: true, keep_null: false }),
+                cursor: None,
+            },
         },
         turns: TurnsSpec {
             slots: &[],

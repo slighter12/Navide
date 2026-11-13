@@ -133,6 +133,28 @@ pub fn user_prompt(raw: &str) -> String {
     text.chars().take(USER_PROMPT_MAX_CHARS).collect()
 }
 
+pub const FULL_PROMPT_MAX_CHARS: usize = 16000;
+
+/// The `PromptText.full` of a text that is a `UserPrompt` (possibly chosen
+/// through `If` / `FirstOf`); "" for any other text.
+pub fn prompt_full(t: &Text, s: &Scope) -> String {
+    match t {
+        Text::UserPrompt(inner) => user_prompt_full(&text(inner, s)),
+        Text::If(p, inner) if pred(p, s) => prompt_full(inner, s),
+        Text::FirstOf(items) => items.iter().find(|i| !text(i, s).is_empty()).map(|i| prompt_full(i, s)).unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// `PromptText.full`: the same prompt, capped for the chat mirror instead.
+pub fn user_prompt_full(raw: &str) -> String {
+    let text = py_strip(raw);
+    if text.is_empty() || text.starts_with('<') {
+        return String::new();
+    }
+    text.chars().take(FULL_PROMPT_MAX_CHARS).collect()
+}
+
 /// `log_readers.base.join_text_blocks`.
 pub fn join_blocks(content: Option<&Value>, block_type: &str) -> String {
     match content {

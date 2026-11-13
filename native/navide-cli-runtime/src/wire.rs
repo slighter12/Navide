@@ -2,7 +2,7 @@
 //! line, in order. The backend keeps one long-lived process; per-file
 //! reader memory (where each activity walk stopped) lives here, as it lives
 //! in main's reader objects.
-use crate::observe::{observers, ActivityState, Observer};
+use crate::observe::{observers, Error, Observer};
 use crate::resume::{self, Command};
 use crate::{launch, vendors};
 use serde::Deserialize;
@@ -22,8 +22,9 @@ struct Request {
     path: String,
     #[serde(default)]
     checkpoint: Map<String, Value>,
+    /// The watcher's seen-keys bag for the file (activity).
     #[serde(default)]
-    state: Option<ActivityState>,
+    bag: Vec<String>,
     #[serde(default)]
     session_id: String,
     #[serde(default)]
@@ -56,15 +57,15 @@ fn handle(observers: &mut HashMap<&'static str, Observer>, req: Request) -> Resu
             to_value(serde_json::to_value(read))
         }
         "activity" => {
-            let mut state = req.state.unwrap_or_default();
+            let mut bag = req.bag;
             let observer = observer(observers, &req.vendor)?;
             observer.set_clock(req.now);
-            let result = observer.activity(path, &mut state);
-            let state = serde_json::to_value(&state).map_err(|e| e.to_string())?;
-            match result {
-                Ok(events) => Ok(json!({"events": events, "state": state})),
-                // The walk's state still moved (main's `finally`), so it is returned with the error.
-                Err(err) => Ok(json!({"events": [], "state": state, "error": err.to_string()})),
+            match observer.activity_bag(path, &mut bag) {
+                Ok(events) => Ok(json!({"events": events, "bag": bag})),
+                // The walk's state still moved (main's `finally`), so the bag is returned with the error.
+                Err(err @ Error::Decode { .. }) => Ok(json!({"events": [], "bag": bag, "error": err.to_string()})),
+                // Unreadable: the caller's own reader decides (main returns no events).
+                Err(err) => Err(err.to_string()),
             }
         }
         "turns" => {
