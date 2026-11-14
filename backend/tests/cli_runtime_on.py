@@ -112,7 +112,8 @@ def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: pyte
         note = f"  ({EXPECTED_UNSUPPORTED[vendor]})" if counts["unsupported"] and vendor in EXPECTED_UNSUPPORTED else ""
         terminalreporter.write_line(
             f"{vendor:12} rust={counts['rust']:<6} unsupported={counts['unsupported']:<4} "
-            f"unreadable={counts['unreadable']:<4} deferred={counts['deferred']:<4} fallback={counts['fallback']}{note}"
+            f"unreadable={counts['unreadable']:<4} python={counts['python']:<4} deferred={counts['deferred']:<4} "
+            f"fallback={counts['fallback']}{note}"
         )
     for problem in unexpected(calls):
         terminalreporter.write_line(f"UNEXPECTED {problem}", red=True)
