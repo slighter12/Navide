@@ -31,6 +31,18 @@ from _pyinstaller_winpty import collect_winpty
 
 _winpty_binaries, _winpty_datas = collect_winpty()
 
+# Vendor modules: cli_vendors/registry.py imports each declared CLI's module by
+# its key, and log_readers/__init__.py's PEP 562 __getattr__ does the same for
+# a reader (importlib.import_module both times), so the graph walk sees none
+# of them. They are collected from the package, not listed: a new vendor file
+# is packaged by being there. One left out would be registered in the packaged
+# app from its declaration alone (launched, and nothing else).
+# test_pyinstaller_spec.py holds this to every vendor module on disk and to
+# log_readers._MIGRATED_READERS.
+from PyInstaller.utils.hooks import collect_submodules
+
+_vendor_modules = collect_submodules('agent_team_backend.cli_vendors')
+
 a = Analysis(
     ['run.py'],
     pathex=['.'],
@@ -75,7 +87,7 @@ a = Analysis(
         ('agent_team_backend/plugins/builtin/navide_skills/backend.py',
          'agent_team_backend/plugins/builtin/navide_skills'),
     ],
-    hiddenimports=[
+    hiddenimports=_vendor_modules + [
         # The top-level app object (imported by name in __main__.py, but listed
         # here as belt-and-suspenders for PyInstaller's graph walk).
         'agent_team_backend.app',
@@ -102,33 +114,7 @@ a = Analysis(
         'agent_team_backend.channels.matrix',
         'agent_team_backend.channels.mattermost',
         'agent_team_backend.channels.imessage',
-        # Vendor modules: cli_vendors/registry.py imports each declared CLI's
-        # module by its key, and log_readers/__init__.py's PEP 562 __getattr__
-        # does the same for a reader (importlib.import_module both times), so
-        # the graph walk sees none of them. One missing here is registered in
-        # the packaged app from its declaration alone: launched, and nothing
-        # else. test_pyinstaller_spec.py holds this list to every vendor
-        # module on disk and to log_readers._MIGRATED_READERS.
-        'agent_team_backend.cli_vendors.aider',
-        'agent_team_backend.cli_vendors.antigravity',
-        'agent_team_backend.cli_vendors.claude',
-        'agent_team_backend.cli_vendors.codex',
-        'agent_team_backend.cli_vendors.copilot',
-        'agent_team_backend.cli_vendors.cursor',
-        'agent_team_backend.cli_vendors.devin',
-        'agent_team_backend.cli_vendors.droid',
-        'agent_team_backend.cli_vendors.goose',
-        'agent_team_backend.cli_vendors.grok',
-        'agent_team_backend.cli_vendors.hermes',
-        'agent_team_backend.cli_vendors.kilo',
-        'agent_team_backend.cli_vendors.kimi',
-        'agent_team_backend.cli_vendors.kiro',
-        'agent_team_backend.cli_vendors.mcode',
-        'agent_team_backend.cli_vendors.muse',
-        'agent_team_backend.cli_vendors.opencode',
-        'agent_team_backend.cli_vendors.openclaw',
-        'agent_team_backend.cli_vendors.pi',
-        'agent_team_backend.cli_vendors.qwen',
+        # (The vendor modules are `_vendor_modules`, above the Analysis call.)
         # uvicorn internals that are resolved at runtime, not import-time.
         # __main__.py leaves http/ws/loop/lifespan at "auto": uvicorn.Config
         # imports these by string, and they import the implementation.

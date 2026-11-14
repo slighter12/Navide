@@ -70,21 +70,58 @@ def test_every_chat_channel_adapter_is_a_hidden_import():
     assert not missing, f"chat channel adapters missing from hiddenimports: {missing}"
 
 
+def _vendor_hidden_imports() -> set[str]:
+    """The vendor modules the spec packages: ``_vendor_modules``, which the
+    spec assigns from a ``collect_submodules(...)`` call, and which is part of
+    ``hiddenimports``. The call is run here, as the build runs it."""
+    tree = ast.parse(SPEC_PATH.read_text(encoding="utf-8"), filename=str(SPEC_PATH))
+    assigned = [
+        node.value for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_vendor_modules" for t in node.targets)
+    ]
+    assert len(assigned) == 1, "the spec no longer assigns _vendor_modules once"
+    call = assigned[0]
+    assert isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "collect_submodules"
+    package = ast.literal_eval(call.args[0])
+    assert package == "agent_team_backend.cli_vendors"
+
+    hidden = next(kw.value for kw in _analysis_call().keywords if kw.arg == "hiddenimports")
+    assert any(isinstance(n, ast.Name) and n.id == "_vendor_modules" for n in ast.walk(hidden)), (
+        "hiddenimports no longer includes _vendor_modules"
+    )
+    from PyInstaller.utils.hooks import collect_submodules
+
+    return set(collect_submodules(package))
+
+
 def test_every_vendor_module_is_a_hidden_import():
     # cli_vendors/registry.py imports each declared CLI's module by its key
     # (importlib.import_module), which the graph walk cannot see. A module
     # missing here is absent from the packaged app, where the registry then
     # builds that CLI from its declaration alone: it launches, and its
-    # credentials, install detection and log reader are silently gone.
+    # credentials, install detection and log reader are silently gone. The
+    # spec collects the package's submodules; this runs that collection and
+    # requires every module file on disk to be in it.
     from agent_team_backend.cli_vendors import _declared
 
     vendors = Path(_declared.__file__).parent
-    listed = set(_keyword("hiddenimports"))
-    missing = sorted(
-        key for key in _declared.declarations()
-        if (vendors / f"{key}.py").is_file() and f"agent_team_backend.cli_vendors.{key}" not in listed
+    packaged = _vendor_hidden_imports()
+    on_disk = {f"agent_team_backend.cli_vendors.{path.stem}" for path in vendors.glob("*.py") if path.stem != "__init__"}
+    assert on_disk, "no vendor modules found"
+    assert not on_disk - packaged, f"vendor modules the spec would not package: {sorted(on_disk - packaged)}"
+
+
+def test_every_vendor_module_is_a_declared_cli():
+    # The registry imports a module only for a declared key, so a vendor file
+    # with no declaration is never registered, in the packaged app or out of it.
+    from agent_team_backend.cli_vendors import _declared
+
+    vendors = Path(_declared.__file__).parent
+    modules = {path.stem for path in vendors.glob("*.py") if not path.stem.startswith("_")} - {"base", "registry"}
+    assert not modules - set(_declared.declarations()), (
+        f"vendor modules with no declaration in native/navide-cli-runtime/src/vendors: "
+        f"{sorted(modules - set(_declared.declarations()))}"
     )
-    assert not missing, f"vendor modules missing from hiddenimports: {missing}"
 
 
 def test_every_lazy_log_reader_vendor_is_a_hidden_import():
@@ -93,7 +130,7 @@ def test_every_lazy_log_reader_vendor_is_a_hidden_import():
     # cannot see, exactly as the registry's own import by key is.
     from agent_team_backend.log_readers import _MIGRATED_READERS
 
-    listed = set(_keyword("hiddenimports"))
+    listed = _vendor_hidden_imports()
     missing = sorted(
         {f"agent_team_backend.cli_vendors.{m}" for m in _MIGRATED_READERS.values()} - listed
     )
