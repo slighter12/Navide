@@ -217,6 +217,45 @@ one carry `evidence="source"` — no real-account round-trip has been recorded; 
 Code's adapter (region-scoped compound file plus a companion `auth-state`
 write, no session resume) is the newest.
 
+### Rust CLI runtime (experimental)
+
+For someone who runs Navide, not someone who adds a CLI. The runtime is off
+unless you turn it on, and off is exactly main's behaviour: nothing starts and
+every reader is Python.
+
+- **Turn it on.** Send `ui.settings.set` with `{"updates": {"rustCliRuntime": true}}`.
+  There is no Settings toggle yet. The backend applies the setting at startup
+  and at every change, without a restart.
+- **Where the binary comes from.** In a packaged app (macOS and Linux)
+  `<resources>/bin/navide-cli-runtime`, which the build stages from
+  `build/cli-runtime` (`pnpm build:cli-runtime`). From a source checkout,
+  `native/navide-cli-runtime/target/release/navide-cli-runtime`
+  (`cargo build --release --manifest-path native/navide-cli-runtime/Cargo.toml`).
+  `NAVIDE_CLI_RUNTIME_BIN` names another file and replaces both; a name that is
+  not a file means no binary, and no other is tried. Windows packages carry
+  none, and the runtime observes nothing there.
+- **No binary, or the wrong one.** The backend logs it once and every reader
+  stays on Python. A binary that says it is another version than the backend,
+  or was built from other CLI declarations than the backend's
+  `cli_declarations.json`, counts as no binary.
+- **What it is doing.** `GET /health` → `diagnostics.cli_runtime`:
+  `state` (`off`, `idle`, `starting`, `running`, `waiting-to-restart`,
+  `stopped-after-failures`), `binary` (found and usable), `failures`,
+  `runtime` (the version and declarations fingerprint the process reported, and
+  `unusable`, the reason it is not used), and `calls` per CLI: `rust`
+  (answered by the runtime), `unsupported` and `unreadable` (the Python reader
+  decided, as on main), `python` (a record only Python's JSON reader accepts,
+  such as a lone surrogate escape or `NaN`: the Python reader read that call),
+  `deferred` (a reader making its own reads, or the process starting), and
+  `fallback`. `fallback` is the number to watch: it counts stalled or dead
+  processes and answers the backend could not use, and a value that keeps
+  growing is a defect to report.
+- **Roll back.** Set `rustCliRuntime` to `false` (or remove it): the process is
+  ended at once and the next read is Python. After five process failures in a
+  row the runtime stays off by itself until the setting is switched off and
+  on again; the log says so once, with the last lines the process wrote to
+  stderr.
+
 ### Two kinds of vendors: CLI and Agent
 
 Since 0.2.39 a vendor is one of two kinds:

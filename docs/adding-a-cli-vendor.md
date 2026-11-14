@@ -347,8 +347,8 @@ The registry test is your checklist for the files a CLI of main's kind keeps
 file for every CLI main had, and holds yours to the declaration. The lists
 under [Other hand-kept lists](#other-hand-kept-lists) are what is left to do
 by hand. It also rejects forbidden imports (vendor modules may import only `base`,
-`_protocols`, the standard library, and httpx — never another vendor or any
-app module).
+`_declared`, `_protocols`, the standard library, and httpx — never another vendor
+or any app module).
 
 ## Boundaries
 
