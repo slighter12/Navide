@@ -12,6 +12,13 @@ functions found in every command of ``_corpus``. It was recorded from those
 functions and is not regenerated: the declarations must keep giving the same
 values and the same ids.
 
+One entry follows upstream main's later change instead of the recording: claude's
+``spawn_env_defaults`` holds ``MCP_TIMEOUT=120000``, which upstream main added to
+claude's ``VendorSpec`` after this recording was made (the 2026-11-12 MCP connect
+budget). Launch facts now come from the declaration, so that change was carried
+into ``vendors/claude.rs`` and this entry was edited by hand to match. Any further
+upstream change to a declared CLI's launch or resume fact is carried the same way.
+
 The recording covers the CLIs main had. A CLI declared after it is not in the
 recording and needs no edit to it: the recorded tests iterate over the
 recorded keys only (and require those to still be declared), and the tests

@@ -114,6 +114,11 @@ pub static CLI: Cli = Cli {
         model: Some(&["--model", "{}"]),
         effort: Some(&["--effort", "{}"]),
         efforts: &["low", "medium", "high", "xhigh", "max"],
+        // Claude Code gives the first MCP connect 30s (MCP_TIMEOUT) and stops
+        // after three retries; a mass restore slowed /plan-mcp past that and left
+        // panes without Navide tools until a manual /mcp (2026-11-12). Verified on
+        // 2.1.325 that HTTP servers honor it.
+        env_defaults: &[("MCP_TIMEOUT", "120000")],
         // Claude Code stamps its own subprocesses with CLAUDE_CODE_CHILD_SESSION;
         // inherited, a spawned pane silently skips transcript saving.
         env_strip: &["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CHILD_SESSION"],

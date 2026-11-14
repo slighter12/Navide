@@ -119,7 +119,12 @@ export default [
         "xhigh",
         "max"
       ],
-      "env_defaults": [],
+      "env_defaults": [
+        [
+          "MCP_TIMEOUT",
+          "120000"
+        ]
+      ],
       "env_strip": [
         "CLAUDE_CONFIG_DIR",
         "CLAUDE_CODE_CHILD_SESSION"

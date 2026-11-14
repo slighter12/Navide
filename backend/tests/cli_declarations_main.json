@@ -41,7 +41,12 @@
     "xhigh",
     "max"
    ],
-   "spawn_env_defaults": [],
+   "spawn_env_defaults": [
+    [
+     "MCP_TIMEOUT",
+     "120000"
+    ]
+   ],
    "home_env_vars": [
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CODE_CHILD_SESSION"
