@@ -119,6 +119,21 @@ def test_registry_is_discovered_in_mains_order() -> None:
             assert spec is module.SPEC, f"{key}: the registry holds its module's SPEC"
 
 
+def test_every_cli_main_had_still_has_its_vendor_module_and_log_reader_module() -> None:
+    """The adapters are optional for a CLI declared later, but not for the ones
+    main had: a module deleted by mistake would otherwise leave that CLI
+    registered from its declaration alone. ``log_readers/<key>.py`` is held
+    even where it is the empty placeholder (devin, kiro, mcode). The recorded
+    list is the only one asked: a new CLI edits nothing here."""
+    missing = [
+        str(path.relative_to(REPO_ROOT))
+        for key in sorted(EXPECTED_KEYS)
+        for path in (VENDORS_DIR / f"{key}.py", VENDORS_DIR.parent / "log_readers" / f"{key}.py")
+        if not path.is_file()
+    ]
+    assert not missing, f"adapter files of CLIs main had are gone: {missing}"
+
+
 def test_a_declared_cli_with_no_module_is_registered_from_its_declaration(monkeypatch) -> None:
     """A fake CLI declared in no Rust file: the registry, rebuilt from a
     declarations table that holds it, registers it from the declaration alone

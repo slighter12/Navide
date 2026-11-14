@@ -135,6 +135,14 @@ describe('agent specs built from the declarations', () => {
     expect(listed.filter((key) => MAIN_ORDER.includes(key))).toEqual(MAIN_ORDER)
   })
 
+  it('still has the spec file of every CLI main had', () => {
+    // A spec file is optional for a CLI declared later, not for these: one
+    // deleted by mistake would leave the CLI listed from its declaration
+    // alone, losing its hint and patterns without any other test noticing.
+    const files = Object.keys(import.meta.glob('../*.ts')).map((path) => path.replace(/^\.\.\//, '').replace(/\.ts$/, ''))
+    expect(MAIN_ORDER.filter((key) => key !== 'terminal' && !files.includes(key))).toEqual([])
+  })
+
   it('lists the plain terminal after every CLI', () => {
     const listed = AGENT_SPECS.map((spec) => spec.agentKey)
     expect(listed.indexOf('terminal')).toBe(listed.length - 1)
