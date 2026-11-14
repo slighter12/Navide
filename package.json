@@ -53,6 +53,7 @@
     "build:pane-helper": "node scripts/build-pane-helper.mjs",
     "build:fn-key": "node scripts/build-fn-key-helper.mjs",
     "build:stt": "node scripts/build-stt.mjs",
+    "build:cli-runtime": "node scripts/build-cli-runtime.mjs",
     "build:hello": "node scripts/build-hello.mjs",
     "build:official-plugins": "pnpm run build:public-packages && pnpm run build:mini-ide && pnpm run build:mini-ide:v2 && pnpm run build:plans && pnpm run build:git:v2 && pnpm run build:browser && node scripts/stage-official-plugin-artifacts.mjs",
     "build:mini-ide": "vite build --config vite.mini-ide.config.ts",
@@ -192,6 +193,13 @@
           "filter": [
             "navide-stt"
           ]
+        },
+        {
+          "from": "build/cli-runtime",
+          "to": "bin",
+          "filter": [
+            "navide-cli-runtime"
+          ]
         }
       ]
     },
@@ -265,6 +273,13 @@
           "filter": [
             "navide-stt"
           ]
+        },
+        {
+          "from": "build/cli-runtime",
+          "to": "bin",
+          "filter": [
+            "navide-cli-runtime"
+          ]
         }
       ]
     },
@@ -276,7 +291,7 @@
     "@navide/plugin-contracts": "link:packages/plugin-contracts",
     "@navide/plugin-sdk": "link:packages/plugin-sdk",
     "@navide/plugin-ui": "link:packages/plugin-ui",
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.0",
     "@types/html-to-text": "^9.0.4",
     "@types/node": "^22",
     "@types/ws": "^8.18.2",
@@ -337,11 +352,11 @@
     "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.8.11",
     "html-to-text": "^10",
-    "koffi": "^3.3.3",
-    "mermaid": "^12.2.0",
+    "koffi": "^3.3.7",
+    "mermaid": "^12.3.0",
     "monaco-editor": "^0.55.1",
     "vue-i18n": "11",
-    "ws": "^8.22.0",
+    "ws": "^8.22.1",
     "yaml": "^2.9.1"
   }
 }

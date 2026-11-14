@@ -66,13 +66,22 @@ jobs:
         continue-on-error: true
         run: bun audit --audit-level=high
       - name: Set up uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-      - name: pip-audit (backend lock)
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      # pip-audit has no severity threshold (bun audit's --audit-level=high
+      # above has one), so every advisory used to block — a moderate ReDoS
+      # included. The gate script rates each advisory from OSV and blocks on
+      # high/critical only, warning below; it fails closed on an unknown rating
+      # or a failed lookup. Design notes are in the script's docstring.
+      - name: pip-audit (backend lock, high and above)
         id: pip-audit
         continue-on-error: true
         run: |
           uv --project backend export --format requirements-txt --no-hashes --no-emit-project > /tmp/backend-requirements.txt
-          uv --project backend run --with pip-audit pip-audit -r /tmp/backend-requirements.txt
+          set +e
+          uv --project backend run --with pip-audit pip-audit -r /tmp/backend-requirements.txt --format json --output /tmp/pip-audit.json
+          rc=$?
+          set -e
+          python3 scripts/pip-audit-severity-gate.py /tmp/pip-audit.json "$rc"
       - name: pip-audit (backend lock, Windows on Arm)
         # The scan above resolves the lock on THIS runner, so every pin behind
         # a `sys_platform == 'win32' and platform_machine == 'ARM64'` marker
@@ -142,7 +151,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Set up uv and dependency cache
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -203,7 +212,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Set up uv and dependency cache
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -291,7 +300,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Set up uv and dependency cache
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -403,7 +412,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Set up uv and dependency cache
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -419,8 +428,12 @@ jobs:
       # a file's tests keep sharing their module state and fixtures in order.
       # Tests marked `serial` (wall-clock timed, seen failing beside the
       # workers) run alone afterwards; both passes always run.
+      # This job compiles no Rust: the tests that run the Rust CLI runtime
+      # skip here (tests/cli_runtime_build.py) and run in the cli-runtime job.
       - name: Complete backend suite
         if: runner.os != 'Windows'
+        env:
+          NAVIDE_CLI_RUNTIME_REQUIRED: '0'
         run: |
           status=0
           uv --project backend run --locked pytest backend/tests -n 4 --dist loadfile -m "not serial" --timeout=120 -o faulthandler_timeout=180 --junitxml=test-results/ci/backend.xml --collection-report=test-results/ci/backend-collection.json --durations=30 || status=$?
@@ -437,6 +450,18 @@ jobs:
       # to clean up descendants when pytest exits.
       # Preserve detached supervision: watchdog threads attached to the Actions
       # console previously hung the step even after pytest had exited.
+      # Diagnosis only: a stall gets native stacks of the stuck python, read
+      # without its GIL (see PY_SPY_ENV in backend/ci_windows_tests.py).
+      - name: Install py-spy for stall stacks
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          uv tool install py-spy==0.4.2
+          "NAVIDE_CI_PY_SPY=$(Join-Path $env:UV_TOOL_BIN_DIR 'py-spy.exe')" >> $env:GITHUB_ENV
+          # The image's Windows SDK debugger, for native stacks py-spy cannot list.
+          $cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
+          if (Test-Path $cdb) { "NAVIDE_CI_CDB=$cdb" >> $env:GITHUB_ENV } else { Write-Host "cdb not found at $cdb" }
       - name: Start detached Windows tests
         if: runner.os == 'Windows'
         shell: pwsh
@@ -510,6 +535,77 @@ jobs:
           CMAKE_PROJECT_INCLUDE_BEFORE: ${{ github.workspace }}/native/navide-stt/portable.cmake
         run: cargo test --locked --manifest-path native/navide-stt/Cargo.toml
 
+  # The Rust CLI runtime (native/navide-cli-runtime) and the backend seam to
+  # it. The crate's own tests replay the parity fixtures and hold the
+  # checked-in declarations to the source; the backend tests then run the
+  # binary this job just built, first with the switch off (declarations, seam,
+  # parity) and then a whole reader suite with the switch on, which fails on
+  # any call the runtime did not answer. Nothing here may skip for want of a
+  # binary: NAVIDE_CLI_RUNTIME_REQUIRED makes that a failure. Linux and macOS
+  # only: the runtime is not built on Windows.
+  cli-runtime:
+    name: Rust CLI runtime (${{ matrix.platform }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-15
+          - platform: Linux
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      NAVIDE_CLI_RUNTIME_REQUIRED: '1'
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: native/navide-cli-runtime
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Set up uv and dependency cache
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install locked dependencies
+        run: uv --project backend sync --locked
+      # The crate is kept free of warnings, tests and build script included.
+      - name: Cargo check (no warnings)
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked --all-targets --manifest-path native/navide-cli-runtime/Cargo.toml
+      - name: Cargo tests
+        run: cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml
+      # The release build, staged where a package takes it from.
+      - name: Build and stage the sidecar
+        run: node scripts/build-cli-runtime.mjs
+      - name: Backend tests of the runtime (switch off)
+        run: uv --project backend run --locked pytest backend/tests/test_cli_declarations.py backend/tests/test_cli_runtime_seam.py backend/tests/test_cli_runtime_parity.py --timeout=300 -o faulthandler_timeout=360 --junitxml=test-results/ci/cli-runtime-off.xml
+      - name: Reader suites with the switch on
+        run: uv --project backend run --locked pytest -p tests.cli_runtime_on backend/tests/vendors backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_claude_activity_resume.py backend/tests/test_activity_high_water.py --timeout=300 -o faulthandler_timeout=360 --junitxml=test-results/ci/cli-runtime-on.xml
+      - name: Upload diagnostic artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: cli-runtime-${{ matrix.platform }}-diagnostics
+          path: test-results/ci/
+          retention-days: 7
+
   # App Lock's Windows Hello helper: it must build, and asking the runner (no
   # Windows Hello set up) must answer "not available" (exit 1), not fail (2).
   hello-helper:
@@ -553,7 +649,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Set up uv and dependency cache
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: marketplace/registry/uv.lock
@@ -580,7 +676,7 @@ jobs:
     # except a group the path filter (the changes job) chose not to run.
     name: Lint and test
     if: ${{ always() }}
-    needs: [changes, static, frontend, build-artifacts, pnpm-lockfile, backend, registry, dependency-audit, stt-sidecar, hello-helper]
+    needs: [changes, static, frontend, build-artifacts, pnpm-lockfile, backend, cli-runtime, registry, dependency-audit, stt-sidecar, hello-helper]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -593,6 +689,7 @@ jobs:
           BUILD_ARTIFACTS_RESULT: ${{ needs['build-artifacts'].result }}
           PNPM_LOCKFILE_RESULT: ${{ needs['pnpm-lockfile'].result }}
           BACKEND_RESULT: ${{ needs.backend.result }}
+          CLI_RUNTIME_RESULT: ${{ needs['cli-runtime'].result }}
           REGISTRY_RESULT: ${{ needs.registry.result }}
           AUDIT_RESULT: ${{ needs['dependency-audit'].result }}
           STT_RESULT: ${{ needs['stt-sidecar'].result }}
@@ -613,6 +710,7 @@ jobs:
           check build-artifacts "$BUILD_ARTIFACTS_RESULT" "$RUN_FRONTEND"
           check pnpm-lockfile "$PNPM_LOCKFILE_RESULT" "$RUN_FRONTEND"
           check backend "$BACKEND_RESULT" "$RUN_BACKEND"
+          check cli-runtime "$CLI_RUNTIME_RESULT" "$RUN_BACKEND"
           check registry "$REGISTRY_RESULT"
           check dependency-audit "$AUDIT_RESULT"
           check stt-sidecar "$STT_RESULT"

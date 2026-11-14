@@ -65,6 +65,7 @@ from .analyzer_settings import AnalyzerSettingsStore
 from . import session_archive
 from .ai_chat_settings import AIChatSettingsStore
 from .applog import app_data_dir, backend_log_path, backend_port_file, in_data_dir
+from . import cli_runtime as _cli_runtime
 from .cli_vendors.registry import VENDORS as _CLI_VENDORS
 from .cli_vendors.registry import vendor as cli_vendor
 from .codex_home import CodexHomeManager
@@ -365,8 +366,10 @@ async def analyzer_benchmark(progress_cb=None) -> list:
 
 # Log readers: one per vendor. Attribution maps log session files to panes.
 # One reader per registered vendor — the registry is the single source.
+# cli_runtime.wrap leaves each reader on Python unless the Rust CLI runtime
+# switch is on (off by default).
 _readers = [
-    spec.make_log_reader()
+    _cli_runtime.wrap(spec.make_log_reader())
     for spec in _CLI_VENDORS.values()
     if spec.make_log_reader is not None
 ]
@@ -1212,6 +1215,9 @@ _dev_time_sweeper_task: "asyncio.Task[None] | None" = None
 _plugin_audit_task: "asyncio.Task[None] | None" = None
 _session_archive_task: "asyncio.Task[None] | None" = None
 _frozen_keepalive_task: "asyncio.Task[None] | None" = None
+_mcp_connect_watch_task: "asyncio.Task[None] | None" = None
+_parked_message_watch_task: "asyncio.Task[None] | None" = None
+_PARKED_MESSAGE_SWEEP_S = 60.0
 
 _SESSION_ARCHIVE_FIRST_S = 600
 _SESSION_ARCHIVE_EVERY_S = 86_400
@@ -1236,6 +1242,49 @@ async def _session_archive_loop() -> None:
             except Exception as err:  # noqa: BLE001 — the loop must survive
                 log.warning("session archive pass failed: %s", err)
         await asyncio.sleep(_SESSION_ARCHIVE_EVERY_S)
+
+
+@app.on_event("shutdown")
+async def _stop_mcp_connect_watch() -> None:
+    for task in (_mcp_connect_watch_task, _parked_message_watch_task):
+        if task is not None:
+            task.cancel()
+
+
+async def _parked_message_watch() -> None:
+    """Every minute: a cli_send still parked on a restore placeholder after 10
+    minutes goes to the windows once (agent_msg.parked_overdue), which tell
+    the user and offer to open the pane."""
+    from .mcp_server import server as plan_mcp
+
+    while True:
+        await asyncio.sleep(_PARKED_MESSAGE_SWEEP_S)
+        for item in plan_mcp.take_overdue_parked():
+            try:
+                await broadcast(make_event("agent_msg.parked_overdue", item))
+            except Exception as err:  # noqa: BLE001 — the loop must survive
+                log.warning("parked message notice failed: %s", err)
+
+
+async def _notify_mcp_connected(pane_id: str) -> None:
+    """A pane reported never-connected has connected after all: drop its badge."""
+    await broadcast(make_event("mcp.connected", {"pane_id": pane_id}))
+
+
+async def _notify_mcp_never_connected(entry: Any) -> None:
+    """A pane's CLI has been up for minutes without reaching /plan-mcp: the
+    windows badge it and toast, the bound chats get one notice."""
+    await broadcast(make_event("mcp.never_connected", {
+        "pane_id": entry.pane_id,
+        "name": entry.name,
+        "workspace_path": entry.workspace_path,
+        "agent_key": entry.agent_key,
+    }))
+    from .channels import get_manager
+
+    manager = get_manager()
+    if manager is not None:
+        await manager.notify_mcp_never_connected(entry.name)
 
 
 async def _sweep_ownerless_ptys_once(now: float | None = None) -> list[str]:
@@ -2596,6 +2645,8 @@ async def _start_log_watcher() -> None:
     from . import acp_switch
 
     acp_switch.apply_settings(ui_settings_store.get())
+    # The `rustCliRuntime` setting (experimental, no Settings toggle yet); off unless set.
+    _cli_runtime.apply_settings(ui_settings_store.get())
     # Per-pane watch files hold message text in the clear and belong to panes
     # that died with the previous process. Only a startup sweep ever removes
     # the ones a killed backend left behind.
@@ -2678,6 +2729,17 @@ async def _start_log_watcher() -> None:
     # Opt-in session-log archive (off by default; see session_archive.py).
     global _session_archive_task
     _session_archive_task = asyncio.create_task(_session_archive_loop())
+
+    # Panes whose CLI never reached /plan-mcp (2026-11-12 mass restore): tell
+    # the windows and the bound chats once per pane.
+    from . import mcp_connect_watch
+
+    global _mcp_connect_watch_task, _parked_message_watch_task
+    _mcp_connect_watch_task = asyncio.create_task(mcp_connect_watch.run(
+        _notify_mcp_never_connected, _notify_mcp_connected,
+    ))
+    # A cli_send parked on a restore placeholder for 10 minutes: tell the user.
+    _parked_message_watch_task = asyncio.create_task(_parked_message_watch())
 
     # Frozen onefile build only: keep the extraction directory from being
     # purged as idle temp while the backend stays up (see frozen_env).
@@ -2965,6 +3027,18 @@ async def _stop_log_watcher() -> None:
     _credential_watcher = None
 
 
+@app.on_event("shutdown")
+async def _stop_cli_runtime() -> None:
+    """Stop the Rust CLI runtime's process, if the switch ever started one.
+
+    Its own handler, registered after _stop_log_watcher: the watcher, whose
+    readers call the runtime, has stopped by then. Off the loop, since it waits
+    for the process to go. Should the handler before it raise, this one does
+    not run; the process then ends when its stdin closes with the backend.
+    """
+    await asyncio.to_thread(_cli_runtime.shutdown)
+
+
 def _default_pool_reading(loop: asyncio.AbstractEventLoop) -> dict[str, int]:
     """The shared default executor's size and backlog. It is created lazily,
     so before the first to_thread it reads as empty. Private attributes of
@@ -3005,6 +3079,8 @@ async def health() -> dict[str, Any]:
         body["diagnostics"] = {
             "loop_lag_ms": await _loop_lag_ms(loop),
             "default_pool": _default_pool_reading(loop),
+            # The switch, the process, and who answered each CLI's reader calls.
+            "cli_runtime": _cli_runtime.status(),
         }
     except Exception as err:  # noqa: BLE001 — fail open
         log.debug("health diagnostics unavailable: %s", err)
