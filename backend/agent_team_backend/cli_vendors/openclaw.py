@@ -74,6 +74,7 @@ from ..log_readers.base import (
 )
 from ._declared import declared
 from .base import Dep, ExtensionsSpec, VendorSpec
+from .base import USER_SCOPE, MemorySource
 from ..usage_common import _epoch_to_iso, _num
 
 log = logging.getLogger("agent_team_backend.log_readers.openclaw")
@@ -476,7 +477,16 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
     return True if found is None else found
 
 
+# Instruction files: bootstrap files come from the agent workspace
+# (~/.openclaw/workspace; OPENCLAW_WORKSPACE_DIR / profile relocate it), not
+# from the TUI's cwd (docs/concepts/agent-workspace, read 2026-11-07).
+_MEMORY_SOURCES = (
+    MemorySource("openclaw", USER_SCOPE, (".openclaw", "workspace", "AGENTS.md"), canonical=True),
+    MemorySource("openclaw", USER_SCOPE, (".openclaw", "workspace", "SOUL.md")),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     key="openclaw",
     label="OpenClaw",
     extensions=ExtensionsSpec(

@@ -81,6 +81,7 @@ from ..log_readers.base import (
 )
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -822,7 +823,25 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".cursor", "hooks.json"), "Cursor hook", section=("hooks",)),
 ))
 
+# Instruction files: rules live in .cursor/rules/**/*.mdc; it also reads the
+# other agents' project files verbatim.
+_MEMORY_SOURCES = (
+    MemorySource("cursor", PROJECT_SCOPE, (".cursor", "rules"), glob="**/*.mdc"),
+    MemorySource("cursor", PROJECT_SCOPE, ("AGENTS.md",)),
+    MemorySource("cursor", PROJECT_SCOPE, ("CLAUDE.md",)),
+    MemorySource("cursor", PROJECT_SCOPE, ("CLAUDE.local.md",)),
+    MemorySource("cursor", PROJECT_SCOPE, (".cursorrules",)),
+    # cursor has no user-scope loader: loadRulesFromDirAndAncestors walks up to
+    # the filesystem root, so the home tree is reached only while the workspace
+    # lives under it -- true for a normal project, false on an external volume.
+    MemorySource("cursor", USER_SCOPE, (".cursor", "rules"), glob="**/*.mdc"),
+    MemorySource("cursor", USER_SCOPE, ("AGENTS.md",)),
+    MemorySource("cursor", USER_SCOPE, ("CLAUDE.md",)),
+    MemorySource("cursor", USER_SCOPE, ("CLAUDE.local.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="cursor",
     # The web quota endpoint is not evidence of the CLI's inference hosts.

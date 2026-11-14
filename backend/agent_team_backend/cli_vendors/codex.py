@@ -33,6 +33,7 @@ import psutil
 
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import AccountSwitchSpec, Dep, McpWiring, SkillsWiring, VendorRuntimeContext, VendorSpec, command_text
 from ..applog import app_data_dir
 from ..skills_store import SkillsStore
@@ -1962,7 +1963,15 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".codex", "hooks.json"), "Codex hook", section=("hooks",), native_consent="hook-trust"),
 ))
 
+# Instruction files: AGENTS.md, with AGENTS.override.md replacing it per directory.
+_MEMORY_SOURCES = (
+    MemorySource("codex", USER_SCOPE, (".codex", "AGENTS.md"), canonical=True),
+    MemorySource("codex", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("codex", PROJECT_SCOPE, ("AGENTS.override.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="codex",
     # Built-in OpenAI API and ChatGPT service defaults (verified 2026-09-21):

@@ -54,6 +54,7 @@ import re
 
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -1088,7 +1089,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("npm-list", (".config", "opencode", "opencode.jsonc"), "opencode plugin", section=("plugin",)),
 ))
 
+# Instruction files: same loader family as kilo.
+_MEMORY_SOURCES = (
+    MemorySource("opencode", USER_SCOPE, (".config", "opencode", "AGENTS.md"), canonical=True),
+    MemorySource("opencode", USER_SCOPE, (".claude", "CLAUDE.md")),
+    MemorySource("opencode", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("opencode", PROJECT_SCOPE, ("CLAUDE.md",)),
+    MemorySource("opencode", PROJECT_SCOPE, ("CONTEXT.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="opencode",
     # Arbitrary provider config; a selected quota provider is not a CLI host set.

@@ -114,6 +114,7 @@ import time
 from .. import osplat
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, MemorySource
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -1452,7 +1453,15 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks-dir", (".copilot", "hooks"), "Copilot hook"),
 ))
 
+# Instruction files: `copilot init` writes the .github file; AGENTS.md is loaded
+# too ("--no-custom-instructions ... from AGENTS.md and related files").
+_MEMORY_SOURCES = (
+    MemorySource("copilot", PROJECT_SCOPE, (".github", "copilot-instructions.md"), canonical=True),
+    MemorySource("copilot", PROJECT_SCOPE, ("AGENTS.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="copilot",
     # Enterprise hosts/model routing have no verified default CLI host set here.

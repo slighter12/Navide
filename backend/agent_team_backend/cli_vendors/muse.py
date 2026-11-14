@@ -134,6 +134,7 @@ from ..log_readers.base import (
 )
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -757,7 +758,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
         section=("plugins",), native_consent="capability-approve"),
 ))
 
+# Instruction files: $XDG_CONFIG_HOME/muse (default ~/.config/muse), then every
+# level from the VCS root down. CLAUDE.md is read only where AGENTS.md is absent.
+_MEMORY_SOURCES = (
+    MemorySource("muse", USER_SCOPE, (".config", "muse", "AGENTS.md"), canonical=True),
+    MemorySource("muse", USER_SCOPE, (".config", "muse", "CLAUDE.md")),
+    MemorySource("muse", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("muse", PROJECT_SCOPE, ("CLAUDE.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="muse",
     # Login/usage observations do not establish Muse's CLI service host set.

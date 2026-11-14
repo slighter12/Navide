@@ -97,6 +97,7 @@ import time
 from pathlib import Path
 
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, MemorySource
 from ._declared import declared
 from .base import AccountSwitchSpec, Dep, VendorSpec
 
@@ -322,7 +323,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("plugin-dirs", (".minimax", "plugins"), "MiniMax Code plugin"),
 ))
 
+# Instruction files: `mcode init .` writes AGENTS.md from a directory analysis,
+# which is the only instruction file the CLI documents. No user-scope row: the
+# data dir (~/.minimax, $MINIMAX_DATA_DIR) holds config.yaml, auth and the
+# session SQLite, and nothing observed there is an instruction file --
+# `agents/` is agent DEFINITIONS (agent.md per built-in agent), not memory.
+_MEMORY_SOURCES = (
+    MemorySource("mcode", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="mcode",
     # Region/environment auth routing is known; service hosts are not verified.

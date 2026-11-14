@@ -39,6 +39,7 @@ hook.
 from __future__ import annotations
 
 from ._declared import declared
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     Dep,
     ExtensionsSpec,
@@ -62,7 +63,17 @@ def _install_hooks(port_file: str):
     return install_hooks(port_file)
 
 
+# Instruction files: steering files, global under the home and per workspace,
+# plus AGENTS.md at the workspace root (kiro.dev/docs/steering, read
+# 2026-11-12 -- docs only, no binary installed).
+_MEMORY_SOURCES = (
+    MemorySource("kiro", USER_SCOPE, (".kiro", "steering"), glob="*.md"),
+    MemorySource("kiro", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("kiro", PROJECT_SCOPE, (".kiro", "steering"), glob="*.md"),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     key="kiro",
     label="Kiro CLI (AWS)",
     extensions=ExtensionsSpec(

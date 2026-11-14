@@ -78,6 +78,7 @@ from ..log_readers.base import (
 )
 from ._declared import declared
 from .base import Dep, ExtensionsSpec, VendorRuntimeContext, VendorSpec
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from ..osplat import platform_id as _platform_id
 from ..usage_common import _epoch_to_iso
 
@@ -449,7 +450,21 @@ def _session_exists(workspace_path: str, session_id: str) -> bool:
     return True if found is None else found
 
 
+# Instruction files: one project file per session, first match of .hermes.md /
+# HERMES.md (up to the git root), AGENTS.override.md, AGENTS.md (merged git
+# root -> cwd), CLAUDE.md, .cursorrules; SOUL.md only from the Hermes home
+# (docs/user-guide/features/context-files, read 2026-11-07).
+_MEMORY_SOURCES = (
+    MemorySource("hermes", USER_SCOPE, (".hermes", "SOUL.md"), canonical=True),
+    MemorySource("hermes", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("hermes", PROJECT_SCOPE, (".hermes.md",)),
+    MemorySource("hermes", PROJECT_SCOPE, ("HERMES.md",)),
+    MemorySource("hermes", PROJECT_SCOPE, ("AGENTS.override.md",)),
+    MemorySource("hermes", PROJECT_SCOPE, ("CLAUDE.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     key="hermes",
     label="Hermes Agent",
     extensions=ExtensionsSpec(

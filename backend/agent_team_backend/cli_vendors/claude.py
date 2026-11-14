@@ -37,6 +37,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .. import osplat
 from ._declared import declared, resume_id
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -1594,7 +1595,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".claude", "settings.json"), "Claude hook", section=("hooks",)),
 ))
 
+# Instruction files: ~/.claude/CLAUDE.md plus the project file and its
+# untracked sibling; nested CLAUDE.md files load per directory (not enumerated).
+_MEMORY_SOURCES = (
+    MemorySource("claude", USER_SCOPE, (".claude", "CLAUDE.md"), canonical=True),
+    MemorySource("claude", PROJECT_SCOPE, ("CLAUDE.md",), canonical=True),
+    MemorySource("claude", PROJECT_SCOPE, ("CLAUDE.local.md",)),
+    MemorySource("claude", PROJECT_SCOPE, (".claude", "CLAUDE.md")),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="claude",
     # Official standalone CLI network requirements (verified 2026-09-21):

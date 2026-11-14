@@ -227,6 +227,60 @@ def test_save_and_read_refuse_anything_over_the_size_limit(tmp_path: Path) -> No
         native_memory.read(str(target), home)
 
 
+# ---- the table is assembled from the vendors -------------------------------
+
+#: `native_memory.MEMORY_SOURCES` as main had it, before each CLI's rows moved
+#: onto its `VendorSpec.memory_sources`: [agent, scope, relative, canonical, glob].
+MAIN_SOURCES = json.loads((Path(__file__).parent / "native_memory_sources_main.json").read_text(encoding="utf-8"))
+
+
+def _rows(sources) -> list[list[Any]]:
+    return [[s.agent, s.scope, list(s.relative), s.canonical, s.glob] for s in sources]
+
+
+def test_every_row_is_declared_on_the_vendor_it_names() -> None:
+    for key, spec in VENDORS.items():
+        for source in spec.memory_sources:
+            assert source.agent == key, f"{key} declares a row for {source.agent}"
+
+
+def test_the_assembled_table_has_main_s_entries_and_each_cli_s_order() -> None:
+    recorded_agents = {row[0] for row in MAIN_SOURCES}
+    assembled = [row for row in _rows(native_memory.MEMORY_SOURCES) if row[0] in recorded_agents]
+    # The same entries, none added or dropped...
+    assert len(assembled) == len(MAIN_SOURCES) == 87
+    assert sorted(assembled, key=repr) == sorted(MAIN_SOURCES, key=repr)
+    # ...and each CLI's rows in the order they had. (A CLI declared later adds
+    # its own rows and needs no edit here.)
+    for agent in recorded_agents:
+        assert [r for r in assembled if r[0] == agent] == [r for r in MAIN_SOURCES if r[0] == agent], agent
+
+
+def test_which_cli_comes_first_in_the_table_is_not_observable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The table is assembled in registry order; main's was in its own. The
+    result of a scan is the same either way: every row's file exists below, and
+    `scan` and `candidates` give the same answer from either table."""
+    home, workspace = _home(tmp_path), tmp_path / "workspace"
+    workspace.mkdir()
+    for source in native_memory.MEMORY_SOURCES:
+        root = home if source.scope == native_memory.USER_SCOPE else workspace
+        if source.glob:
+            _write(root, (*source.relative, "rule.mdc" if source.glob.endswith("mdc") else "rule.md"))
+        else:
+            _write(root, source.relative)
+    now = [f.as_dict() for f in native_memory.scan(home, workspace)]
+    now_allowed = native_memory.candidates(home, workspace)
+
+    main_order = tuple(
+        native_memory.MemorySource(agent, scope, tuple(relative), canonical, glob)
+        for agent, scope, relative, canonical, glob in MAIN_SOURCES
+    )
+    monkeypatch.setattr(native_memory, "MEMORY_SOURCES", main_order)
+
+    assert [f.as_dict() for f in native_memory.scan(home, workspace)] == now
+    assert native_memory.candidates(home, workspace) == now_allowed
+
+
 # ---- agent coverage -------------------------------------------------------
 
 

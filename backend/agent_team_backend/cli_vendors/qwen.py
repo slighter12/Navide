@@ -41,6 +41,7 @@ from ..log_readers.base import (
 from ..log_readers.base import encode_claude_cwd
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -970,7 +971,16 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".qwen", "settings.json"), "Qwen hook", section=("hooks",)),
 ))
 
+# Instruction files: hierarchical QWEN.md, plus the private project-local file.
+_MEMORY_SOURCES = (
+    MemorySource("qwen", USER_SCOPE, (".qwen", "QWEN.md"), canonical=True),
+    MemorySource("qwen", PROJECT_SCOPE, ("QWEN.md",), canonical=True),
+    MemorySource("qwen", PROJECT_SCOPE, (".qwen", "QWEN.local.md")),
+    MemorySource("qwen", PROJECT_SCOPE, ("AGENTS.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="qwen",
     # OpenAI-compatible/custom providers; quota hosts cover another interface.

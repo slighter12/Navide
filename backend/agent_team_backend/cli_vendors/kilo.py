@@ -24,6 +24,7 @@ from typing import Any
 
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -327,7 +328,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("npm-list", (".config", "kilo", "kilo.jsonc"), "Kilo plugin", section=("plugin",)),
 ))
 
+# Instruction files: its own config dir, and ~/.claude/CLAUDE.md unless disabled.
+_MEMORY_SOURCES = (
+    MemorySource("kilo", USER_SCOPE, (".config", "kilo", "AGENTS.md"), canonical=True),
+    MemorySource("kilo", USER_SCOPE, (".claude", "CLAUDE.md")),
+    MemorySource("kilo", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("kilo", PROJECT_SCOPE, ("CLAUDE.md",)),
+    MemorySource("kilo", PROJECT_SCOPE, ("CONTEXT.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="kilo",
     # OpenCode fork with arbitrary providers; quota base is not a CLI host set.

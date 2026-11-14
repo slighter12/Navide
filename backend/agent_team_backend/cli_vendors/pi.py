@@ -46,6 +46,7 @@ import re
 
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     AccountSwitchSpec,
     Dep,
@@ -856,7 +857,17 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("npm-list", (".pi", "agent", "settings.json"), "Pi package", section=("packages",)),
 ))
 
+# Instruction files: ~/.pi/agent/ and every ancestor directory, override first.
+_MEMORY_SOURCES = (
+    MemorySource("pi", USER_SCOPE, (".pi", "agent", "AGENTS.md"), canonical=True),
+    MemorySource("pi", USER_SCOPE, (".pi", "agent", "CLAUDE.md")),
+    MemorySource("pi", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("pi", PROJECT_SCOPE, ("AGENTS.override.md",)),
+    MemorySource("pi", PROJECT_SCOPE, ("CLAUDE.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="pi",
     # Open-ended provider/model config; OpenRouter quota is not a CLI host set.

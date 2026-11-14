@@ -49,6 +49,7 @@ from pathlib import Path
 
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import AccountSwitchSpec, Dep, PlatformInstall, VendorSpec
 from ..osplat import platform_id as _platform_id
 from ..log_readers.base import (
@@ -536,7 +537,22 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("hooks", (".factory", "settings.json"), "Droid hook", section=("hooks",)),
 ))
 
+# Instruction files: three personal dot dirs (the bare home is explicitly
+# skipped), and the same dirs per project level. The Claude.md/Agents.md/
+# agents.md spellings are the same files on a case-insensitive volume, so one row.
+_MEMORY_SOURCES = (
+    MemorySource("droid", USER_SCOPE, (".factory", "AGENTS.md"), canonical=True),
+    MemorySource("droid", USER_SCOPE, (".factory", "CLAUDE.md")),
+    MemorySource("droid", USER_SCOPE, (".agents", "AGENTS.md")),
+    MemorySource("droid", USER_SCOPE, (".agent", "AGENTS.md")),
+    MemorySource("droid", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("droid", PROJECT_SCOPE, ("CLAUDE.md",)),
+    MemorySource("droid", PROJECT_SCOPE, (".factory", "AGENTS.md")),
+    MemorySource("droid", PROJECT_SCOPE, (".agents", "AGENTS.md")),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="droid",
     # Factory/custom model service destinations have not been verified here.

@@ -33,6 +33,7 @@ import time
 
 from ._declared import declared
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from .base import (
     PlatformInstall,
     AccountSwitchSpec,
@@ -822,7 +823,21 @@ _EXTENSIONS = ExtensionsSpec(
     note="agy has plugins (`agy plugin list`), but where it keeps them is not verified yet.",
 )
 
+# Instruction files: readGlobalRules stats both ~/.gemini and ~/.gemini/config
+# for each of the two filenames; the project tier walks cwd up to the git
+# root. The .agents/rules aliases (.agent, _agents, _agent) are not listed.
+_MEMORY_SOURCES = (
+    MemorySource("antigravity", USER_SCOPE, (".gemini", "GEMINI.md"), canonical=True),
+    MemorySource("antigravity", USER_SCOPE, (".gemini", "AGENTS.md")),
+    MemorySource("antigravity", USER_SCOPE, (".gemini", "config", "GEMINI.md")),
+    MemorySource("antigravity", USER_SCOPE, (".gemini", "config", "AGENTS.md")),
+    MemorySource("antigravity", PROJECT_SCOPE, ("GEMINI.md",), canonical=True),
+    MemorySource("antigravity", PROJECT_SCOPE, ("AGENTS.md",)),
+    MemorySource("antigravity", PROJECT_SCOPE, (".agents", "rules"), glob="*.md"),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="antigravity",
     # Quota/OAuth constants above do not establish CLI service expectations.

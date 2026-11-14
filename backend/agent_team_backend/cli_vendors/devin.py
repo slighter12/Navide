@@ -52,6 +52,7 @@ from pathlib import Path
 
 from ._declared import declared
 from .base import Dep, ExtensionsSpec, VendorRuntimeContext, VendorSpec
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from ..osplat import platform_id as _platform_id
 
 
@@ -63,7 +64,23 @@ def _config_dir(ctx: VendorRuntimeContext, platform: str | None = None) -> Path:
     return ctx.home / ".config" / "devin"
 
 
+# Instruction files: every standard file is an always-on rule, user and project
+# loaded together; ~/.config/devin/AGENTS.md is %APPDATA%\devin on Windows
+# (docs.devin.ai/cli/extensibility/rules, read 2026-11-07 -- docs only).
+_MEMORY_SOURCES = (
+    MemorySource("devin", USER_SCOPE, (".config", "devin", "AGENTS.md"), canonical=True),
+    MemorySource("devin", USER_SCOPE, (".devin", "global_rules.md")),
+    MemorySource("devin", USER_SCOPE, (".devin", "rules"), glob="*.md"),
+    MemorySource("devin", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("devin", PROJECT_SCOPE, ("AGENTS.local.md",)),
+    MemorySource("devin", PROJECT_SCOPE, ("AGENT.md",)),
+    MemorySource("devin", PROJECT_SCOPE, ("CLAUDE.md",)),
+    MemorySource("devin", PROJECT_SCOPE, (".devin", "global_rules.md")),
+    MemorySource("devin", PROJECT_SCOPE, (".devin", "rules"), glob="*.md"),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     key="devin",
     label="Devin CLI (Cognition)",
     extensions=ExtensionsSpec(

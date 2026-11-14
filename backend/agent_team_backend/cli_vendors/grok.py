@@ -59,6 +59,7 @@ from uuid import UUID
 
 from .. import osplat
 from .base import ExtensionsSource, ExtensionsSpec  # noqa: F401
+from .base import PROJECT_SCOPE, USER_SCOPE, MemorySource
 from ._declared import declared
 from .base import AccountSwitchSpec, Dep, PlatformInstall, McpServerConfig, McpValue, McpWiring, SkillsWiring, VendorSpec
 from ..usage_common import _num, _snapshot, _window
@@ -779,7 +780,15 @@ _EXTENSIONS = ExtensionsSpec(sources=(
     ExtensionsSource("plugin-dirs", (".grok", "installed-plugins"), "Grok plugin"),
 ))
 
+# Instruction files: ~/.grok/AGENTS.md, then AGENTS.override.md/AGENTS.md per level.
+_MEMORY_SOURCES = (
+    MemorySource("grok", USER_SCOPE, (".grok", "AGENTS.md"), canonical=True),
+    MemorySource("grok", PROJECT_SCOPE, ("AGENTS.md",), canonical=True),
+    MemorySource("grok", PROJECT_SCOPE, ("AGENTS.override.md",)),
+)
+
 SPEC = VendorSpec(
+    memory_sources=_MEMORY_SOURCES,
     extensions=_EXTENSIONS,
     key="grok",
     # auth.x.ai proves login routing only; grok-build service hosts unverified.
