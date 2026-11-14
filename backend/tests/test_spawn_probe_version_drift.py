@@ -64,10 +64,15 @@ def test_every_vendor_has_a_verified_version_or_says_why_it_has_none() -> None:
         )
     # The ones main left unverified still are (OpenClaw and Hermes Agent, wired
     # from their docs; Devin CLI and Kiro CLI, docs read 2026-11-07 and
-    # 2026-11-12, no binary installed), and main's sixteen still are verified.
+    # 2026-11-12, no binary installed), and main's sixteen still are verified,
+    # by key: a CLI added later is in neither set and needs no edit here.
     unverified = {key for key, spec in VENDORS.items() if spec.cli_unverified_reason}
     assert {"openclaw", "hermes", "devin", "kiro"} <= unverified
-    assert len(_VERIFIED) >= 16
+    verified = {key for key, _ in _VERIFIED}
+    assert {
+        "aider", "antigravity", "claude", "codex", "copilot", "cursor", "droid", "goose",
+        "grok", "kilo", "kimi", "mcode", "muse", "opencode", "pi", "qwen",
+    } <= verified
 
 
 def test_goose_and_kimi_compare_against_their_cli_wide_version() -> None:

@@ -285,6 +285,52 @@ def test_which_cli_comes_first_in_the_table_is_not_observable(tmp_path: Path, mo
     assert native_memory.candidates(home, workspace) == now_allowed
 
 
+def test_a_workspace_that_is_a_cli_s_user_directory_lists_the_file_under_the_first_row_that_reaches_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The one case where the order of the table shows. `~/.codex` as the
+    workspace: `~/.codex/AGENTS.md` is codex's user row (`.codex/AGENTS.md`) and
+    every project row `AGENTS.md`. `candidates` keeps the scope and the relative
+    path of the first row to reach a path, and the table is in registry order.
+
+    This pins the registry-order result. Main's order listed it under User as
+    `.codex/AGENTS.md`; that is a known difference (REDESIGN-REPORT.md, "Rust
+    differences from main"). The set of allowed paths is the same either way."""
+    home = _home(tmp_path)
+    workspace = home / ".codex"
+    target = _write(workspace, ("AGENTS.md",))
+
+    [listed] = [f for f in native_memory.scan(home, workspace) if f.path == str(target)]
+    assert (listed.scope, listed.relative) == (native_memory.PROJECT_SCOPE, "AGENTS.md")
+    assert "codex" in listed.readers, "codex still reads it, through its user row"
+
+    # With the rows in main's order the label differs; nothing else does.
+    main_order = tuple(
+        native_memory.MemorySource(agent, scope, tuple(relative), canonical, glob)
+        for agent, scope, relative, canonical, glob in MAIN_SOURCES
+    )
+    recorded_agents = {row[0] for row in MAIN_SOURCES}
+    added = tuple(s for s in native_memory.MEMORY_SOURCES if s.agent not in recorded_agents)
+    allowed_now = set(native_memory.candidates(home, workspace))
+    monkeypatch.setattr(native_memory, "MEMORY_SOURCES", main_order + added)
+    [on_main] = [f for f in native_memory.scan(home, workspace) if f.path == str(target)]
+    assert (on_main.scope, on_main.relative) == (native_memory.USER_SCOPE, ".codex/AGENTS.md")
+    assert on_main.readers == listed.readers
+    assert set(native_memory.candidates(home, workspace)) == allowed_now
+
+
+def test_every_declared_row_is_a_relative_path_of_one_of_the_two_scopes() -> None:
+    """`memory_sources` is the allow-list of files Settings may read and write,
+    and a user-scope row is not checked for containment: the shape is."""
+    for key, spec in VENDORS.items():
+        for source in spec.memory_sources:
+            where = f"{key}: {source}"
+            assert source.scope in (native_memory.USER_SCOPE, native_memory.PROJECT_SCOPE), where
+            assert source.relative, where
+            for part in source.relative:
+                assert part and part != "..", where
+                assert not Path(part).is_absolute() and "/" not in part and "\\" not in part, where
+
+
 # ---- agent coverage -------------------------------------------------------
 
 

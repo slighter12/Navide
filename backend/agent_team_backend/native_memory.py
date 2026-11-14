@@ -111,9 +111,14 @@ class MemoryConflictError(RuntimeError):
 #: ``VendorSpec.memory_sources``, in registry order (verified against the
 #: installed binary or its bundled docs, never against documentation alone;
 #: see each ``cli_vendors/<key>.py``). A file read by several CLIs has one row
-#: per reader; ``scan`` merges them. Which CLI comes first is not observable:
-#: readers are sorted, ``canonical`` is merged by OR, and ``scan`` sorts its
-#: result.
+#: per reader; ``scan`` merges them. The order is not observable except in one
+#: case: ``candidates`` keeps the scope and relative path of the first row to
+#: reach a path, so when the workspace is itself a CLI's user directory (``~/.codex``)
+#: its ``AGENTS.md`` is listed under the first project row's label (registry
+#: order: Project ``AGENTS.md``), where main listed it under User
+#: ``.codex/AGENTS.md``. Readers are sorted and ``canonical`` is merged by OR,
+#: and the set of allowed paths does not depend on the order. Pinned by
+#: ``test_native_memory.py``.
 MEMORY_SOURCES: tuple[MemorySource, ...] = tuple(
     source for spec in VENDORS.values() for source in spec.memory_sources
 )

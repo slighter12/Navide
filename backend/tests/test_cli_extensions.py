@@ -63,8 +63,15 @@ def test_every_vendor_declares_where_its_extensions_live_or_says_it_has_none() -
         else:
             assert isinstance(spec.extensions, ExtensionsSpec), key
             assert not spec.extensions_none_reason, f"{key} declares both"
-    # Main's one CLI with none.
+    # Main's one CLI with none, and the nineteen that declare one, by key: a
+    # CLI added later is in neither set and needs no edit here.
     assert VENDORS["aider"].extensions is None and VENDORS["aider"].extensions_none_reason
+    declared_on_main = {
+        "antigravity", "claude", "codex", "copilot", "cursor", "devin", "kiro", "droid", "goose", "grok",
+        "hermes", "kilo", "kimi", "mcode", "muse", "opencode", "openclaw", "pi", "qwen",
+    }
+    for key in declared_on_main:
+        assert isinstance(VENDORS[key].extensions, ExtensionsSpec), f"{key} declared an extension spec on main"
 
 
 def test_the_vendor_list_hides_aider_and_marks_unread_clis_unsupported(tmp_path: Path) -> None:
