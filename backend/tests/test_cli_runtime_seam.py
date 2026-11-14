@@ -23,6 +23,7 @@ import pytest
 
 from agent_team_backend import cli_runtime, osplat
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
+from tests import cli_runtime_build
 from tests import test_cli_runtime_parity as parity
 
 pytestmark = pytest.mark.skipif(osplat.platform_id == "win32", reason="the stand-in processes are #! scripts")
@@ -164,6 +165,116 @@ def test_a_failed_process_is_not_restarted_before_its_delay(tmp_path: Path, monk
     assert seam.status()["failures"] == 1
 
 
+#: Answers the handshake, reads `sys.argv[0].count` usage requests without
+#: answering any, then exits: every caller is waiting when it dies.
+DIES_WITH_CALLERS_WAITING = """
+waiting = 0
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["op"] == "observes":
+        print(json.dumps({"id": request["id"], "ok": True, "result": {"qwen": {"cwd": "written"}}}), flush=True)
+        continue
+    waiting += 1
+    if waiting == int(open(sys.argv[0] + ".count").read()):
+        sys.exit(3)
+"""
+
+
+def test_one_dead_process_is_one_failure_however_many_callers_waited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                     seam) -> None:
+    callers = cli_runtime.BREAKER_FAILURES + 3
+    exe = _stand_in(tmp_path, DIES_WITH_CALLERS_WAITING)
+    Path(str(exe) + ".count").write_text(str(callers), encoding="utf-8")
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(exe))
+    monkeypatch.setattr(cli_runtime, "BACKOFF_BASE_S", 1000.0)
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+    # One call first, so the process is up and has said what it observes:
+    # every thread below then goes straight to its own request.
+    assert cli_runtime._client_for_call() is not None and cli_runtime._observed(cli_runtime._client) == {
+        "qwen": {"cwd": "written"}}
+
+    start = threading.Barrier(callers)
+    results: list[Any] = []
+
+    def call() -> None:
+        start.wait(10.0)
+        results.append(reader.parse_incremental(chat, {}))
+
+    threads = [threading.Thread(target=call, daemon=True) for _ in range(callers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(15.0)
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(results) == callers and all(result.events == [] for result in results), "Python answered every caller"
+
+    status = seam.status()
+    assert status["failures"] == 1, "the process died once"
+    assert status["state"] == "waiting-to-restart", "one death does not trip the breaker"
+    assert status["calls"]["qwen"]["fallback"] == callers
+
+
+def test_a_call_that_arrives_as_the_process_dies_does_not_wait_out_its_timeout(tmp_path: Path) -> None:
+    client = cli_runtime._Client(_stand_in(tmp_path, STALLS))
+
+    class DiesBeforeTheNextId:
+        """Between a call's start and its registration, the process goes."""
+
+        def __next__(self) -> int:
+            client.kill()
+            _wait_for(lambda: client.dead)
+            return 1
+
+    client._ids = DiesBeforeTheNextId()
+    started = time.monotonic()
+    with pytest.raises(OSError, match="exited"):
+        client.call("usage", 30.0)
+    assert time.monotonic() - started < 5.0
+    client.close()
+
+
+#: Answers every reader call with an error of the kind a panic gives.
+ANSWERS_PANIC = """
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["op"] == "observes":
+        print(json.dumps({"id": request["id"], "ok": True, "result": {"qwen": {"cwd": "written"}}}), flush=True)
+    else:
+        print(json.dumps({"id": request["id"], "ok": False, "kind": "panic", "error": "panic: a rule"}), flush=True)
+"""
+
+
+def test_an_error_answered_on_every_poll_is_logged_once_and_counted_every_time(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture) -> None:
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(_stand_in(tmp_path, ANSWERS_PANIC)))
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+    with caplog.at_level(logging.WARNING, logger=cli_runtime.log.name):
+        for _ in range(5):
+            assert reader.parse_incremental(chat, {}).events == []
+    assert len([r for r in caplog.records if "could not answer" in r.getMessage()]) == 1
+    assert seam.status()["calls"]["qwen"]["fallback"] == 5
+    assert seam.status()["state"] == "running", "an error answer is not a dead process"
+
+
+def test_a_call_after_shutdown_does_not_start_the_process_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                seam) -> None:
+    exe = _stand_in(tmp_path, STALLS)
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(exe))
+    monkeypatch.setattr(cli_runtime, "CALL_TIMEOUT_S", 0.3)
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+    assert cli_runtime._client_for_call() is not None
+    seam.shutdown()
+
+    assert reader.parse_incremental(chat, {}).events == []
+    assert cli_runtime._client is None and _seen(exe) == [], "no process was asked anything"
+    # Applying the switch is what lets it start again.
+    seam.apply(True)
+    assert cli_runtime._client_for_call() is not None
+
+
 def test_switched_on_without_a_binary_says_so_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam,
                                                    caplog: pytest.LogCaptureFixture) -> None:
     monkeypatch.setenv(cli_runtime.BINARY_ENV, str(tmp_path / "missing"))
@@ -198,8 +309,7 @@ def test_the_binary_is_looked_up_like_the_other_sidecars(tmp_path: Path, monkeyp
 
 
 def test_status_counts_who_answered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
-    if cli_runtime.binary() is None:
-        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
+    cli_runtime_build.binary()
     scenario = parity._scenarios()["qwen_0_25"]
     seam.apply(True)
     parity._run(scenario, tmp_path, lambda: cli_runtime.wrap(cli_vendor("qwen").make_log_reader()), monkeypatch)
@@ -252,8 +362,7 @@ def no_read_problems():
 def test_what_the_schema_check_finds_reaches_the_readers_problem_registry(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, no_read_problems) -> None:
     """The runtime read the store; the CLI's status must say what main's reader would."""
-    if cli_runtime.binary() is None:
-        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
+    cli_runtime_build.binary()
     import sqlite3
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
@@ -290,8 +399,7 @@ def test_a_failing_query_is_the_readers_to_record_and_to_clear(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, no_read_problems) -> None:
     """The runtime declines a read whose query fails; main's reader makes it,
     records why, and keeps making it until it works and clears its entry."""
-    if cli_runtime.binary() is None:
-        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
+    cli_runtime_build.binary()
     import sqlite3
 
     from tests.vendors import test_opencode as builders
@@ -342,8 +450,7 @@ def test_a_failing_query_is_the_readers_to_record_and_to_clear(
 
 def test_what_the_reader_would_log_is_logged_once_through_its_own_logger(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture) -> None:
-    if cli_runtime.binary() is None:
-        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
+    cli_runtime_build.binary()
     # The scenario has a session no table gives a key (two polls read it).
     scenario = parity._scenarios()["openclaw_db"]
     seam.apply(True)

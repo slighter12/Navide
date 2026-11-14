@@ -99,11 +99,20 @@ _enabled = False
 # process is started, written to, read from or waited for.
 _state = threading.Lock()
 _client: "_Client | None" = None
+#: Every process that became `_client` has its own number, and
+#: `_failed_generation` is the newest one whose failure has been counted: the
+#: callers that were all waiting on one process report one death, not one each.
+_generation = 0
+_failed_generation = 0
 _failures = 0
 _failed_at = 0.0
 _retry_at = 0.0
 _breaker_open = False
+#: Set by `shutdown()`: no call starts the process again until the switch is applied.
+_stopping = False
 _no_binary_logged = False
+#: (CLI, kind) of the error answers already logged.
+_errors_logged: set[tuple[str, str]] = set()
 _counts: dict[str, dict[str, int]] = {}
 
 
@@ -113,11 +122,12 @@ def enabled() -> bool:
 
 def apply(on: bool) -> None:
     """Make the backend match the switch. Idempotent; never raises, never waits."""
-    global _enabled, _failures, _retry_at, _breaker_open, _no_binary_logged
+    global _enabled, _failures, _retry_at, _breaker_open, _stopping, _no_binary_logged
     _enabled = bool(on)
     with _state:
         # Flipping the switch is the way out of a tripped breaker.
-        _failures, _retry_at, _breaker_open = 0, 0.0, False
+        _failures, _retry_at, _breaker_open, _stopping = 0, 0.0, False, False
+        _errors_logged.clear()
         if not _enabled:
             _no_binary_logged = False
     if not _enabled:
@@ -135,8 +145,14 @@ def apply_settings(settings: Any) -> None:
 def shutdown() -> None:
     """Stop the process at backend shutdown (the setting is left as it is).
 
-    Waits up to a few seconds for the process to go: call it off the event loop.
+    A reader call that arrives afterwards (the token monitor and the ledgers
+    read from their own threads) is answered by Python: nothing starts the
+    process again until the switch is applied. Waits up to a few seconds for
+    the process to go: call it off the event loop.
     """
+    global _stopping
+    with _state:
+        _stopping = True
     closer = _drop_client()
     if closer is not None:
         closer.join(_CLOSE_GRACE_S + 1.0)
@@ -224,6 +240,8 @@ class _Client:
         self._waiting_lock = threading.Lock()
         self._outbox: "queue.SimpleQueue[bytes | None]" = queue.SimpleQueue()
         self.dead = False
+        #: Its number among the processes that became the current one (0: never did).
+        self.generation = 0
         #: What the process observes: CLI key -> {"cwd": form}. None until asked.
         self.observed: dict[str, dict] | None = None
         for target, name in ((self._write, "cli-runtime-write"), (self._read, "cli-runtime-read")):
@@ -263,9 +281,11 @@ class _Client:
         except (OSError, ValueError):
             pass
         finally:
-            # No more answers will come: wake everyone still waiting.
-            self.dead = True
+            # No more answers will come: wake everyone still waiting. `dead`
+            # is set under the lock a call registers under, so a call either
+            # is in `_waiting` here or sees `dead`.
             with self._waiting_lock:
+                self.dead = True
                 waiting, self._waiting = list(self._waiting.values()), {}
             for slot in waiting:
                 slot.put(None)
@@ -273,11 +293,11 @@ class _Client:
     def call(self, op: str, timeout: float, **fields: Any) -> dict:
         """The process's answer document. Raises OSError when it is gone and
         TimeoutError when it did not answer in time."""
-        if self.dead:
-            raise OSError("navide-cli-runtime exited")
         request_id = next(self._ids)
         slot: "queue.SimpleQueue[dict | None]" = queue.SimpleQueue()
         with self._waiting_lock:
+            if self.dead:
+                raise OSError("navide-cli-runtime exited")
             self._waiting[request_id] = slot
         self._outbox.put((json.dumps({"id": request_id, "op": op, **fields}) + "\n").encode("utf-8"))
         try:
@@ -332,12 +352,19 @@ def _reap(client: "_Client") -> None:
 
 def _process_failed(client: "_Client | None", err: BaseException) -> None:
     """A process died, stalled or would not start (``client`` None): end it,
-    and schedule (or give up on) the next start."""
-    global _client, _failures, _failed_at, _retry_at, _breaker_open
+    and schedule (or give up on) the next start.
+
+    One process is one failure. Killing it wakes every caller that was
+    waiting on it, and each of them comes here: only the first is counted."""
+    global _client, _failed_generation, _failures, _failed_at, _retry_at, _breaker_open
     now = time.monotonic()
     with _state:
-        if client is not None and _client is client:
-            _client = None
+        if client is not None:
+            if client.generation <= _failed_generation:
+                return
+            _failed_generation = client.generation
+            if _client is client:
+                _client = None
         if now - _failed_at > HEALTHY_AFTER_S:
             _failures = 0
         _failures += 1
@@ -359,9 +386,9 @@ def _process_failed(client: "_Client | None", err: BaseException) -> None:
 
 def _client_for_call() -> "_Client | None":
     """The running process, started if it may be; None means "use Python"."""
-    global _client
+    global _client, _generation
     with _state:
-        if not _enabled or _breaker_open:
+        if not _enabled or _breaker_open or _stopping:
             return None
         current = _client
         if current is not None and not current.dead:
@@ -383,11 +410,13 @@ def _client_for_call() -> "_Client | None":
         _process_failed(None, err)
         return None
     with _state:
-        if _enabled and _client is None:
+        if _enabled and not _stopping and _client is None:
+            _generation += 1
+            fresh.generation = _generation
             _client = fresh
             return fresh
-        # Switched off, or another thread started one, meanwhile.
-        winner = _client if _enabled else None
+        # Switched off, stopped, or another thread started one, meanwhile.
+        winner = _client if _enabled and not _stopping else None
     _reap(fresh)
     return winner
 
@@ -435,7 +464,14 @@ def _call(vendor: str, op: str, **fields: Any) -> "tuple[Any, dict] | None":
         _count(vendor, "unreadable")
     else:
         _count(vendor, "fallback")
-        log.warning("navide-cli-runtime could not answer %s for %s (%s): %s", op, vendor, kind, answer.get("error"))
+        # A read that fails this way fails on every poll: said once per CLI
+        # and kind (until the switch is applied again); `status()` counts all.
+        with _state:
+            said = (vendor, str(kind)) in _errors_logged
+            _errors_logged.add((vendor, str(kind)))
+        if not said:
+            log.warning("navide-cli-runtime could not answer %s for %s (%s): %s; further such answers are "
+                        "counted, not logged", op, vendor, kind, answer.get("error"))
     return None
 
 
