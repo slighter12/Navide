@@ -84,6 +84,16 @@ def _vendor_hidden_imports() -> set[str]:
     assert isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "collect_submodules"
     package = ast.literal_eval(call.args[0])
     assert package == "agent_team_backend.cli_vendors"
+    # A package that fails to import fails the build instead of collecting
+    # nothing, and the spec itself asserts the registry module was collected.
+    on_error = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords}.get("on_error")
+    assert on_error == "raise", "collect_submodules must be called with on_error='raise'"
+    registry_asserts = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Assert) and "agent_team_backend.cli_vendors.registry" in ast.unparse(node.test)
+        and "_vendor_modules" in ast.unparse(node.test)
+    ]
+    assert registry_asserts, "the spec no longer asserts that the collected list holds the registry module"
 
     hidden = next(kw.value for kw in _analysis_call().keywords if kw.arg == "hiddenimports")
     assert any(isinstance(n, ast.Name) and n.id == "_vendor_modules" for n in ast.walk(hidden)), (
@@ -91,7 +101,7 @@ def _vendor_hidden_imports() -> set[str]:
     )
     from PyInstaller.utils.hooks import collect_submodules
 
-    return set(collect_submodules(package))
+    return set(collect_submodules(package, on_error="raise"))
 
 
 def test_every_vendor_module_is_a_hidden_import():

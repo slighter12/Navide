@@ -41,7 +41,10 @@ _winpty_binaries, _winpty_datas = collect_winpty()
 # log_readers._MIGRATED_READERS.
 from PyInstaller.utils.hooks import collect_submodules
 
-_vendor_modules = collect_submodules('agent_team_backend.cli_vendors')
+# on_error='raise': a package that fails to import must fail the build, not
+# yield an empty list with one warning in a long log.
+_vendor_modules = collect_submodules('agent_team_backend.cli_vendors', on_error='raise')
+assert 'agent_team_backend.cli_vendors.registry' in _vendor_modules, 'the vendor modules were not collected'
 
 a = Analysis(
     ['run.py'],
