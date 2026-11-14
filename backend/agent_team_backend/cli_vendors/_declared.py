@@ -3,9 +3,11 @@
 ``native/navide-cli-runtime/src/vendors/<key>.rs`` declares a CLI once.
 ``cli_declarations.json`` (beside the package) is that declaration's launch
 and resume part, printed by ``navide-cli-runtime declarations launch`` and
-checked in (a test fails when it is not current), so the backend needs no
-binary to read it. A vendor module spreads ``declared(key)`` into its
-``VendorSpec`` instead of keeping its own copy of:
+checked in (the crate's ``tests/checked_in.rs`` fails when it is not what the
+source prints), so the backend needs no binary to read it. It is also the
+list of CLIs there are and their order (``registry.py``). A vendor module
+spreads ``declared(key)`` into its ``VendorSpec`` instead of keeping its own
+copy of:
 
 * whether a spawn may name a model or an effort, and the effort vocabulary;
 * the environment defaults a spawn adds and the home variables it strips;
@@ -14,8 +16,8 @@ binary to read it. A vendor module spreads ``declared(key)`` into its
   session it resumes (``resume_id``).
 
 The frontend's agent specs read the same output for the arguments themselves
-(``src/renderer/src/platform/plugin-shell/agents/_declared.ts``, from a copy
-generated beside it).
+(``src/renderer/src/platform/plugin-shell/agents/_declared.ts``, from the same
+output generated beside it as a typed constant).
 """
 
 from __future__ import annotations

@@ -1,20 +1,21 @@
 # Adding a CLI vendor
 
 Navide supports one CLI agent per vendor file. Adding a vendor is a
-self-contained PR: its declaration, two new spec files plus one registration
-line on each side, and the test lists and docs under
+self-contained PR: its declaration, two new spec files (found by their names;
+nothing registers them), and the test lists and docs under
 [Other hand-kept lists](#other-hand-kept-lists).
 You never need to read or modify the shared orchestration code.
 
 ## Declaration
 
 How the CLI is launched and resumed (program, flags, environment, resume
-syntax, label, kind) is declared once, in
-`native/navide-cli-runtime/src/vendors/<key>.rs`, and both spec files read it
-through `declared(<key>)` instead of retyping it. Write that file first, build
-the runtime and regenerate the two `cli_declarations.json` files:
-["The declaration: launch and resume, declared once"](en-US/cli-extension-guide.md#the-declaration-launch-and-resume-declared-once)
-has the five steps. Reading the CLI's records through the Rust runtime is a
+syntax, label, kind) and where it sits in the app's lists is declared once,
+in `native/navide-cli-runtime/src/vendors/<key>.rs`, and both spec files read
+it through `declared(<key>)` instead of retyping it. Write that file first
+and regenerate the two checked-in copies of the declarations
+(`NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in` in the crate):
+["Exactly which files a new CLI needs"](en-US/cli-extension-guide.md#exactly-which-files-a-new-cli-needs)
+has the steps. Reading the CLI's records through the Rust runtime is a
 separate, optional part of the same file, described in the section after it.
 
 ## Backend
@@ -24,7 +25,12 @@ separate, optional part of the same file, described in the section after it.
    the `SPEC`, spreading `**declared("<key>")` for the launch and resume
    fields. Every capability you leave at its default is treated as
    "unsupported" for your vendor — the app degrades gracefully.
-2. Register the spec in `cli_vendors/registry.py` (one line, alphabetical).
+2. Do not register it: `cli_vendors/registry.py` imports the module named
+   after each declared key, in the order the declarations give
+   (`order.registry`). Because that import is by name, add the module to the
+   `hiddenimports` of `backend/agent_team_backend.spec`
+   (`test_pyinstaller_spec.py` fails until you do); a module PyInstaller
+   leaves out is registered in the packaged app from its declaration alone.
 3. If the CLI writes local conversation logs, implement the log reader in
    your vendor file and set `make_log_reader`.
 4. Add `backend/agent_team_backend/log_readers/<key>.py`. Every registered
@@ -135,11 +141,11 @@ separate, optional part of the same file, described in the section after it.
    fill in the spec: `...declared('<key>')` for the label, default command,
    flags and resume syntax, then the capability flags — the template lists
    every optional field with pointers to the full docs in `agents/types.ts`.
-2. Register it in `agents/index.ts` (one line, display order).
-   Decide whether the vendor is a CLI or an Agent ("Two kinds of vendors" in
-   `docs/en-US/cli-extension-guide.md`) and set the spec's `kind` field:
-   `kind: 'agent'` for an Agent, left out for a CLI. It picks the ＋ menu
-   block the vendor is listed in.
+2. Do not register it: `agents/index.ts` finds every spec file and lists it
+   where the declaration says (`order.menu`). Whether the vendor is a CLI or
+   an Agent ("Two kinds of vendors" in `docs/en-US/cli-extension-guide.md`)
+   is the declaration's `kind`, which `declared()` hands to the spec. It
+   picks the ＋ menu block the vendor is listed in.
 3. Add a row to `vendors` in `src/renderer/src/components/CliAgentsHelp.vue`
    (Settings ▸ Help). It is a hand-maintained mirror, and
    `test_help_panel_sign_in_column_matches_login_command_args` compares its
@@ -160,7 +166,7 @@ separate, optional part of the same file, described in the section after it.
    list in `src/renderer/src/platform/plugin-shell/lib/cliPermission.test.ts`.
 8. Run `pnpm vitest run src/renderer/src/platform/plugin-shell/agents` — the structural tests there
    check your spec against the rules the template states (key matches the
-   filename, the file is registered, `resumeCommandPattern` matches the
+   filename, the file is listed, `resumeCommandPattern` matches the
    command Navide builds for you, no `/g` on a matcher). They need no edit
    when you add a vendor; they discover your file on their own.
 
@@ -188,26 +194,27 @@ new key is missing — so they are easy to find only after a red run:
   (`.ws-add-scroll` `max-height`, ~24px per CLI row) and `ADD_MENU_MAX_H`
   above it; `ControlPane.addMenu.test.ts` fails when the CLI list outgrows
   the cap.
-- `backend/agent_team_backend.spec` — only for a vendor with a log reader
-  (`test_pyinstaller_spec.py` holds that list to `_MIGRATED_READERS`).
+- `backend/agent_team_backend.spec` — `hiddenimports`, for every vendor with
+  a `cli_vendors/<key>.py` (`test_pyinstaller_spec.py` holds that list to the
+  vendor modules on disk and to `_MIGRATED_READERS`).
 - The vendor count and list in `README.md`, `README.ja-JP.md` and
   `README.zh-TW.md`, the roster in `docs/en-US/cli-vendor-matrix.md`, the key
   list and an integration record in `docs/en-US/cli-extension-guide.md`.
 
 Write the spec as `export const SPEC = { … } as const satisfies AgentSpec`,
-never `SPEC: AgentSpec`. The annotation widens `agentKey` to `string`, and
-`index.ts` derives the app-wide `AgentKey` union from these literals — one
-annotated spec collapses that union everywhere. A compile-time assertion in
-`agents/__tests__/specs.test.ts` fails if this regresses.
+never `SPEC: AgentSpec`: the annotation widens every literal in the spec. The
+app-wide `AgentKey` union is the declared keys (`_cli_declarations.ts`, a
+typed constant); a compile-time assertion in `agents/__tests__/specs.test.ts`
+fails if it ever degrades to `string`.
 
 ## Where your vendor shows up in the UI
 
-Registering the spec is all the wiring there is — every surface below reads
-the assembled list, so none of them needs an edit. What the list is, though,
-passes through one filter that is easy to mistake for a bug:
+The declaration and the spec file are all the wiring there is — every surface
+below reads the assembled list, so none of them needs an edit. What the list
+is, though, passes through one filter that is easy to mistake for a bug:
 
 ```
-agents/<key>.ts  →  agents/index.ts (ORDERED)  →  AGENT_SPECS / CLI_AGENT_SPECS
+agents/<key>.ts  →  agents/index.ts (found, in `order.menu`)  →  AGENT_SPECS / CLI_AGENT_SPECS
                                                           │
                         App.vue `enabledAgentSpecs` ──────┘
                         (user's Settings → CLI Agents order + disabled list)

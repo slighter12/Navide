@@ -24,24 +24,32 @@ names and does not prescribe current menu labels.
 
 ## Part 1 — Where the code lives
 
-Since the one-file-per-vendor refactor (July 2026) an integration is two
-vendor files plus one registration line on each side. No shared module
-carries per-vendor branches, and CI rejects a vendor module that imports
-another vendor or any app module.
+An integration is the CLI's declaration plus, where the app does more for it
+than launch and resume it, one vendor file on each side. Nothing registers
+them: both registries are built from the declarations and find the vendor
+files by the CLI's key. No shared module carries per-vendor branches, and CI
+rejects a vendor module that imports another vendor or any app module.
 
 | Layer | File |
 |-------|------|
-| Declaration — how the CLI is launched and resumed, and (optionally) how its records are read | `native/navide-cli-runtime/src/vendors/<key>.rs` |
+| Declaration — the key, label, kind and place in the lists; how the CLI is launched and resumed; (optionally) how its records are read | `native/navide-cli-runtime/src/vendors/<key>.rs` |
+| The declarations as the app reads them (generated, never edited) | `backend/agent_team_backend/cli_declarations.json`, `src/renderer/src/platform/plugin-shell/agents/_cli_declarations.ts` |
 | Backend spec — credentials, usage, session paths, log reader, install entry | `backend/agent_team_backend/cli_vendors/<key>.py` |
-| Backend registration | `backend/agent_team_backend/cli_vendors/registry.py` |
-| Frontend spec — label, command, resume syntax, capability flags | `src/renderer/src/platform/plugin-shell/agents/<key>.ts` |
-| Frontend registration + display order | `src/renderer/src/platform/plugin-shell/agents/index.ts` |
+| Frontend spec — capability flags and what the declaration cannot say | `src/renderer/src/platform/plugin-shell/agents/<key>.ts` |
 
-Everything the old layer-by-layer checklist enumerated now derives from those
-four:
+`cli_vendors/registry.py` imports the module named after each declared key,
+in the order the declarations give (`order.registry`); `agents/index.ts`
+finds every spec file with `import.meta.glob` and lists them by
+`order.menu`. A declared CLI with no vendor file on a side is registered
+there from its declaration alone: it can be launched and resumed, and has no
+other capability.
 
-- `AgentKey` is re-exported from `agents/index.ts`; `data/stages.ts` holds no
-  hand-written union to drift.
+Everything the old layer-by-layer checklist enumerated now derives from
+those:
+
+- `AgentKey` is the declared keys (`agents/index.ts`, from
+  `_cli_declarations.ts`); `data/stages.ts` holds no hand-written union to
+  drift.
 - The install wizard's `DEPS` aggregates each spec's `install_dep`
   (`onboarding_deps.py`), and a vendor absent from `_AGENT_CLI_ORDER` simply
   appends in registry order.
@@ -69,37 +77,64 @@ in the Rust crate `native/navide-cli-runtime`, and neither spec retypes it:
   strips (`env_strip`);
 - the resume arguments, and how the session id is read back out of a saved
   launch command;
-- the interrupt byte, the display label and the kind (CLI or Agent).
+- the interrupt byte, the display label and the kind (CLI or Agent);
+- where the CLI sits in the app's two lists (`order.menu`: the spawn menus
+  and settings; `order.registry`: the backend's vendor registry). The numbers
+  leave gaps: a new CLI takes a free one and no other file changes.
 
 `navide-cli-runtime declarations launch` prints that part of every
-declaration as JSON. The output is checked in twice, byte for byte the same:
+declaration as JSON. The output is checked in twice:
 `backend/agent_team_backend/cli_declarations.json` for the vendor registry,
-and `src/renderer/src/platform/plugin-shell/agents/cli_declarations.json` for
-the agent specs (plugin-shell imports nothing from outside itself). Both are
-generated; never edit them.
+and `src/renderer/src/platform/plugin-shell/agents/_cli_declarations.ts` for
+the agent specs: the same JSON as a typed constant, so the agent keys are a
+literal union at compile time, and inside plugin-shell because it imports
+nothing from outside itself. Both are generated; never edit them.
 
-The steps for a new CLI, or for a change to any of the fields above:
+#### Exactly which files a new CLI needs
 
-1. Write or edit `native/navide-cli-runtime/src/vendors/<key>.rs`: a
-   `pub static CLI: Cli` and, for a CLI whose records are not declared,
-   `crate::unobserved!(CLI);`. The crate's `build.rs` lists the directory, so
-   no shared Rust file is edited. `native/navide-cli-runtime/tests/extensibility.rs`
-   is a complete CLI declared in one file, and `DESIGN.md` beside the crate
-   explains the vocabulary.
-2. Build it: `cargo build --release` in `native/navide-cli-runtime` (and
-   `cargo test` there).
-3. Regenerate both JSON files and commit them:
-   `NAVIDE_DECLARATIONS_WRITE=1 uv --project backend run pytest backend/tests/test_cli_declarations.py`.
-   Run without the variable, the same test fails when either file is not what
-   the built runtime prints.
-4. Backend spec: spread `**declared("<key>")` (`cli_vendors/_declared.py`). It
-   supplies `supports_model`, `supports_effort`, `known_efforts`,
+To exist in the app (it appears in the menus, launches, and resumes if its
+declaration says how):
+
+1. `native/navide-cli-runtime/src/vendors/<key>.rs`: a `pub static CLI: Cli`
+   and, for a CLI whose records are not declared, `crate::unobserved!(CLI);`.
+   The crate's `build.rs` lists the directory, so no shared Rust file is
+   edited. `native/navide-cli-runtime/tests/extensibility.rs` is a complete
+   CLI declared in one file, and `DESIGN.md` beside the crate explains the
+   vocabulary.
+2. The two generated copies, rewritten by one command in
+   `native/navide-cli-runtime` and committed:
+   `NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in`. Run without the
+   variable (plain `cargo test`), that test fails when either copy is not
+   what the source prints. It needs no built binary.
+
+No shared file is edited for that: not `registry.py`, not `agents/index.ts`.
+
+For everything beyond launch and resume, add the vendor file of the side
+that needs it; each is found by its name:
+
+3. `backend/agent_team_backend/cli_vendors/<key>.py`, exporting `SPEC`
+   (credentials, usage, install detection, the log reader, hooks). Spread
+   `**declared("<key>")` (`cli_vendors/_declared.py`): it supplies
+   `supports_model`, `supports_effort`, `known_efforts`,
    `spawn_env_defaults`, `home_env_vars`, `interrupt_key`,
-   `supports_session_resume` and `resume_id_from_command`; do not set these by
-   hand.
-5. Frontend spec: spread `...declared('<key>')` (`agents/_declared.ts`). It
-   supplies `label`, `defaultCommand`, `skipPermissionFlag`, `modelArgs`,
-   `effortArgs`, `knownEfforts`, `resumeArgs` and `kind`.
+   `supports_session_resume` and `resume_id_from_command`; do not set these
+   by hand. The module must also be named in the `hiddenimports` of
+   `backend/agent_team_backend.spec`, because the registry imports it by name
+   and PyInstaller cannot see that (`test_pyinstaller_spec.py` fails
+   otherwise).
+4. `src/renderer/src/platform/plugin-shell/agents/<key>.ts`, exporting `SPEC`
+   (capability flags, prompt patterns, quota semantics). Spread
+   `...declared('<key>')` (`agents/_declared.ts`): it supplies `label`,
+   `defaultCommand`, `skipPermissionFlag`, `modelArgs`, `effortArgs`,
+   `knownEfforts`, `resumeArgs`, `resumeCommandPattern` and `kind`. The
+   declared `resumeCommandPattern` recognizes the resume command Navide itself
+   builds; set your own after the spread only to recognize more (a short-flag
+   alias, the `=` and the spaced form both, arguments in between).
+
+The repository's tests then ask for more before a vendor counts as
+integrated (a log reader module, an install entry, the hand-kept test lists):
+[Adding a CLI vendor](../adding-a-cli-vendor.md) has that list. Those are the
+tests' requirements for a fully supported CLI, not registration.
 
 `backend/tests/test_cli_declarations.py` holds a recording of every value
 main's hand-written specs had, and of the session id each of main's parsers

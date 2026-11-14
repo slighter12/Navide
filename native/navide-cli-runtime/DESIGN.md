@@ -18,6 +18,41 @@ Adding a CLI is its file: no registry edit, no second declaration site.
 `tests/extensibility.rs` declares a CLI the crate has never seen, outside
 `src/`, and runs its lifecycle.
 
+## A new CLI in the product: which files
+
+The same holds outside the crate. The application keeps no list of CLIs:
+
+- The backend's vendor registry (`cli_vendors/registry.py`) is the declared
+  CLIs in the order they declare (`Cli::order.registry`). For each it imports
+  the module named after the key, `cli_vendors/<key>.py`, and takes its
+  `SPEC`; a declared CLI with no such module is registered from its
+  declaration alone.
+- The frontend's agent list (`agents/index.ts`) is the declared CLIs in
+  `Cli::order.menu`. Spec files are found with `import.meta.glob`; a declared
+  CLI with no `agents/<key>.ts` gets its spec from the declaration alone. The
+  `AgentKey` type is the declared keys.
+
+So a new CLI needs exactly:
+
+1. `src/vendors/<key>.rs`: the declaration.
+2. The two generated copies of `declarations launch`, rewritten by
+   `NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in` and committed.
+
+With those it is in the menus, launches, and resumes if it declares how. No
+shared file is edited. Two more files exist only where the application does
+more for the CLI than launch it, and each is found by its name:
+
+3. `backend/agent_team_backend/cli_vendors/<key>.py`: credentials, usage,
+   install detection, hooks, and the Python log reader (which still reads the
+   records whenever the switch is off, the default).
+4. `src/renderer/src/platform/plugin-shell/agents/<key>.ts`: capability
+   flags, prompt patterns, quota semantics.
+
+What is still listed by hand, and is not registration: the packaged backend's
+`hiddenimports` (PyInstaller cannot see an import by name; a test holds the
+list to the modules on disk), and the test lists and documents that name
+every CLI (`docs/adding-a-cli-vendor.md`, "Other hand-kept lists").
+
 ## A vendor is a type (`decl::Vendor`)
 
 ```rust
@@ -35,8 +70,11 @@ impl Vendor for V {
 The core is generic over that type: `Observer<V>`, `Walk<'_, V>`,
 `Backend<V>`. Each vendor is compiled into its own copy of the engine
 (monomorphised), so there is no `dyn`, no table lookup and no comparison of a
-vendor's name anywhere in a read. The one dispatch by key is `AnyObserver`, an
-enum over the compiled observers, at the wire where a request names its CLI.
+vendor's name anywhere in a read: the vendor functions take their inputs as
+generic parameters too (`Vendor::probe` is generic over the query function it
+is handed), and `src/` holds no `dyn` at all. The one dispatch by key is
+`AnyObserver`, an enum over the compiled observers, at the wire where a
+request names its CLI.
 
 What this buys, as the compiler checks it:
 
@@ -75,10 +113,12 @@ A value only one CLI reads its own way is that CLI's `Ext`: a typed id in the
 declaration, evaluated by the vendor's function (`Vendor::text`, `num`,
 `pred`, `init`, `probe`). Those functions are pure: the record, the slots and
 the walk's facts in, the value out. They never keep state, emit an event or
-move a cursor; the core does all of that. Two exceptions touch something
+move a cursor; the core does all of that. Three exceptions touch something
 outside the record, and each says why at its definition: `Vendor::init` (a
-slot's first value, from the transcript's path) and `Vendor::probe` (which
-schema a database holds, through the one query function it is handed).
+slot's first value, from the transcript's path), `Vendor::probe` (which
+schema a database holds, through the one query function it is handed), and
+antigravity's workspace text, which asks the disk which of several candidate
+paths is a directory (main's heuristic; no record can carry it).
 
 | CLI | Its `Ext` |
 |-----|-----------|
@@ -101,9 +141,11 @@ droid's and copilot's records need nothing of their own: both declare `NoExt`.
 
 Single-user items that stay in the shared part are mechanics, not value
 extraction: how a kept slot is written into the bag (`KeptForm::TextOnChange`
-for codex, `JsonText` for grok), and the tracker's explicit `Close` and
+for codex, `JsonText` for grok), the tracker's explicit `Close` and
 `Cancel` with a millisecond clock (kimi is the one CLI whose transcript ends
-and cancels turns itself).
+and cancels turns itself), and a slot seeded from the database being walked
+(`StoreSeed`, antigravity: the query runs on the walk's own connection, so
+the core has to make it).
 
 ## A new store shape is a core change, by design
 
@@ -141,7 +183,9 @@ versions of a CLI: the variants are declared, the choice is the vendor's.
 
 One connection per observer call (`db.rs`, `Conn`), opened read-only the way
 main's readers open one, with the declared `requires` columns checked once on
-it; a store without them is `Unsupported`. Partition labels that resolved are
+it; a store without them is `Unsupported`. That holds for every CLI: a slot
+whose first value is in the database (`StoreSeed`) is read on that same
+connection, and nothing else in the crate opens one. Partition labels that resolved are
 kept in the observer between calls, unresolved ones are not (main's cache). A
 query that fails is "no rows this cycle", as main treats it, unless the
 declaration says the store's reader reports such a failure
@@ -155,7 +199,9 @@ one JSON answer per stdout line (`wire.rs`). Four worker lanes; the reads of
 one file always go to the same lane, so they stay in order and the reader
 memory for that file lives in one place, while different files are read side
 by side. Each request runs under `catch_unwind`: a panic answers an error,
-the lane's observers are rebuilt, and the process keeps serving. Off Unix
+the observer of the request's CLI is replaced (what it remembered is only an
+optimisation; every other CLI's observer keeps its memory), and the process
+keeps serving. Off Unix
 (no file identity, so checkpoints could never match Python's) `observes`
 answers nothing and the backend routes nothing.
 
@@ -178,9 +224,53 @@ lock while the process works. A call that times out kills the process and is
 answered by Python. Turning the switch off sets a flag and kills the process
 without taking any lock a call holds. A process that keeps failing is
 restarted after a growing delay, and after five failures in a row the runtime
-stays on Python until the switch is flipped again, and says so once. Every
-call's outcome is counted per CLI (`rust`, `unsupported`, `unreadable`,
-`deferred`, `fallback`) and reported by `/health`.
+stays on Python until the switch is flipped again, and says so once. A
+failure is a process, not a caller: every started process has a generation,
+and the callers that were all waiting on one process when it died report one
+failure between them. An error the process answers on every poll is logged
+once per CLI and kind. After the backend's shutdown has stopped the process,
+no late reader call starts it again. Every call's outcome is counted per CLI
+(`rust`, `unsupported`, `unreadable`, `deferred`, `fallback`) and reported by
+`/health`.
+
+### What a routed call costs, and the next wire
+
+Measured by `backend/tests/bench_cli_runtime.py` on a Claude transcript that
+grows by one record per poll (macOS, release build; microseconds per call,
+median): main's reader about 23, the routed call about 62, at any transcript
+length. Of the 62: the pipe round trip with the runtime's own request
+handling 12, the seam's two helper threads and the caller's queue 7, the
+read itself 35 (two file opens: the slot header and the tail), JSON on the
+Python side 3.
+
+So a poll that reads one small record is slower through the process boundary
+than in Python, and will stay so on this wire: about 19 of the 62 are the
+boundary itself. What the runtime buys today is not the per-call time; it is
+that the reads are one declaration per CLI and leave the Python process.
+
+Left on the table on purpose:
+
+- **The header slot is read on every call** (about 15 of the 35). main's
+  Claude reader keeps the cwd per file and inode. Doing the same needs the
+  observer's memory passed into slot initialisation at seven call sites and a
+  declared "kept" initialiser, since each CLI's Python reader differs in
+  whether it keeps the value. It belongs with the next wire.
+- **One request, one round trip.** The seam routes three reader methods, and
+  the watcher calls them one file at a time.
+
+The wire has to change shape before PTY or WebSocket work, and that is where
+both of those go: a framed duplex channel (a local socket, length-prefixed
+frames) with the runtime pushing events instead of answering polls. Requests
+then batch, a watcher pass over N files is one frame each way, and PTY output
+and WS fan-out have the stream they need. `wire.rs` and the seam are replaced
+by it; the vendor, backend and declaration layers carry over unchanged. Not
+done in this round: the transport stays stdio JSON lines.
+
+One thing to settle before PTY ownership shares a process with the SQLite
+reads: on macOS, in this crate's unit tests, a child forked while another
+thread held a SQLite connection (the system library) was killed with signal 9
+before it wrote anything, about one run in five; it did not happen once the
+two were kept apart (`session::FD_FORK_LOCK`). The cause is not established.
 
 The two sides keep one state format, so the switch can flip mid-session:
 usage checkpoints are main's JSON, and the activity state is the watcher's
@@ -207,15 +297,43 @@ Rust reports what it decides; Python reports what Python decides.
 ## Launch and resume have one source
 
 `backend/agent_team_backend/cli_declarations.json` and
-`src/renderer/src/platform/plugin-shell/agents/cli_declarations.json` are the
-output of `declarations launch`, checked in (two copies because plugin-shell
-imports nothing from outside itself). `cli_vendors/_declared.py` and
+`src/renderer/src/platform/plugin-shell/agents/_cli_declarations.ts` are the
+output of `declarations launch`, checked in: the JSON as printed, and the
+same JSON as a typed constant (two copies because plugin-shell imports
+nothing from outside itself; a constant because a `.json` import would widen
+the agent keys to `string`). `cli_vendors/_declared.py` and
 `agents/_declared.ts` turn an entry into the fields each spec used to type by
-hand. `backend/tests/test_cli_declarations.py` fails when either file is not
-what the built runtime prints, compares every field with a recording of
-main's hand-written values, and runs both resume-id readers (the backend's
-scan and `resume.rs` through the `resume_id` op) over the same recorded
-commands.
+hand.
+
+Three tests hold them:
+
+- `tests/checked_in.rs` (this crate, plain `cargo test`, no binary) compares
+  both copies with what the source prints, and rewrites them with
+  `NAVIDE_DECLARATIONS_WRITE=1`. A declaration changed without regenerating
+  fails here.
+- `backend/tests/test_cli_declarations.py` runs `cargo run -- declarations
+  launch` and compares the backend's copy with it, compares every field with
+  a recording of main's hand-written values, and runs both resume-id readers
+  (the backend's scan and `resume.rs` through the `resume_id` op) over the
+  same recorded commands.
+- `agents/__tests__/declared.test.ts` compares the frontend specs with a
+  recording of main's: the fields, the display order, and the pattern each
+  spec recognizes a resume command by.
+
+The backend tests that run the runtime never use a binary built earlier:
+`backend/tests/cli_runtime_build.py` has cargo bring the release build up to
+date first. Where cargo is expected (`NAVIDE_CLI_RUNTIME_REQUIRED=1`: CI's
+`cli-runtime` job) a runtime that cannot be built fails the test; a job that
+compiles no Rust says so (`=0`) and those tests skip there.
+
+A frontend spec recognizes a saved resume command by the pattern derived
+from its declared resume arguments (the command Navide itself builds). Seven
+specs keep a hand-written pattern after the spread because they recognize
+more than that: a short-flag alias (kilo, kimi, opencode), the `=` and the
+spaced form both (copilot, cursor, openclaw), a former program name
+(cursor), arguments between the base command and the flag (hermes,
+openclaw); aider's is for its id-less restore. Six that only repeated the
+declared command are gone.
 
 ## Tests are the contract
 
@@ -252,10 +370,15 @@ commands.
   Unix, so that conversion is not written.
 - **PTY ownership** (`session.rs`), **Windows ConPTY** and **Windows file
   identity**.
-- **Packaging.** The seam looks for the binary where a packaged app keeps its
-  other sidecars (`frozen_env.packaged_bin_dir()`), but no build script
-  compiles it into the app bundle yet: in a packaged app the switch finds no
-  binary, says so once, and stays on Python.
+- **Windows.** No Windows package carries the binary and no Windows job
+  builds it (`scripts/build-cli-runtime.mjs` does nothing there).
+
+Packaging is wired but not yet exercised: `scripts/build-cli-runtime.mjs`
+stages the release binary in `build/cli-runtime/`, the macOS and Linux
+packages copy it to `<resources>/bin` (where the seam looks,
+`frozen_env.packaged_bin_dir()`), and `release.yml` builds it beside the
+speech sidecar and verifies its signature on macOS. No release or release dry
+run has been run with it.
 - **A Settings toggle.** The switch is a key of the UI settings document.
 
 ## Decisions recorded

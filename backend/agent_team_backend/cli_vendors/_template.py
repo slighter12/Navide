@@ -3,19 +3,21 @@
 Files starting with ``_`` are ignored by the registry and its tests. Steps to
 add a vendor (full guide: ``docs/adding-a-cli-vendor.md``):
 
-1. Declare how the CLI is launched and resumed, once, in
-   ``native/navide-cli-runtime/src/vendors/<key>.rs`` (program, flags, env,
-   resume syntax), rebuild the runtime and regenerate
-   ``cli_declarations.json`` (see ``docs/en-US/cli-extension-guide.md``).
-2. Copy this file to ``<key>.py`` (short lowercase key, e.g. ``mycli``).
+1. Declare how the CLI is launched and resumed, and where it sits in the
+   app's lists, once, in ``native/navide-cli-runtime/src/vendors/<key>.rs``
+   (program, flags, env, resume syntax, order), and regenerate the checked-in
+   declarations (see ``docs/en-US/cli-extension-guide.md``).
+2. Copy this file to ``<key>.py`` (short lowercase key, e.g. ``mycli``): the
+   name is how ``registry.py`` finds it. Nothing registers it.
 3. Fill in SPEC below. Leave any capability at its default until you
    implement it — ``None`` means the app treats that capability as
    unsupported for your vendor (it does NOT fall back to another vendor).
-4. Register the SPEC in ``registry.py`` (one line, alphabetical).
+4. Add the module to ``hiddenimports`` in ``backend/agent_team_backend.spec``
+   (the registry imports it by name, which PyInstaller cannot see).
 5. Add a log reader section below if your CLI writes local conversation
    logs, plus ``backend/tests/vendors/test_<key>.py``.
-6. Add the frontend spec in ``src/renderer/src/platform/plugin-shell/agents/<key>.ts`` and
-   register it in ``agents/index.ts``.
+6. Add the frontend spec in ``src/renderer/src/platform/plugin-shell/agents/<key>.ts``
+   (found by its name too).
 7. Run the structural tests — they tell you what is missing or forbidden:
    ``uv --project backend run pytest backend/tests/test_cli_vendors_registry.py``
 
