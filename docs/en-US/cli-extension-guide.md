@@ -123,16 +123,14 @@ vendor file) and running both suites; it was not committed:
    with a fixture `<key>.json` beside it, and its row in
    `tests/cli/vendorContracts.test.ts` (the inventory tests fail until both
    name the CLI).
-4. The hand-kept lists that name every CLI. With the throwaway CLI these
-   backend tests failed: `test_cli_launch_argv.py`,
-   `test_cli_vendors_registry.py` (the README sentence, the `CliAgentsHelp.vue`
-   table, `helpCliFacts.ts`), `test_native_memory.py`,
-   `test_spawn_probe_version_drift.py`, `test_risk_declarations.py` and
-   `test_cli_extensions.py` (a CLI must declare where its extensions live,
-   which takes a vendor file); on the frontend,
-   `plugins/navide-plans/src/retained/agentSpecs.ts`, `TURN_START_SIGNAL` in
-   `submitTurnConfirm.ts` and the ＋ menu's cap in `ControlPane.vue` had to name
-   it. They are listed in [Adding a CLI vendor](../adding-a-cli-vendor.md#other-hand-kept-lists).
+4. The lists that still name a CLI by hand. The earlier hand-kept lists
+   (`EXPECTED_VENDORS`, `CLI_NAMES`, `MEMORY_SOURCES`, the exemption sets, the
+   plans plugin's frozen copy, `NO_LOG_READER`, `TURN_START_SIGNAL`, the ＋
+   menu's cap) now derive from the declaration or the vendor's own spec, or are
+   recorded subsets. A second throwaway CLI, a copy of goose with its adapter
+   files, still needed: the `SNAPSHOT` in `test_install_deps_snapshot.py`, the
+   README vendor count and list, and the `CliAgentsHelp.vue` row. They are
+   listed in [Adding a CLI vendor](../adding-a-cli-vendor.md#other-hand-kept-lists).
    So one declaration plus its tests is true of registration and of the
    recording tests; it is not yet true of the whole repository.
 

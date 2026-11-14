@@ -292,6 +292,14 @@ Sessions should publish structured progress back to the Project Intelligence Lay
   both of which live in the Electron main process's data directory. Activity
   records a `secrets.*` call by its address only, and every agent tool answer
   is redacted against the package's own values.
+- **Planned, not built:** the Rust CLI runtime's PTY host will serve the
+  terminal stream to the renderer on its own local socket
+  (`native/navide-cli-runtime/DESIGN.md`, P2 and P7). The listener binds
+  loopback only, and a connection must present a per-launch random token, handed
+  over the already authenticated backend channel, in its first frame; it is
+  closed without a reply otherwise. The host never opens SQLite and holds no
+  credentials. Until it ships, PTY bytes stay on the backend's existing
+  WebSocket and this boundary does not exist.
 - Local API-key file permissions are defense in depth, not a secret vault.
 - Git history and run artifacts can preserve data after a working file is deleted.
 - A pane's identity on the Navide MCP endpoint (`/plan-mcp?pane=<id>`) is

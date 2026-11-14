@@ -275,7 +275,11 @@ def test_which_cli_comes_first_in_the_table_is_not_observable(tmp_path: Path, mo
         native_memory.MemorySource(agent, scope, tuple(relative), canonical, glob)
         for agent, scope, relative, canonical, glob in MAIN_SOURCES
     )
-    monkeypatch.setattr(native_memory, "MEMORY_SOURCES", main_order)
+    # A CLI main did not have has no recorded rows; it keeps the rows its own
+    # spec declares, after main's.
+    recorded_agents = {row[0] for row in MAIN_SOURCES}
+    added = tuple(s for s in native_memory.MEMORY_SOURCES if s.agent not in recorded_agents)
+    monkeypatch.setattr(native_memory, "MEMORY_SOURCES", main_order + added)
 
     assert [f.as_dict() for f in native_memory.scan(home, workspace)] == now
     assert native_memory.candidates(home, workspace) == now_allowed

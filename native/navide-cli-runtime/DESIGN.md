@@ -369,6 +369,103 @@ does.
 Windows is its own stage: no file identity, no ConPTY, no named-pipe
 transport, so none of this exists there yet.
 
+#### The plan, item by item (P1–P9; planned, nothing here is built)
+
+**P1. Checkpoints travel with the batch.** Every pushed batch carries its
+checkpoint and its seen-keys delta. The consumer (Python) stores them in the
+same transaction as the events and acknowledges the batch. A restarted worker
+is seeded from the last *acknowledged* state, never from its own memory. This
+is what keeps "the worker may be killed" legal: the kill can lose unsent work
+but cannot lose or repeat an acknowledged event.
+
+**P2. Every place Python reads PTY output today.** All of it is in
+`backend/agent_team_backend/terminals.py`; no other module reads a PTY.
+
+| Reader | What it does with the bytes | Moves to |
+|---|---|---|
+| `TerminalService._on_readable` (loop reader callback) | drains up to `_READ_DRAIN_MAX_BYTES` per callback, detects EOF/EIO as exit | the host (owns the master fd) |
+| `TerminalService._drain_output_behind_barrier` (`handle.read(4096)` loop) | slurps kernel-buffered bytes before a resize so none straddle it | the host (resize and the read are ordered there) |
+| `TerminalService._absorb_output` / `_flush_output` | batches, caps (`_BUF_CAP`), splits into <=64 KB frames, `_echo_probe` latency, `_recent_chunks` rate window | the host (framing and credit); the echo probe and rate window become host counters |
+| `TerminalService._mirror_to_log` | decoded copy into `output_log_fp` (pipeline panes only); read later by `src/main/manual-log-search.ts`, `mcp_server/server.py`, `ws_handlers.py` | a **tee**: the host writes the same log file, so its readers do not change |
+| `app._active_emit` (`app.py`) | routes each frame to the owning window by `output_frame_session_id` | stays in Python while the hop is temporary (point 1); at the end state the host routes by stream id and Python keeps ownership bookkeeping (`_PTY_OWNERS`) only |
+
+No output-pattern detector reads the PTY in Python: activity and usage come
+from the CLIs' own logs, which the observe worker reads. Anything that wants
+screen contents later takes them from the host's scrollback, not from a second
+read.
+
+The host's renderer socket authenticates each connection before it serves a
+byte: a per-launch random token handed to the renderer over the existing
+authenticated backend channel, presented in the first (hello) frame, compared
+in constant time, and the listener binds loopback only. A connection that
+fails the check is closed with no reply. The listener is a new trust boundary
+and is listed as a planned item in `docs/en-US/architecture.md`.
+
+**P3. The PTY parity oracle.** Recorded from main, per scenario: the raw byte
+stream read off the master, the WebSocket frames the backend emitted (type,
+stream, length, payload), and the order of resize and exit events relative to
+the data. Scenarios: burst output, split multi-byte characters, a resize
+mid-stream, exit with unread output, EOF versus EIO. The host replays each
+scenario through a pseudo-terminal running a scripted child and requires the
+same frame sequence, byte for byte, with resize and exit ordering equal.
+Timing is not compared; ordering and content are.
+
+**P4. A stalled read wedges its lane.** A read that blocks (a hung network
+volume) holds its lane's thread. Two options, the plan takes the first:
+(a) **lane replacement**: after the call timeout, abandon the stuck thread
+(it is detached, never joined), start a replacement lane, count the abandoned
+threads, and at a cap (default 4) kill the worker, since a leak that large
+means the volume is gone; (b) reads not tied to a lane, each on its own
+short-lived thread with the same cap. (a) is simpler to bound and keeps the
+per-file circuit from the section above as its first line of defence.
+
+**P5. Host lifecycle.** The host polls its parent and exits when the parent is
+gone, closing every master (agents get SIGHUP, which is what happens today
+when the backend dies). If the host crashes, the backend reports every pane it
+owned as exited with reason `host-crash` and does not restart them
+silently. The host stays small on purpose: no SQLite, no parsing, no
+declarations beyond launch, so its crash surface is the PTY code alone.
+Whether panes survive a *backend* restart: not in this stage. They end with
+the backend; surviving would need a reattach protocol and a separate security
+review.
+
+**P6. No consumer versus a slow consumer.** With **no consumer** attached
+(window closed, pane detached) the host keeps draining the PTY into a bounded
+per-stream scrollback so the child never blocks. With a **slow consumer**
+attached it stops reading that one PTY (the kernel buffer then slows the
+child). Neither clears scrollback: the bound on the buffer drops the *oldest
+bytes from replay history*, never emits a clear sequence, and never discards
+bytes the consumer has not yet been given.
+
+**P7. Frame details.** Maximum payload length 1 MiB (larger is a protocol
+error that closes the connection). A hello frame first, carrying the protocol
+version and the token; an unknown version is refused. Each data frame carries
+a stream byte offset so a reconnect asks for "from offset N" and the host
+replays from scrollback or says the offset is gone. A credit frame grants the
+host permission to send N more bytes on a stream; the host sends nothing past
+its credit. Stream ids are allocated by the side that opens the stream from
+its own counter (host-opened odd, backend-opened even) and never reused within
+a connection.
+
+**P8. I/O model, dependency, and the measure.** Decision: a readiness loop
+(`poll`/`kqueue` through `libc`, already a dependency) on a small fixed thread
+count, not a thread per pane, because the motive is hundreds of panes.
+The WebSocket handshake and framing are hand-written (RFC 6455 subset: no
+extensions, no fragmentation we emit), keeping the crate's rule of serde,
+serde_json, libc and (Linux) libsqlite3-sys; adding a WebSocket crate would
+need the dependency rule changed first and is not planned. Acceptance for the
+scale motive: event-loop lag measured in `S/perf-harness` at **200 panes**
+with the host on, against the Python baseline recorded on the same machine;
+the host must not be worse at 20 panes and must show a lower p99 loop lag at
+200. A result that misses it is a defect to fix, not a budget to relax.
+
+**P9. How the host is switched on.** One key in the UI settings document,
+off by default, read once at backend start (a change applies to *new* panes).
+If the host cannot start (binary missing, bind fails, hello refused), the
+pane falls back to the current Python PTY path, the failure is counted and
+shown in the runtime status, and the backend does not retry for that pane. A
+pane never runs half on one path and half on the other.
+
 ### Who reports a store that cannot be read
 
 Rust reports what it decides; Python reports what Python decides.

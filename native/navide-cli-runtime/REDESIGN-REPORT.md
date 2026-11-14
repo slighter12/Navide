@@ -3,12 +3,84 @@
 Branch `refactor/cli-runtime-lifecycle-main`, based on upstream/main
 `75272dd4b`, pushed to the fork (draft PR 18). The design is in `DESIGN.md`.
 
-This is the state after fix round 3. Round 2 ended at `5690f50d1` (CI run
-43553202513 was its last); round 3 answers review 3-A (N1 to N7), first in
-this report. Round 2's section follows, then round 1's own table, and the rest
+This is the state after fix round 4, which answers reviews 4-A and 4-B, first in
+this report. Round 2 ended at `5690f50d1` (CI run 43553202513 was its last);
+round 3 answered review 3-A (N1 to N7), whose section follows round 4's.
+Round 2's section follows that, then round 1's own table, and the rest
 describes what the branch holds now. Round 1 ended at `aec1a324b`; its two
 reviews (2-A: WITH LIMITS, 2-B: NOT READY as a base) are in the round 2
 section, finding by finding.
+
+## Fix round 4: every review 4 finding
+
+"Before" is the head `06d6fbce0`. CI run 43567091901 on it had one failed
+Windows shard, `guard/test_decision_latency.py` (a 0.2 s timing test this
+branch does not touch). The first round-4 worker stopped on an API error; a
+second one finished the work below.
+
+| Finding | Status | What changed | The test that shows it |
+|---------|--------|--------------|------------------------|
+| **F1** (4-A) CI red on the head, not in the report | Reported | Stated above and in the CI row below. Not re-run (a re-run is a `gh` write). | None. |
+| **F2 = B4-1** a start that fails with anything but `OSError` raised into the reader call or skipped the backoff | Fixed (`d75bb009c`) | `_client_for_call` catches `Exception` around `binary()` and `_Client(exe)`, counts it, falls back and backs off. `_Client.__init__` kills and reaps its child when a helper thread cannot start. | `test_cli_runtime_seam.py::test_a_start_that_cannot_get_a_thread_falls_back_backs_off_and_kills_the_child` (stand-in `Popen`, then a thread start that raises). Run against the old `cli_runtime.py`: failed (`RuntimeError: can't start new thread` reached the caller). Fixed: passes. |
+| **F3** calls during a start were counted as faults | Fixed (`d75bb009c`) | `status()["state"]` is `starting` while a start is in flight; calls that step aside are `deferred`, not `fallback`; a start longer than a few seconds is logged once. | `test_calls_during_a_start_are_deferred_not_faults_and_the_state_says_starting` (a start held open). Old code: failed (no such state). Fixed: passes. |
+| **F4** `collect_submodules` could return an empty list without failing the build | Fixed (`f017519b8`) | `on_error="raise"`; the spec asserts the registry module is in the list. | `test_pyinstaller_spec.py` checks both. |
+| **F5 = B4-2** nothing said a recorded CLI's adapter file was still there | Fixed (`13e573371`) | The recorded keys must keep `cli_vendors/<key>.py`, `log_readers/<key>.py` (placeholders included) and `agents/<key>.ts`; a new CLI edits nothing. | `test_every_cli_main_had_still_has_its_vendor_module_and_log_reader_module`; `declared.test.ts` "still has the spec file of every CLI main had". **Deletion proof, run in this round:** with `log_readers/mcode.py` moved away the backend test failed ("adapter files of CLIs main had are gone: ['backend/agent_team_backend/log_readers/mcode.py']"); with `agents/mcode.ts` moved away the frontend test failed. Both files restored; `git status` shows them untouched. |
+| **F6** the vendor guide stated rules the relaxed tests no longer hold | Fixed | `docs/adding-a-cli-vendor.md` (the `collect_submodules` rule, step 5 `memory_sources`, step 10 `extensions_none_reason`, "Other hand-kept lists", "Verify"), `docs/en-US/cli-extension-guide.md` (step 4). | None: documentation. |
+| **Derivable lists** (both reviews, goal 1) | Fixed except three, below | `EXPECTED_VENDORS` is a recorded subset and `CLI_NAMES` comes from the declarations (`6938ce94c`); `observed` is exported from the declarations and `NO_LOG_READER` / `TURN_START_SIGNAL` derive from it (`89bf3a10a`); the plans plugin's frozen copy compares only recorded keys and the add menu's cap is a fixed budget (`e262e15f3`); `MEMORY_SOURCES` moved onto `VendorSpec.memory_sources` (`0aab88753`); the three exemption sets are `cli_unverified_reason`, `extensions_none_reason`, `data_dirs_none_reason` (`d26a01a6f`); `cliPermission.test.ts`'s "flagless" list is a recorded subset (this round). `MCP_WIRED` stays by hand: its fact is in the Python spec and a generated field would add a second source of it. | `test_guard_refuses_every_declared_cli_program`, `test_inventory_holds_every_cli_main_had`, `test_every_row_is_declared_on_the_vendor_it_names`, `test_the_assembled_table_has_main_s_entries_and_each_cli_s_order`, `test_which_cli_comes_first_in_the_table_is_not_observable`, `test_every_vendor_declares_where_its_extensions_live_or_says_it_has_none`, `test_every_vendor_has_a_verified_version_or_says_why_it_has_none`, `test_every_vendor_declares_data_dirs_or_says_why_it_has_none`, `ControlPane.addMenu.test.ts` "the scroller cap is a fixed budget that scrolls, not a count of the roster". |
+| **Task 7** DESIGN.md plan | Written, design only | DESIGN.md "The plan, item by item (P1–P9)"; `docs/en-US/architecture.md` "Trust boundaries" gets the host's renderer socket as a planned item. | None: no code changed. |
+
+### The second fake-CLI proof
+
+A throwaway CLI, `fakegoose`, a copy of goose with all its adapter files
+(`cli_vendors/fakegoose.py`, `log_readers/fakegoose.py`, `vendors/fakegoose.rs`,
+`agents/fakegoose.ts`, `tests/fixtures/cli-regression/fakegoose.json`) and a
+regenerated declaration pair, then the full backend suite
+(`node scripts/changed-backend-tests.mjs`) and the full frontend suite
+(`bun run vitest run`). Reverted afterwards; `git status` held none of its files.
+
+What it still needed beyond its own files, and which test asked:
+
+| File | Test that asked |
+|------|-----------------|
+| `tests/fixtures/cli-regression/catalog.json` (entry; the fixture is its own file) | the regression inventory gate, "vendor coverage differs: missing=['fakegoose']" |
+| `tests/cli/vendorContracts.test.ts` (a row) | "matches the supported registry and backend regression catalog exactly" |
+| the `SNAPSHOT` in `backend/tests/vendors/test_install_deps_snapshot.py` | `test_agent_cli_install_entries_unchanged` |
+| `README.md` / `README.ja-JP.md` / `README.zh-TW.md` vendor count and list | `test_cli_vendors_registry.py::test_readmes_list_every_registered_vendor` |
+| the `vendors` table in `CliAgentsHelp.vue` | `test_help_panel_sign_in_column_matches_login_command_args` |
+
+Two more failures were defects in this round's own tests, not policy lists,
+and are fixed in the commit: `test_native_memory.py::test_which_cli_comes_first_in_the_table_is_not_observable`
+swapped in main's 87 recorded rows and so dropped a new CLI's rows (it now
+appends the rows of unrecorded CLIs), and `cliPermission.test.ts` listed the
+flagless vendors exactly (now a recorded subset). With both fixed the CLI
+passed them with its own files only.
+
+Not fixed: the install `SNAPSHOT`, the README count and list and the Help panel
+row. They are product copy and an install-order recording that a person
+should state for a new CLI; the guides list them. The frontend run also failed
+`pluginExternalWorkspace.test.ts` (`Executable not found in $PATH: "pnpm"`),
+the same machine limit as rounds 2 and 3.
+
+After the revert: `cargo test --offline` passed, and `checked_in` agrees with
+the restored copies (nothing was regenerated by hand).
+
+### Commands and results (round 4, after the last change)
+
+| Command | Result |
+|---------|--------|
+| `node scripts/changed-backend-tests.mjs` (bare, no pipe) | exit 0: 16717 passed, 40 skipped, 1 xfailed, then the serial pass 106 passed, 4 skipped. |
+| `bun run vitest run` | 20507 passed, 1 failed: `src/main/plugins/pluginExternalWorkspace.test.ts`, `Executable not found in $PATH: "pnpm"` (no pnpm on this machine; not touched by this branch; the same failure as rounds 2 and 3). |
+| `cargo test --offline` (crate), run after the fake CLI was reverted | passed (exit 0). |
+| `bun run typecheck:web` | no errors. |
+| `uv --project backend run ruff check backend/tests/test_native_memory.py` | all checks passed. |
+| the two new seam tests against `06d6fbce0`'s `cli_runtime.py` | both failed; both pass on the fix (20 passed in `test_cli_runtime_seam.py`). |
+
+| CI | Result |
+|----|--------|
+| Run on the round 4 push | filled in below after the run finishes (it is reported to the manager; a later commit would start another run) |
+
+Not verified: the Linux and Windows runs (CI is their first), and the `pnpm`-based
+external workspace test.
 
 ## Fix round 3: every review 3-A finding
 
