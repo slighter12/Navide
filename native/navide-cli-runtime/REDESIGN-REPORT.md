@@ -302,6 +302,50 @@ Round 1's two (three registry checks reading the spec sources by regular
 expression; `test_acp_tui_unchanged.py` pinning `app._stop_log_watcher`) are
 in the history of this file.
 
+### CI run 43553202513 (round 2's push, `ee4d932d2`)
+
+Three causes failed seven jobs (the gate job is the seventh, failing because
+the others did). The first two are fixed; neither fix has run on the platform
+it is for, so the next CI run is their first.
+
+| Job | Cause | Fix |
+|-----|-------|-----|
+| Rust CLI runtime (Linux), "switch off" step: 52 failed, every one in `cli_runtime_build.cargo()` with "rustup could not choose a version of cargo to run … no default is configured". The steps after it did not run. | The suite's conftest points `HOME` at an empty directory before any test module is imported, and a rustup-managed cargo looks for its toolchains under `$HOME/.rustup`. The `cargo test` step before it ran in the step's own shell, with the real `HOME`. | `cargo()` runs cargo with `RUSTUP_HOME` and `CARGO_HOME` named from the account's home in the password database, unless the environment already names them. Test: `test_cargo_runs_with_the_accounts_rust_homes_not_the_suites_empty_home`. |
+| Backend tests (Windows), all five shards: 26 failures, all `test_python_readers_match_the_parity_fixtures`. | The fixtures record what main's readers return on Unix. On Windows the same readers return the same paths with its separators (`<root>\share\…` in `file_path`, `path` and `cwd`, and a cwd of `\usr`); every differing line in the five logs is one of those. The same 26 failed on round 1's push (`aec1a324b`, run 43535726613), so this is not from round 2. | The test is skipped on Windows: the fixtures are for a runtime that is built on Unix only. The readers' own vendor tests still run there. |
+| Backend tests (Windows, 3/5): `test_server_link_pin_audit.py::test_forget_called_after_settle_promotion[file]`, "condition never became true" after its 5 s wait. | Not from this branch, which changes no server-link code or test (`git diff upstream/main...HEAD` over those files is empty). It passed in the same shard on round 1's push. A wait that timed out once is all the log shows; the cause is not established. | None. |
+
+Reproduced before the fix, on macOS, by putting a rustup-managed cargo first
+on `PATH` with no `RUSTUP_TOOLCHAIN` set. This machine's environment names
+its toolchain there, and with it named rustup does not fail under the
+redirected `HOME`: it downloads and installs that toolchain into the empty
+directory (`cargo --version` run that way printed "the missing active
+toolchain … has been auto-installed"). So the round 2 runs passed here by
+installing a toolchain into each run's throwaway home, which the fix also
+stops.
+
+- `cargo --version` with `HOME` at an empty directory printed the same rustup
+  error as CI.
+- `test_the_checked_in_declarations_are_current`, with the conftest's own
+  `HOME`, failed with it too.
+
+After the fix, in that same environment with `NAVIDE_CLI_RUNTIME_REQUIRED=1`,
+the three files of the failed step passed (158). The new test, run with the
+fix taken out, failed: the stand-in cargo was given no `RUSTUP_HOME`.
+
+Why the macOS leg of the same job passed with the same rustup setup is not
+established: nothing in its log shows how its cargo found a toolchain. (A
+hypothesis only: that runner's environment names a rustup home or a
+toolchain, as this machine's does.)
+
+Re-run after these fixes, in the usual environment:
+
+| Command | Result |
+|---------|--------|
+| switch off: the three files of the failed step, `test_cli_vendors_registry.py` and `test_pyinstaller_spec.py` | 193 passed, 1 skipped (Windows only) |
+| switch on: the command in the table above | 879 passed, 4 skipped; fallback 0 for every observed CLI |
+| `node scripts/changed-backend-tests.mjs -- -k "cli_runtime or cli_declarations"` (the isolated runner) | 159 passed, 1 skipped (the `cargo run` currency check; no cargo there) |
+| `uv --project backend run ruff check` on the three changed files | all checks passed |
+
 ## Python defects found (main unchanged)
 
 1. A line that is not UTF-8 raises `UnicodeDecodeError` in the JSONL activity
