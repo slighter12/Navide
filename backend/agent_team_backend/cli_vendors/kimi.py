@@ -641,7 +641,6 @@ SPEC = VendorSpec(
         discovery_home=((".kimi-code", "skills"), (".agents", "skills")),
         discovery_project=((".agents", "skills"),),
     ),
-    label="Kimi Code CLI (Moonshot AI)",
     # No flag and no config variable, so the MCP config can only be reached
     # through the config directory — which kimi, unlike grok and antigravity,
     # relocates with a variable of its own. A url with no transport field is

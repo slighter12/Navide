@@ -846,7 +846,6 @@ SPEC = VendorSpec(
         reads_shared_root=True,
         skills_rel=(".agents", "skills"),
     ),
-    label="Grok Build (SpaceXAI)",
     # Wired through the per-pane HOME shim (mcp_server/pane_home.py): the
     # official CLI reads its servers as a MAP of `[mcp_servers.<name>]` tables
     # in ~/.grok/config.toml, and `config_file` + `section` below is the whole

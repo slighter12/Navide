@@ -1,4 +1,26 @@
 {
+ "labels": {
+  "aider": "Aider",
+  "antigravity": "Antigravity CLI (Google)",
+  "claude": "Claude Code (Anthropic)",
+  "codex": "Codex CLI (OpenAI)",
+  "copilot": "GitHub Copilot CLI",
+  "cursor": "Cursor CLI",
+  "devin": "Devin CLI (Cognition)",
+  "droid": "Droid CLI (Factory)",
+  "goose": "Goose (AAIF)",
+  "grok": "Grok Build (SpaceXAI)",
+  "hermes": "Hermes Agent",
+  "kilo": "Kilo Code CLI",
+  "kimi": "Kimi Code CLI (Moonshot AI)",
+  "kiro": "Kiro CLI (AWS)",
+  "mcode": "MiniMax Code",
+  "muse": "Muse Code (Meta)",
+  "openclaw": "OpenClaw",
+  "opencode": "OpenCode (Anomaly)",
+  "pi": "Pi",
+  "qwen": "Qwen Code (Alibaba Cloud)"
+ },
  "launch": {
   "aider": {
    "supports_model": false,

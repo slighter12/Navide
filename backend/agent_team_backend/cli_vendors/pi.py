@@ -878,7 +878,6 @@ SPEC = VendorSpec(
     # --skill takes one skill (file or directory) and is repeated; it adds to
     # discovery rather than replacing it (--no-skills is the opt-out).
     skills_wiring=SkillsWiring(flag="--skill", flag_takes="each"),
-    label="Pi",
     # Multi-account: ``auth.json`` is a provider map (FileAuthStorageBackend,
     # 0600, written whole under a lock file); a profile binds to one OAuth
     # provider and a switch rewrites that entry only. ``PI_CODING_AGENT_DIR``

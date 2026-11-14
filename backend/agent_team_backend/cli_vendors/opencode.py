@@ -1115,7 +1115,6 @@ SPEC = VendorSpec(
         reads_shared_root=True,
         config_paths_key=("skills", "paths"),
     ),
-    label="OpenCode (Anomaly)",
     # No MCP flag; instead a whole config document read out of
     # OPENCODE_CONFIG_CONTENT and deep-merged over the user's files, so nothing
     # on disk is touched and the value dies with the pane. Verified against

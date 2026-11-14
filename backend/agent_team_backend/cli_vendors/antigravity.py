@@ -852,7 +852,6 @@ SPEC = VendorSpec(
         root_env="HOME",
         skills_rel=(".gemini", "skills"),
     ),
-    label="Antigravity CLI (Google)",
     # Multi-account: the refresh token is one fixed-name macOS Keychain item
     # (service "gemini", account "antigravity" — go-keyring, base64 JSON),
     # with the token file below as the stale copy the reader falls back to.

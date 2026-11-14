@@ -140,6 +140,13 @@ def test_launch_and_resume_fields_are_mains(key: str) -> None:
 
 
 @pytest.mark.parametrize("key", RECORDED)
+def test_the_display_label_is_mains(key: str) -> None:
+    """The label each vendor module typed by hand on main, which the declaration
+    now supplies (`declared()` returns it; no vendor module spells its own)."""
+    assert _main()["labels"][key] == registry.VENDORS[key].label == cli_declarations.declared(key)["label"]
+
+
+@pytest.mark.parametrize("key", RECORDED)
 def test_resume_ids_are_mains(key: str) -> None:
     recorded = _main()["resume_ids"][key]
     corpus = _corpus(key)

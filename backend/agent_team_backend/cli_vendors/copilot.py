@@ -1482,7 +1482,6 @@ SPEC = VendorSpec(
         # user silently loses them.
         discovery_home=((".agents", "skills"),),
     ),
-    label="GitHub Copilot CLI",
     # `copilot login` authenticates over OAuth. On a local desktop it opens
     # the browser and captures the result on a loopback callback — exactly
     # what a login pane carries; the device-code flow it falls back to for

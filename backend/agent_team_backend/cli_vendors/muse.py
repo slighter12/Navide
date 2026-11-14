@@ -785,7 +785,6 @@ SPEC = VendorSpec(
         reads_shared_root=True,
         skills_rel=(".agents", "skills"),
     ),
-    label="Muse Code (Meta)",
     # `muse login` signs in with a Meta account by having the user approve a
     # code in the browser — a flow a PTY pane can carry. Note META_API_KEY
     # still takes priority over the account login if it is set in the

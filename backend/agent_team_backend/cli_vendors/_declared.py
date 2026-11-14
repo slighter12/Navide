@@ -9,6 +9,7 @@ list of CLIs there are and their order (``registry.py``). A vendor module
 spreads ``declared(key)`` into its ``VendorSpec`` instead of keeping its own
 copy of:
 
+* the display label;
 * whether a spawn may name a model or an effort, and the effort vocabulary;
 * the environment defaults a spawn adds and the home variables it strips;
 * the interrupt byte;
@@ -118,6 +119,7 @@ def declared(key: str) -> dict[str, Any]:
             return resume_id(key, command)
     interrupt = bytes(entry["interrupt"])
     return {
+        "label": entry["label"],
         "supports_model": launch["model"] is not None,
         "supports_effort": launch["effort"] is not None,
         "known_efforts": tuple(launch["efforts"]),

@@ -341,7 +341,6 @@ SPEC = VendorSpec(
     # Relocation and legacy fallback verified against mcode 0.4.12 above.
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("MINIMAX_DATA_DIR") or ctx.env.get("MAVIS_DATA_DIR") or ctx.home / ".minimax"),),
     data_dir_env_vars=("MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"),
-    label="MiniMax Code",
     # `--session <id>` exists on the interactive command, but resume also
     # needs something able to NAME the id of a session Navide started, and
     # that is the log reader mcode does not have yet (see the module

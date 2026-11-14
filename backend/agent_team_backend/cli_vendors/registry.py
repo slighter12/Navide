@@ -37,7 +37,7 @@ def _spec(entry: Mapping[str, Any]) -> VendorSpec:
     except ModuleNotFoundError as err:
         if err.name != name:
             raise  # the module is there; one of its own imports is not
-        return VendorSpec(key=key, label=entry["label"], **declared(key))
+        return VendorSpec(key=key, **declared(key))
     spec = module.SPEC
     if spec.key != key:
         raise ValueError(f"cli_vendors/{key}.py declares {spec.key!r}, not the CLI it is named after")

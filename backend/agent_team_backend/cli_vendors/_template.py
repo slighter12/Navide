@@ -12,14 +12,16 @@ add a vendor (full guide: ``docs/adding-a-cli-vendor.md``):
 3. Fill in SPEC below. Leave any capability at its default until you
    implement it — ``None`` means the app treats that capability as
    unsupported for your vendor (it does NOT fall back to another vendor).
-4. Add the module to ``hiddenimports`` in ``backend/agent_team_backend.spec``
-   (the registry imports it by name, which PyInstaller cannot see).
-5. Add a log reader section below if your CLI writes local conversation
+4. Add a log reader section below if your CLI writes local conversation
    logs, plus ``backend/tests/vendors/test_<key>.py``.
-6. Add the frontend spec in ``src/renderer/src/platform/plugin-shell/agents/<key>.ts``
+5. Add the frontend spec in ``src/renderer/src/platform/plugin-shell/agents/<key>.ts``
    (found by its name too).
-7. Run the structural tests — they tell you what is missing or forbidden:
+6. Run the structural tests — they tell you what is missing or forbidden:
    ``uv --project backend run pytest backend/tests/test_cli_vendors_registry.py``
+
+Nothing needs adding to the PyInstaller spec: it collects every module of
+this package (``collect_submodules``), and ``cli_declarations.json`` is
+bundled once for all vendors.
 
 Import rules (CI-enforced): only ``base``, ``_declared``, ``_protocols``, the
 standard library, and httpx. Never import another vendor module or any
@@ -32,11 +34,10 @@ from .base import VendorSpec
 
 SPEC = VendorSpec(
     key="_template",          # your vendor key — must match the filename
-    label="Human Name",       # display label, e.g. "MyCLI"
-    # --- launch and resume: from the declaration, never retyped here ---
-    # Model and effort support, the effort vocabulary, the environment a spawn
-    # adds and strips, the interrupt byte, whether a session resumes by id and
-    # how a saved command names it:
+    # --- label, launch and resume: from the declaration, never retyped here ---
+    # The display label (e.g. "MyCLI"), model and effort support, the effort
+    # vocabulary, the environment a spawn adds and strips, the interrupt byte,
+    # whether a session resumes by id and how a saved command names it:
     # **declared("mycli"),
     # --- credentials: only if the CLI stores a login the vault can park ---
     # live_file=(".mycli", "auth.json"),

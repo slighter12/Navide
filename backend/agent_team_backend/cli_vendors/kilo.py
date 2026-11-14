@@ -352,7 +352,6 @@ SPEC = VendorSpec(
     # owns the flags themselves.
     # Verified 2026-08-15: kilo's bundle carries no SKILL.md handling at all.
     skills_supported=False,
-    label="Kilo Code CLI",
     # An OpenCode fork: identical config document, its own variable.
     mcp_wiring=McpWiring(
         config=McpServerConfig(

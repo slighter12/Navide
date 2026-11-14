@@ -397,7 +397,6 @@ _MEMORY_SOURCES = (
 SPEC = VendorSpec(
     memory_sources=_MEMORY_SOURCES,
     key="goose",
-    label="Goose (AAIF)",
     # Plugins live in ~/.agents/plugins and extensions in config.yaml's
     # `extensions:` map (source, 1.55.0); neither layout has been checked
     # against a populated install, so nothing is listed yet.

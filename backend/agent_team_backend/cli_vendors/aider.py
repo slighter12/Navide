@@ -661,7 +661,6 @@ SPEC = VendorSpec(
     data_dirs=None,
     # Verified 2026-08-15: aider's package never mentions "skill".
     skills_supported=False,
-    label="Aider",
     # The only vendor here with no session ids at all: resume is
     # `--chat-history-file <path> --restore-chat-history`, so there is nothing
     # for a caller to name. cli_open_agent refuses `session_id` on this key

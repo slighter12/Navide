@@ -859,7 +859,6 @@ SPEC = VendorSpec(
         # not to load that root, so the automatic cell is best-effort here.
         reads_shared_root=True,
     ),
-    label="Cursor CLI",
     # Multi-account: cursor-agent keeps its session in two macOS Keychain
     # items (access + refresh, account "cursor-user"), swapped as a pair. No
     # config-dir variable isolates a login, so a sign-in runs against the

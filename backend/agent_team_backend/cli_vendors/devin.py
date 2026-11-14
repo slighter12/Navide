@@ -83,7 +83,6 @@ SPEC = VendorSpec(
     memory_sources=_MEMORY_SOURCES,
     cli_unverified_reason="wired from the docs (read 2026-11-07); no binary installed, so no version was checked",
     key="devin",
-    label="Devin CLI (Cognition)",
     extensions=ExtensionsSpec(
         supported=False,
         note="Devin plugins, skills and hooks (devin plugins / skills paths) are not inventoried yet",

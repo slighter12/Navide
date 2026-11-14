@@ -467,7 +467,6 @@ SPEC = VendorSpec(
     memory_sources=_MEMORY_SOURCES,
     cli_unverified_reason="wired from the docs (read 2026-11-07); no install to run, so no version was checked",
     key="hermes",
-    label="Hermes Agent",
     extensions=ExtensionsSpec(
         supported=False,
         note="Hermes skills and plugins (~/.hermes) are not inventoried yet",

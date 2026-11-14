@@ -1641,7 +1641,6 @@ SPEC = VendorSpec(
         flag="--add-dir",
         view_layout=(".claude", "skills"),
     ),
-    label="Claude Code (Anthropic)",
     # `--mcp-config` takes a literal JSON string as well as a path, and servers
     # from it load IN ADDITION to the user's own config (we never pass
     # --strict-mcp-config). A command that already carries the flag is the

@@ -995,7 +995,6 @@ SPEC = VendorSpec(
         root_home=(".qwen",),
         skills_rel=("skills",),
     ),
-    label="Qwen Code (Alibaba Cloud)",
     # `--mcp-config` is undocumented in `qwen --help` but registered, takes
     # inline JSON or a path, and merges over settings.json. No "type"
     # discriminator: httpUrl is streamable HTTP, a plain url would be SSE.

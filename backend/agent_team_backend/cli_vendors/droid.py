@@ -560,7 +560,6 @@ SPEC = VendorSpec(
     # FACTORY_HOME_OVERRIDE relocates the whole tree (droid_sessions_root).
     data_dirs=lambda ctx: (ctx.path(ctx.env.get("FACTORY_HOME_OVERRIDE") or ctx.home / ".factory"),),
     data_dir_env_vars=("FACTORY_HOME_OVERRIDE",),
-    label="Droid CLI (Factory)",
     # Quota exhaustion, read from the 0.206.0 bundle (not reproduced live):
     # the structured ``agent_turn_outcome.reason`` value (the reader passes
     # it as the turn_complete detail) plus the TUI banners. Neighbours such

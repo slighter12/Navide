@@ -2011,7 +2011,6 @@ SPEC = VendorSpec(
         skills_rel=("skills",),
         isolated_panes_home=(".codex-panes",),
     ),
-    label="Codex CLI (OpenAI)",
     # No JSON document at all: `-c` is a one-shot TOML override merged over
     # config.toml at process start, and stays valid after a subcommand
     # (`codex resume`). The dotted key doubles as the already-wired marker.
