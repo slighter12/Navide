@@ -50,5 +50,18 @@
   {"text": "{'a':1}", "expect": "rejected", "python_accepts": false},
   {"text": "[1 2]", "expect": "rejected", "python_accepts": false},
   {"text": "{\"a\" 1}", "expect": "rejected", "python_accepts": false},
-  {"text": "tru", "expect": "rejected", "python_accepts": false}
+  {"text": "tru", "expect": "rejected", "python_accepts": false},
+  {"text": "{\"a\":1,\"a\":2}", "expect": "rust", "python_accepts": true},
+  {"text": "-NaN", "expect": "python", "python_accepts": false},
+  {"text": "{\"a\":-NaN}", "expect": "python", "python_accepts": false},
+  {"hex": "7b2261223a317d", "expect": "rust", "python_accepts": true},
+  {"hex": "efbbbf7b2261223a317d", "expect": "python", "python_accepts": true},
+  {"hex": "efbbbf7b6e6f74206a736f6e7d", "expect": "python", "python_accepts": false},
+  {"hex": "fffe5b0031005d00", "expect": "python", "python_accepts": true},
+  {"hex": "feff005b0031005d", "expect": "python", "python_accepts": true},
+  {"hex": "5b0031005d00", "expect": "python", "python_accepts": true},
+  {"hex": "005b0031005d", "expect": "python", "python_accepts": true},
+  {"hex": "5b00000031000000", "expect": "python", "python_accepts": false},
+  {"hex": "12ff2066696c65", "expect": "rejected", "python_accepts": false},
+  {"hex": "7b226122", "expect": "rejected", "python_accepts": false}
 ]

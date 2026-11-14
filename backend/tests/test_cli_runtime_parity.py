@@ -590,6 +590,10 @@ def _scenarios() -> dict[str, dict]:
         _db_step([cursor_blob("a2", cursor_t._assistant("one")), cursor_blob("a3", cursor_t._assistant("two"))], 2, 3),
         # The store was recreated: re-anchor at its newest row, replay nothing.
         _db_step(["DELETE FROM blobs", cursor_blob("n1", cursor_t._assistant("old"))], 3, 4),
+        # A cell of UTF-8 JSON with a byte-order mark: `json.loads(bytes)` reads it, so
+        # the runtime hands the call to Python (it is not "no message").
+        _db_step([("INSERT INTO blobs VALUES (?, CAST(? AS BLOB))",
+                   ("bom", "﻿" + json.dumps(cursor_t._assistant("read despite the mark"))))], 4, 5),
     ]
     cursor_steps[2]["sidecars"] = {f"{cursor_dir}/meta.json": json.dumps({"updatedAtMs": 1786844146562, "cwd": "/work"})}
     def agy_step(idx: int, step_type: int, status: int, metadata: bytes | None, payload: bytes | None) -> str:
@@ -815,6 +819,7 @@ def _scenarios() -> dict[str, dict]:
         "cursor_db": {
             "vendor": "cursor", "env": {},
             "file": f"{cursor_dir}/store.db",
+            "python_reads": ["activity@4"],
             "steps": cursor_steps,
         },
         "openclaw_db": {

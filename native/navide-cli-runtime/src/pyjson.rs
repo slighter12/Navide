@@ -44,8 +44,15 @@ pub fn parse(text: &str) -> Parsed {
     }
 }
 
-/// `parse` for bytes: only valid UTF-8 is read, as Python decodes it first.
+/// `parse` for bytes. `json.loads(bytes)` first detects the encoding
+/// (`json.detect_encoding`): a UTF-8 or UTF-16 byte-order mark, or a NUL in the
+/// first four bytes (UTF-16 or UTF-32 without a mark), means Python decodes
+/// something this parser does not, so that is Python's to read. Otherwise only
+/// valid UTF-8 is read.
 pub fn parse_bytes(bytes: &[u8]) -> Parsed {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) || bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) || bytes.iter().take(4).any(|&byte| byte == 0) {
+        return Parsed::Python;
+    }
     std::str::from_utf8(bytes).map_or(Parsed::Rejected, parse)
 }
 
@@ -207,8 +214,17 @@ mod tests {
         assert!(cases.len() > 30);
         let mut wrong = Vec::new();
         for case in &cases {
-            let text = case["text"].as_str().unwrap();
-            let got = match parse(text) {
+            let (text, parsed) = match case["hex"].as_str() {
+                Some(hex) => {
+                    let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap()).collect();
+                    (hex, parse_bytes(&bytes))
+                }
+                None => {
+                    let text = case["text"].as_str().unwrap();
+                    (text, parse(text))
+                }
+            };
+            let got = match parsed {
                 Parsed::Value(_) => "rust",
                 Parsed::Python => "python",
                 Parsed::Rejected => "rejected",

@@ -22,31 +22,45 @@ CASES = json.loads(
 )
 
 
-def _python_accepts(text: str) -> bool:
+def _python_accepts(text: str | bytes) -> bool:
     try:
         json.loads(text)
-    except ValueError:  # JSONDecodeError
+    except ValueError:  # JSONDecodeError, and UnicodeDecodeError for bytes
         return False
     return True
 
 
-@pytest.mark.parametrize("case", CASES, ids=lambda case: repr(case["text"])[:48])
+def _payload(case: dict) -> str | bytes:
+    """A case is a ``text`` or, for what ``json.loads(bytes)`` detects, a ``hex`` byte string."""
+    return bytes.fromhex(case["hex"]) if "hex" in case else case["text"]
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda case: repr(_payload(case))[:48])
 def test_python_does_what_the_case_says(case: dict) -> None:
-    assert _python_accepts(case["text"]) == case["python_accepts"]
+    assert _python_accepts(_payload(case)) == case["python_accepts"]
 
 
 def test_no_text_python_reads_is_ever_sorted_as_rejected() -> None:
     """The one direction that loses records: a text Python reads that the runtime skips."""
-    lost = [case["text"] for case in CASES if case["python_accepts"] and case["expect"] == "rejected"]
+    lost = [_payload(case) for case in CASES if case["python_accepts"] and case["expect"] == "rejected"]
     assert lost == []
 
 
 def test_the_cases_cover_each_extension_python_has() -> None:
-    python_only = [case["text"] for case in CASES if case["expect"] == "python" and case["python_accepts"]]
+    python_only = [
+        case["text"] for case in CASES if "text" in case and case["expect"] == "python" and case["python_accepts"]
+    ]
     joined = "\n".join(python_only)
     for needle in ("\\ud83d", "NaN", "Infinity", "1e999"):
         assert needle in joined, needle
     assert any(len(text) > 300 for text in python_only), "an integer of more than 300 digits"
+
+
+def test_the_cases_cover_each_way_json_loads_detects_an_encoding_in_bytes() -> None:
+    byte_cases = [bytes.fromhex(case["hex"]) for case in CASES if "hex" in case and case["python_accepts"]]
+    assert any(raw.startswith(b"\xef\xbb\xbf") for raw in byte_cases), "UTF-8 BOM"
+    assert any(raw.startswith((b"\xff\xfe", b"\xfe\xff")) for raw in byte_cases), "UTF-16 BOM"
+    assert any(b"\x00" in raw[:4] and not raw.startswith((b"\xff\xfe", b"\xfe\xff")) for raw in byte_cases), "NUL"
 
 
 def test_nesting_is_python_only_between_128_levels_and_its_own_limit() -> None:
