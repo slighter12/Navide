@@ -3,14 +3,115 @@
 Branch `refactor/cli-runtime-lifecycle-main`, based on upstream/main
 `75272dd4b`, pushed to the fork (draft PR 18). The design is in `DESIGN.md`.
 
-This is the state after fix round 5, which answers reviews 5-A and 5-B (no
-finding Medium or higher), first in this report. Round 4's section follows
+This is the state after fix round 6 (the full review), first in this report
+after the PR summary. Round 5 answers reviews 5-A and 5-B (no finding Medium
+or higher). Round 4's section follows
 (reviews 4-A and 4-B). Round 2 ended at `5690f50d1` (CI run 43553202513 was
 its last); round 3 answered review 3-A (N1 to N7), whose section follows
 round 4's. Round 2's section follows that, then round 1's own table, and the
 rest describes what the branch holds now. Round 1 ended at `aec1a324b`; its
 two reviews (2-A: WITH LIMITS, 2-B: NOT READY as a base) are in the round 2
 section, finding by finding.
+
+## PR summary
+
+- **What it is.** An experimental, off-by-default Rust process
+  (`navide-cli-runtime`) that reads the same CLI transcripts and stores the
+  Python log readers read, for three calls: usage (`parse_incremental`),
+  activity (`parse_activity`) and turns (`turns_for_session`). A CLI's facts
+  (where its records live, how to launch and resume it, how its records map to
+  events) are one declaration in the crate; the Python registry, the frontend
+  agent specs and the Rust readers are all read from it. The Python readers
+  stay in the tree and answer whenever the runtime cannot.
+- **What it costs, and what it does not do.** A routed call costs about 62 µs
+  against 23 µs for the Python reader (micro-benchmark below). This PR does not
+  target the lag with hundreds of agents; it is the seam, the declaration flow
+  and the parity proof that a later stage builds on.
+- **What is off by default.** The `rustCliRuntime` UI setting (no Settings
+  toggle; `ui.settings.set`). With it off no process is started and no call is
+  routed. Rollback is setting it false.
+- **What was not run.** The signed release dry run; `electron-builder --dir`
+  (this repository has no unsigned `--dir` script and `dist` needs pnpm);
+  Linux and Windows locally (CI covers them, see the CI table in the round 6
+  section); the Rust side of the Windows path.
+
+## Fix round 6 (full review): state of this report
+
+This is the state after fix round 6. The branch was first merged with
+upstream/main (`f2e636827`, a merge commit); the work follows in small commits
+`6b886d067`, `ed2cd0f71`, `5b1757416`, `20a2f842b` and the ones this section
+ends with. Round 5's section follows.
+
+### Deliberate non-fault outcome added this round
+
+`python` is a new per-CLI outcome next to `rust`, `unsupported`, `unreadable`,
+`deferred` and `fallback`. It means: "Python can read this and the runtime
+cannot, so Python answered, and nothing was committed on the way". It is not a
+fault: it does not count toward the breaker and does not kill the process. The
+switch-on counter table prints it as `python=`. With the switch on and the
+`tests.cli_runtime_on` plugin, `fallback` is 0 for every CLI that appeared
+(claude, codex, kimi, muse, qwen in the set below).
+
+**One deviation from the brief, on purpose.** The brief says a terminated line
+that fails to parse in Rust makes the call a Python one. `pyjson::parse` is a
+classifier instead (`Value`, `Python`, `Rejected`): a line is handed over only
+when Python's `json.loads` would accept it and `serde_json` would not (lone
+surrogate escapes, `NaN` / `Infinity` / `-Infinity`, nesting past 128 levels).
+A line neither parser accepts is stepped over exactly as main steps over it.
+The literal rule would keep plain-text cells (Hermes `content`, OpenCode rows
+that are not JSON) and genuinely corrupt lines on Python for good.
+
+### Findings
+
+| Item | Status | What changed | The test that shows it |
+|------|--------|--------------|------------------------|
+| **Merge, L1** `MCP_TIMEOUT` | Fixed | `git merge upstream/main`; claude's `env_defaults` carries `MCP_TIMEOUT=120000`; declarations regenerated; `cli_declarations_main.json` follows upstream's later change. | `test_spawn_env_request.py::test_a_claude_pane_gets_a_longer_mcp_connect_budget` passes; `test_cli_declarations.py`. |
+| **C1** a record Python reads is stepped over | Fixed | `pyjson::parse` / `lenient`; `Error::PythonReads` is wire kind `python` and outcome `python`; nothing is committed on a hand-over (file lines, SQLite JSON cells). | Six new probe fixtures (`claude_probe_{surrogate,nan,deep,corrupt}`, `codex_probe_surrogate`, `opencode_probe_surrogate`) in `test_switch_on_matches_python` (switch-on equals all-Python, for usage, activity and turns); `test_cli_runtime_json.py` (55 dialect cases, `tests/json_dialect.json`). **Fails on old code:** `... pytest backend/tests/test_cli_runtime_parity.py -k "test_switch_on_matches_python and probe"` failed 6 probes on the pre-fix binary. `claude_probe_corrupt` shows that Python steps over a corrupt line, so the next checkpoint is past it and nothing loops. |
+| **C2** a request the runtime cannot parse | Fixed | `wire::parse_request` parses to `Value` first and answers a bad request under its id (kind `request`, or `python`); a non-UTF-8 line is answered, not fatal. `_Client.call` encodes strictly (`ensure_ascii=False`, `allow_nan=False`); a path or key Python cannot send raises `PythonReads` before a slot is taken: no request, no kill, no breaker failure. | Crate: `a_request_that_cannot_be_parsed_is_answered_under_its_id`. Seam: `test_a_request_python_cannot_send_as_utf8_is_python_reads_it_and_the_process_is_left_alone`, `test_a_request_the_process_refuses_is_answered_at_once_and_does_not_count_against_it`, `test_the_binary_answers_a_request_it_cannot_parse_under_its_id` (the real binary). **Not shown failing on old code** (read from the code: `lines()` aborted on non-UTF-8, and an `id: null` answer waited the 10 s timeout). |
+| **R1 / C4** SQLite open mode | Fixed | `mode=ro` first, checked with a schema probe; `immutable=1` only when that is refused and the database has no `-wal` / `-shm`; after an immutable read a `-wal` that appeared discards the read (`PythonReads`). The comment about the system SQLite stays. | `a_wal_database_without_sidecars_is_read_and_a_wal_that_appears_after_an_immutable_read_is_noticed` (it uses `wal_checkpoint(TRUNCATE)` and removes the sidecars by hand; macOS was confirmed to take the immutable path). The remaining difference is listed under "Rust differences from main (known)". |
+| **C3** a field missing from the answer | Fixed | The conversion of an answer into Python objects is inside the fallback (`_bad_answer`: `rust` is taken back, `fallback` counted, logged once per CLI); `_activity` converts everything before it mutates the caller's bag. | `test_an_answer_that_cannot_be_read_falls_back_to_python_not_into_the_watcher` (seam). Not shown failing on old code. |
+| **C3 / L-C2** build identity | Fixed | `observes` carries `_runtime` {version, declarations (FNV-1a of `registry::launch_json()`)}. Python compares both (`RUNTIME_VERSION`, a hash of `cli_declarations.json` with CRLF normalised); a mismatch kills the process and `status()["binary"]` is False. `status()` has a `runtime` block. | `observes_says_which_build_answered` (crate); the three build-mismatch cases and `test_a_build_that_is_not_this_backends_counts_as_no_binary` (three cases) and `test_the_seams_runtime_version_is_the_crates` in `test_cli_runtime_seam.py`; the health key set in `test_health_diagnostics.py`. |
+| **L-C2** stderr | Fixed | stderr is piped and drained by a thread; the last 8 lines (200 chars each) are logged once when the process dies abnormally; the panic hook prints only `file:line`, never a record. | `test_what_the_process_wrote_to_stderr_is_logged_once_bounded_when_it_dies` (seam). |
+| **N1** binary lookup | Fixed | `OSError` / `RuntimeError` in the lookup is "no binary"; `apply()` never raises. | `test_a_binary_that_cannot_even_be_looked_for_is_no_binary`. |
+| **N3** `target/release` | Fixed | Searched only when not frozen; frozen uses the packaged `<resources>/bin`. | `test_the_repository_build_is_looked_for_only_outside_the_packaged_backend`. |
+| **S1** CONTRIBUTING | Fixed | Declaration-flow bullet, Rust 1.85 floor, `NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in`. | Docs only. |
+| **S2** `_template.py` step 4 | Fixed | Removed, steps renumbered, says nothing is added to the PyInstaller spec. | Docs only. |
+| **S3** import allowlist | Fixed | `_declared` named in `docs/adding-a-cli-vendor.md`. | Docs only. |
+| **S4** `label=` | Fixed | `declared()` returns the label; the 20 hand-written lines are gone; `registry.py` builds `VendorSpec(key=key, **declared(key))`. Main's observable labels are unchanged (`cli_declarations_main.json` holds main's 20). | `test_cli_declarations.py::test_the_display_label_is_mains`, the registry and vendor suites. |
+| **S5** CHANGELOG | Fixed | One Unreleased "Added" line. | Docs only. |
+| **L-C1** operator section | Fixed | "Rust CLI runtime (experimental)" in `docs/en-US/cli-extension-guide.md`: how to turn it on, where the binary resolves, `NAVIDE_CLI_RUNTIME_BIN`, `/health` `diagnostics.cli_runtime`, rollback. | Docs only. |
+| **L-C5** this report | Fixed | The round 5 CI row says run 43581709159: green; the size table is recounted. | Docs only. |
+| **Rust hygiene** | Fixed | clippy's `cursor.rs` warning (`typed`); `Cargo.toml` says `catch_unwind` needs `panic = "unwind"`; the per-event `tail.checkpoint.clone()` that carried the old `recent_keys` is dropped from one `base` copy (event checkpoints are compared by parity, so the clone itself stays). | Crate suite; the parity fixtures. |
+| **L-C3** mid-session flip | Fixed | One flip test per route family. | `test_cli_runtime_parity.py` flip test over `claude_turns`, `codex_rewrites`, `opencode_v1`: Rust, Python, Rust over a growing store, equal to an all-Python run. |
+| **L2** packaged build | Done locally, partly | See below. | Commands below. |
+| **C-N6** Hermes `is_numeric` against `\d` | Recorded as a known difference | Under "Rust differences from main (known)". | None. |
+
+### Packaging (L2)
+
+- `uv --project backend run --locked pyinstaller --noconfirm --distpath <scratch>/pydist --workpath <scratch>/pywork backend/agent_team_backend.spec` (`release.yml` runs `uv run --locked pyinstaller agent_team_backend.spec` from `backend/`): exit 0.
+- The archive table of contents holds all 20 vendor modules, `base`, `_declared`, `_protocols`, `_template` and `registry`; `_internal/agent_team_backend/cli_declarations.json` is present.
+- The frozen backend started with an isolated data directory and home: "LogWatcher started · 17 reader(s)", `/health` status ok, `diagnostics.cli_runtime` present (`enabled` false, `state` off, `binary` false, `failures` 0, `runtime` all null, `calls` empty).
+- A packaged-like layout (`res/bin/agent_team_backend/` beside `res/bin/navide-cli-runtime`, `rustCliRuntime` preset to true): `/health` showed `enabled` true, `state` idle, `binary` true. No transcript call was made, so the handshake was **not** exercised there.
+- `electron-builder --dir` was **not** run: there is no unsigned `--dir` script, and `dist` is `pnpm build && electron-builder`.
+- The build outputs were removed and `git status` was clean afterwards.
+
+### Commands and results (round 6)
+
+| Command | Result |
+|---------|--------|
+| `cargo test --offline` | 49 passed (8 suites). |
+| `cargo check --offline --all-targets` | no warnings. |
+| `cargo clippy --offline --all-targets` | no issues. |
+| `env -u NAVIDE_PANE_MARK uv --project backend run pytest` on vendors, parity, seam, json, claude_activity_resume, activity_high_water, declarations, registry, health, shutdown_seen_flush, osplat, osplat_windows_discovery, pyinstaller_spec, spawn_env_request (switch off) | 1255 passed, 3 skipped. |
+| the same set with `-p tests.cli_runtime_on` (switch on) | 918 passed, 4 skipped. `fallback=0` for claude, codex, kimi, muse, qwen. Under the plugin the probe tests assert `python >= handed-over calls` (routes are installed on classes and instances, so a call is counted two or three times); without it they assert `==`. |
+| `bun run vitest run --changed upstream/main` | 20547 passed, 1 failed: `pluginExternalWorkspace.test.ts`, `Executable not found in $PATH: "pnpm"` (no pnpm here; the same failure as rounds 2 to 5; not touched by this branch). |
+| `bun run typecheck:web` | no errors. |
+| `node scripts/changed-backend-tests.mjs` (bare, after the last code change) | exit 0: 16951 passed, 40 skipped, 110 deselected, 1 xfailed (13 min 40 s), then the serial pass 106 passed, 4 skipped. The report and docs were edited after it. |
+| `git merge-tree --write-tree upstream/main HEAD` | clean (a tree id, no conflicts), run against HEAD before the report commit. |
+
+| CI | Result |
+|----|--------|
+| Run on the round 6 push | recorded in the delivery message (the push happens after this file is committed) |
 
 ## Fix round 5: the Lows and every known contradiction
 
@@ -64,7 +165,7 @@ fixed.
 
 | CI | Result |
 |----|--------|
-| Run on the round 5 push | CI_RESULT |
+| Run on the round 5 push | run 43581709159: green |
 
 ## Fix round 4: every review 4 finding
 
@@ -394,16 +495,16 @@ SQL strings.
 
 | Part | Lines |
 |------|-------|
-| Core: `src/` without `src/vendors/` (22 files, 6,322, unit tests included) plus `build.rs` (35) | 6,357 |
-| Declarations: `src/vendors/` (20 files) | 3,422 |
+| Core: `src/` without `src/vendors/` (22 files, 7,018, unit tests included) plus `build.rs` (35); counted after round 6 | 7,053 |
+| Declarations: `src/vendors/` (20 files) | 3,427 |
 | of which extension code: each file's `Ext` enum, `impl Vendor` and helper functions, unit tests excluded (round 1's count by item line ranges, less the 6 lines of antigravity's removed `init`) | about 700 |
 | of which the three launch-and-resume-only files (devin, kiro, mcode) | 45 |
-| Crate tests: `tests/*.rs` (parity replay and rule coverage, declaration checks, the checked-in copies, the outside CLI, local time) | 686 |
-| Parity fixtures: `tests/parity/*.json` | 27 files |
-| Seam: `cli_runtime.py` | 652 |
-| Readers of the generated declarations: `_declared.py` 131, `_declared.ts` 97 | 228 |
-| The two registries: `cli_vendors/registry.py` 148 (was 160, with its hand list), `agents/index.ts` 59 (was 76) | 207 |
-| Round 2's tooling: `scripts/build-cli-runtime.mjs` 57, `backend/tests/cli_runtime_build.py` 63, `backend/tests/bench_cli_runtime.py` 208 | 328 |
+| Crate tests: `tests/*.rs` (parity replay and rule coverage, declaration checks, the checked-in copies, the extensibility toy CLI, local time) | 728 |
+| Parity fixtures: `tests/parity/*.json` (round 6 added 6 probe fixtures) and `tests/json_dialect.json` (55 cases) | 33 files, 1 file |
+| Seam: `cli_runtime.py` | 913 |
+| Readers of the generated declarations: `_declared.py` 133, `_declared.ts` 97 | 230 |
+| The two registries: `cli_vendors/registry.py` 148 (was 160, with its hand list), `agents/index.ts` 67 (was 76) | 215 |
+| Tooling: `scripts/build-cli-runtime.mjs` 62, `backend/tests/cli_runtime_build.py` 112, `backend/tests/bench_cli_runtime.py` 208 | 382 |
 
 The core grew by 221 lines in round 2: `StoreSeed` and `Order` in `decl.rs`,
 the bounded header read, and unit tests (the header read on a pipe, the
@@ -596,6 +697,30 @@ Still open, all in cases no fixture or vendor test reaches:
 - goose's store env value is not checked for being absolute.
 - `\d` is ASCII in aider's matchers and `char::is_numeric` in hermes's (main:
   Unicode decimal digits); aider's case-insensitive words fold ASCII only.
+  (C-N6, recorded in round 6: the Hermes difference is not fixed.)
+- **Python reads a call (round 6).** A terminated line or JSON column that
+  `serde_json` rejects and Python's `json.loads` may read (a lone surrogate
+  escape, `NaN` / `Infinity`, a number out of a double's range or of any
+  length, nesting past 128 levels) hands the whole call to the Python reader:
+  the answer is the non-fault kind `python` (counted as `python`), nothing is
+  committed, and the next call is the runtime's again once Python's reader has
+  stepped past the record as main does. The rule is the classifier
+  `pyjson::parse` (`Value`, `Python` or `Rejected`), not "any parse failure",
+  which would have kept plain-text cells (hermes `content`, opencode rows that
+  are not JSON) and corrupt lines on Python for good. The classifier is
+  deliberately wider than Python (an out-of-range or malformed number is
+  treated as `0`, nesting beyond 900 levels is Python's to read or raise on): a
+  wider classifier costs a call, never a record. A record only Python parses
+  inside the header region of a file keeps that file's *header reads* on
+  Python until it is past the region. An unterminated last line only Python
+  parses is handed over as well; an incomplete line is waited for as before.
+  Sidecar JSON documents, the seen-keys bag and cursor parses are unchanged.
+- SQLite (round 6): `mode=ro` is tried first, as on main; `immutable=1` is
+  used only for a closed WAL database (no `-wal`, no `-shm`) that the system
+  SQLite refuses, and a `-wal` that appears after such a read hands the call
+  to Python. What is left: a writer that starts, commits and closes (so its
+  `-wal` is gone again) between the open and that check is not noticed; a
+  `mode=ro` read of main would have seen its rows, and the next poll does.
 - Python, not Rust: the memory table (`native_memory.MEMORY_SOURCES`) is
   assembled in registry order, main's was in its own, and the order shows in
   one case. `candidates()` keeps the scope and relative path of the first row
