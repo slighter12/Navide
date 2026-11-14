@@ -35,6 +35,7 @@ from agent_team_backend.cli_vendors import opencode as opencode_vendor
 from agent_team_backend.cli_vendors.pi import encode_pi_cwd
 from agent_team_backend.cli_vendors.registry import vendor as cli_vendor
 from agent_team_backend.log_readers.claude import encode_claude_cwd
+from tests import cli_runtime_build
 from tests.vendors import test_aider as aider_t
 from tests.vendors import test_antigravity_activity as agy_t
 from tests.vendors import test_claude as claude_t
@@ -960,8 +961,7 @@ def test_switch_on_without_a_binary_falls_back_to_python(tmp_path: Path, monkeyp
 
 @pytest.mark.parametrize("name", sorted(_scenarios()))
 def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime_switch) -> None:
-    if cli_runtime.binary() is None:
-        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
+    cli_runtime_build.binary()
     scenario = _scenarios()[name]
     runtime_switch.apply(True)
     expected = _run(scenario, tmp_path / "py", _python_reader(scenario["vendor"]), monkeypatch)

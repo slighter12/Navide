@@ -56,6 +56,7 @@ pub static CLI: Cli = Cli {
     key: "qwen",
     label: "Qwen Code (Alibaba Cloud)",
     kind: Kind::Cli,
+    order: Order { menu: 70, registry: 200 },
     launch: Launch { yolo_args: &["--yolo"], model: Some(&["--model", "{}"]), env_strip: &["QWEN_HOME", "QWEN_RUNTIME_DIR"], ..Launch::of("qwen") },
     resume: Resume {
         args: Some(&["--resume", "{id}"]),

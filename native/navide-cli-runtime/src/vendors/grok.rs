@@ -88,6 +88,7 @@ pub static CLI: Cli = Cli {
     key: "grok",
     label: "Grok Build (SpaceXAI)",
     kind: Kind::Cli,
+    order: Order { menu: 40, registry: 100 },
     // `--always-approve` exists but is deliberately not wired (see agents/grok.ts).
     launch: Launch {
         model: Some(&["--model", "{}"]),

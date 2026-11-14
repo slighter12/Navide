@@ -16,7 +16,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let result = match (args.next().as_deref(), args.next().as_deref()) {
         (Some("declarations"), None) => print(&registry::export()),
-        (Some("declarations"), Some("launch")) => print(&registry::ALL),
+        (Some("declarations"), Some("launch")) => std::io::Write::write_all(&mut std::io::stdout().lock(), registry::launch_json().as_bytes()),
         (Some("serve"), None) => wire::serve(std::io::stdin().lock(), std::io::stdout()),
         _ => {
             eprintln!("usage: navide-cli-runtime declarations [launch] | serve");

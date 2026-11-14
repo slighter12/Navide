@@ -1,8 +1,16 @@
-[
+// Generated from native/navide-cli-runtime/src/vendors/*.rs: the output of
+// `navide-cli-runtime declarations launch`, as a typed constant. Never edited
+// by hand. `NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in` (in
+// native/navide-cli-runtime) rewrites it together with the backend's copy.
+export default [
   {
     "key": "aider",
     "label": "Aider",
     "kind": "cli",
+    "order": {
+      "menu": 120,
+      "registry": 10
+    },
     "launch": {
       "program": "aider",
       "base_args": [],
@@ -30,6 +38,10 @@
     "key": "antigravity",
     "label": "Antigravity CLI (Google)",
     "kind": "cli",
+    "order": {
+      "menu": 30,
+      "registry": 20
+    },
     "launch": {
       "program": "agy",
       "base_args": [],
@@ -80,6 +92,10 @@
     "key": "claude",
     "label": "Claude Code (Anthropic)",
     "kind": "cli",
+    "order": {
+      "menu": 10,
+      "registry": 30
+    },
     "launch": {
       "program": "claude",
       "base_args": [],
@@ -135,6 +151,10 @@
     "key": "codex",
     "label": "Codex CLI (OpenAI)",
     "kind": "cli",
+    "order": {
+      "menu": 20,
+      "registry": 40
+    },
     "launch": {
       "program": "codex",
       "base_args": [],
@@ -180,6 +200,10 @@
     "key": "copilot",
     "label": "GitHub Copilot CLI",
     "kind": "cli",
+    "order": {
+      "menu": 100,
+      "registry": 50
+    },
     "launch": {
       "program": "copilot",
       "base_args": [],
@@ -235,6 +259,10 @@
     "key": "cursor",
     "label": "Cursor CLI",
     "kind": "cli",
+    "order": {
+      "menu": 110,
+      "registry": 60
+    },
     "launch": {
       "program": "agent",
       "base_args": [],
@@ -278,6 +306,10 @@
     "key": "devin",
     "label": "Devin CLI (Cognition)",
     "kind": "cli",
+    "order": {
+      "menu": 170,
+      "registry": 70
+    },
     "launch": {
       "program": "devin",
       "base_args": [],
@@ -303,6 +335,10 @@
     "key": "droid",
     "label": "Droid CLI (Factory)",
     "kind": "cli",
+    "order": {
+      "menu": 140,
+      "registry": 80
+    },
     "launch": {
       "program": "droid",
       "base_args": [],
@@ -349,6 +385,10 @@
     "key": "goose",
     "label": "Goose (AAIF)",
     "kind": "cli",
+    "order": {
+      "menu": 160,
+      "registry": 90
+    },
     "launch": {
       "program": "goose",
       "base_args": [],
@@ -392,6 +432,10 @@
     "key": "grok",
     "label": "Grok Build (SpaceXAI)",
     "kind": "cli",
+    "order": {
+      "menu": 40,
+      "registry": 100
+    },
     "launch": {
       "program": "grok",
       "base_args": [],
@@ -438,6 +482,10 @@
     "key": "hermes",
     "label": "Hermes Agent",
     "kind": "agent",
+    "order": {
+      "menu": 200,
+      "registry": 110
+    },
     "launch": {
       "program": "hermes",
       "base_args": [
@@ -485,6 +533,10 @@
     "key": "kilo",
     "label": "Kilo Code CLI",
     "kind": "cli",
+    "order": {
+      "menu": 80,
+      "registry": 120
+    },
     "launch": {
       "program": "kilo",
       "base_args": [],
@@ -532,6 +584,10 @@
     "key": "kimi",
     "label": "Kimi Code CLI (Moonshot AI)",
     "kind": "cli",
+    "order": {
+      "menu": 50,
+      "registry": 130
+    },
     "launch": {
       "program": "kimi",
       "base_args": [],
@@ -583,6 +639,10 @@
     "key": "kiro",
     "label": "Kiro CLI (AWS)",
     "kind": "cli",
+    "order": {
+      "menu": 180,
+      "registry": 140
+    },
     "launch": {
       "program": "kiro-cli",
       "base_args": [
@@ -612,6 +672,10 @@
     "key": "mcode",
     "label": "MiniMax Code",
     "kind": "cli",
+    "order": {
+      "menu": 150,
+      "registry": 150
+    },
     "launch": {
       "program": "mcode",
       "base_args": [],
@@ -637,6 +701,10 @@
     "key": "muse",
     "label": "Muse Code (Meta)",
     "kind": "cli",
+    "order": {
+      "menu": 130,
+      "registry": 160
+    },
     "launch": {
       "program": "muse",
       "base_args": [],
@@ -692,6 +760,10 @@
     "key": "openclaw",
     "label": "OpenClaw",
     "kind": "agent",
+    "order": {
+      "menu": 190,
+      "registry": 180
+    },
     "launch": {
       "program": "openclaw",
       "base_args": [
@@ -737,6 +809,10 @@
     "key": "opencode",
     "label": "OpenCode (Anomaly)",
     "kind": "cli",
+    "order": {
+      "menu": 60,
+      "registry": 170
+    },
     "launch": {
       "program": "opencode",
       "base_args": [],
@@ -782,6 +858,10 @@
     "key": "pi",
     "label": "Pi",
     "kind": "cli",
+    "order": {
+      "menu": 90,
+      "registry": 190
+    },
     "launch": {
       "program": "pi",
       "base_args": [],
@@ -838,6 +918,10 @@
     "key": "qwen",
     "label": "Qwen Code (Alibaba Cloud)",
     "kind": "cli",
+    "order": {
+      "menu": 70,
+      "registry": 200
+    },
     "launch": {
       "program": "qwen",
       "base_args": [],
@@ -881,4 +965,4 @@
       3
     ]
   }
-]
+] as const

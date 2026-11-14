@@ -198,8 +198,11 @@ impl Connection {
                 ROW => {}
                 _ => return None,
             }
+            // The type first: reading a BLOB's bytes as text makes SQLite
+            // report the cell as TEXT afterwards.
+            let kind = unsafe { sqlite3_column_type(statement.0, 0) };
             let bytes = unsafe { cell(statement.0, 0) };
-            match unsafe { sqlite3_column_type(statement.0, 0) } {
+            match kind {
                 4 => out.push_str(&ignore_invalid(bytes)),
                 // A TEXT cell that is not UTF-8 fails main's whole query.
                 3 => out.push_str(std::str::from_utf8(bytes).ok()?),
@@ -261,15 +264,59 @@ impl Db {
     pub fn rows(&self, sql: &str, params: &[Param]) -> Option<Vec<Row>> {
         self.connection.query(sql, params, self.json, self.binary)
     }
+
+    /// The first column of every row of `sql`, bytes decoded as UTF-8 with
+    /// invalid sequences dropped (Python `errors="ignore"`), concatenated.
+    /// `None`: the query failed.
+    pub fn joined(&self, sql: &str) -> Option<String> {
+        self.connection.joined(sql)
+    }
 }
 
-/// The first column of every row of `sql`, bytes decoded as UTF-8 with
-/// invalid sequences dropped (Python `errors="ignore"`), concatenated; when
-/// the query fails, the database file's own bytes the same way (a live store
-/// mid-write). For a slot initialiser that reads a blob table whole.
-pub fn joined(path: &Path, sql: &str) -> String {
-    Connection::open(path)
-        .and_then(|connection| connection.joined(sql))
-        .or_else(|| std::fs::read(path).ok().map(|bytes| ignore_invalid(&bytes)))
-        .unwrap_or_default()
+#[cfg(test)]
+pub(crate) mod testing {
+    //! A database a test can write: the crate itself only ever reads one.
+    use super::*;
+
+    #[cfg_attr(target_os = "macos", link(name = "sqlite3"))]
+    #[cfg_attr(windows, link(name = "winsqlite3", kind = "raw-dylib"))]
+    unsafe extern "C" {
+        fn sqlite3_exec(db: *mut c_void, sql: *const c_char, callback: *const c_void, arg: *mut c_void, error: *mut *mut c_char) -> c_int;
+    }
+
+    /// Run `sql` against the database at `path`, creating it.
+    pub fn write(path: &Path, sql: &str) {
+        const READ_WRITE_CREATE: c_int = 2 | 4;
+        let name = CString::new(path.to_str().unwrap()).unwrap();
+        let sql = CString::new(sql).unwrap();
+        let mut raw = std::ptr::null_mut();
+        assert_eq!(unsafe { sqlite3_open_v2(name.as_ptr(), &mut raw, READ_WRITE_CREATE, std::ptr::null()) }, 0);
+        let db = Connection(raw);
+        assert_eq!(unsafe { sqlite3_exec(db.0, sql.as_ptr(), std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
+    }
+
+    /// A fresh directory under the system's temporary one.
+    pub fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("navide-cli-runtime-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blob_that_is_not_utf8_is_joined_as_a_blob() {
+        let dir = testing::scratch("joined");
+        let path = dir.join("store.db");
+        // A protobuf-like blob: a length byte that is not UTF-8 on its own,
+        // then text; and a TEXT row.
+        testing::write(&path, "CREATE TABLE t (data); INSERT INTO t VALUES (x'12FF66696C653A2F2F2F757372'), ('z')");
+        let db = Db::open(&path, &[], &[], &[]).unwrap().unwrap();
+        assert_eq!(db.joined("SELECT data FROM t ORDER BY rowid").as_deref(), Some("\u{12}file:///usrz"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

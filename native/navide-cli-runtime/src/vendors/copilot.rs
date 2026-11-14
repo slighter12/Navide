@@ -47,6 +47,7 @@ pub static CLI: Cli = Cli {
     key: "copilot",
     label: "GitHub Copilot CLI",
     kind: Kind::Cli,
+    order: Order { menu: 100, registry: 50 },
     launch: Launch {
         yolo_args: &["--yolo"],
         model: Some(&["--model", "{}"]),
@@ -85,6 +86,7 @@ static OBSERVE: Observe<V> = Observe {
         requires: &[],
         // main's reader warns (once) about a store it cannot read.
         unreadable: Unreadable::Unsupported,
+        seeds: &[],
         usage: SqlUsage::Anchored(Anchored::of(
             &[UsageRule {
                 when: Pred::True,

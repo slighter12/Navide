@@ -15,7 +15,9 @@ died or stalled, an error answer) or declined a store that is not listed in
 The few tests that meter the Python reader's own file reads are skipped, with
 the reason shown (``PYTHON_READ_METERS``).
 
-Needs a release build: ``cargo build --release`` in native/navide-cli-runtime.
+The runtime is built from the checkout's source first
+(``tests/cli_runtime_build.py``); a run that cannot build it is an error, not
+a skip.
 """
 
 from __future__ import annotations
@@ -69,9 +71,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 def pytest_configure(config: pytest.Config) -> None:
     from agent_team_backend import cli_runtime
     from agent_team_backend.cli_vendors.registry import VENDORS
+    from tests import cli_runtime_build
 
-    if cli_runtime.binary() is None:
-        raise pytest.UsageError("cli_runtime_on needs navide-cli-runtime built (cargo build --release)")
+    try:
+        cli_runtime_build.binary()
+    except (pytest.skip.Exception, pytest.fail.Exception) as stopped:
+        # A suite run with the switch on and nothing to switch to proves nothing.
+        raise pytest.UsageError(f"cli_runtime_on needs navide-cli-runtime built from source: {stopped}") from None
     seen: set[type] = set()
     for spec in VENDORS.values():
         if spec.make_log_reader is None:

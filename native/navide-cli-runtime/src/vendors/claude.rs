@@ -108,6 +108,7 @@ pub static CLI: Cli = Cli {
     key: "claude",
     label: "Claude Code (Anthropic)",
     kind: Kind::Cli,
+    order: Order { menu: 10, registry: 30 },
     launch: Launch {
         yolo_args: &["--dangerously-skip-permissions"],
         model: Some(&["--model", "{}"]),

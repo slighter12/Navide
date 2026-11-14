@@ -52,7 +52,7 @@ fn found(pick: Option<usize>, problem: Option<Problem>) -> Probed {
 /// main's `_schema`. OpenCode 2's tables win, unless the 1.x ones took the
 /// newest write (a downgrade, or a 1.x binary sharing the database): that is
 /// read as 1.x and disclosed, since the 2.x side then goes unread.
-pub fn schema(store: &mut dyn FnMut(&str) -> Option<Vec<Value>>) -> Probed {
+pub fn schema<S: FnMut(&str) -> Option<Vec<Value>>>(store: &mut S) -> Probed {
     let Some(rows) = store(TABLES) else { return Probed { pick: None, read: None } };
     let names: BTreeSet<String> = rows.iter().map(|row| py_str_opt(row.get("name"))).collect();
     let has = |table: &str| names.contains(table);
@@ -151,7 +151,7 @@ macro_rules! store {
                 }
             }
 
-            fn probe(ext: family::Ext, store: &mut dyn FnMut(&str) -> Option<Vec<serde_json::Value>>) -> Probed {
+            fn probe<S: FnMut(&str) -> Option<Vec<serde_json::Value>>>(ext: family::Ext, store: &mut S) -> Probed {
                 match ext {
                     family::Ext::Schema => family::schema(store),
                     family::Ext::Created => Probed { pick: None, read: None },
@@ -239,6 +239,7 @@ macro_rules! store {
                 requires: &[],
                 // main's reader records why (its read-problem registry).
                 unreadable: Unreadable::Unsupported,
+                seeds: &[],
                 usage: SqlUsage::OneOf {
                     probe: family::Ext::Schema,
                     of: &[
@@ -309,6 +310,7 @@ pub static CLI: Cli = Cli {
     key: "opencode",
     label: "OpenCode (Anomaly)",
     kind: Kind::Cli,
+    order: Order { menu: 60, registry: 170 },
     // Only `opencode run` has a permission bypass; the TUI has none.
     launch: Launch { model: Some(&["--model", "{}"]), env_strip: &["OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"], ..Launch::of("opencode") },
     resume: Resume {

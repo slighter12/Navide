@@ -45,6 +45,7 @@ static TOY: Cli = Cli {
     key: "toy",
     label: "Toy CLI",
     kind: Kind::Cli,
+    order: Order { menu: 9000, registry: 9000 },
     launch: Launch {
         base_args: &["chat"],
         yolo_args: &["--yes"],

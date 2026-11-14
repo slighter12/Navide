@@ -7,6 +7,7 @@ pub static CLI: Cli = Cli {
     key: "kilo",
     label: "Kilo Code CLI",
     kind: Kind::Cli,
+    order: Order { menu: 80, registry: 120 },
     launch: Launch { yolo_args: &["--auto"], model: Some(&["--model", "{}"]), env_strip: &["KILO_CONFIG_DIR", "KILO_CONFIG"], ..Launch::of("kilo") },
     resume: Resume {
         args: Some(&["--session", "{id}"]),

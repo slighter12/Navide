@@ -78,6 +78,7 @@ pub static CLI: Cli = Cli {
     key: "muse",
     label: "Muse Code (Meta)",
     kind: Kind::Cli,
+    order: Order { menu: 130, registry: 160 },
     launch: Launch {
         yolo_args: &["--disable-approval"],
         model: Some(&["--model", "{}"]),

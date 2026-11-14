@@ -101,6 +101,16 @@ fn settling_rows_are_bound_in_their_query() {
 }
 
 #[test]
+fn every_cli_has_its_own_place_in_both_lists() {
+    for (n, cli) in ALL.iter().enumerate() {
+        for other in &ALL[..n] {
+            assert_ne!(cli.order.menu, other.order.menu, "{} and {} share a menu place", cli.key, other.key);
+            assert_ne!(cli.order.registry, other.order.registry, "{} and {} share a registry place", cli.key, other.key);
+        }
+    }
+}
+
+#[test]
 fn launch_declarations_are_complete() {
     for cli in ALL {
         let launch = &cli.launch;

@@ -32,6 +32,7 @@ pub static CLI: Cli = Cli {
     key: "droid",
     label: "Droid CLI (Factory)",
     kind: Kind::Cli,
+    order: Order { menu: 140, registry: 80 },
     // The interactive command accepts an unknown `--model` and ignores it.
     launch: Launch {
         yolo_args: &["--auto", "high"],

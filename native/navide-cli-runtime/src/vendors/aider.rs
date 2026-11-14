@@ -174,6 +174,7 @@ pub static CLI: Cli = Cli {
     key: "aider",
     label: "Aider",
     kind: Kind::Cli,
+    order: Order { menu: 120, registry: 10 },
     // Any model string goes straight to litellm, so a wrong one cannot be caught.
     launch: Launch { yolo_args: &["--yes-always"], env_strip: &["AIDER_CHAT_HISTORY_FILE", "AIDER_INPUT_HISTORY_FILE"], ..Launch::of("aider") },
     // Only a lossy `--restore-chat-history`, which names no session.

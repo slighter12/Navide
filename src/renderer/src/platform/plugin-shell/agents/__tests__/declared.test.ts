@@ -94,8 +94,49 @@ const MAIN: Record<string, Held> = {
   qwen: { label: 'Qwen Code (Alibaba Cloud)', command: 'qwen', yolo: '--yolo', model: '--model M', resume: '--resume ID' },
 }
 
+/** The display order of main's hand-kept `ORDERED` list in `index.ts`,
+ *  recorded before discovery replaced it. It is each declaration's
+ *  `order.menu`, with the plain terminal after the CLIs. */
+const MAIN_ORDER = [
+  'claude', 'codex', 'antigravity', 'grok', 'kimi', 'opencode', 'qwen', 'kilo', 'pi', 'copilot',
+  'cursor', 'aider', 'muse', 'droid', 'mcode', 'goose', 'devin', 'kiro', 'openclaw', 'hermes',
+  'terminal',
+]
+
+/** The `resumeCommandPattern` each spec file held on main. A spec that held
+ *  none was recognized by the generic `<agentKey> --resume <id>` shape. */
+const MAIN_RESUME_PATTERN: Record<string, RegExp> = {
+  aider: /^aider\b.*--restore-chat-history\b/,
+  antigravity: /^agy\s+--conversation\s+\S+/,
+  codex: /^codex\s+resume\s+\S+/,
+  copilot: /^copilot\s+--resume(?:=|\s+)\S+/,
+  cursor: /^(?:cursor-)?agent\s+--resume(?:=|\s+)\S+/,
+  goose: /^goose\s+session\s+-r\s+--session-id\s+\S+/,
+  grok: /^grok\s+-r\s+\S+/,
+  hermes: /^hermes\s+chat\b.*\s(?:--continue|-c)\s+\S+/,
+  kilo: /^kilo\s+(?:--session|-s)\s+\S+/,
+  kimi: /^kimi\s+(?:--session|-S)\s+\S+/,
+  muse: /^muse\s+resume\s+\S+/,
+  opencode: /^opencode\s+(?:--session|-s)\s+\S+/,
+  openclaw: /^openclaw\s+tui\b.*\s--session(?:=|\s+)\S+/,
+  pi: /^pi\s+--session-id\s+\S+/,
+}
+
 describe('agent specs built from the declarations', () => {
   const vendors = AGENT_SPECS.filter((spec) => spec.agentKey !== 'terminal')
+
+  it('lists the specs in the order main listed them', () => {
+    expect(AGENT_SPECS.map((spec) => spec.agentKey)).toEqual(MAIN_ORDER)
+  })
+
+  it.each(MAIN_ORDER.filter((key) => key !== 'terminal'))('%s recognizes a resume command as on main', (key) => {
+    const spec = vendors.find((candidate) => candidate.agentKey === key)!
+    // App.vue's looksLikeResumeCommand: the spec's pattern, else the generic shape.
+    const now = spec.resumeCommandPattern ?? new RegExp(`^${key}\\s+--resume\\s+\\S+`)
+    const main = MAIN_RESUME_PATTERN[key] ?? new RegExp(`^${key}\\s+--resume\\s+\\S+`)
+    expect(now.source).toBe(main.source)
+    expect(now.flags).toBe(main.flags)
+  })
 
   it('covers every vendor', () => {
     expect(vendors.map((spec) => spec.agentKey).sort()).toEqual(Object.keys(MAIN).sort())

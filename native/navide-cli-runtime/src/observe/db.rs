@@ -42,6 +42,17 @@ impl Conn {
         self.db.as_ref()?.rows(sql, params)
     }
 
+    /// The text a `StoreSeed` is evaluated over: the query's cells joined,
+    /// or the database file's own bytes when the query fails (a live store
+    /// mid-write), invalid UTF-8 dropped either way.
+    fn seed_text(&self, path: &std::path::Path, sql: &str) -> String {
+        self.db
+            .as_ref()
+            .and_then(|db| db.joined(sql))
+            .or_else(|| std::fs::read(path).ok().map(|bytes| crate::text::ignore_invalid(&bytes)))
+            .unwrap_or_default()
+    }
+
     /// The first column of the first row, as main's `_int` reads it; `None`
     /// when it is SQL `NULL` (`MAX` over no rows) or the query fails.
     fn scalar(&self, sql: &str) -> Option<i64> {
@@ -104,8 +115,13 @@ impl<V: Vendor<Backend = Sqlite>> Backend<V> for Sqlite {
     }
 
     fn walk(walk: &mut Walk<'_, V>, state: &mut ActivityState, memo: &mut Memo) -> Result<(), Error> {
-        walk.restore(state);
         let conn = Conn::open(walk.file)?;
+        for seed in walk.file.records().seeds {
+            let record = serde_json::json!({ "text": conn.seed_text(walk.file.path, seed.sql) });
+            let value = expr::text(&seed.value, &Scope::of(&record, &walk.slots));
+            walk.slots.set(seed.slot, value);
+        }
+        walk.restore(state);
         run_walk(walk, &conn, &walk.file.records().activity, state, memo);
         conn.checked(walk.file, ())
     }

@@ -121,6 +121,7 @@ pub static CLI: Cli = Cli {
     key: "openclaw",
     label: "OpenClaw",
     kind: Kind::Agent,
+    order: Order { menu: 190, registry: 180 },
     // The TUI on the local embedded runtime (a bare `openclaw` attaches to a gateway).
     launch: Launch { base_args: &["tui", "--local"], ..Launch::of("openclaw") },
     resume: Resume {
@@ -152,6 +153,7 @@ static OBSERVE: Observe<V> = Observe {
         binary: &[],
         requires: &[("transcript_events", &["session_id", "seq", "event_json", "message_role"])],
         unreadable: Unreadable::Quiet,
+        seeds: &[],
         usage: SqlUsage::Watermarks {
             rules: &[UsageRule {
                 when: Pred::All(&[MESSAGE_ROW, ASSISTANT, Pred::IsObject(&["event", "message", "usage"])]),

@@ -28,6 +28,16 @@ macro_rules! registry {
             $(visitor.vendor::<crate::vendors::$vendor::V>(stringify!($vendor));)*
         }
 
+        /// The observer of one CLI by key (`None`: unknown, or it declares no records).
+        pub fn observer(key: &str) -> Option<AnyObserver> {
+            $(
+                if <crate::vendors::$vendor::V as Vendor>::CLI.key == key {
+                    return Observer::<crate::vendors::$vendor::V>::new().map(AnyObserver::$vendor);
+                }
+            )*
+            None
+        }
+
         /// One CLI's observer, whichever CLI it is.
         #[allow(non_camel_case_types)]
         pub enum AnyObserver {
@@ -83,7 +93,11 @@ macro_rules! registry {
 
 each_vendor!(registry);
 
-/// The observer of one CLI by key (`None`: unknown, or it declares no records).
-pub fn observer(key: &str) -> Option<AnyObserver> {
-    AnyObserver::all().into_iter().find(|observer| observer.key() == key)
+/// What `declarations launch` prints: the launch and resume part of every
+/// declaration, as the checked-in `cli_declarations.json` holds it (pretty
+/// JSON and a final newline).
+pub fn launch_json() -> String {
+    let mut text = serde_json::to_string_pretty(ALL).expect("declarations are plain data");
+    text.push('\n');
+    text
 }

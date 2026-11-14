@@ -24,6 +24,8 @@ export const SPEC = {
   //
   // Resume: `tui --session <key>` reattaches the session with that key.
   ...declared('openclaw'),
+  // Wider than the pattern derived from the declaration: other arguments may
+  // sit between `tui` and the flag, in the `=` or the spaced form.
   resumeCommandPattern: /^openclaw\s+tui\b.*\s--session(?:=|\s+)\S+/,
   supportsRebuild: true,
   // A fresh pane names its own session key, so the pane owns it from the

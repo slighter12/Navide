@@ -104,6 +104,7 @@ pub static CLI: Cli = Cli {
     key: "codex",
     label: "Codex CLI (OpenAI)",
     kind: Kind::Cli,
+    order: Order { menu: 20, registry: 40 },
     launch: Launch {
         yolo_args: &["--dangerously-bypass-approvals-and-sandbox"],
         // Effort is a config override (`-c model_reasoning_effort=…`), not a flag.

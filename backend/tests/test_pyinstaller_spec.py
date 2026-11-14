@@ -70,12 +70,27 @@ def test_every_chat_channel_adapter_is_a_hidden_import():
     assert not missing, f"chat channel adapters missing from hiddenimports: {missing}"
 
 
+def test_every_vendor_module_is_a_hidden_import():
+    # cli_vendors/registry.py imports each declared CLI's module by its key
+    # (importlib.import_module), which the graph walk cannot see. A module
+    # missing here is absent from the packaged app, where the registry then
+    # builds that CLI from its declaration alone: it launches, and its
+    # credentials, install detection and log reader are silently gone.
+    from agent_team_backend.cli_vendors import _declared
+
+    vendors = Path(_declared.__file__).parent
+    listed = set(_keyword("hiddenimports"))
+    missing = sorted(
+        key for key in _declared.declarations()
+        if (vendors / f"{key}.py").is_file() and f"agent_team_backend.cli_vendors.{key}" not in listed
+    )
+    assert not missing, f"vendor modules missing from hiddenimports: {missing}"
+
+
 def test_every_lazy_log_reader_vendor_is_a_hidden_import():
     # log_readers/__init__.py resolves each migrated reader through a PEP 562
     # __getattr__ that calls importlib.import_module, which the graph walk
-    # cannot see. Today cli_vendors.registry imports every one statically, but
-    # a vendor dropped from the registry would then vanish from the packaged
-    # app while `from log_readers import XLogReader` still works in dev.
+    # cannot see, exactly as the registry's own import by key is.
     from agent_team_backend.log_readers import _MIGRATED_READERS
 
     listed = set(_keyword("hiddenimports"))

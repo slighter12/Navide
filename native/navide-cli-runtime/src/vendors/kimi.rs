@@ -48,6 +48,7 @@ pub static CLI: Cli = Cli {
     key: "kimi",
     label: "Kimi Code CLI (Moonshot AI)",
     kind: Kind::Cli,
+    order: Order { menu: 50, registry: 130 },
     // Effort lives in config.toml, not on the command line.
     launch: Launch {
         yolo_args: &["--yolo"],

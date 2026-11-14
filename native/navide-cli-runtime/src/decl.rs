@@ -67,7 +67,7 @@ pub trait Vendor: Sized + Debug + 'static {
     /// Which of the declared variants this store holds (`SqlUsage::OneOf`,
     /// `SqlWalk::OneOf`): `store` runs one query and returns its rows, `None`
     /// when it cannot be read this cycle. Read-only, and only through `store`.
-    fn probe(_ext: Self::Ext, _store: &mut dyn FnMut(&str) -> Option<Vec<Value>>) -> Probed {
+    fn probe<S: FnMut(&str) -> Option<Vec<Value>>>(_ext: Self::Ext, _store: &mut S) -> Probed {
         Probed { pick: Some(0), read: None }
     }
 }
@@ -191,10 +191,25 @@ pub struct Cli {
     pub key: Str,
     pub label: Str,
     pub kind: Kind,
+    pub order: Order,
     pub launch: Launch,
     pub resume: Resume,
     /// Byte(s) that interrupt the CLI in its PTY.
     pub interrupt: &'static [u8],
+}
+
+/// Where a CLI sits in the two lists the app builds from the declarations,
+/// ascending. No two CLIs share a number (`tests/declarations.rs`), and the
+/// numbers leave gaps, so a new CLI takes a free one and no other file
+/// changes.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+pub struct Order {
+    /// The frontend's agent specs: the spawn menus and the settings lists.
+    pub menu: u16,
+    /// The backend's vendor registry. Its order reaches callers that iterate
+    /// it (install detection, capability maps), so it is declared, not
+    /// derived from the key.
+    pub registry: u16,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -928,8 +943,25 @@ pub struct SqliteRecords<V: Vendor> {
     /// What a database that cannot be read this cycle (missing, busy,
     /// locked, a query its schema does not fit) answers.
     pub unreadable: Unreadable,
+    /// Slots a walk starts with that are read from the store itself, on the
+    /// walk's own connection.
+    pub seeds: &'static [StoreSeed<V>],
     pub usage: SqlUsage<V>,
     pub activity: SqlWalk<V>,
+}
+
+/// A slot's first value, from the database being walked.
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub struct StoreSeed<V: Vendor> {
+    pub slot: V::Slot,
+    /// The first column of every row, bytes decoded as UTF-8 with invalid
+    /// sequences dropped (Python `errors="ignore"`), concatenated. When the
+    /// query fails, the database file's own bytes the same way (a live store
+    /// mid-write).
+    pub sql: Str,
+    /// The slot's value, evaluated over the record `{"text": <that text>}`.
+    pub value: Text<V>,
 }
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]

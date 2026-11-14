@@ -88,6 +88,7 @@ pub static CLI: Cli = Cli {
     key: "hermes",
     label: "Hermes Agent",
     kind: Kind::Agent,
+    order: Order { menu: 200, registry: 110 },
     // Every pane launches through `--continue`, which refuses `-m` / `--reasoning`.
     launch: Launch { base_args: &["chat"], yolo_args: &["--yolo"], ..Launch::of("hermes") },
     resume: Resume {
@@ -127,6 +128,7 @@ static OBSERVE: Observe<V> = Observe {
             ("messages", &["id", "session_id", "role", "content", "tool_calls", "timestamp", "finish_reason"]),
         ],
         unreadable: Unreadable::Quiet,
+        seeds: &[],
         usage: SqlUsage::Counters {
             rules: &[UsageRule {
                 when: Pred::True,

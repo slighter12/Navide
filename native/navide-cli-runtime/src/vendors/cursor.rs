@@ -101,6 +101,7 @@ pub static CLI: Cli = Cli {
     key: "cursor",
     label: "Cursor CLI",
     kind: Kind::Cli,
+    order: Order { menu: 110, registry: 60 },
     // Effort is part of the model id (`gpt-5.3-codex-high`).
     launch: Launch { yolo_args: &["--force"], model: Some(&["--model", "{}"]), ..Launch::of("agent") },
     resume: Resume {
@@ -135,6 +136,7 @@ static OBSERVE: Observe<V> = Observe {
         binary: &[],
         requires: &[],
         unreadable: Unreadable::Quiet,
+        seeds: &[],
         usage: SqlUsage::None,
         activity: SqlWalk::Rows(RowWalk {
             sql: "SELECT rowid AS row, id, data FROM blobs WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",

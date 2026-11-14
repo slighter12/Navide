@@ -151,16 +151,19 @@ pub fn handle(observers: &mut Observers, req: Request) -> Result<Value, Failure>
 
 pub type Handler = fn(&mut Observers, Request) -> Result<Value, Failure>;
 
-/// One request, answered: a panic is an error answer, and the observers it
-/// may have left half-updated are replaced (what they remembered is only an
-/// optimisation).
+/// One request, answered: a panic is an error answer, and the observer it
+/// may have left half-updated (the request's CLI's) is replaced; what it
+/// remembered is only an optimisation. Every other CLI's keeps its memory.
 fn answer(observers: &mut Observers, req: Request, handler: Handler) -> Value {
     let id = req.id.clone();
+    let key = observers.get_key_value(req.vendor.as_str()).map(|(key, _)| *key);
     match catch_unwind(AssertUnwindSafe(|| handler(observers, req))) {
         Ok(Ok(result)) => json!({"id": id, "ok": true, "result": result}),
         Ok(Err(failure)) => json!({"id": id, "ok": false, "kind": failure.kind, "error": failure.error}),
         Err(panic) => {
-            *observers = self::observers();
+            if let Some(fresh) = key.and_then(crate::registry::observer) {
+                observers.insert(fresh.key(), fresh);
+            }
             let what = panic.downcast_ref::<&str>().map(|s| (*s).to_owned()).or_else(|| panic.downcast_ref::<String>().cloned()).unwrap_or_default();
             json!({"id": id, "ok": false, "kind": "panic", "error": format!("panic: {what}")})
         }
@@ -280,6 +283,33 @@ mod tests {
         assert_eq!(by_id(&answers, 1)["error"], "panic: declared rule blew up");
         assert_eq!(by_id(&answers, 2)["ok"], true);
         assert!(answers.iter().any(|a| a["id"].is_null() && a["kind"] == "request"));
+    }
+
+    #[test]
+    fn a_panic_costs_only_its_own_clis_reader_memory() {
+        // A note stays in an observer until it is taken: it stands for
+        // everything an observer remembers between calls.
+        fn handler(observers: &mut Observers, req: Request) -> Result<Value, Failure> {
+            match req.op.as_str() {
+                "mark" => {
+                    if let Some(AnyObserver::claude(observer)) = observers.get_mut("claude") {
+                        observer.leave_note("mark");
+                    }
+                    if let Some(AnyObserver::codex(observer)) = observers.get_mut("codex") {
+                        observer.leave_note("mark");
+                    }
+                    Ok(Value::Null)
+                }
+                "boom" => panic!("declared rule blew up"),
+                _ => Ok(json!([observer(observers, "claude")?.take_notes().len(), observer(observers, "codex")?.take_notes().len()])),
+            }
+        }
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let answers = run("{\"id\":1,\"op\":\"mark\"}\n{\"id\":2,\"op\":\"boom\",\"vendor\":\"claude\"}\n{\"id\":3,\"op\":\"notes\"}\n", 1, handler);
+        std::panic::set_hook(previous);
+        assert_eq!(by_id(&answers, 2)["kind"], "panic");
+        assert_eq!(by_id(&answers, 3)["result"], json!([0, 1]), "claude's observer is new, codex's is the one it was");
     }
 
     #[test]

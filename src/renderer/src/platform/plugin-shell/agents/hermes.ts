@@ -30,6 +30,8 @@ export const SPEC = {
   // Resume: `--continue <name>` resumes the latest session in that name's
   // lineage (Hermes titles a continuation `<name> #2`).
   ...declared('hermes'),
+  // Wider than the pattern derived from the declaration: other arguments may
+  // sit between `chat` and the flag, and `-c` is its short form.
   resumeCommandPattern: /^hermes\s+chat\b.*\s(?:--continue|-c)\s+\S+/,
   supportsRebuild: true,
   // A fresh pane names its own session: `--create-if-missing` makes the named

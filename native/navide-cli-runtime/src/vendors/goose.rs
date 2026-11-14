@@ -77,6 +77,7 @@ pub static CLI: Cli = Cli {
     key: "goose",
     label: "Goose (AAIF)",
     kind: Kind::Cli,
+    order: Order { menu: 160, registry: 90 },
     // Approval is the GOOSE_MODE setting, not a flag.
     launch: Launch::of("goose"),
     resume: Resume {
@@ -107,6 +108,7 @@ static OBSERVE: Observe<V> = Observe {
         binary: &[],
         requires: &[],
         unreadable: Unreadable::Quiet,
+        seeds: &[],
         usage: SqlUsage::After {
             rules: &[UsageRule {
                 when: Pred::True,

@@ -1,8 +1,9 @@
 """The Rust runtime's declarations are the one source for launch and resume.
 
 ``cli_declarations.json`` (in the backend package) is what
-``navide-cli-runtime declarations launch`` prints; the vendor registry and the
-frontend's agent specs are built from it.
+``navide-cli-runtime declarations launch`` prints; the vendor registry is
+built from it, and the frontend's agent specs from the same output as a typed
+constant (``agents/_cli_declarations.ts``).
 
 ``cli_declarations_main.json`` (beside this file) is what main's own registry
 held and answered before it read the declarations: each CLI's launch and
@@ -15,16 +16,15 @@ values and the same ids.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from agent_team_backend import cli_runtime
 from agent_team_backend.cli_vendors import _declared as cli_declarations
 from agent_team_backend.cli_vendors import registry
+from tests import cli_runtime_build
 
 MAIN = Path(__file__).with_name("cli_declarations_main.json")
 KEYS = sorted(cli_declarations.declarations())
@@ -141,35 +141,36 @@ def test_the_registry_holds_what_is_declared(key: str) -> None:
         assert got == cli_declarations.resume_id(key, command), command
 
 
-def _binary() -> Path:
-    exe = cli_runtime.binary()
-    if exe is None:
-        pytest.skip("navide-cli-runtime is not built (cargo build --release in native/navide-cli-runtime)")
-    return exe
-
-
-#: The same generated file inside the frontend module that reads it (plugin-shell
-#: imports nothing from outside itself).
+#: The same output as a typed constant, inside the frontend module that reads
+#: it (plugin-shell imports nothing from outside itself).
 FRONTEND_FILE = (Path(__file__).resolve().parents[2] / "src" / "renderer" / "src" / "platform" / "plugin-shell"
-                 / "agents" / "cli_declarations.json")
+                 / "agents" / "_cli_declarations.ts")
+_REGENERATE = "run `NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in` in native/navide-cli-runtime"
 
 
 def test_the_checked_in_declarations_are_current() -> None:
-    """``NAVIDE_DECLARATIONS_WRITE=1`` rewrites both files from the binary."""
-    printed = subprocess.run([str(_binary()), "declarations", "launch"], capture_output=True, text=True,
-                             encoding="utf-8", check=True, timeout=60).stdout
-    if os.environ.get("NAVIDE_DECLARATIONS_WRITE") == "1":
-        for generated in (cli_declarations.FILE, FRONTEND_FILE):
-            generated.write_text(printed, encoding="utf-8")
-        cli_declarations.declarations.cache_clear()
-    for generated in (cli_declarations.FILE, FRONTEND_FILE):
-        assert generated.read_text(encoding="utf-8") == printed, \
-            f"{generated.name} is stale: rebuild the runtime and run this test with NAVIDE_DECLARATIONS_WRITE=1"
+    """What the source prints, run from the source (``cargo run``, no binary
+    built earlier), is what the backend reads. The crate's own
+    ``tests/checked_in.rs`` holds both copies to the source too, and writes them."""
+    printed = cli_runtime_build.cargo("run", "--quiet", "--", "declarations", "launch").stdout
+    assert cli_declarations.FILE.read_text(encoding="utf-8") == printed, \
+        f"{cli_declarations.FILE.name} is stale: {_REGENERATE}"
 
 
 def test_backend_and_frontend_read_the_same_declarations() -> None:
-    """Needs no binary: the two generated files never differ."""
-    assert FRONTEND_FILE.read_bytes() == cli_declarations.FILE.read_bytes()
+    """Needs no build: the frontend's constant is the backend's JSON."""
+    _header, marker, body = FRONTEND_FILE.read_text(encoding="utf-8").partition("export default ")
+    assert marker, f"{FRONTEND_FILE.name} exports no default"
+    assert body == cli_declarations.FILE.read_text(encoding="utf-8").rstrip("\n") + " as const\n", \
+        f"{FRONTEND_FILE.name} is not {cli_declarations.FILE.name}: {_REGENERATE}"
+
+
+def test_the_registry_and_menu_orders_are_declared() -> None:
+    """Every CLI has its own place in both lists the app builds."""
+    orders = [entry["order"] for entry in cli_declarations.declarations().values()]
+    for name in ("menu", "registry"):
+        places = [order[name] for order in orders]
+        assert len(set(places)) == len(places) == len(KEYS), name
 
 
 @pytest.mark.parametrize("key", KEYS)
@@ -179,7 +180,7 @@ def test_the_runtime_names_the_same_sessions(key: str) -> None:
     commands = _corpus(key)[::3]
     requests = "".join(json.dumps({"id": n, "op": "resume_id", "vendor": key, "command": command}) + "\n"
                        for n, command in enumerate(commands))
-    done = subprocess.run([str(_binary()), "serve"], input=requests, capture_output=True, text=True,
+    done = subprocess.run([str(cli_runtime_build.binary()), "serve"], input=requests, capture_output=True, text=True,
                           encoding="utf-8", check=True, timeout=120)
     answers = {a["id"]: a for a in map(json.loads, done.stdout.splitlines())}
     assert len(answers) == len(commands)

@@ -19,7 +19,6 @@ export const SPEC = {
   // through the kickoff marker. An unknown id exits with "no such session
   // exists", which the backend preflight checks.
   ...declared('goose'),
-  resumeCommandPattern: /^goose\s+session\s+-r\s+--session-id\s+\S+/,
   needsSessionMarker: true,
   supportsRebuild: true,
   // Measured on a real PTY (1.55.0): `ESC[?2004h` at startup, never

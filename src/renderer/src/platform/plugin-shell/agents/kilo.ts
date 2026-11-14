@@ -32,6 +32,8 @@ export const SPEC = {
   // Resume (`--session <id>`): the id is `ses_`-prefixed (OpenCode fork).
   ...declared('kilo'),
   needsSessionMarker: true,
+  // Also the short flag, which the pattern derived from the declaration
+  // (Navide's own resume command) does not know.
   resumeCommandPattern: /^kilo\s+(?:--session|-s)\s+\S+/,
   supportsRebuild: true,
   // Measured on a real PTY: the CLI itself emits `ESC[?1049h` during startup

@@ -6,8 +6,7 @@
 //! a protobuf blob. An assistant step still streaming is read again until it
 //! finishes; a finished reply ends the turn only as the pass's newest step.
 use crate::decl::*;
-use crate::expr::Scope;
-use crate::observe::sqlite;
+use crate::expr::{py_str_opt, Scope};
 use crate::proto;
 use crate::text::{posix_normalise, unquote};
 use crate::time;
@@ -21,11 +20,13 @@ slots! { SessionId = "session_id", Cwd = "cwd" }
 /// What only Antigravity's store needs: its text is inside protobuf blobs.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum Ext {
-    /// Slot: the workspace is a `file://` URI that the metadata blob repeats,
-    /// some copies followed by protobuf bytes that read as printable junk.
-    /// main picks among the candidates by whether the path is a directory on
-    /// disk, then by how often it occurs, then the shortest — a file-system
-    /// heuristic no record can carry. Read once per walk.
+    /// Text, for the walk's `Cwd` seed: the workspace is a `file://` URI that
+    /// the metadata blob repeats, some copies followed by protobuf bytes that
+    /// read as printable junk. main picks among the candidates by whether the
+    /// path is a directory on disk, then by how often it occurs, then the
+    /// shortest: a file-system heuristic no record can carry, so this one
+    /// text function looks at the disk. Read once per walk, on the walk's
+    /// connection (`StoreSeed`).
     Workspace,
     /// Text: the user's prompt (payload field 19, text field 2).
     Prompt,
@@ -62,14 +63,7 @@ impl Vendor for V {
                     .map(time::iso_from_micros)
                     .unwrap_or_default()
             }
-            Ext::Workspace => String::new(),
-        }
-    }
-
-    fn init(ext: Ext, path: &std::path::Path) -> String {
-        match ext {
-            Ext::Workspace => workspace(&sqlite::joined(path, "SELECT data FROM trajectory_metadata_blob")),
-            _ => String::new(),
+            Ext::Workspace => workspace(&py_str_opt(scope.get(&["text"]))),
         }
     }
 }
@@ -126,6 +120,7 @@ pub static CLI: Cli = Cli {
     key: "antigravity",
     label: "Antigravity CLI (Google)",
     kind: Kind::Cli,
+    order: Order { menu: 30, registry: 20 },
     launch: Launch {
         yolo_args: &["--dangerously-skip-permissions"],
         model: Some(&["--model", "{}"]),
@@ -161,6 +156,8 @@ static OBSERVE: Observe<V> = Observe {
         binary: &["metadata", "payload"],
         requires: &[],
         unreadable: Unreadable::Quiet,
+        // Only a walk needs the workspace (usage reads nothing).
+        seeds: &[StoreSeed { slot: Slot::Cwd, sql: "SELECT data FROM trajectory_metadata_blob", value: Text::Ext(Ext::Workspace) }],
         // main's base reader: no token records, its legacy checkpoint kept.
         usage: SqlUsage::Legacy,
         activity: SqlWalk::Rows(RowWalk {
@@ -178,8 +175,6 @@ static OBSERVE: Observe<V> = Observe {
         }),
     },
     activity: Activity {
-        // Only a walk needs the workspace (usage reads nothing).
-        slots: &[Seed { slot: Slot::Cwd, init: SlotInit::Ext(Ext::Workspace) }],
         ..Activity::rules(&[
             Rule {
                 when: Pred::Text(STEP, StrTest::Eq("14")),

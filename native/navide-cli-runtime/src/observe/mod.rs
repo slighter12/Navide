@@ -295,6 +295,11 @@ impl<V: Vendor> Observer<V> {
         std::mem::take(&mut self.memo.notes)
     }
 
+    #[cfg(test)]
+    pub(crate) fn leave_note(&mut self, kind: &'static str) {
+        self.memo.note(kind, String::new());
+    }
+
     /// What the last call's reads have to tell the registry main's reader
     /// keeps (`decl::Read`); empty after a call that failed.
     pub fn take_reads(&mut self) -> Vec<Read> {

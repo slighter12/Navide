@@ -60,6 +60,7 @@ pub static CLI: Cli = Cli {
     key: "pi",
     label: "Pi",
     kind: Kind::Cli,
+    order: Order { menu: 90, registry: 190 },
     launch: Launch {
         // pi has no permission system to bypass.
         model: Some(&["--model", "{}"]),

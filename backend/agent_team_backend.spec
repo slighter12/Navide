@@ -102,23 +102,28 @@ a = Analysis(
         'agent_team_backend.channels.matrix',
         'agent_team_backend.channels.mattermost',
         'agent_team_backend.channels.imessage',
-        # Vendor modules behind log_readers/__init__.py's PEP 562 __getattr__
-        # (importlib.import_module). cli_vendors.registry imports them all
-        # statically today; pinned so dropping one from the registry cannot
-        # silently drop its reader from the packaged app.
-        # test_pyinstaller_spec.py holds this list to log_readers._MIGRATED_READERS.
+        # Vendor modules: cli_vendors/registry.py imports each declared CLI's
+        # module by its key, and log_readers/__init__.py's PEP 562 __getattr__
+        # does the same for a reader (importlib.import_module both times), so
+        # the graph walk sees none of them. One missing here is registered in
+        # the packaged app from its declaration alone: launched, and nothing
+        # else. test_pyinstaller_spec.py holds this list to every vendor
+        # module on disk and to log_readers._MIGRATED_READERS.
         'agent_team_backend.cli_vendors.aider',
         'agent_team_backend.cli_vendors.antigravity',
         'agent_team_backend.cli_vendors.claude',
         'agent_team_backend.cli_vendors.codex',
         'agent_team_backend.cli_vendors.copilot',
         'agent_team_backend.cli_vendors.cursor',
+        'agent_team_backend.cli_vendors.devin',
         'agent_team_backend.cli_vendors.droid',
         'agent_team_backend.cli_vendors.goose',
         'agent_team_backend.cli_vendors.grok',
         'agent_team_backend.cli_vendors.hermes',
         'agent_team_backend.cli_vendors.kilo',
         'agent_team_backend.cli_vendors.kimi',
+        'agent_team_backend.cli_vendors.kiro',
+        'agent_team_backend.cli_vendors.mcode',
         'agent_team_backend.cli_vendors.muse',
         'agent_team_backend.cli_vendors.opencode',
         'agent_team_backend.cli_vendors.openclaw',

@@ -13,11 +13,13 @@ These are the CI guardrails of the one-file-per-vendor refactor:
 from __future__ import annotations
 
 import ast
+import importlib
 import inspect
-import json
 import re
 import sys
 from pathlib import Path
+
+import pytest
 
 from agent_team_backend.cli_vendors import registry
 from agent_team_backend.cli_vendors.base import VendorSpec
@@ -32,9 +34,11 @@ CLI_AGENTS_HELP = (
 )
 
 def _frontend_declaration(path: Path, source: str) -> dict | None:
-    """The entry of `agents/cli_declarations.json` a frontend spec file takes
-    its launch and resume fields from, by spreading `...declared('<key>')`
-    (`agents/_declared.ts`); None for a file that spreads none (the plain
+    """The declaration a frontend spec file takes its launch and resume
+    fields from, by spreading `...declared('<key>')` (`agents/_declared.ts`,
+    which reads `agents/cli_declarations.ts`: the backend's
+    `cli_declarations.json` as a typed constant, held equal to it by
+    `test_cli_declarations.py`); None for a file that spreads none (the plain
     terminal). A spec must spread its own key: another vendor's declaration
     would launch the wrong program under this vendor's name."""
     spread = re.search(r"\.\.\.declared\('([a-z]+)'\)", source)
@@ -44,8 +48,9 @@ def _frontend_declaration(path: Path, source: str) -> dict | None:
     assert key and key.group(1) == spread.group(1), (
         f"{path.name} spreads declared('{spread.group(1)}'), which is not its own agentKey"
     )
-    declared = json.loads((FRONTEND_AGENTS_DIR / "cli_declarations.json").read_text(encoding="utf-8"))
-    entries = [entry for entry in declared if entry["key"] == spread.group(1)]
+    from agent_team_backend.cli_vendors import _declared
+
+    entries = [entry for entry in _declared.declarations().values() if entry["key"] == spread.group(1)]
     assert len(entries) == 1, f"{path.name}: no declaration for {spread.group(1)!r}"
     return entries[0]
 
@@ -85,6 +90,43 @@ def test_registry_matches_expected_vendor_set() -> None:
         assert isinstance(spec, VendorSpec)
         assert spec.key == key
         assert spec.label
+
+
+# The order of main's hand-kept registry tuple, recorded before discovery
+# replaced the tuple (the discovered specs were compared with it one by one,
+# by identity, before it was deleted). The order reaches callers that iterate
+# VENDORS, so it must stay what it was; it is each declaration's
+# `order.registry`.
+MAIN_REGISTRY_ORDER = (
+    "aider", "antigravity", "claude", "codex", "copilot", "cursor", "devin", "droid", "goose", "grok",
+    "hermes", "kilo", "kimi", "kiro", "mcode", "muse", "opencode", "openclaw", "pi", "qwen",
+)
+
+
+def test_registry_is_discovered_in_mains_order() -> None:
+    assert tuple(registry.VENDORS) == MAIN_REGISTRY_ORDER
+    for key, spec in registry.VENDORS.items():
+        module = importlib.import_module(f"agent_team_backend.cli_vendors.{key}")
+        assert spec is module.SPEC, f"{key}: the registry holds its module's SPEC"
+
+
+def test_a_declared_cli_with_no_module_is_registered_from_its_declaration(monkeypatch) -> None:
+    from agent_team_backend.cli_vendors import _declared
+
+    monkeypatch.setattr(registry, "declared", lambda key: _declared.declared("devin"))
+    spec = registry._spec({"key": "no_such_vendor_module", "label": "New CLI"})
+    assert (spec.key, spec.label) == ("no_such_vendor_module", "New CLI")
+    assert spec.home_env_vars == registry.VENDORS["devin"].home_env_vars
+    assert spec.install_dep is None and spec.account_switch is None
+
+
+def test_a_vendor_module_that_cannot_be_imported_is_not_mistaken_for_a_missing_one(monkeypatch) -> None:
+    def broken(name: str):
+        raise ModuleNotFoundError("No module named 'yaml'", name="yaml")
+
+    monkeypatch.setattr(importlib, "import_module", broken)
+    with pytest.raises(ModuleNotFoundError, match="yaml"):
+        registry._spec({"key": "claude", "label": "Claude Code"})
 
 
 def test_registry_matches_install_detection_deps() -> None:

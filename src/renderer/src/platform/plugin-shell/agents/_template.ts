@@ -1,16 +1,18 @@
 /**
- * CONTRIBUTOR TEMPLATE — copy to `<your_key>.ts` and fill in, then register
- * the SPEC in `index.ts` (one line, display order). Files starting with `_`
- * are never registered. Full guide: docs/adding-a-cli-vendor.md.
+ * CONTRIBUTOR TEMPLATE — copy to `<your_key>.ts` and fill in. Nothing else
+ * registers it: `index.ts` finds every spec file here, and lists it where the
+ * CLI's declaration says (`order.menu`). A CLI that needs nothing below
+ * beyond its declaration needs no file at all. Files starting with `_` are
+ * never registered. Full guide: docs/adding-a-cli-vendor.md.
  */
 
 import type { AgentSpec } from './types'
 
 // In a real spec file: `import { declared } from './_declared'`.
 
-// `as const satisfies` — NOT `: AgentSpec`. The annotation would widen
-// agentKey to `string`, and index.ts derives the AgentKey union from these
-// literals: one annotated spec collapses the union for the whole app.
+// `as const satisfies` — NOT `: AgentSpec`: the annotation would widen every
+// literal in the spec. (The AgentKey union is the declared keys, from
+// `_cli_declarations.ts`.)
 export const SPEC = {
   agentKey: '_template', // must match the filename
   // ── Launch and resume: declared once, never retyped here ──
@@ -18,7 +20,7 @@ export const SPEC = {
   // (with the effort vocabulary), the resume arguments and the vendor kind
   // come from the CLI's declaration in
   // native/navide-cli-runtime/src/vendors/<key>.rs, through
-  // cli_declarations.json:
+  // _cli_declarations.ts:
   //   ...declared('mycli'),
   // Declare only what the INTERACTIVE command accepts — Navide never spawns
   // `exec`/`run`, and several CLIs expose a flag on the subcommand only. A
@@ -32,7 +34,7 @@ export const SPEC = {
   defaultCommand: 'mycli',
   // paneArg: (ctx) => '...',           // per-pane argument, if state must be split
   // ── Session resume (see types.ts for full field docs) ──
-  // resumeCommandPattern: /^mycli\s+--resume\s+\S+/, // only if non-generic shape
+  // resumeCommandPattern: /^mycli\s+(?:--resume|-r)\s+\S+/, // only to recognize more than the declared resume command
   // resumeWithoutId: (file) => '...',  // id-less vendors only (see aider)
   // supportsRebuild: true,
   // supportsRestorePin: true,
