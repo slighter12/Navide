@@ -709,6 +709,46 @@ def test_an_answer_that_cannot_be_read_falls_back_to_python_not_into_the_watcher
     assert seam.status()["calls"]["qwen"]["fallback"] >= 3
 
 
+@pytest.mark.parametrize("op", ["usage", "activity", "turns"])
+@pytest.mark.parametrize("bad", ["no-result", "read-without-reason"])
+def test_what_an_unreadable_answer_said_beside_its_result_is_not_applied_and_the_reader_reads(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, no_read_problems, caplog: pytest.LogCaptureFixture,
+        op: str, bad: str) -> None:
+    """`notes` and `reads` are applied once the result is converted: an answer
+    with no result, or a `reads` entry without its `reason`, falls back to the
+    reader (the watcher sees no error) and writes nothing to the registry, not
+    even the entries before the malformed one."""
+    from tests.vendors import test_opencode as builders
+    import sqlite3
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    db = tmp_path / "opencode" / "opencode.db"
+    db.parent.mkdir()
+    con = sqlite3.connect(db)
+    con.executescript(builders._SCHEMA)
+    con.commit()
+    con.close()
+    reader = cli_runtime.wrap(cli_vendor("opencode").make_log_reader())
+    seam.apply(True)
+
+    reads = [{"ok": False, "key": "first", "reason": "query-failed", "detail": "d", "status": "unreadable"},
+             {"ok": False, "key": "second", "detail": "d", "status": "unreadable"}]  # no `reason`
+    results = {"usage": {"events": [], "checkpoint": {}}, "activity": {"events": [], "bag": []}, "turns": {"turns": []}}
+    answer = None if bad == "no-result" else {**results[op], "reads": reads}
+    monkeypatch.setattr(cli_runtime, "_call", lambda vendor, op_, **fields: (answer, {"cwd": "written"}))
+
+    with caplog.at_level(logging.WARNING, logger=cli_runtime.log.name):
+        if op == "usage":
+            assert reader.parse_incremental(db, {}).events == []
+        elif op == "activity":
+            assert reader.parse_activity(db, set()) == []
+        else:
+            assert reader.turns_for_session(db, "") == []
+    assert no_read_problems.read_problem("opencode") is None, "nothing was written to the registry"
+    assert len([r for r in caplog.records if "shape this backend cannot read" in r.getMessage()]) == 1
+    assert seam.status()["calls"]["opencode"]["fallback"] >= 1
+
+
 def test_status_counts_who_answered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
     cli_runtime_build.binary()
     scenario = parity._scenarios()["qwen_0_25"]

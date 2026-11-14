@@ -113,7 +113,12 @@ START_DEADLINE_S = 30.0
 #: accept (a lone surrogate escape, ``NaN``, nesting past 128 levels), so
 #: nothing was committed past it and the Python reader read the call; if
 #: Python rejects it too (a corrupt line) that reader steps over it, as main
-#: does, and the next call is the runtime's again. ``deferred``: the
+#: does. On an incremental path (usage, activity) the next call is the
+#: runtime's again, because the Python reader moved the checkpoint past the
+#: record. A whole-file pass (``turns_for_session``, SQLite counters, a full
+#: usage pass) has no checkpoint to move: it stays on Python for that file
+#: while the record is in it, which costs time and never a record.
+#: ``deferred``: the
 #: reader asked to make its own reads (one with a failing query on record
 #: does, until that query works again), or the call arrived while another
 #: caller was starting the process. ``fallback``: a fault — a stalled,
@@ -702,17 +707,18 @@ def _log_notes(reader: Any, notes: Any) -> None:
     reader's own logger, once per reader and kind, as main warns once."""
     if not notes:
         return
+    # Every note is read before any is said, so a malformed one says nothing.
+    parsed = [(str(note.get("kind") or note.get("text") or ""), note.get("text")) for note in notes]
     module = sys.modules.get(type(reader).__module__)
     reader_log = getattr(module, "log", None) or log
     try:
         said = reader.__dict__.setdefault("_cli_runtime_notes", set())
     except AttributeError:  # a reader with __slots__: say it every time
         said = set()
-    for note in notes:
-        kind = str(note.get("kind") or note.get("text") or "")
+    for kind, text in parsed:
         if kind not in said:
             said.add(kind)
-            reader_log.warning("%s", note.get("text") or kind)
+            reader_log.warning("%s", text or kind)
 
 
 def _apply_reads(reader: Any, path: Path, reads: Any) -> None:
@@ -723,11 +729,15 @@ def _apply_reads(reader: Any, path: Path, reads: Any) -> None:
     report, worked = getattr(reader, "_report_problem", None), getattr(reader, "_read_ok", None)
     if not reads or report is None or worked is None:
         return
-    for read in reads:
-        if read.get("ok"):
-            worked(read["key"])
-        else:
-            report(read["key"], path, read["reason"], read["detail"], status=read["status"])
+    # Every entry is read before any is applied, so a malformed one writes
+    # nothing to the registry.
+    calls = [
+        (worked, (read["key"],), {}) if read.get("ok")
+        else (report, (read["key"], path, read["reason"], read["detail"]), {"status": read["status"]})
+        for read in reads
+    ]
+    for call, args, kwargs in calls:
+        call(*args, **kwargs)
 
 
 def _reads_itself(reader: Any) -> bool:
@@ -739,8 +749,11 @@ def _reads_itself(reader: Any) -> bool:
 
 
 def _ask(reader: Any, op: str, path: Path, **fields: Any) -> "tuple[Any, dict] | None":
-    """The runtime's answer to one of `reader`'s calls, what it said beside
-    the result already passed on; None means the reader reads this one."""
+    """The runtime's answer to one of `reader`'s calls, with what it declares
+    about the CLI; None means the reader reads this one. What the answer said
+    beside its result (`notes`, `reads`) is not applied here: each route does
+    that once the result has been converted, so an answer that cannot be read
+    falls back with nothing applied."""
     vendor = str(reader.vendor)
     if _reads_itself(reader):
         # Counted only for a CLI the process has said it observes. Before the
@@ -750,11 +763,13 @@ def _ask(reader: Any, op: str, path: Path, **fields: Any) -> "tuple[Any, dict] |
         if vendor in _known:
             _count(vendor, "deferred")
         return None
-    answer = _call(vendor, op, path=str(path), **fields)
-    if answer is not None:
-        _log_notes(reader, answer[0].get("notes"))
-        _apply_reads(reader, path, answer[0].get("reads"))
-    return answer
+    return _call(vendor, op, path=str(path), **fields)
+
+
+def _apply_side(reader: Any, path: Path, result: dict) -> None:
+    """Apply what the answer said beside its result, once it has been read."""
+    _log_notes(reader, result.get("notes"))
+    _apply_reads(reader, path, result.get("reads"))
 
 
 # ---- the three routed reader calls ------------------------------------------
@@ -806,7 +821,9 @@ def _usage(reader: Any, original: Callable[..., IncrementalParseResult], path: P
             )
             for e in result["events"]
         ]
-        return IncrementalParseResult(events, result["checkpoint"])
+        parsed = IncrementalParseResult(events, result["checkpoint"])
+        _apply_side(reader, path, result)
+        return parsed
     except _UNREADABLE_ANSWER as err:
         return _bad_answer(reader, "usage", err, original, path, checkpoint)
 
@@ -843,6 +860,7 @@ def _activity(reader: Any, original: Callable[..., list[ActivityEvent]], path: P
             )
             for e in result["events"]
         ]
+        _apply_side(reader, path, result)
     except _UNREADABLE_ANSWER as err:
         return _bad_answer(reader, "activity", err, original, path, seen_keys)
     seen_keys.clear()
@@ -876,6 +894,7 @@ def _turns(reader: Any, original: Callable[..., list[TurnUsage]], path: Path, se
                 model_calls=t["model_calls"],
                 cli_version=t["cli_version"],
             ))
+        _apply_side(reader, path, result)
     except _UNREADABLE_ANSWER as err:
         return _bad_answer(reader, "turns", err, original, path, session_id)
     if error:
