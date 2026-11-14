@@ -49,8 +49,13 @@ ends with. Round 5's section follows.
 cannot, so Python answered, and nothing was committed on the way". It is not a
 fault: it does not count toward the breaker and does not kill the process. The
 switch-on counter table prints it as `python=`. With the switch on and the
-`tests.cli_runtime_on` plugin, `fallback` is 0 for every CLI that appeared
-(claude, codex, kimi, muse, qwen in the set below).
+`tests.cli_runtime_on` plugin, `fallback` is 0 for all 17 observed CLIs (see
+the switch-on row below). The parity tests never reset the process-wide counts
+(`reset_counts` is the plugin's alone): they take a snapshot before the reads
+and assert on the difference. The first round 6 push (`d91e17b29`) reset them
+inside two tests, so its plugin run listed only 5 CLIs and its end-of-session
+"no fault fallback" gate covered only the tests after the last reset; that was
+found by review and fixed in the commit after it.
 
 **One deviation from the brief, on purpose.** The brief says a terminated line
 that fails to parse in Rust makes the call a Python one. `pyjson::parse` is a
@@ -103,15 +108,17 @@ that are not JSON) and genuinely corrupt lines on Python for good.
 | `cargo check --offline --all-targets` | no warnings. |
 | `cargo clippy --offline --all-targets` | no issues. |
 | `env -u NAVIDE_PANE_MARK uv --project backend run pytest` on vendors, parity, seam, json, claude_activity_resume, activity_high_water, declarations, registry, health, shutdown_seen_flush, osplat, osplat_windows_discovery, pyinstaller_spec, spawn_env_request (switch off) | 1255 passed, 3 skipped. |
-| the same set with `-p tests.cli_runtime_on` (switch on) | 918 passed, 4 skipped. `fallback=0` for claude, codex, kimi, muse, qwen. Under the plugin the probe tests assert `python >= handed-over calls` (routes are installed on classes and instances, so a call is counted two or three times); without it they assert `==`. |
+| the same set with `-p tests.cli_runtime_on` (switch on) | 918 passed, 4 skipped (the round 5 set: vendors, parity, seam, `test_claude_activity_resume.py`, `test_activity_high_water.py`). All 17 observed CLIs are in the table and `fallback=0` for every one. The counts are round 5's, line for line (`unsupported`: copilot 29, hermes 2, openclaw 2, opencode 2; `deferred`: opencode 7; `unreadable`: grok 2, pi 1), plus the new `python` column (claude 27, codex 9, opencode 9, all others 0: the probe fixtures' hand-overs, counted by two routes each under the plugin). The probe test asserts `python == hand-overs x routes` on a snapshot difference, with routes 2 under the plugin (the class route and the wrapped instance's) and 1 without it. Its expected run is made with the switch off, so it is Python's under the plugin as well. |
+| `... pytest -q backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_cli_runtime_json.py` (switch off, after the counter fix) | 163 passed. |
 | `bun run vitest run --changed upstream/main` | 20547 passed, 1 failed: `pluginExternalWorkspace.test.ts`, `Executable not found in $PATH: "pnpm"` (no pnpm here; the same failure as rounds 2 to 5; not touched by this branch). |
 | `bun run typecheck:web` | no errors. |
-| `node scripts/changed-backend-tests.mjs` (bare, after the last code change) | exit 0: 16951 passed, 40 skipped, 110 deselected, 1 xfailed (13 min 40 s), then the serial pass 106 passed, 4 skipped. The report and docs were edited after it. |
+| `node scripts/changed-backend-tests.mjs` (bare, after the last code change) | exit 0: 16951 passed, 40 skipped, 110 deselected, 1 xfailed (13 min 24 s), then the serial pass 106 passed, 4 skipped. Run again after the counter-reset fix (the last code change); only this report was edited after it. |
 | `git merge-tree --write-tree upstream/main HEAD` | clean (a tree id, no conflicts), run against HEAD before the report commit. |
 
 | CI | Result |
 |----|--------|
-| Run on the round 6 push | recorded in the delivery message (the push happens after this file is committed) |
+| Run on the round 6 push (`d91e17b29`) | run 43607754703: green (every job, Windows included); Secret scan 43607754771: green. |
+| Run on the push that fixes the counter reset | see the delivery message |
 
 ## Fix round 5: the Lows and every known contradiction
 
