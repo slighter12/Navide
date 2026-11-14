@@ -64,11 +64,29 @@ impl Conn {
     /// A read that failed is the caller's reader's to report, where the
     /// declaration says so.
     fn checked<V: Vendor<Backend = Sqlite>, T>(&self, file: &File<'_, V>, done: T) -> Result<T, Error> {
+        // A JSON cell this parser rejects read as nothing: whether Python
+        // reads it is Python's to say, so nothing of this read is kept.
+        if self.db.as_ref().is_some_and(Db::unparsed) {
+            return Err(Error::unparsed("a JSON cell"));
+        }
+        // Read with `immutable=1`, and a writer has come since: the rows may
+        // be behind its -wal, so main's read could differ.
+        if self.db.as_ref().is_some_and(Db::wal_appeared) {
+            return Err(Error::PythonReads("a -wal file appeared beside a database read immutable".to_owned()));
+        }
         if self.failed.get() && file.records().unreadable == Unreadable::Unsupported {
             return Err(Error::Unsupported(format!("{} could not be read", file.path.display())));
         }
         Ok(done)
     }
+}
+
+/// A database file's slots before any row. The only slot source that can hand
+/// a call over (a header line of JSON text) reads lines of a transcript, which
+/// a database does not have, so this never errs; if a declaration ever did
+/// ask for one, an empty slot is what a header that cannot be read gives.
+fn db_slots<V: Vendor>(file: &File<'_, V>) -> Slots<V> {
+    file.slots(&[]).unwrap_or_default()
 }
 
 fn row_scope<'a, V: Vendor>(row: &'a Row, slots: &'a Slots<V>) -> Scope<'a, V> {
@@ -274,7 +292,7 @@ fn after<V: Vendor<Backend = Sqlite>>(
     let prior = py_str_opt(checkpoint.get("identity"));
     let replaced = !prior.is_empty() && prior != identity;
     let mut last = if replaced || full { 0 } else { py_int(checkpoint.get("row_id")) };
-    let mut slots = file.slots(&[]);
+    let mut slots = db_slots(file);
     let mut events = Vec::new();
     let mut seen = HashSet::new();
     let rows = conn.rows(sql, &[Param::Int(last)]).unwrap_or_default();
@@ -392,7 +410,7 @@ impl<V: Vendor<Backend = Sqlite>> Anchored<V> {
                 }
             }
         }
-        let mut slots = file.slots(&[]);
+        let mut slots = db_slots(file);
         let (mut events, mut seen) = (Vec::new(), HashSet::new());
         let mut next = last;
         for row in &rows {
@@ -443,7 +461,7 @@ fn counters<V: Vendor<Backend = Sqlite>>(
     };
     // `int(v or 0)`.
     let int = |v: Option<&Value>| v.filter(|v| expr::truthy(v)).and_then(py_int_raw).unwrap_or(0);
-    let mut slots = file.slots(&[]);
+    let mut slots = db_slots(file);
     let (mut events, mut state, mut seen) = (Vec::new(), Map::new(), HashSet::new());
     for mut row in rows {
         let key = py_str_opt(row.value.get(id));
@@ -500,7 +518,7 @@ fn watermarks<V: Vendor<Backend = Sqlite>>(
         _ => Map::new(),
     };
     let Some(tops) = tops(conn, part) else { return UsageRead::unchanged(checkpoint) };
-    let mut slots = file.slots(&[]);
+    let mut slots = db_slots(file);
     let (mut events, mut seen) = (Vec::new(), HashSet::new());
     for (name, top) in tops {
         let after = marks.get(&name).and_then(Value::as_i64).unwrap_or(-1);

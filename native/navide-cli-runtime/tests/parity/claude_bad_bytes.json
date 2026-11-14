@@ -3,6 +3,7 @@
  "file": "claude/projects/-tmp-demo/bad-1.jsonl",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "write",

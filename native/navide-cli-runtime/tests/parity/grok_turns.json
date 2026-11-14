@@ -3,6 +3,7 @@
  "file": "grok/sessions/%2FUsers%2Fdev%2Fproj/01a09f53-9ed8-7303-9e16-e4907f948d93/updates.jsonl",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "write",

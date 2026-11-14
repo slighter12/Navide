@@ -3,6 +3,7 @@
  "file": "share/kilo/kilo.db",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "db",

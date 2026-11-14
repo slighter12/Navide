@@ -8,6 +8,7 @@ use super::file::Tail;
 use super::{Error, File, UsageEvent, UsageRead};
 use crate::decl::{FileMode, FileUsage, RawValue, Reading, Restore, SlotKey, UsageRule, Vendor};
 use crate::expr::{self, py_int, py_str_opt, Scope, Slots};
+use crate::pyjson::{self, Parsed};
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 
@@ -99,9 +100,9 @@ pub(crate) fn from_file<V: Vendor>(
     spec: &'static FileUsage<V>,
     checkpoint: &Map<String, Value>,
     full: bool,
-    tail: impl FnOnce(&Map<String, Value>) -> std::io::Result<Tail>,
+    tail: impl FnOnce(&Map<String, Value>) -> Result<Tail, Error>,
 ) -> Result<UsageRead, Error> {
-    let mut slots = file.slots(spec.slots);
+    let mut slots = file.slots(spec.slots)?;
     if let FileMode::Snapshot { suffix, mark } = spec.mode {
         return Ok(snapshot(file, spec, slots, checkpoint, suffix, mark));
     }
@@ -125,7 +126,7 @@ pub(crate) fn from_file<V: Vendor>(
         FileMode::PerRecord { window, keep_on_rotation, credited } => {
             Ok(per_record(file, spec, slots, checkpoint, tail, Window { size: window, keep_on_rotation, credited: credited && !full }, full))
         }
-        FileMode::Cumulative { stamp } => Ok(cumulative(file, spec, slots, checkpoint, tail, restore, stamp)),
+        FileMode::Cumulative { stamp } => cumulative(file, spec, slots, checkpoint, tail, restore, stamp),
         // Returned above; a sidecar document has no tail.
         FileMode::Snapshot { .. } => Err(Error::Unsupported("a snapshot has no record tail".to_owned())),
     }
@@ -229,6 +230,13 @@ fn per_record<V: Vendor>(
             recent.pop_front();
         }
     };
+    // What every event's checkpoint starts from. The window the previous
+    // checkpoint carried is each event's own below, so it is not copied once
+    // per event just to be replaced.
+    let mut base = tail.checkpoint.clone();
+    if size > 0 {
+        base.shift_remove("recent_keys");
+    }
     for (end, record) in &tail.records {
         let Some(record) = record else { continue };
         let at = At::line(0, *end);
@@ -263,7 +271,7 @@ fn per_record<V: Vendor>(
                 remember(&mut recent, &key);
             }
         }
-        let mut cp = tail.checkpoint.clone();
+        let mut cp = base.clone();
         cp.insert("offset".into(), (*end).into());
         if size > 0 {
             cp.insert("recent_keys".into(), recent.iter().cloned().collect::<Vec<_>>().into());
@@ -300,20 +308,29 @@ fn stamped(stamp: &[(&str, i64)], checkpoint: &Map<String, Value>) -> bool {
 
 /// The totals of the last totals record wholly before `offset` (a checkpoint
 /// written before its stamp existed stored them in an older basis).
-fn totals_before<V: Vendor>(file: &File<'_, V>, spec: &'static FileUsage<V>, offset: u64) -> (i64, i64) {
-    let Ok(data) = std::fs::read(file.path) else { return (0, 0) };
+fn totals_before<V: Vendor>(file: &File<'_, V>, spec: &'static FileUsage<V>, offset: u64) -> Result<(i64, i64), Error> {
+    let Ok(data) = std::fs::read(file.path) else { return Ok((0, 0)) };
     let head = &data[..(offset as usize).min(data.len())];
     let mut found = (0, 0);
     let scratch = Slots::<V>::default();
     for raw in head.split(|b| *b == b'\n' || *b == b'\r') {
-        let Some(record) = std::str::from_utf8(raw).ok().and_then(|t| serde_json::from_str::<Value>(t).ok()) else { continue };
+        let Ok(text) = std::str::from_utf8(raw) else { continue };
+        if text.trim_matches([' ', '\t']).is_empty() {
+            continue;
+        }
+        let record = match pyjson::parse(text) {
+            Parsed::Value(record) => record,
+            Parsed::Rejected => continue,
+            // Python may read a line this parser does not: its totals are not ours to skip.
+            Parsed::Python => return Err(Error::unparsed("a record before the checkpoint")),
+        };
         let s = scope(&record, At::line(0, 0), &scratch);
         let Some(rule) = spec.rules.iter().find(|r| expr::pred(&r.when, &s)) else { continue };
         if let Some(totals) = rule.reading.as_ref().and_then(|reading| counts(reading, &s)) {
             found = totals;
         }
     }
-    found
+    Ok(found)
 }
 
 fn cumulative<V: Vendor>(
@@ -324,10 +341,10 @@ fn cumulative<V: Vendor>(
     tail: Tail,
     restore: bool,
     stamp: &'static [(&'static str, i64)],
-) -> UsageRead {
+) -> Result<UsageRead, Error> {
     let mut prev = if restore { (py_int(checkpoint.get("input_total")), py_int(checkpoint.get("output_total"))) } else { (0, 0) };
     if prev != (0, 0) && !stamp.is_empty() && !stamped(stamp, checkpoint) {
-        prev = totals_before(file, spec, py_int(checkpoint.get("offset")) as u64);
+        prev = totals_before(file, spec, py_int(checkpoint.get("offset")) as u64)?;
     }
     let mut latest_totals = prev;
     let mut latest: Option<(&Value, &'static Reading<V>, u64)> = None;
@@ -347,16 +364,16 @@ fn cumulative<V: Vendor>(
         next.insert((*key).to_owned(), (*value).into());
     }
     let Some((record, reading, end)) = latest else {
-        return UsageRead { events: Vec::new(), checkpoint: next };
+        return Ok(UsageRead { events: Vec::new(), checkpoint: next });
     };
     let delta = (latest_totals.0 - prev.0, latest_totals.1 - prev.1);
     if delta.0 < 0 || delta.1 < 0 || delta == (0, 0) {
-        return UsageRead { events: Vec::new(), checkpoint: next };
+        return Ok(UsageRead { events: Vec::new(), checkpoint: next });
     }
     let mut cp = next.clone();
     cp.insert("offset".into(), end.into());
     let s = Scope { totals: latest_totals, ..scope(record, At::line(0, end), &slots) };
     let key = expr::text(&reading.key, &s);
     let event = event(file, reading, &s, delta, key, cp);
-    UsageRead { events: vec![event], checkpoint: next }
+    Ok(UsageRead { events: vec![event], checkpoint: next })
 }

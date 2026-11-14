@@ -3,6 +3,7 @@
  "file": "ws/.aider.chat.history.0a1b2c3d.md",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "write",

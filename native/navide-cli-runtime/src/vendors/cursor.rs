@@ -39,7 +39,7 @@ pub enum Ext {
 
 const QUERY: (&str, &str) = ("<user_query>", "</user_query>");
 
-fn typed<'t>(content: &'t str) -> Option<&'t str> {
+fn typed(content: &str) -> Option<&str> {
     enclosed(content, QUERY.0, QUERY.1).map(py_strip)
 }
 

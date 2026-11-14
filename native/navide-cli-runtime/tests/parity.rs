@@ -94,6 +94,28 @@ fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or_else(|| panic!("fixture field {key}"))
 }
 
+/// The state the Python reader leaves behind when the runtime hands it a
+/// call (`Error::PythonReads`), put back into the form the runtime reads: the
+/// fixture holds it without the file's `identity` (dev:inode), which the
+/// runtime's own checkpoints and byte-cursor keys carry.
+fn with_identity(path: &Path, checkpoint: &Value) -> Map<String, Value> {
+    let mut checkpoint = checkpoint.as_object().cloned().unwrap_or_default();
+    if matches!(checkpoint.get("kind").and_then(Value::as_str), Some("jsonl" | "sqlite")) {
+        let identity = navide_cli_runtime::observe::file::identity(&std::fs::metadata(path).unwrap());
+        checkpoint.insert("identity".into(), identity.into());
+    }
+    checkpoint
+}
+
+/// The same for a seen-keys bag key that holds a byte cursor.
+fn bag_with_identity(path: &Path, key: &str) -> String {
+    if !key.contains("\"kind\": \"jsonl\"") {
+        return key.to_owned();
+    }
+    let identity = navide_cli_runtime::observe::file::identity(&std::fs::metadata(path).unwrap());
+    key.replacen("\"anchor\"", &format!("\"identity\": \"{identity}\", \"anchor\""), 1)
+}
+
 fn replay(fixture: &Path) -> Vec<String> {
     let scenario: Value = serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
     let name = fixture.file_stem().unwrap().to_string_lossy().into_owned();
@@ -129,6 +151,8 @@ fn replay(fixture: &Path) -> Vec<String> {
     let mut bag: Vec<String> = Vec::new();
     let mut problems = Problems::default();
     let mut failures = Vec::new();
+    // The calls the runtime hands to the Python reader (`<op>@<step>`, `turns`).
+    let python_reads: Vec<String> = scenario["python_reads"].as_array().into_iter().flatten().map(|r| r.as_str().unwrap().to_owned()).collect();
     for (n, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
         write_sidecars(&step["sidecars"]);
         if str_of(step, "mode") == "db" {
@@ -161,30 +185,46 @@ fn replay(fixture: &Path) -> Vec<String> {
             }
         }
         observer.set_clock(step["now"].as_f64());
-        let read = match observer.usage(&path, &checkpoint) {
-            Ok(read) => read,
-            Err(err) => {
-                failures.push(format!("{name} step {n}: usage {err}"));
+        // A call the fixture names is handed to the Python reader, which then
+        // holds the state: the replay takes it from what Python recorded.
+        let hands_usage = python_reads.contains(&format!("usage@{n}"));
+        match (observer.usage(&path, &checkpoint), hands_usage) {
+            (Err(Error::PythonReads(_)), true) => checkpoint = with_identity(&path, &step["expect"]["usage"]["checkpoint"]),
+            (Ok(read), false) => {
+                problems.apply(observer.take_reads(), &path);
+                checkpoint = read.checkpoint.clone();
+                let usage = norm(serde_json::to_value(&read).unwrap(), &root);
+                if usage != expected(&step["expect"]["usage"]) {
+                    failures.push(format!("{name} step {n} usage\n  rust:   {usage}\n  python: {}", step["expect"]["usage"]));
+                }
+            }
+            (other, handed) => {
+                failures.push(format!("{name} step {n}: usage answered {:?}, handed to python wanted: {handed}", other.map(|r| r.events.len())));
                 continue;
             }
-        };
-        problems.apply(observer.take_reads(), &path);
-        checkpoint = read.checkpoint.clone();
-        let usage = norm(serde_json::to_value(&read).unwrap(), &root);
-        if usage != expected(&step["expect"]["usage"]) {
-            failures.push(format!("{name} step {n} usage\n  rust:   {usage}\n  python: {}", step["expect"]["usage"]));
         }
         // main's walk raises on a line that is not UTF-8, after saving its state.
         let wants_error = step["expect"]["activity_error"].as_str();
-        let events = match (observer.activity_bag(&path, &mut bag), wants_error) {
-            (Ok(events), None) => events,
-            (Err(Error::Decode { .. }), Some("decode")) => Vec::new(),
-            (other, _) => {
-                failures.push(format!("{name} step {n} activity: got {:?}, python error: {wants_error:?}", other.map(|e| e.len())));
+        let hands_activity = python_reads.contains(&format!("activity@{n}"));
+        let events = match (observer.activity_bag(&path, &mut bag), wants_error, hands_activity) {
+            (Err(Error::PythonReads(_)), _, true) => {
+                bag = step["expect"]["bag"].as_array().unwrap().iter().map(|key| bag_with_identity(&path, key.as_str().unwrap())).collect();
+                Vec::new()
+            }
+            (Ok(events), None, false) => events,
+            (Err(Error::Decode { .. }), Some("decode"), false) => Vec::new(),
+            (other, _, handed) => {
+                failures.push(format!(
+                    "{name} step {n} activity: got {:?}, python error: {wants_error:?}, handed to python wanted: {handed}",
+                    other.map(|e| e.len())
+                ));
                 Vec::new()
             }
         };
         problems.apply(observer.take_reads(), &path);
+        if hands_activity {
+            continue;
+        }
         if let Some(wanted) = step["expect"].get("problem") {
             let got = norm(problems.oldest(), &root);
             if got != *wanted {
@@ -201,15 +241,17 @@ fn replay(fixture: &Path) -> Vec<String> {
             failures.push(format!("{name} step {n} seen-keys bag\n  rust:   {got}\n  python: {}", step["expect"]["bag"]));
         }
     }
-    match (observer.turns(&path, ""), scenario["turns"]["error"].as_str()) {
-        (Ok(turns), None) => {
+    match (observer.turns(&path, ""), scenario["turns"]["error"].as_str(), python_reads.contains(&"turns".to_owned())) {
+        (Ok(turns), None, false) => {
             let turns = norm(serde_json::to_value(turns).unwrap(), &root);
             if turns != scenario["turns"] {
                 failures.push(format!("{name} turns\n  rust:   {turns}\n  python: {}", scenario["turns"]));
             }
         }
-        (Err(Error::Decode { .. }), Some("decode")) => {}
-        (other, wanted) => failures.push(format!("{name} turns: got {:?}, python error: {wanted:?}", other.map(|t| t.len()))),
+        (Err(Error::Decode { .. }), Some("decode"), false) | (Err(Error::PythonReads(_)), _, true) => {}
+        (other, wanted, handed) => {
+            failures.push(format!("{name} turns: got {:?}, python error: {wanted:?}, handed to python wanted: {handed}", other.map(|t| t.len())))
+        }
     }
     failures
 }

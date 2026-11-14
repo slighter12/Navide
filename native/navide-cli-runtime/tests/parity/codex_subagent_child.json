@@ -3,6 +3,7 @@
  "file": "home/.codex-panes/pane-1/sessions/2026/09/05/rollout-2026-09-05T09-10-57-01a06f1e-61a5-7751-916e-3b30d4db0812.jsonl",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "write",

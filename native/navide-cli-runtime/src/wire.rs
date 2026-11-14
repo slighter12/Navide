@@ -54,8 +54,10 @@ pub fn observers() -> Observers {
 }
 
 /// A failed request: what went wrong and of which kind. `unsupported` is the
-/// declared "this store is the Python reader's" answer; every other kind is
-/// a fault.
+/// declared "this store is the Python reader's" answer, and `python` is "this
+/// call holds a record only Python is sure to read" (see
+/// `Error::PythonReads`); `io` is a file the caller's reader decides on.
+/// Every other kind is a fault.
 pub struct Failure {
     pub kind: &'static str,
     pub error: String,
@@ -67,6 +69,7 @@ impl From<Error> for Failure {
             Error::Unsupported(_) => "unsupported",
             Error::Io(_) => "io",
             Error::Decode { .. } => "decode",
+            Error::PythonReads(_) => "python",
         };
         Failure { kind, error: err.to_string() }
     }
@@ -80,14 +83,32 @@ fn observer<'a>(observers: &'a mut Observers, vendor: &str) -> Result<&'a mut An
     observers.get_mut(vendor).ok_or_else(|| bad(format!("no observe declaration for {vendor:?}")))
 }
 
+/// The key beside the CLIs in the `observes` answer that says which build
+/// answered. No CLI is called this.
+pub const RUNTIME_KEY: &str = "_runtime";
+
+/// FNV-1a over the bytes: a fingerprint to compare two copies of a text, not a
+/// defence against anyone.
+fn fingerprint(bytes: &[u8]) -> String {
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3));
+    format!("{hash:016x}")
+}
+
 /// What `observes` answers: each observed CLI with the form its cwd is to
-/// be put in. Empty where files have no identity (the checkpoints this
-/// process shares with the Python readers could never match).
+/// be put in (none where files have no identity: the checkpoints this process
+/// shares with the Python readers could never match), and under
+/// `RUNTIME_KEY` the crate's version and the fingerprint of the declarations
+/// it prints (`declarations launch`), so that the backend can tell a binary
+/// built from other declarations than its own checked-in copy.
 fn observed(observers: &Observers) -> Value {
-    if !HAS_FILE_IDENTITY {
-        return json!({});
+    let mut answer = Map::new();
+    if HAS_FILE_IDENTITY {
+        for (key, observer) in observers {
+            answer.insert((*key).to_owned(), json!({"cwd": observer.cwd_form()}));
+        }
     }
-    Value::Object(observers.iter().map(|(key, observer)| ((*key).to_owned(), json!({"cwd": observer.cwd_form()}))).collect())
+    answer.insert(RUNTIME_KEY.to_owned(), json!({"version": env!("CARGO_PKG_VERSION"), "declarations": fingerprint(crate::registry::launch_json().as_bytes())}));
+    Value::Object(answer)
 }
 
 /// What a read has to tell the caller beside its result: `notes`, which
@@ -185,6 +206,36 @@ fn lane(req: &Request, workers: usize) -> usize {
     (hasher.finish() % workers as u64) as usize
 }
 
+/// A request line as a `Request`, or the answer that refuses it. The line is
+/// read as a JSON value first, so whatever is wrong with a field, the answer
+/// carries the request's id and the caller hears of it at once instead of
+/// waiting out its timeout.
+///
+/// A line `serde_json` rejects that Python's `json` may read (a lone surrogate
+/// escape: a path with undecodable bytes) is refused as `python`: the
+/// caller's own reader reads that call. The backend does not send those;
+/// this is for a caller that does.
+fn parse_request(line: &[u8]) -> Result<Request, Value> {
+    let refuse = |id: Value, kind: &str, error: String| json!({"id": id, "ok": false, "kind": kind, "error": error});
+    let (text, utf8) = match std::str::from_utf8(line) {
+        Ok(text) => (std::borrow::Cow::Borrowed(text), true),
+        Err(_) => (String::from_utf8_lossy(line), false),
+    };
+    let value = match serde_json::from_str::<Value>(&text) {
+        Ok(value) => value,
+        Err(err) => {
+            let id = crate::pyjson::lenient(&text).map_or(Value::Null, |value| value["id"].clone());
+            let kind = if matches!(crate::pyjson::parse(&text), crate::pyjson::Parsed::Python) { "python" } else { "request" };
+            return Err(refuse(id, kind, format!("bad request: {err}")));
+        }
+    };
+    let id = value["id"].clone();
+    if !utf8 {
+        return Err(refuse(id, "request", "bad request: the line is not UTF-8".to_owned()));
+    }
+    serde_json::from_value::<Request>(value).map_err(|err| refuse(id, "request", format!("bad request: {err}")))
+}
+
 pub fn serve(input: impl BufRead, output: impl Write + Send + 'static) -> std::io::Result<()> {
     serve_with(input, output, WORKERS, handle)
 }
@@ -206,23 +257,29 @@ pub fn serve_with(input: impl BufRead, output: impl Write + Send + 'static, work
         }));
     }
     let mut result = Ok(());
-    for line in input.lines() {
-        let line = match line {
-            Ok(line) => line,
+    let mut input = input;
+    let mut line = Vec::new();
+    loop {
+        // Bytes, not `lines()`: a line that is not UTF-8 is a bad request to
+        // answer, not an error that ends the process.
+        line.clear();
+        match input.read_until(b'\n', &mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
             Err(err) => {
                 result = Err(err);
                 break;
             }
-        };
-        if line.trim().is_empty() {
+        }
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let sent = match serde_json::from_str::<Request>(&line) {
+        let sent = match parse_request(&line) {
             Ok(req) => {
                 let lane = lane(&req, lanes.len());
                 lanes[lane].send(req).map_err(|_| std::io::Error::other("worker gone"))
             }
-            Err(err) => write(&output, &json!({"id": null, "ok": false, "kind": "request", "error": format!("bad request: {err}")})),
+            Err(refusal) => write(&output, &refusal),
         };
         if let Err(err) = sent {
             result = Err(err);
@@ -256,8 +313,12 @@ mod tests {
     }
 
     fn run(requests: &str, workers: usize, handler: Handler) -> Vec<Value> {
+        run_bytes(requests.as_bytes(), workers, handler)
+    }
+
+    fn run_bytes(requests: &[u8], workers: usize, handler: Handler) -> Vec<Value> {
         let out = Shared::default();
-        serve_with(Cursor::new(requests.to_owned()), out.clone(), workers, handler).unwrap();
+        serve_with(Cursor::new(requests.to_vec()), out.clone(), workers, handler).unwrap();
         let bytes = out.0.lock().unwrap().clone();
         String::from_utf8(bytes).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect()
     }
@@ -293,6 +354,44 @@ mod tests {
         assert_eq!(by_id(&answers, 1)["error"], "panic: declared rule blew up");
         assert_eq!(by_id(&answers, 2)["ok"], true);
         assert!(answers.iter().any(|a| a["id"].is_null() && a["kind"] == "request"));
+    }
+
+    /// A request the process cannot parse is answered under its own id, at
+    /// once, and the lines after it are still served (the caller would
+    /// otherwise wait out its timeout and kill the process).
+    #[test]
+    fn a_request_that_cannot_be_parsed_is_answered_under_its_id() {
+        fn handler(_: &mut Observers, req: Request) -> Result<Value, Failure> {
+            Ok(req.id)
+        }
+        let mut requests: Vec<u8> = Vec::new();
+        // A field of the wrong type.
+        requests.extend_from_slice(b"{\"id\":1,\"op\":\"x\",\"checkpoint\":[1]}\n");
+        // A path with a lone surrogate escape: not for this parser, for Python's.
+        requests.extend_from_slice(b"{\"id\":2,\"op\":\"x\",\"path\":\"/a/\\udcff\"}\n");
+        // Bytes that are not UTF-8, which used to end the process.
+        requests.extend_from_slice(b"{\"id\":3,\"op\":\"x\",\"path\":\"/a/\xff\"}\n");
+        // Not JSON at all: no id to answer under.
+        requests.extend_from_slice(b"{{{\n");
+        requests.extend_from_slice(b"{\"id\":5,\"op\":\"x\"}\n");
+        let answers = run_bytes(&requests, 1, handler);
+        assert_eq!((by_id(&answers, 1)["ok"].clone(), by_id(&answers, 1)["kind"].clone()), (json!(false), json!("request")));
+        assert_eq!((by_id(&answers, 2)["ok"].clone(), by_id(&answers, 2)["kind"].clone()), (json!(false), json!("python")));
+        assert_eq!((by_id(&answers, 3)["ok"].clone(), by_id(&answers, 3)["kind"].clone()), (json!(false), json!("request")));
+        assert!(answers.iter().any(|a| a["id"].is_null() && a["kind"] == "request"));
+        assert_eq!(by_id(&answers, 5)["ok"], true, "the line after the bad ones is served");
+        assert_eq!(answers.len(), 5);
+    }
+
+    #[test]
+    fn observes_says_which_build_answered() {
+        let answers = run("{\"id\":1,\"op\":\"observes\"}\n", 1, handle);
+        let runtime = &by_id(&answers, 1)["result"][RUNTIME_KEY];
+        assert_eq!(runtime["version"], env!("CARGO_PKG_VERSION"));
+        let declarations = runtime["declarations"].as_str().unwrap();
+        assert_eq!(declarations.len(), 16);
+        assert_eq!(declarations, fingerprint(crate::registry::launch_json().as_bytes()));
+        assert_ne!(declarations, fingerprint(b"other declarations"));
     }
 
     #[test]

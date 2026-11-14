@@ -3,6 +3,7 @@
  "file": "openclaw/agents/main/agent/openclaw-agent.sqlite",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "db",

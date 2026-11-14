@@ -3,6 +3,7 @@
  "file": "hermes/state.db",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "db",

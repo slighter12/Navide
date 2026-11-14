@@ -44,7 +44,7 @@ fn entries<'v>(each: Option<&Each>, record: &'v Value) -> Vec<(String, &'v Value
 }
 
 pub fn exact<V: Vendor>(file: &File<'_, V>, spec: &'static ExactTurns<V>, session_id: &str) -> Result<Vec<TurnUsage>, Error> {
-    let mut slots = file.slots(spec.slots);
+    let mut slots = file.slots(spec.slots)?;
     let session = file.spec.session;
     let mut turns: Vec<TurnUsage> = Vec::new();
     let mut by_key: HashMap<String, usize> = HashMap::new();

@@ -3,6 +3,7 @@
  "file": "share/opencode/opencode.db",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "db",

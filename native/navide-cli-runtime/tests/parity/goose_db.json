@@ -3,6 +3,7 @@
  "file": "goose/data/sessions/sessions.db",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "db",

@@ -3,6 +3,7 @@
  "file": "home/.cursor/chats/dddddddddddddddddddddddddddddddd/e6495800-dfd4-4a75-b2ab-d70980f83b89/store.db",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "db",

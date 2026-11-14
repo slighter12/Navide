@@ -6,6 +6,7 @@ pub mod decl;
 pub mod expr;
 pub mod observe;
 pub mod proto;
+pub mod pyjson;
 pub mod resume;
 #[cfg(unix)]
 pub mod session;

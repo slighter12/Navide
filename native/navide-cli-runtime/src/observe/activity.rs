@@ -334,7 +334,7 @@ pub(crate) fn slot_rules<V: Vendor>(file: &File<'_, V>, rules: &'static [Rule<V>
 /// One walk of the file from `state`: the events, with the state moved on.
 pub fn walk<V: Vendor>(file: &File<'_, V>, state: &mut ActivityState, memo: &mut Memo, now: f64) -> Result<Vec<ActivityEvent>, Error> {
     let spec = &file.spec.activity;
-    let mut walk = Walk::new(file, file.slots(spec.slots), state.turn.take(), now);
+    let mut walk = Walk::new(file, file.slots(spec.slots)?, state.turn.take(), now);
     if let Err(err) = V::Backend::walk(&mut walk, state, memo) {
         state.turn = walk.turn;
         return Err(err);

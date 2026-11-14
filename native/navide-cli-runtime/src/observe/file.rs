@@ -8,6 +8,7 @@ use super::{bag, usage, ActivityState, Backend, Error, File, Memo, TurnUsage, Us
 use crate::blake2b;
 use crate::decl::{ExactTurns, JsonlRecords, LineCursor, TextRecords, UsageRule, Vendor};
 use crate::expr::{py_int, py_str_opt, py_strip};
+use crate::pyjson::{self, Parsed};
 use crate::text::ignore_invalid;
 use serde_json::{Map, Value};
 use std::fs::{File as FsFile, Metadata};
@@ -102,7 +103,7 @@ impl<V: Vendor<Backend = TextLog>> Backend<V> for TextLog {
         match &records.usage {
             // main's whole-file pass opens the file in text mode: every line
             // counts, the unterminated last one included.
-            Some(spec) if full => usage::from_file(file, spec, checkpoint, true, |_| whole_text(file.path, records.kind)),
+            Some(spec) if full => usage::from_file(file, spec, checkpoint, true, |_| Ok(whole_text(file.path, records.kind)?)),
             Some(spec) => usage::from_file(file, spec, checkpoint, false, |from| read_text_tail(file.path, from, records.kind)),
             None => Ok(UsageRead::unchanged(checkpoint)),
         }
@@ -167,10 +168,15 @@ fn anchor(file: &mut FsFile, end: u64) -> io::Result<String> {
     Ok(blake2b::hex_digest(&buf, 8))
 }
 
+/// Whether a line is blank to Python's `json`: only JSON whitespace.
+fn is_blank(text: &str) -> bool {
+    text.trim_matches([' ', '\t', '\n', '\r']).is_empty()
+}
+
 /// Complete records after a checkpoint's offset.
 pub struct Tail {
     /// `(byte offset just past the record, the record)`; `None` for a line
-    /// that is not a JSON object.
+    /// main's reader skips: not UTF-8, blank, or JSON that is not an object.
     pub records: Vec<(u64, Option<Value>)>,
     pub checkpoint: Map<String, Value>,
     /// The cursor restarted at 0 (rewrite, shrink, replacement).
@@ -179,16 +185,28 @@ pub struct Tail {
     pub replaced: bool,
 }
 
-pub fn read_tail(path: &Path, checkpoint: &Map<String, Value>) -> io::Result<Tail> {
-    tail(path, checkpoint, "jsonl", |line| {
-        std::str::from_utf8(line).ok().and_then(|text| serde_json::from_str::<Value>(text).ok()).filter(Value::is_object)
+/// A line that is not UTF-8, or blank, or JSON that is not an object, or
+/// that Python rejects too, is skipped (`None`) as main skips it. A line
+/// Python's `json` may read and this parser does not is not: it is
+/// `Error::PythonReads`, and the offset stays before it (see `pyjson`).
+pub fn read_tail(path: &Path, checkpoint: &Map<String, Value>) -> Result<Tail, Error> {
+    tail(path, checkpoint, "jsonl", |line, committed| {
+        let Ok(text) = std::str::from_utf8(line) else { return Ok(None) };
+        if is_blank(text) {
+            return Ok(None);
+        }
+        match pyjson::parse(text) {
+            Parsed::Value(value) => Ok(Some(value).filter(Value::is_object)),
+            Parsed::Rejected => Ok(None),
+            Parsed::Python => Err(Error::unparsed(format_args!("the record ending at byte {committed}"))),
+        }
     })
 }
 
 /// The same tail over a plain-text transcript: every complete line is a
 /// `{"line": text}` record.
-pub fn read_text_tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str) -> io::Result<Tail> {
-    tail(path, checkpoint, kind, |line| Some(text_record(&ignore_invalid(line))))
+pub fn read_text_tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str) -> Result<Tail, Error> {
+    tail(path, checkpoint, kind, |line, _| Ok(Some(text_record(&ignore_invalid(line)))))
 }
 
 /// Every line of a plain-text transcript as main's text-mode file yields
@@ -208,7 +226,8 @@ fn text_record(line: &str) -> Value {
     Value::Object(record)
 }
 
-fn tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str, decode: impl Fn(&[u8]) -> Option<Value>) -> io::Result<Tail> {
+/// `decode` gets each complete line and the offset just past it.
+fn tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str, decode: impl Fn(&[u8], u64) -> Result<Option<Value>, Error>) -> Result<Tail, Error> {
     // One path lookup: the identity and length are the opened file's own.
     let mut file = FsFile::open(path)?;
     let meta = file.metadata()?;
@@ -234,7 +253,7 @@ fn tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str, decode: impl F
         let line = &rest[start..start + nl + 1];
         start += nl + 1;
         committed = offset + start as u64;
-        records.push((committed, decode(line)));
+        records.push((committed, decode(line, committed)?));
     }
     let anchor = if committed != 0 { anchor(&mut file, committed)? } else { String::new() };
     let mut next = checkpoint.clone();
@@ -274,13 +293,15 @@ pub struct WalkEnd {
 /// The activity walk every line-cursor reader in main shares: lines after the
 /// mark; a blank line is skipped unmarked; an unparseable line stops the walk
 /// when it is unterminated (still being written) and is stepped over for good
-/// when it is terminated.
+/// when it is terminated. A line Python's `json` may read and this parser
+/// does not (`pyjson`) ends the walk with `Error::PythonReads` before the
+/// mark moves: it must not be stepped over.
 pub fn walk_lines(
     path: &Path,
     high_water: usize,
     resume: Option<LineResume>,
     mut visit: impl FnMut(Line<'_>),
-) -> io::Result<WalkEnd> {
+) -> Result<WalkEnd, Error> {
     let mut file = FsFile::open(path)?;
     let meta = file.metadata()?;
     let inode = inode(&meta);
@@ -322,13 +343,14 @@ pub fn walk_lines(
         if stripped.is_empty() || line_no <= high_water {
             continue;
         }
-        match serde_json::from_str::<Value>(stripped) {
-            Err(_) if !terminated => break,
-            Err(_) => {
+        match pyjson::parse(stripped) {
+            Parsed::Python => return Err(Error::unparsed(format_args!("line {line_no}"))),
+            Parsed::Rejected if !terminated => break,
+            Parsed::Rejected => {
                 last_line = line_no;
                 resume_at = Some(offset);
             }
-            Ok(value) => {
+            Parsed::Value(value) => {
                 last_line = line_no;
                 resume_at = terminated.then_some(offset);
                 visit(Line { number: line_no, end: offset, value: &value });
@@ -390,15 +412,24 @@ pub fn walk_text(path: &Path, high_water: usize, mut visit: impl FnMut(usize, &V
 }
 
 /// Every JSON record of the file with its 1-based line number, for the
-/// whole-file passes (turns, header slots). Blank and malformed lines are
-/// skipped but still counted. `strict`: a file that is not UTF-8 is an
-/// error, as main's strict text-mode open raises (else its bad bytes are
-/// replaced).
+/// whole-file passes (turns, header slots). Blank lines and lines Python
+/// rejects too are skipped but still counted; a line Python's `json` may read
+/// and this parser does not is `Error::PythonReads` (`pyjson`). `strict`: a
+/// file that is not UTF-8 is an error, as main's strict text-mode open raises
+/// (else its bad bytes are replaced).
 pub fn all_lines(path: &Path, limit: usize, strict: bool, mut visit: impl FnMut(usize, &str, Option<&Value>) -> bool) -> Result<(), Error> {
-    let mut each = |index: usize, raw: &str| {
+    let mut each = |index: usize, raw: &str| -> Result<bool, Error> {
         let stripped = py_strip(raw);
-        let value = if stripped.is_empty() { None } else { serde_json::from_str::<Value>(stripped).ok() };
-        visit(index + 1, stripped, value.as_ref())
+        let value = if stripped.is_empty() {
+            None
+        } else {
+            match pyjson::parse(stripped) {
+                Parsed::Value(value) => Some(value),
+                Parsed::Rejected => None,
+                Parsed::Python => return Err(Error::unparsed(format_args!("line {}", index + 1))),
+            }
+        };
+        Ok(visit(index + 1, stripped, value.as_ref()))
     };
     if strict {
         // The whole file must be UTF-8 before any line counts.
@@ -406,7 +437,7 @@ pub fn all_lines(path: &Path, limit: usize, strict: bool, mut visit: impl FnMut(
         let text = std::str::from_utf8(&data)
             .map_err(|err| Error::Decode { line: data[..err.valid_up_to()].iter().filter(|b| **b == b'\n').count() + 1 })?;
         for (index, raw) in text.split_inclusive('\n').enumerate() {
-            if (limit != 0 && index >= limit) || !each(index, raw) {
+            if (limit != 0 && index >= limit) || !each(index, raw)? {
                 break;
             }
         }
@@ -419,7 +450,7 @@ pub fn all_lines(path: &Path, limit: usize, strict: bool, mut visit: impl FnMut(
     let mut index = 0;
     while limit == 0 || index < limit {
         line.clear();
-        if io::BufRead::read_until(&mut reader, b'\n', &mut line)? == 0 || !each(index, &String::from_utf8_lossy(&line)) {
+        if io::BufRead::read_until(&mut reader, b'\n', &mut line)? == 0 || !each(index, &String::from_utf8_lossy(&line))? {
             break;
         }
         index += 1;
@@ -440,11 +471,12 @@ mod tests {
 
     #[test]
     fn tail_reads_complete_lines_and_detects_a_rewrite() {
-        let f = file_with(b"{\"a\":1}\n[1]\n{\"b\":\n{\"c\":3}");
+        // An object, JSON that is no object, a blank line, and a last line still being written.
+        let f = file_with(b"{\"a\":1}\n[1]\n\n{\"c\":3}");
         let tail = read_tail(&f.path, &Map::new()).unwrap();
         let values: Vec<_> = tail.records.iter().map(|(end, v)| (*end, v.is_some())).collect();
-        assert_eq!(values, [(8, true), (12, false), (18, false)]);
-        assert_eq!(tail.checkpoint["offset"], 18);
+        assert_eq!(values, [(8, true), (12, false), (13, false)]);
+        assert_eq!(tail.checkpoint["offset"], 13);
         assert!(!tail.rotated);
         std::fs::write(&f.path, b"{\"z\":1}\n{\"y\":2}\n{\"x\":3}\n").unwrap();
         let again = read_tail(&f.path, &tail.checkpoint).unwrap();
@@ -453,19 +485,125 @@ mod tests {
     }
 
     #[test]
-    fn walk_marks_corrupt_lines_and_stops_at_an_unterminated_one() {
-        let f = file_with(b"{\"n\":1}\n\nnot json\n{\"n\":4}\n{\"n\":");
+    fn walk_marks_blank_lines_and_stops_at_an_unterminated_one() {
+        let f = file_with(b"{\"n\":1}\n\n{\"n\":3}\n{\"n\":");
         let mut seen = Vec::new();
         let end = walk_lines(&f.path, 0, None, |line| seen.push(line.number)).unwrap();
-        assert_eq!(seen, [1, 4]);
-        assert_eq!(end.last_line, 4);
+        assert_eq!(seen, [1, 3]);
+        assert_eq!(end.last_line, 3);
         let resume = end.resume.unwrap();
-        assert_eq!((resume.line, resume.offset), (4, 26));
-        std::fs::OpenOptions::new().append(true).open(&f.path).unwrap().write_all(b"5}\n").unwrap();
+        assert_eq!((resume.line, resume.offset), (3, 17));
+        std::fs::OpenOptions::new().append(true).open(&f.path).unwrap().write_all(b"4}\n").unwrap();
         let mut more = Vec::new();
-        let end = walk_lines(&f.path, 4, Some(resume), |line| more.push(line.number)).unwrap();
-        assert_eq!(more, [5]);
-        assert_eq!(end.last_line, 5);
+        let end = walk_lines(&f.path, 3, Some(resume), |line| more.push(line.number)).unwrap();
+        assert_eq!(more, [4]);
+        assert_eq!(end.last_line, 4);
+    }
+
+    /// What Python's `json` reads and this parser does not (C1): a lone
+    /// surrogate escape, the non-finite literals, a number out of range,
+    /// nesting past 128 levels.
+    fn python_only_lines() -> Vec<(&'static str, String)> {
+        vec![
+            ("a lone surrogate escape", "{\"text\":\"cut \\ud83d\"}\n".to_owned()),
+            ("a lone trailing surrogate", "{\"text\":\"\\ude00\"}\n".to_owned()),
+            ("NaN", "{\"n\":NaN}\n".to_owned()),
+            ("Infinity", "{\"n\":[Infinity,-Infinity]}\n".to_owned()),
+            ("a number out of range", "{\"n\":1e999}\n".to_owned()),
+            ("deep nesting", format!("{{\"n\":{}{}}}\n", "[".repeat(200), "]".repeat(200))),
+        ]
+    }
+
+    /// Lines Python rejects too: main skips them, and so does the runtime.
+    fn corrupt_lines() -> [&'static str; 3] {
+        ["{not json}\n", "{\"n\":\n", "[1,]\n"]
+    }
+
+    fn is_python_reads<T>(result: Result<T, Error>) -> bool {
+        matches!(result, Err(Error::PythonReads(_)))
+    }
+
+    #[test]
+    fn a_tail_never_steps_over_a_line_it_cannot_parse() {
+        for (what, bad) in python_only_lines() {
+            let f = file_with(format!("{{\"a\":1}}\n{bad}{{\"c\":3}}\n").as_bytes());
+            assert!(is_python_reads(read_tail(&f.path, &Map::new())), "{what}: the whole call is handed over");
+            let at = |offset: u64| {
+                let mut cp = Map::new();
+                cp.insert("offset".into(), offset.into());
+                cp.insert("identity".into(), identity(&std::fs::metadata(&f.path).unwrap()).into());
+                cp
+            };
+            // The same bytes after the checkpoint of the line before it.
+            assert!(is_python_reads(read_tail(&f.path, &at(8))), "{what}: after a checkpoint too");
+            // Past the bad line (the Python reader's checkpoint) the tail reads on.
+            let tail = read_tail(&f.path, &at(8 + bad.len() as u64)).unwrap();
+            assert_eq!(tail.records.len(), 1, "{what}: only the line after it is left");
+            assert!(!tail.rotated, "{what}");
+        }
+    }
+
+    #[test]
+    fn a_walk_hands_a_line_it_cannot_parse_to_python_before_the_mark_moves() {
+        for (what, bad) in python_only_lines() {
+            let f = file_with(format!("{{\"n\":1}}\n{bad}{{\"n\":3}}\n").as_bytes());
+            let mut seen = Vec::new();
+            assert!(is_python_reads(walk_lines(&f.path, 0, None, |line| seen.push(line.number))), "{what}");
+            assert_eq!(seen, [1], "{what}: the line before it was only looked at");
+            // Python's mark is past the bad line: the walk reads on from there.
+            let mut seen = Vec::new();
+            let end = walk_lines(&f.path, 2, None, |line| seen.push(line.number)).unwrap();
+            assert_eq!((seen, end.last_line), (vec![3], 3), "{what}");
+        }
+    }
+
+    /// A corrupt line is main's to skip too (Python rejects it): the tail, the
+    /// walk and the whole-file pass step over it and read the line after it,
+    /// so a corrupt line is never handed over, and nothing loops on it.
+    #[test]
+    fn a_line_python_rejects_too_is_stepped_over() {
+        for bad in corrupt_lines() {
+            let f = file_with(format!("{{\"n\":1}}\n{bad}{{\"n\":3}}\n").as_bytes());
+            let tail = read_tail(&f.path, &Map::new()).unwrap();
+            assert_eq!(tail.records.iter().map(|(_, v)| v.is_some()).collect::<Vec<_>>(), [true, false, true], "{bad:?}");
+            let mut seen = Vec::new();
+            let end = walk_lines(&f.path, 0, None, |line| seen.push(line.number)).unwrap();
+            assert_eq!((seen, end.last_line), (vec![1, 3], 3), "{bad:?}");
+            let mut values = Vec::new();
+            all_lines(&f.path, 0, true, |line, _, value| {
+                values.push((line, value.is_some()));
+                true
+            })
+            .unwrap();
+            assert_eq!(values, [(1, true), (2, false), (3, true)], "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn an_unterminated_last_line_that_is_not_yet_json_waits_and_one_python_reads_is_handed_over() {
+        let f = file_with(b"{\"n\":1}\n{\"n\":NaN");
+        assert_eq!(read_tail(&f.path, &Map::new()).unwrap().records.len(), 1, "only complete lines are read");
+        assert_eq!(walk_lines(&f.path, 0, None, |_| {}).unwrap().last_line, 1, "the walk stops before it");
+        assert!(all_lines(&f.path, 0, true, |_, _, _| true).is_ok());
+        assert!(all_lines(&f.path, 0, false, |_, _, _| true).is_ok());
+        // Complete JSON for Python though it has no line ending yet: main's walk
+        // visits it, so the walk is Python's.
+        let f = file_with(b"{\"n\":1}\n{\"n\":NaN}");
+        assert!(is_python_reads(walk_lines(&f.path, 0, None, |_| {})));
+        assert!(is_python_reads(all_lines(&f.path, 0, true, |_, _, _| true)));
+        assert_eq!(read_tail(&f.path, &Map::new()).unwrap().records.len(), 1, "the tail reads complete lines only");
+    }
+
+    #[test]
+    fn a_whole_file_pass_hands_a_line_it_cannot_parse_to_python() {
+        for (what, bad) in python_only_lines() {
+            let f = file_with(format!("{{\"n\":1}}\n{bad}{{\"n\":3}}\n").as_bytes());
+            for strict in [true, false] {
+                assert!(is_python_reads(all_lines(&f.path, 0, strict, |_, _, _| true)), "{what} (strict: {strict})");
+                // A header read that stops before the bad line never sees it.
+                assert!(all_lines(&f.path, 1, strict, |_, _, _| true).is_ok(), "{what} (strict: {strict}): limit 1");
+            }
+        }
     }
 
     /// main's `test_claude_activity_resume` read meters, on this side: a resume

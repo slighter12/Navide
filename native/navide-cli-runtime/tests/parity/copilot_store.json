@@ -3,6 +3,7 @@
  "file": "copilot/session-store.db",
  "sidecars": {},
  "as_written": [],
+ "python_reads": [],
  "steps": [
   {
    "mode": "db",

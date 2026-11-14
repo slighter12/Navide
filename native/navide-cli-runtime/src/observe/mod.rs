@@ -32,6 +32,16 @@ pub enum Error {
     /// declared column, another store of the same CLI): the caller's own
     /// reader takes the call.
     Unsupported(String),
+    /// A record this parser rejects and Python's `json` may read (`pyjson`:
+    /// a lone surrogate escape, `NaN` and `Infinity`, a number out of range,
+    /// nesting past 128 levels). Stepping over it would lose its tokens and
+    /// events for good, so nothing is committed past it and the caller's own
+    /// reader takes the whole call. That reader moves its checkpoint past the
+    /// record, as main does (also if it turns out that Python rejects it:
+    /// it then steps over it exactly as main does), so the next call starts
+    /// after it and nothing loops. A record Python rejects too is not this
+    /// error: main skips it, and so does the runtime.
+    PythonReads(String),
 }
 
 impl std::fmt::Display for Error {
@@ -40,7 +50,21 @@ impl std::fmt::Display for Error {
             Error::Io(err) => write!(f, "io: {err}"),
             Error::Decode { line } => write!(f, "line {line} is not UTF-8"),
             Error::Unsupported(why) => write!(f, "unsupported store: {why}"),
+            Error::PythonReads(why) => write!(f, "left to the Python reader: {why}"),
         }
+    }
+}
+
+impl Error {
+    /// A record at `where_` that this parser rejects (see `PythonReads`).
+    pub(crate) fn unparsed(where_: impl std::fmt::Display) -> Self {
+        Error::PythonReads(format!("{where_} is JSON this parser does not read"))
+    }
+
+    /// An error that hands the call to the caller's own reader: it says
+    /// nothing about the store, and the caller reads the same bytes itself.
+    pub fn is_handed_over(&self) -> bool {
+        matches!(self, Error::Io(_) | Error::Unsupported(_) | Error::PythonReads(_))
     }
 }
 
@@ -219,12 +243,12 @@ impl<'a, V: Vendor> File<'a, V> {
 
     /// The file's slots before any record: the declared initial values, with
     /// the section's own in place of the file's.
-    pub fn slots(&self, section: &'static [Seed<V>]) -> Slots<V> {
+    pub fn slots(&self, section: &'static [Seed<V>]) -> Result<Slots<V>, Error> {
         let mut slots = Slots::default();
         for slot in self.spec.slots.iter().filter(|s| !section.iter().any(|o| o.slot == s.slot)).chain(section) {
-            slots.set(slot.slot, init(&slot.init, self.path));
+            slots.set(slot.slot, init(&slot.init, self.path)?);
         }
-        slots
+        Ok(slots)
     }
 }
 
@@ -325,7 +349,7 @@ impl<V: Vendor> Observer<V> {
     /// is not this declaration's) says nothing: that reader makes the same
     /// reads and says it itself. A decode error still answers.
     fn settled<T>(&mut self, result: Result<T, Error>) -> Result<T, Error> {
-        if matches!(result, Err(Error::Io(_) | Error::Unsupported(_))) {
+        if result.as_ref().is_err_and(Error::is_handed_over) {
             self.memo.reads.clear();
             self.memo.notes.clear();
         }
@@ -357,7 +381,7 @@ impl<V: Vendor> Observer<V> {
     pub fn activity_bag(&mut self, path: &Path, bag: &mut Vec<String>) -> Result<Vec<ActivityEvent>, Error> {
         let mut state = bag::load(self.spec, bag);
         let result = self.activity(path, &mut state);
-        if !matches!(result, Err(Error::Io(_) | Error::Unsupported(_))) {
+        if !result.as_ref().is_err_and(Error::is_handed_over) {
             bag::store(self.spec, &state, bag);
         }
         result
@@ -411,15 +435,17 @@ pub fn dir_name(path: &Path, n: usize) -> String {
     nth_dir(path, n).map(file_name).unwrap_or_default()
 }
 
-fn init<V: Vendor>(init_spec: &SlotInit<V>, path: &Path) -> String {
-    match init_spec {
+/// A slot's value before any record. Only a header line this parser rejects
+/// is an error (`PythonReads`); a header that cannot be read is empty.
+fn init<V: Vendor>(init_spec: &SlotInit<V>, path: &Path) -> Result<String, Error> {
+    Ok(match init_spec {
         SlotInit::Empty => String::new(),
         SlotInit::FileStem => path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_owned(),
         SlotInit::DirName(n) => dir_name(path, *n),
         SlotInit::Header { lines, when, field, first_line } => {
             let empty = Slots::<V>::default();
             let mut found = String::new();
-            let _ = file::all_lines(path, *lines, false, |line, stripped, value| {
+            let read = file::all_lines(path, *lines, false, |line, stripped, value| {
                 if stripped.is_empty() {
                     return true;
                 }
@@ -435,6 +461,9 @@ fn init<V: Vendor>(init_spec: &SlotInit<V>, path: &Path) -> String {
                     None => !first_line,
                 }
             });
+            if let Err(err @ Error::PythonReads(_)) = read {
+                return Err(err);
+            }
             found
         }
         SlotInit::SidecarJson { up, file, keys } => nth_dir(path, *up)
@@ -445,7 +474,16 @@ fn init<V: Vendor>(init_spec: &SlotInit<V>, path: &Path) -> String {
                 keys.iter().filter_map(|k| object.get(*k)).find(|v| truthy(v)).map(py_str)
             })
             .unwrap_or_default(),
-        SlotInit::FirstOf(options) => options.iter().map(|o| init(o, path)).find(|v| !v.is_empty()).unwrap_or_default(),
+        SlotInit::FirstOf(options) => {
+            let mut first = String::new();
+            for option in *options {
+                first = init(option, path)?;
+                if !first.is_empty() {
+                    break;
+                }
+            }
+            first
+        }
         SlotInit::Ext(ext) => V::init(*ext, path),
-    }
+    })
 }

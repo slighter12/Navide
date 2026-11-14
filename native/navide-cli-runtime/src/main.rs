@@ -17,7 +17,18 @@ fn main() {
     let result = match (args.next().as_deref(), args.next().as_deref()) {
         (Some("declarations"), None) => print(&registry::export()),
         (Some("declarations"), Some("launch")) => std::io::Write::write_all(&mut std::io::stdout().lock(), registry::launch_json().as_bytes()),
-        (Some("serve"), None) => wire::serve(std::io::stdin().lock(), std::io::stdout()),
+        (Some("serve"), None) => {
+            // stderr ends up in the backend's log when the process fails. A
+            // panic's message can quote what a transcript said (a slice cut
+            // inside a character names the text), so only the place is
+            // printed; the request that panicked gets its message as its
+            // answer.
+            std::panic::set_hook(Box::new(|info| {
+                let at = info.location().map_or_else(|| "an unknown place".to_owned(), |at| format!("{}:{}", at.file(), at.line()));
+                eprintln!("navide-cli-runtime: panic at {at}");
+            }));
+            wire::serve(std::io::stdin().lock(), std::io::stdout())
+        }
         _ => {
             eprintln!("usage: navide-cli-runtime declarations [launch] | serve");
             std::process::exit(2);

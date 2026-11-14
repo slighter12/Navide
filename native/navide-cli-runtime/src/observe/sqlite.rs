@@ -11,8 +11,10 @@
 //! `winsqlite3.dll`.
 use super::Error;
 use crate::expr::Blob;
+use crate::pyjson::{self, Parsed};
 use crate::text::ignore_invalid;
 use serde_json::{Map, Value};
+use std::cell::Cell;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::Path;
 
@@ -87,22 +89,41 @@ impl Drop for Statement {
     }
 }
 
+/// `path` with `suffix` appended to its file name (`-wal`, `-shm`).
+fn beside(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    name.into()
+}
+
 impl Connection {
-    fn open(path: &Path) -> Option<Self> {
+    /// Opens the way main's readers do (`mode=ro`); the second field is true
+    /// when it had to be `immutable=1` instead, which reads the database file
+    /// as it is and ignores any `-wal`.
+    fn open(path: &Path) -> Option<(Self, bool)> {
         if !path.is_file() {
             return None;
         }
+        if let Some(db) = Self::open_uri(&uri(path, false)?).filter(Connection::readable) {
+            return Some((db, false));
+        }
         // A WAL database whose last writer closed has no -wal/-shm, and the
-        // system SQLite refuses a read-only open of it (it may not create the
-        // -shm) where Python's bundled one reads it. With neither file there
-        // the database file holds every committed row: `immutable=1` reads it
-        // without creating anything beside it.
-        let sidecars = ["-wal", "-shm"].iter().any(|suffix| {
-            let mut name = path.as_os_str().to_owned();
-            name.push(suffix);
-            Path::new(&name).exists()
-        });
-        let name = CString::new(uri(path, !sidecars && wal_header(path))?).ok()?;
+        // system SQLite refuses to read it with `mode=ro` (it may not create
+        // the -shm) where Python's bundled one reads it. With neither file
+        // there the database file holds every committed row: `immutable=1`
+        // reads it without creating anything beside it. Only that case: a
+        // refusal for any other reason (busy, corrupt, not a database) stays
+        // a refusal, as on main. If a writer shows up during the read the
+        // caller notices (`Db::wal_appeared`) and hands the call over.
+        let sidecars = ["-wal", "-shm"].iter().any(|suffix| beside(path, suffix).exists());
+        if sidecars || !wal_header(path) {
+            return None;
+        }
+        Self::open_uri(&uri(path, true)?).filter(Connection::readable).map(|db| (db, true))
+    }
+
+    fn open_uri(uri: &str) -> Option<Self> {
+        let name = CString::new(uri).ok()?;
         let mut raw = std::ptr::null_mut();
         let code = unsafe { sqlite3_open_v2(name.as_ptr(), &mut raw, OPEN_READONLY | OPEN_URI, std::ptr::null()) };
         let db = (!raw.is_null()).then_some(Connection(raw));
@@ -111,6 +132,13 @@ impl Connection {
         }
         let db = db?;
         (unsafe { sqlite3_busy_timeout(db.0, BUSY_TIMEOUT_MS) } == 0).then_some(db)
+    }
+
+    /// Whether the schema can be read: SQLite opens a database lazily, and a
+    /// `mode=ro` open it cannot serve fails here, at the first read.
+    fn readable(&self) -> bool {
+        self.prepare("SELECT count(*) FROM sqlite_master", &[])
+            .is_some_and(|statement| matches!(unsafe { sqlite3_step(statement.0) }, ROW | DONE))
     }
 
     fn prepare(&self, sql: &str, params: &[Param]) -> Option<Statement> {
@@ -136,7 +164,9 @@ impl Connection {
         Some(statement)
     }
 
-    fn query(&self, sql: &str, params: &[Param], json: &[&str], binary: &[&str]) -> Option<Vec<Row>> {
+    /// `unparsed` is set when a JSON column holds text this parser rejects
+    /// and Python may read (`Db::unparsed`).
+    fn query(&self, sql: &str, params: &[Param], json: &[&str], binary: &[&str], unparsed: &Cell<bool>) -> Option<Vec<Row>> {
         let statement = self.prepare(sql, params)?;
         let columns: Vec<String> = (0..unsafe { sqlite3_column_count(statement.0) })
             .map(|c| {
@@ -171,11 +201,11 @@ impl Connection {
                         } else {
                             match (blob, json.contains(&name.as_str())) {
                                 // Python decodes TEXT as UTF-8 and fails the whole query on a bad cell.
-                                (false, true) => serde_json::from_str(text.ok()?).unwrap_or(Value::Null),
+                                (false, true) => json_cell(pyjson::parse(text.ok()?), unparsed),
                                 (false, false) => Value::String(text.ok()?.to_owned()),
                                 // A BLOB stays bytes there: JSON of them, else nothing to read
                                 // (protobuf nodes can share a table with JSON messages).
-                                (true, true) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
+                                (true, true) => json_cell(pyjson::parse_bytes(bytes), unparsed),
                                 (true, false) => text.map_or(Value::Null, |t| Value::String(t.to_owned())),
                             }
                         }
@@ -212,6 +242,20 @@ impl Connection {
     }
 }
 
+/// A JSON column's cell. Text neither parser reads (a plain-text cell that
+/// shares the column, a protobuf blob) is nothing to read; text only Python's
+/// `json` may read is nothing too, but marks the call as Python's.
+fn json_cell(parsed: Parsed, unparsed: &Cell<bool>) -> Value {
+    match parsed {
+        Parsed::Value(value) => value,
+        Parsed::Rejected => Value::Null,
+        Parsed::Python => {
+            unparsed.set(true);
+            Value::Null
+        }
+    }
+}
+
 /// The bytes of a TEXT or BLOB cell (valid until the next step).
 unsafe fn cell<'s>(statement: *mut c_void, column: c_int) -> &'s [u8] {
     let pointer = unsafe { sqlite3_column_text(statement, column) };
@@ -237,6 +281,9 @@ pub struct Db {
     connection: Connection,
     json: &'static [&'static str],
     binary: &'static [&'static str],
+    unparsed: Cell<bool>,
+    /// Opened `immutable=1` (see `Connection::open`): the path to look beside.
+    immutable: Option<std::path::PathBuf>,
 }
 
 impl Db {
@@ -249,20 +296,36 @@ impl Db {
         binary: &'static [&'static str],
         requires: &[(&str, &[&str])],
     ) -> Result<Option<Db>, Error> {
-        let Some(connection) = Connection::open(path) else { return Ok(None) };
+        let Some((connection, immutable)) = Connection::open(path) else { return Ok(None) };
         for (table, columns) in requires {
-            let Some(have) = connection.query(&format!("PRAGMA table_info({table})"), &[], &[], &[]) else { return Ok(None) };
+            let Some(have) = connection.query(&format!("PRAGMA table_info({table})"), &[], &[], &[], &Cell::new(false)) else { return Ok(None) };
             let has = |column: &str| have.iter().any(|row| row.value.get("name").and_then(Value::as_str) == Some(column));
             if let Some(missing) = columns.iter().find(|c| !has(c)) {
                 return Err(Error::Unsupported(format!("table {table} lacks {missing}")));
             }
         }
-        Ok(Some(Db { connection, json, binary }))
+        Ok(Some(Db { connection, json, binary, unparsed: Cell::new(false), immutable: immutable.then(|| path.to_owned()) }))
+    }
+
+    /// Whether a `-wal` has appeared beside a database this call read with
+    /// `immutable=1`: a writer started meanwhile, and rows it committed are in
+    /// that file where this read could not see them, while main's `mode=ro`
+    /// would. The read is not kept; the caller's reader makes it.
+    pub fn wal_appeared(&self) -> bool {
+        self.immutable.as_deref().is_some_and(|path| beside(path, "-wal").exists())
     }
 
     /// The rows of `sql`; `None`: not readable this cycle.
     pub fn rows(&self, sql: &str, params: &[Param]) -> Option<Vec<Row>> {
-        self.connection.query(sql, params, self.json, self.binary)
+        self.connection.query(sql, params, self.json, self.binary, &self.unparsed)
+    }
+
+    /// Whether a JSON column the rows read so far held text this parser
+    /// rejects and Python's `json` may read. Such a cell reads as nothing
+    /// (`Null`), which is only right if Python rejects it too: the caller
+    /// hands the call to its own reader instead of committing past the row.
+    pub fn unparsed(&self) -> bool {
+        self.unparsed.get()
     }
 
     /// The first column of every row of `sql`, bytes decoded as UTF-8 with
@@ -300,6 +363,63 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A JSON column cell this parser rejects reads as nothing, and the call
+    /// is the caller's reader's only if Python's `json` may read the cell: a
+    /// plain-text cell that shares the column, a blank one, a protobuf blob
+    /// and text that is not JSON to anyone are not.
+    #[test]
+    fn a_json_cell_that_only_python_may_read_hands_the_call_over() {
+        #[cfg(unix)]
+        let _no_fork = crate::session::FD_FORK_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = crate::observe::file::tempfile_lite::TempFile::new("json-cells");
+        testing::write(
+            &store.path,
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, data); \
+             INSERT INTO t (data) VALUES ('{\"a\":1}'), (''), (x'12FF66696C653A2F2F2F757372'), (NULL), ('plain text'), ('not json'), (x'7B226122'); \
+             INSERT INTO t (data) VALUES ('{\"a\":\"cut \\ud83d\"}'), ('{\"a\":NaN}'), (x'7B2261223A4E614E7D');",
+        );
+        let db = Db::open(&store.path, &["data"], &[], &[]).unwrap().unwrap();
+        let rows = db.rows("SELECT data FROM t WHERE id <= 7 ORDER BY id", &[]).unwrap();
+        assert_eq!(rows[0].value["data"], serde_json::json!({"a": 1}));
+        assert!(!db.unparsed(), "valid JSON, a blank cell, a protobuf blob, NULL, plain text and corrupt JSON are nothing to hand over");
+        for (id, what) in [(8, "a lone surrogate"), (9, "NaN"), (10, "a blob of NaN")] {
+            let db = Db::open(&store.path, &["data"], &[], &[]).unwrap().unwrap();
+            let rows = db.rows("SELECT data FROM t WHERE id = ?", &[Param::Int(id)]).unwrap();
+            assert!(rows[0].value["data"].is_null(), "{what} reads as nothing");
+            assert!(db.unparsed(), "{what} is handed over");
+        }
+    }
+
+    /// A WAL database whose last writer closed has no `-wal`/`-shm`: it is
+    /// opened `mode=ro` as main does, and `immutable=1` only where the system
+    /// SQLite refuses that (macOS's did where this was written; a build that
+    /// reads it `mode=ro` takes the first branch and the test still holds).
+    /// Either way its rows are read, and a `-wal` that appears after an
+    /// immutable read is noticed.
+    #[test]
+    fn a_wal_database_without_sidecars_is_read_and_a_wal_that_appears_after_an_immutable_read_is_noticed() {
+        #[cfg(unix)]
+        let _no_fork = crate::session::FD_FORK_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = crate::observe::file::tempfile_lite::TempFile::new("wal-closed");
+        testing::write(&store.path, "PRAGMA journal_mode=WAL; CREATE TABLE t (n); INSERT INTO t VALUES (7); PRAGMA wal_checkpoint(TRUNCATE)");
+        assert!(wal_header(&store.path), "the fixture is a WAL database");
+        // Every row is in the database file now; a writer that closed cleanly
+        // leaves no sidecars, which some SQLite builds do not do for this helper.
+        for suffix in ["-wal", "-shm"] {
+            let _ = std::fs::remove_file(beside(&store.path, suffix));
+        }
+        let db = Db::open(&store.path, &[], &[], &[]).unwrap().expect("a closed WAL database can be read");
+        assert_eq!(db.rows("SELECT n FROM t", &[]).unwrap()[0].value["n"], 7);
+        assert!(!db.wal_appeared());
+        let immutable = db.immutable.is_some();
+        std::fs::write(beside(&store.path, "-wal"), b"").unwrap();
+        assert_eq!(db.wal_appeared(), immutable, "only a read that ignored the -wal needs to be handed over");
+        // A database that is not WAL and cannot be opened stays refused: no second try.
+        let bad = crate::observe::file::tempfile_lite::TempFile::new("not-a-db");
+        std::fs::write(&bad.path, b"this is not a database at all, it is longer than the header is").unwrap();
+        assert!(Db::open(&bad.path, &[], &[], &[]).unwrap().is_none());
+    }
 
     #[test]
     fn a_blob_that_is_not_utf8_is_joined_as_a_blob() {
