@@ -12,6 +12,7 @@ The misbehaving processes are small scripts started in place of the binary
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -39,7 +40,7 @@ for line in sys.stdin:
     seen.write(request["op"] + "\\n")
     seen.flush()
     if request["op"] == "observes":
-        print(json.dumps({"id": request["id"], "ok": True, "result": {"qwen": {"cwd": "written"}}}), flush=True)
+        print(json.dumps({"id": request["id"], "ok": True, "result": __OBSERVES__}), flush=True)
 """
 
 #: Exits as soon as it starts.
@@ -50,8 +51,18 @@ sys.exit(3)
 """
 
 
-def _stand_in(tmp_path: Path, body: str) -> Path:
+def _observes(**runtime: str) -> dict:
+    """The handshake answer of a process built from this checkout (it observes
+    qwen); ``runtime`` overrides what it says its build is."""
+    build = {"version": cli_runtime.RUNTIME_VERSION, "declarations": cli_runtime._declarations_fingerprint(), **runtime}
+    return {"qwen": {"cwd": "written"}, cli_runtime.RUNTIME_KEY: build}
+
+
+def _stand_in(tmp_path: Path, body: str, observes: dict | None = None) -> Path:
+    """A script that runs in place of the binary; ``__OBSERVES__`` in its body
+    is its handshake answer (by default a process built from this checkout)."""
     script = tmp_path / "stand-in-runtime"
+    body = body.replace("__OBSERVES__", repr(observes if observes is not None else _observes()))
     script.write_text(f"#!{sys.executable}\nimport json, sys\n{body}", encoding="utf-8")
     script.chmod(0o755)
     return script
@@ -187,7 +198,7 @@ waiting = 0
 for line in sys.stdin:
     request = json.loads(line)
     if request["op"] == "observes":
-        print(json.dumps({"id": request["id"], "ok": True, "result": {"qwen": {"cwd": "written"}}}), flush=True)
+        print(json.dumps({"id": request["id"], "ok": True, "result": __OBSERVES__}), flush=True)
         continue
     waiting += 1
     if waiting == int(open(sys.argv[0] + ".count").read()):
@@ -207,7 +218,7 @@ def test_one_dead_process_is_one_failure_however_many_callers_waited(tmp_path: P
     # One call first, so the process is up and has said what it observes:
     # every thread below then goes straight to its own request.
     assert cli_runtime._client_for_call() is not None and cli_runtime._observed(cli_runtime._client) == {
-        "qwen": {"cwd": "written"}}
+        "qwen": {"cwd": "written"}}, "the CLIs it observes, without the build's identity"
 
     start = threading.Barrier(callers)
     results: list[Any] = []
@@ -293,7 +304,7 @@ def test_a_start_that_cannot_get_a_thread_falls_back_backs_off_and_kills_the_chi
 
     monkeypatch.setattr(cli_runtime.subprocess, "Popen", popen)
     monkeypatch.setattr(cli_runtime, "threading", SimpleNamespace(Thread=OutOfThreads, Lock=threading.Lock,
-                                                                  local=threading.local))
+                                                                  Event=threading.Event, local=threading.local))
     reader, chat = _qwen(tmp_path)
     seam.apply(True)
 
@@ -328,7 +339,7 @@ def test_calls_during_a_start_are_deferred_not_faults_and_the_state_says_startin
         time.sleep(0.1)
         for _ in range(3):
             assert cli_runtime._call("qwen", "usage") is None
-    assert seam.status()["calls"] == {"qwen": {"rust": 0, "unsupported": 0, "unreadable": 0, "deferred": 3,
+    assert seam.status()["calls"] == {"qwen": {"rust": 0, "unsupported": 0, "unreadable": 0, "python": 0, "deferred": 3,
                                                "fallback": 0}}
     assert len([r for r in caplog.records if "has been starting" in r.getMessage()]) == 1, "said once"
 
@@ -477,7 +488,7 @@ ANSWERS_PANIC = """
 for line in sys.stdin:
     request = json.loads(line)
     if request["op"] == "observes":
-        print(json.dumps({"id": request["id"], "ok": True, "result": {"qwen": {"cwd": "written"}}}), flush=True)
+        print(json.dumps({"id": request["id"], "ok": True, "result": __OBSERVES__}), flush=True)
     else:
         print(json.dumps({"id": request["id"], "ok": False, "kind": "panic", "error": "panic: a rule"}), flush=True)
 """
@@ -546,6 +557,158 @@ def test_the_binary_is_looked_up_like_the_other_sidecars(tmp_path: Path, monkeyp
     assert cli_runtime.binary() is None
 
 
+def test_the_repository_build_is_looked_for_only_outside_the_packaged_backend(tmp_path: Path,
+                                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    built = cli_runtime_build.binary()  # the repository's release build exists now
+    name = osplat.paths.bundled_executable("navide-cli-runtime")
+    packaged = tmp_path / "resources" / "bin"
+    packaged.mkdir(parents=True)
+    monkeypatch.delenv(cli_runtime.BINARY_ENV, raising=False)
+    monkeypatch.setattr(cli_runtime.frozen_env, "packaged_bin_dir", lambda: str(packaged))
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert cli_runtime.binary() is None, "packaged: no sidecar there means none, whatever a source tree holds"
+
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    (packaged / name).write_text("", encoding="utf-8")
+    assert cli_runtime.binary() == built, "from source: the repository's build, not a packaged folder"
+
+
+def test_a_binary_that_cannot_even_be_looked_for_is_no_binary(monkeypatch: pytest.MonkeyPatch, seam) -> None:
+    def refuses(_self: Path) -> bool:
+        raise PermissionError("a volume that refuses the lookup")
+
+    monkeypatch.delenv(cli_runtime.BINARY_ENV, raising=False)
+    monkeypatch.setattr(Path, "is_file", refuses)
+    assert cli_runtime.binary() is None
+    seam.apply(True)  # never raises
+    assert seam.status()["binary"] is False
+
+
+def test_the_seams_runtime_version_is_the_crates() -> None:
+    manifest = (Path(__file__).resolve().parents[2] / "native" / "navide-cli-runtime" / "Cargo.toml").read_text(encoding="utf-8")
+    versions = [line.split("=", 1)[1].strip().strip('"') for line in manifest.splitlines() if line.startswith("version =")]
+    assert versions == [cli_runtime.RUNTIME_VERSION], "bump RUNTIME_VERSION with the crate's version"
+
+
+def test_a_request_python_cannot_send_as_utf8_is_python_reads_it_and_the_process_is_left_alone(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
+    exe = _stand_in(tmp_path, STALLS)
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(exe))
+    monkeypatch.setattr(cli_runtime, "CALL_TIMEOUT_S", 30.0)  # a call that waited would show
+    seam.apply(True)
+    started = time.monotonic()
+    undecodable = os.fsdecode(b"/chats/a\xffb.jsonl")  # surrogateescape: '\udcff'
+    assert "\udcff" in undecodable
+    assert cli_runtime._call("qwen", "usage", path=undecodable, checkpoint={}) is None
+    assert cli_runtime._call("qwen", "usage", path="/chats/a.jsonl", checkpoint={"ratio": float("nan")}) is None
+    assert time.monotonic() - started < 5.0, "nothing waited for an answer"
+    status = seam.status()
+    assert status["calls"]["qwen"]["python"] == 2 and status["calls"]["qwen"]["fallback"] == 0
+    assert status["failures"] == 0 and status["state"] == "running", "the process was not killed or counted"
+    assert _seen(exe) == ["observes"], "no request was sent"
+
+
+#: Answers every reader call with the same error answer (`__ANSWER__`).
+ANSWERS_ERROR = """
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["op"] == "observes":
+        print(json.dumps({"id": request["id"], "ok": True, "result": __OBSERVES__}), flush=True)
+    else:
+        print(json.dumps({"id": request["id"], "ok": False, "kind": "request", "error": "bad request: a field"}), flush=True)
+"""
+
+
+def test_a_request_the_process_refuses_is_answered_at_once_and_does_not_count_against_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(_stand_in(tmp_path, ANSWERS_ERROR)))
+    monkeypatch.setattr(cli_runtime, "CALL_TIMEOUT_S", 30.0)
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+    started = time.monotonic()
+    for _ in range(3):
+        assert reader.parse_incremental(chat, {}).events == []
+    assert time.monotonic() - started < 5.0
+    assert seam.status()["failures"] == 0 and seam.status()["state"] == "running"
+
+
+def test_the_binary_answers_a_request_it_cannot_parse_under_its_id() -> None:
+    """The real binary, given what the backend no longer sends (a lone surrogate
+    escape) and a field of the wrong type, answers each under its id at once."""
+    done = subprocess.run([str(cli_runtime_build.binary()), "serve"], timeout=30, check=True, capture_output=True,
+                          input=b'{"id":7,"op":"usage","path":"/a/\\udcff"}\n{"id":8,"op":"usage","bag":"x"}\n')
+    answers = {answer["id"]: answer for answer in map(json.loads, done.stdout.splitlines())}
+    assert (answers[7]["ok"], answers[7]["kind"]) == (False, "python")
+    assert (answers[8]["ok"], answers[8]["kind"]) == (False, "request")
+
+
+@pytest.mark.parametrize("runtime", [{"version": "9.9.9"}, {"declarations": "0" * 16}, None],
+                         ids=["other version", "other declarations", "says nothing"])
+def test_a_build_that_is_not_this_backends_counts_as_no_binary(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture, runtime: dict | None) -> None:
+    observes = _observes(**(runtime or {}))
+    if runtime is None:
+        del observes[cli_runtime.RUNTIME_KEY]
+    exe = _stand_in(tmp_path, STALLS, observes)
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(exe))
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+    with caplog.at_level(logging.WARNING, logger=cli_runtime.log.name):
+        for _ in range(4):
+            assert reader.parse_incremental(chat, {}).events == []
+    assert _seen(exe) == ["observes"], "it was asked what it is, then nothing, and not started again"
+    status = seam.status()
+    assert status["binary"] is False and status["runtime"]["unusable"]
+    assert status["calls"].get("qwen", {}).get("fallback", 0) == 0, "not a fault"
+    assert status["failures"] == 0
+    assert len([r for r in caplog.records if "is not used" in r.getMessage()]) == 1, "said once"
+    # Applying the switch asks again.
+    seam.apply(True)
+    assert seam.status()["runtime"]["unusable"] is None
+
+
+#: Writes to stderr, then exits without answering.
+DIES_LOUDLY = """
+sys.stdin.readline()
+sys.stderr.write("navide-cli-runtime: panic at src/observe/file.rs:99\\n" + "x" * 5000 + "\\n")
+sys.stderr.flush()
+sys.exit(3)
+"""
+
+
+def test_what_the_process_wrote_to_stderr_is_logged_once_bounded_when_it_dies(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture) -> None:
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(_stand_in(tmp_path, DIES_LOUDLY)))
+    monkeypatch.setattr(cli_runtime, "BACKOFF_BASE_S", 1000.0)
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+    with caplog.at_level(logging.WARNING, logger=cli_runtime.log.name):
+        for _ in range(3):
+            assert reader.parse_incremental(chat, {}).events == []
+    said = [r.getMessage() for r in caplog.records if "stderr:" in r.getMessage()]
+    assert len(said) == 1, "once, with the failure that counted the process"
+    assert "panic at src/observe/file.rs:99" in said[0]
+    assert len(said[0]) < 600, "bounded"
+
+
+def test_an_answer_that_cannot_be_read_falls_back_to_python_not_into_the_watcher(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture) -> None:
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+    # What the runtime answers: events with a field missing, a bag of the wrong type.
+    answers = {"usage": {"events": [{"vendor": "qwen"}], "checkpoint": {}}, "activity": {"events": [], "bag": 5},
+               "turns": {"turns": [{"turn_index": 1}]}}
+    monkeypatch.setattr(cli_runtime, "_call", lambda vendor, op, **fields: (answers[op], {"cwd": "written"}))
+    bag = {"kept"}
+    with caplog.at_level(logging.WARNING, logger=cli_runtime.log.name):
+        assert reader.parse_incremental(chat, {}).events == []
+        assert reader.parse_activity(chat, bag) == [] and bag == {"kept"}, "the caller's bag was not touched"
+        assert reader.turns_for_session(chat, "") == []
+    assert len([r for r in caplog.records if "shape this backend cannot read" in r.getMessage()]) == 1, "said once per CLI"
+    assert seam.status()["calls"]["qwen"]["fallback"] >= 3
+
+
 def test_status_counts_who_answered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
     cli_runtime_build.binary()
     scenario = parity._scenarios()["qwen_0_25"]
@@ -554,7 +717,10 @@ def test_status_counts_who_answered(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     status = seam.status()
     assert status["state"] == "running" and status["failures"] == 0
     assert status["calls"] == {"qwen": {"rust": 2 * len(scenario["steps"]) + 1, "unsupported": 0, "unreadable": 0,
-                                        "deferred": 0, "fallback": 0}}
+                                        "python": 0, "deferred": 0, "fallback": 0}}
+    # The process said which build it is, and it is the one this backend is written for.
+    assert status["runtime"]["unusable"] is None and status["runtime"]["version"] == cli_runtime.RUNTIME_VERSION
+    assert status["runtime"]["declarations"] == cli_runtime._declarations_fingerprint()
     seam.shutdown()
     assert seam.status()["state"] == "idle"
 

@@ -33,7 +33,8 @@ def test_health_reports_loop_lag_and_default_pool(client: TestClient) -> None:
 def test_health_reports_the_rust_cli_runtime_switch(client: TestClient) -> None:
     runtime = client.get("/health").json()["diagnostics"]["cli_runtime"]
 
-    assert set(runtime) == {"enabled", "state", "binary", "failures", "calls"}
+    assert set(runtime) == {"enabled", "state", "binary", "failures", "runtime", "calls"}
+    assert set(runtime["runtime"]) == {"version", "declarations", "unusable"}
     assert isinstance(runtime["enabled"], bool) and isinstance(runtime["calls"], dict)
 
 

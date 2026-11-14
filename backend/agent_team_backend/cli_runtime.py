@@ -41,6 +41,7 @@ the process and, per CLI, how many calls Rust answered and how many fell back.
 
 from __future__ import annotations
 
+import collections
 import itertools
 import json
 import logging
@@ -70,6 +71,19 @@ SETTING_KEY = "rustCliRuntime"
 BINARY_ENV = "NAVIDE_CLI_RUNTIME_BIN"
 _BIN_NAME = "navide-cli-runtime"
 
+#: The crate version this seam is written for (``native/navide-cli-runtime/
+#: Cargo.toml``; a test keeps the two equal). The ``observes`` answer carries
+#: the binary's, and one that differs is treated as no binary: a runtime of
+#: another build answers in a shape this code may not read.
+RUNTIME_VERSION = "0.1.0"
+#: Where the ``observes`` answer puts the build's identity, beside the CLIs.
+RUNTIME_KEY = "_runtime"
+#: The lines of the process's stderr kept for the log when it fails, and the
+#: longest one kept. The runtime writes no transcript text there (its panic
+#: hook prints a location only).
+STDERR_LINES = 8
+STDERR_LINE_CHARS = 200
+
 #: Longest wait for one answer. A read of a transcript of tens of MB takes
 #: well under a second; ten means the process is stuck (a stalled volume, a
 #: stopped process), not slow.
@@ -94,12 +108,17 @@ START_DEADLINE_S = 30.0
 #: ``unsupported``: the runtime declined a store its declaration does not
 #: describe, so the Python reader read it (expected; each case is a declared
 #: ``Unsupported``). ``unreadable``: the file could not be opened or read, and
-#: the Python reader decided what that means, as on main. ``deferred``: the
+#: the Python reader decided what that means, as on main. ``python``: a record
+#: in the call is JSON the runtime's parser rejects and Python's ``json`` may
+#: accept (a lone surrogate escape, ``NaN``, nesting past 128 levels), so
+#: nothing was committed past it and the Python reader read the call; if
+#: Python rejects it too (a corrupt line) that reader steps over it, as main
+#: does, and the next call is the runtime's again. ``deferred``: the
 #: reader asked to make its own reads (one with a failing query on record
 #: does, until that query works again), or the call arrived while another
 #: caller was starting the process. ``fallback``: a fault — a stalled,
 #: dead or failing process, or an error answer.
-OUTCOMES = ("rust", "unsupported", "unreadable", "deferred", "fallback")
+OUTCOMES = ("rust", "unsupported", "unreadable", "python", "deferred", "fallback")
 
 _enabled = False
 # Guards the few module values below. Held only to swap them, never while a
@@ -129,6 +148,10 @@ _slow_start_logged = False
 #: Per calling thread: the last `_client_for_call` stepped aside for a start.
 _aside = threading.local()
 _no_binary_logged = False
+#: What the last process said about its build (``version``, ``declarations``),
+#: and why that build is not used (None: it is). Set by the handshake.
+_runtime_said: dict[str, Any] | None = None
+_unusable: str | None = None
 #: (CLI, kind) of the error answers already logged.
 _errors_logged: set[tuple[str, str]] = set()
 _counts: dict[str, dict[str, int]] = {}
@@ -141,12 +164,14 @@ def enabled() -> bool:
 def apply(on: bool) -> None:
     """Make the backend match the switch. Idempotent; never raises, never waits."""
     global _enabled, _failures, _retry_at, _breaker_open, _stopping, _no_binary_logged, _starting, _start_epoch
+    global _runtime_said, _unusable
     _enabled = bool(on)
     with _state:
         # Flipping the switch is the way out of a tripped breaker, and out of a
         # start that never ends: one that began before this is ended when it
         # returns, not installed.
         _failures, _retry_at, _breaker_open, _stopping = 0, 0.0, False, False
+        _runtime_said, _unusable = None, None
         _start_epoch += 1
         _starting = False
         _errors_logged.clear()
@@ -182,21 +207,23 @@ def shutdown() -> None:
 
 def binary() -> Path | None:
     """The runtime executable: ``$NAVIDE_CLI_RUNTIME_BIN``, else the packaged
-    ``<resources>/bin`` (where the app's other native sidecars live), else the
-    repository's release build."""
-    override = os.environ.get(BINARY_ENV)
-    if override:
-        path = Path(override).expanduser()
-        return path if path.is_file() else None
-    name = osplat.paths.bundled_executable(_BIN_NAME)
-    folders: list[Path] = []
-    if getattr(sys, "frozen", False):
-        folders.append(Path(frozen_env.packaged_bin_dir()))
-    folders.append(Path(__file__).resolve().parents[2] / "native" / _BIN_NAME / "target" / "release")
-    for folder in folders:
-        if (folder / name).is_file():
-            return folder / name
-    return None
+    ``<resources>/bin`` (where the app's other native sidecars live) in the
+    packaged backend, else the repository's release build in a source
+    checkout. None when there is none, or when it cannot even be looked for (a
+    volume that refuses the lookup): that is no binary, never an error."""
+    try:
+        override = os.environ.get(BINARY_ENV)
+        if override:
+            path = Path(override).expanduser()
+            return path if path.is_file() else None
+        name = osplat.paths.bundled_executable(_BIN_NAME)
+        if getattr(sys, "frozen", False):
+            folder = Path(frozen_env.packaged_bin_dir())
+        else:
+            folder = Path(__file__).resolve().parents[2] / "native" / _BIN_NAME / "target" / "release"
+        return folder / name if (folder / name).is_file() else None
+    except (OSError, RuntimeError):  # RuntimeError: `expanduser` without a home
+        return None
 
 
 def _log_no_binary() -> None:
@@ -230,7 +257,19 @@ def status() -> dict[str, Any]:
             state = "idle"
         calls = {vendor: dict(counts) for vendor, counts in sorted(_counts.items())}
         failures = _failures
-    return {"enabled": _enabled, "state": state, "binary": binary() is not None, "failures": failures, "calls": calls}
+        said, unusable = dict(_runtime_said) if _runtime_said is not None else None, _unusable
+    return {
+        "enabled": _enabled,
+        "state": state,
+        # A build that is not the one this code is written for counts as none.
+        "binary": binary() is not None and unusable is None,
+        "failures": failures,
+        # What the process said it is (None until its handshake), and why it
+        # is not used (None: it is).
+        "runtime": {"version": (said or {}).get("version"), "declarations": (said or {}).get("declarations"),
+                    "unusable": unusable},
+        "calls": calls,
+    }
 
 
 def reset_counts() -> dict[str, dict[str, int]]:
@@ -247,6 +286,11 @@ def _count(vendor: str, outcome: str) -> None:
         counts[outcome] += 1
 
 
+class PythonReads(Exception):
+    """A call whose request cannot be sent as strict UTF-8 JSON: it is the
+    Python reader's, and says nothing about the process."""
+
+
 class _Client:
     """One ``serve`` process: a JSON request per line in, a JSON answer per line
     out, matched by id. Two threads own the pipes; callers only wait."""
@@ -256,10 +300,13 @@ class _Client:
             [str(exe), "serve"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             **osplat.paths.helper_process_options(),
         )
         self._ids = itertools.count(1)
+        #: The last lines the process wrote to stderr (bounded).
+        self._stderr_tail: "collections.deque[str]" = collections.deque(maxlen=STDERR_LINES)
+        self._stderr_done = threading.Event()
         self._waiting: dict[int, "queue.SimpleQueue[dict | None]"] = {}
         self._waiting_lock = threading.Lock()
         self._outbox: "queue.SimpleQueue[bytes | None]" = queue.SimpleQueue()
@@ -269,7 +316,8 @@ class _Client:
         #: What the process observes: CLI key -> {"cwd": form}. None until asked.
         self.observed: dict[str, dict] | None = None
         try:
-            for target, name in ((self._write, "cli-runtime-write"), (self._read, "cli-runtime-read")):
+            for target, name in ((self._write, "cli-runtime-write"), (self._read, "cli-runtime-read"),
+                                 (self._drain, "cli-runtime-stderr")):
                 threading.Thread(target=target, name=name, daemon=True).start()
         except BaseException:
             # No thread may own the pipes (the thread limit): the caller never
@@ -298,6 +346,31 @@ class _Client:
                 stdin.close()
             except OSError:
                 pass
+
+    def _drain(self) -> None:
+        """Keep the last lines of stderr, and never let the pipe fill."""
+        stderr = self._proc.stderr
+        assert stderr is not None
+        try:
+            for raw in stderr:
+                line = raw.decode("utf-8", "replace").strip()
+                if line:
+                    self._stderr_tail.append(line[:STDERR_LINE_CHARS])
+        except (OSError, ValueError):
+            pass
+        finally:
+            self._stderr_done.set()
+
+    def stderr_text(self) -> str:
+        """The kept lines of stderr, joined; once the process has gone (its
+        stdout closed), after a short wait for the last of them to be read."""
+        if self.dead:
+            try:
+                self._proc.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                pass
+            self._stderr_done.wait(0.5)
+        return " | ".join(self._stderr_tail)
 
     def _read(self) -> None:
         stdout = self._proc.stdout
@@ -328,12 +401,20 @@ class _Client:
         """The process's answer document. Raises OSError when it is gone and
         TimeoutError when it did not answer in time."""
         request_id = next(self._ids)
+        try:
+            # Strict: no lone surrogate (a path with undecodable bytes, as
+            # `surrogateescape` makes one) and no NaN is sent as an escape the
+            # process cannot parse. The process stays untouched; the caller's
+            # Python reader reads the call.
+            line = (json.dumps({"id": request_id, "op": op, **fields}, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        except (UnicodeEncodeError, ValueError) as err:
+            raise PythonReads(str(err)) from None
         slot: "queue.SimpleQueue[dict | None]" = queue.SimpleQueue()
         with self._waiting_lock:
             if self.dead:
                 raise OSError("navide-cli-runtime exited")
             self._waiting[request_id] = slot
-        self._outbox.put((json.dumps({"id": request_id, "op": op, **fields}) + "\n").encode("utf-8"))
+        self._outbox.put(line)
         try:
             answer = slot.get(timeout=timeout)
         except queue.Empty:
@@ -407,15 +488,19 @@ def _process_failed(client: "_Client | None", err: BaseException) -> None:
         tripped = _failures >= BREAKER_FAILURES and not _breaker_open
         _breaker_open = _breaker_open or tripped
         failures = _failures
+    # What the process said on stderr before it went: once, with the failure
+    # that counted it (a process is one failure).
+    tail = client.stderr_text() if client is not None and hasattr(client, "stderr_text") else ""
     if client is not None:
         _reap(client)
+    said = f" (stderr: {tail})" if tail else ""
     if tripped:
         log.warning(
-            "navide-cli-runtime failed %d times in a row (last: %s); readers stay on Python "
-            "until the %s setting is switched off and on again", failures, err, SETTING_KEY,
+            "navide-cli-runtime failed %d times in a row (last: %s%s); readers stay on Python "
+            "until the %s setting is switched off and on again", failures, err, said, SETTING_KEY,
         )
     else:
-        log.warning("navide-cli-runtime unavailable, using the Python reader: %s", err)
+        log.warning("navide-cli-runtime unavailable, using the Python reader: %s%s", err, said)
 
 
 def _client_for_call() -> "_Client | None":
@@ -424,7 +509,7 @@ def _client_for_call() -> "_Client | None":
     _aside.stepped = False
     slow_for = abandoned_after = 0.0
     with _state:
-        if not _enabled or _breaker_open or _stopping:
+        if not _enabled or _breaker_open or _stopping or _unusable is not None:
             return None
         current = _client
         if current is not None and not current.dead:
@@ -498,13 +583,60 @@ def _client_for_call() -> "_Client | None":
                 _starting = False
 
 
+def _declarations_fingerprint() -> str:
+    """The runtime's fingerprint (FNV-1a, 64 bit) of the checked-in
+    declarations, which the crate prints in the ``observes`` answer for the
+    declarations it was built from. Line ends are normalised, as a checkout on
+    Windows may convert them."""
+    from .cli_vendors import _declared  # not at import: the vendors import this module
+
+    hash_ = 0xCBF29CE484222325
+    for byte in _declared.FILE.read_bytes().replace(b"\r\n", b"\n"):
+        hash_ = ((hash_ ^ byte) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return f"{hash_:016x}"
+
+
+def _why_unusable(said: Any) -> str | None:
+    """Why the build the process says it is cannot be used, None if it can."""
+    if not isinstance(said, dict) or "version" not in said or "declarations" not in said:
+        return "it does not say which build it is"
+    if said["version"] != RUNTIME_VERSION:
+        return f"it is version {said['version']!r}, this backend is written for {RUNTIME_VERSION!r}"
+    try:
+        expected = _declarations_fingerprint()
+    except Exception as err:  # noqa: BLE001 — declarations that cannot be read cannot be matched
+        return f"the backend's declarations could not be read ({err})"
+    if said["declarations"] != expected:
+        return "it was built from other CLI declarations than the backend's cli_declarations.json"
+    return None
+
+
 def _observed(client: "_Client") -> dict[str, dict]:
-    global _known
+    global _known, _client, _runtime_said, _unusable
     if client.observed is None:
         answer = client.call("observes", CALL_TIMEOUT_S)
         result = answer.get("result") if answer.get("ok") else None
-        client.observed = result if isinstance(result, dict) else {}
-        _known = client.observed
+        result = result if isinstance(result, dict) else {}
+        said = result.get(RUNTIME_KEY)
+        why = _why_unusable(said)
+        with _state:
+            _runtime_said = said if isinstance(said, dict) else None
+            first = _unusable is None  # callers that shared this handshake say it once
+            if why is not None:
+                _unusable = why
+                if _client is client:
+                    _client = None
+        if why is not None:
+            # As if there were no binary: nothing it answers is used, and it is
+            # not started again until the switch is applied.
+            client.observed = {}
+            _known = {}
+            _reap(client)
+            if first:
+                log.warning("navide-cli-runtime is not used: %s; every reader stays on Python", why)
+        else:
+            client.observed = {key: value for key, value in result.items() if key != RUNTIME_KEY}
+            _known = client.observed
     return client.observed
 
 
@@ -529,6 +661,9 @@ def _call(vendor: str, op: str, **fields: Any) -> "tuple[Any, dict] | None":
         if declared is None:
             return None
         answer = client.call(op, CALL_TIMEOUT_S, vendor=vendor, **fields)
+    except PythonReads:
+        _count(vendor, "python")  # nothing was sent: not a fault, and the process is fine
+        return None
     except Exception as err:  # noqa: BLE001 — the Python reader takes over
         _process_failed(client, err)
         _count(vendor, "fallback")
@@ -541,6 +676,8 @@ def _call(vendor: str, op: str, **fields: Any) -> "tuple[Any, dict] | None":
         _count(vendor, "unsupported")
     elif kind == "io":
         _count(vendor, "unreadable")
+    elif kind == "python":
+        _count(vendor, "python")
     else:
         _count(vendor, "fallback")
         # A read that fails this way fails on every poll: said once per CLI
@@ -622,32 +759,56 @@ def _ask(reader: Any, op: str, path: Path, **fields: Any) -> "tuple[Any, dict] |
 
 # ---- the three routed reader calls ------------------------------------------
 
+#: What a missing or mistyped field in the runtime's answer raises when it is
+#: turned into the reader's objects.
+_UNREADABLE_ANSWER = (KeyError, TypeError, ValueError, AttributeError, IndexError)
+
+
+def _bad_answer(reader: Any, op: str, err: BaseException, original: Callable[..., Any], *args: Any) -> Any:
+    """The runtime answered, but not in a shape this code reads: a fault, and
+    the Python reader reads the call from the state the caller holds (nothing
+    of the answer was applied), so the watcher never sees the error."""
+    vendor = str(reader.vendor)
+    with _state:
+        counts = _counts.setdefault(vendor, dict.fromkeys(OUTCOMES, 0))
+        counts["rust"] = max(0, counts["rust"] - 1)  # it was counted as answered
+        counts["fallback"] += 1
+        said = (vendor, "answer") in _errors_logged
+        _errors_logged.add((vendor, "answer"))
+    if not said:
+        log.warning("navide-cli-runtime answered %s for %s in a shape this backend cannot read (%s: %s); "
+                    "further such answers are counted, not logged", op, vendor, type(err).__name__, err)
+    return original(*args)
+
 
 def _usage(reader: Any, original: Callable[..., IncrementalParseResult], path: Path, checkpoint: dict) -> IncrementalParseResult:
     answer = _ask(reader, "usage", path, checkpoint=checkpoint or {})
     if answer is None:
         return original(path, checkpoint)
     result, declared = answer
-    events = [
-        TokenUsage(
-            vendor=e["vendor"],
-            input_tokens=e["input_tokens"],
-            output_tokens=e["output_tokens"],
-            cwd=_cwd(declared, e["cwd"]),
-            session_id=e["session_id"],
-            file_path=e["file_path"],
-            dedup_key=e["dedup_key"],
-            timestamp=e["timestamp"],
-            model=e["model"],
-            checkpoint=e["checkpoint"],
-            raw=e["raw"],
-            cache_read_tokens=e["cache_read_tokens"],
-            cache_creation_tokens=e["cache_creation_tokens"],
-            cli_version=e["cli_version"],
-        )
-        for e in result["events"]
-    ]
-    return IncrementalParseResult(events, result["checkpoint"])
+    try:
+        events = [
+            TokenUsage(
+                vendor=e["vendor"],
+                input_tokens=e["input_tokens"],
+                output_tokens=e["output_tokens"],
+                cwd=_cwd(declared, e["cwd"]),
+                session_id=e["session_id"],
+                file_path=e["file_path"],
+                dedup_key=e["dedup_key"],
+                timestamp=e["timestamp"],
+                model=e["model"],
+                checkpoint=e["checkpoint"],
+                raw=e["raw"],
+                cache_read_tokens=e["cache_read_tokens"],
+                cache_creation_tokens=e["cache_creation_tokens"],
+                cli_version=e["cli_version"],
+            )
+            for e in result["events"]
+        ]
+        return IncrementalParseResult(events, result["checkpoint"])
+    except _UNREADABLE_ANSWER as err:
+        return _bad_answer(reader, "usage", err, original, path, checkpoint)
 
 
 def _prompt(text: str, full: str) -> str:
@@ -663,25 +824,33 @@ def _activity(reader: Any, original: Callable[..., list[ActivityEvent]], path: P
     if answer is None:
         return original(path, seen_keys)
     result, declared = answer
+    try:
+        # Everything is converted before the caller's bag is touched, so an
+        # answer that cannot be read leaves the Python reader its own state.
+        bag = list(result["bag"])
+        error = result.get("error")
+        events = [] if error else [
+            ActivityEvent(
+                vendor=e["vendor"],
+                event_type=e["event_type"],
+                cwd=_cwd(declared, e["cwd"]),
+                session_id=e["session_id"],
+                file_path=e["file_path"],
+                dedup_key=e["dedup_key"],
+                timestamp=e["timestamp"],
+                detail=e["detail"],
+                text=_prompt(e["text"], e.get("full", "")),
+            )
+            for e in result["events"]
+        ]
+    except _UNREADABLE_ANSWER as err:
+        return _bad_answer(reader, "activity", err, original, path, seen_keys)
     seen_keys.clear()
-    seen_keys.update(result["bag"])
-    if result.get("error"):
+    seen_keys.update(bag)
+    if error:
         # main's walk raises here too, after its state is saved.
-        raise UnicodeDecodeError("utf-8", b"", 0, 1, str(result["error"]))
-    return [
-        ActivityEvent(
-            vendor=e["vendor"],
-            event_type=e["event_type"],
-            cwd=_cwd(declared, e["cwd"]),
-            session_id=e["session_id"],
-            file_path=e["file_path"],
-            dedup_key=e["dedup_key"],
-            timestamp=e["timestamp"],
-            detail=e["detail"],
-            text=_prompt(e["text"], e.get("full", "")),
-        )
-        for e in result["events"]
-    ]
+        raise UnicodeDecodeError("utf-8", b"", 0, 1, str(error))
+    return events
 
 
 def _turns(reader: Any, original: Callable[..., list[TurnUsage]], path: Path, session_id: str = "") -> list[TurnUsage]:
@@ -689,26 +858,29 @@ def _turns(reader: Any, original: Callable[..., list[TurnUsage]], path: Path, se
     if answer is None:
         return original(path, session_id)
     result = answer[0]
-    if result.get("error"):
+    try:
+        error = result.get("error")
+        out: list[TurnUsage] = []
+        for t in [] if error else result["turns"]:
+            out.append(TurnUsage(
+                turn_index=t["turn_index"],
+                session_id=t["session_id"],
+                started_at=t["started_at"],
+                ended_at=t["ended_at"],
+                prompt_excerpt=t["prompt_excerpt"],
+                input=t["input"],
+                cache_read=t["cache_read"],
+                cache_creation=t["cache_creation"],
+                output=t["output"],
+                calls=[TurnCall(**c) for c in t["calls"]],
+                model_calls=t["model_calls"],
+                cli_version=t["cli_version"],
+            ))
+    except _UNREADABLE_ANSWER as err:
+        return _bad_answer(reader, "turns", err, original, path, session_id)
+    if error:
         # main's strict text-mode pass raises on a transcript that is not UTF-8.
-        raise UnicodeDecodeError("utf-8", b"", 0, 1, str(result["error"]))
-    out: list[TurnUsage] = []
-    for t in result["turns"]:
-        turn = TurnUsage(
-            turn_index=t["turn_index"],
-            session_id=t["session_id"],
-            started_at=t["started_at"],
-            ended_at=t["ended_at"],
-            prompt_excerpt=t["prompt_excerpt"],
-            input=t["input"],
-            cache_read=t["cache_read"],
-            cache_creation=t["cache_creation"],
-            output=t["output"],
-            calls=[TurnCall(**c) for c in t["calls"]],
-            model_calls=t["model_calls"],
-            cli_version=t["cli_version"],
-        )
-        out.append(turn)
+        raise UnicodeDecodeError("utf-8", b"", 0, 1, str(error))
     return out
 
 

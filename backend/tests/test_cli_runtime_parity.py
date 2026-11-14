@@ -191,6 +191,66 @@ def _scenarios() -> dict[str, dict]:
         b'{"type":"assistant","timestamp":"2026-09-18T00:00:02Z","message":{"content":"\xff\xfe"}}\n'
         + _lines([claude_t._assistant_line("m2", "r2", "2026-09-18T00:00:03Z", inp=7, cr=0, cc=0, out=1,
                                            stop="end_turn")]).encode()).decode("ascii")
+    def probe_line(record: dict, value: str) -> str:
+        """One transcript line whose JSON text main's ``json.loads`` accepts and the
+        runtime's parser does not: ``value`` is raw JSON text, put in a field no
+        reader looks at, so the line is a complete record with its tokens and events."""
+        return json.dumps(record, ensure_ascii=False)[:-1] + ', "navide_probe": ' + value + "}\n"
+
+    #: What the runtime's parser rejects and Python accepts: a lone UTF-16
+    #: surrogate escape (Node writes one when it cuts a string inside a pair),
+    #: the non-finite literals, and nesting past 128 levels.
+    python_only = {
+        "surrogate": '"cut \\ud83d"',
+        "nan": "[NaN, Infinity, -Infinity]",
+        "deep": "[" * 200 + "]" * 200,
+    }
+    claude_probe = [
+        # With its cwd: the header slot is found on line 1, so a later line is not part of that read.
+        dict(claude_t._prompt_line("p1", "before the probe line", "2026-09-19T00:00:00Z"), cwd="/tmp/demo"),
+        claude_t._assistant_line("m1", "r1", "2026-09-19T00:00:01Z", inp=4, cr=0, cc=0, out=2, stop="end_turn"),
+    ]
+    claude_probe_line = claude_t._assistant_line("m2", "r2", "2026-09-19T00:00:03Z", inp=10, cr=5, cc=0, out=5,
+                                                 stop="end_turn")
+    claude_probe_after = [
+        claude_t._prompt_line("p2", "after the probe line", "2026-09-19T00:01:00Z"),
+        claude_t._assistant_line("m3", "r3", "2026-09-19T00:01:04Z", inp=7, cr=1, cc=0, out=1, stop="end_turn"),
+    ]
+    # The line is a record Python reads, in the middle of a transcript that
+    # goes on after it: with the switch on the call that meets it is Python's,
+    # the next one is the runtime's again, and the results are Python's.
+    claude_python_only = {
+        f"claude_probe_{kind}": {
+            "vendor": "claude", "env": {"CLAUDE_CONFIG_DIR": "claude"},
+            "file": f"claude/projects/-tmp-demo/probe-{kind}.jsonl",
+            "python_reads": ["usage@1", "activity@1", "turns"],
+            "steps": [_step("write", claude_probe, 0, 1),
+                      _step("append", [], 1, 2, tail=probe_line(claude_probe_line, value)),
+                      _step("append", claude_probe_after, 2, 3)],
+        }
+        for kind, value in python_only.items()
+    }
+    # A line that is not JSON to anyone: Python rejects it too and so skips it,
+    # and so does the runtime, which hands nothing over (the control for the
+    # cases above: it must not cost a Python read).
+    claude_python_only["claude_probe_corrupt"] = {
+        "vendor": "claude", "env": {"CLAUDE_CONFIG_DIR": "claude"},
+        "file": "claude/projects/-tmp-demo/probe-corrupt.jsonl",
+        "steps": [_step("write", claude_probe, 0, 1),
+                  _step("append", [], 1, 2, tail="{not json}\n" + _lines([claude_probe_line])),
+                  _step("append", claude_probe_after, 2, 3)],
+    }
+    # The same for a rollout (a byte-offset cursor for activity as well).
+    codex_python_only = {
+        "codex_probe_surrogate": {
+            "vendor": "codex", "env": {},
+            "file": f"home/.codex/sessions/2026/10/22/rollout-2026-10-22T10-00-00-{codex_t._THREAD}.jsonl",
+            "python_reads": ["usage@1", "activity@1", "turns"],
+            "steps": [_step("write", codex[:5], 0, 1),
+                      _step("append", [], 1, 2, tail=probe_line(codex[5], python_only["surrogate"])),
+                      _step("append", codex[6:12], 2, 3)],
+        },
+    }
     droid_dir = "droid/sessions/-tmp-demo"
     droid_sid = "d0c1e2f3-0000-4000-8000-000000000001"
     droid_settings = f"{droid_dir}/{droid_sid}.settings.json"
@@ -345,6 +405,17 @@ def _scenarios() -> dict[str, dict]:
         _db_step([oc_message("m8", "ses_a", oc_assistant({"input": 60, "output": 6}, completed=None)),
                   oc_message("m9", "ses_a", oc_assistant({"input": 5, "output": 5}))], 6, 7),
         _db_step([oc_update("m8", oc_assistant({"input": 60, "output": 6}))], 7, 8),
+    ]
+
+    # A message and a part whose JSON text only Python reads (SQLite hands the
+    # same text to both readers); the poll after them is the runtime's again.
+    probe = '"cut \\ud83d"'
+    opencode_probe_steps = opencode_steps[:2] + [
+        _db_step([oc_message("mP", "ses_a", json.dumps(oc_assistant({"input": 9, "output": 2}))[:-1]
+                             + ", \"navide_probe\": " + probe + "}"),
+                  oc_part("pP", "mP", "ses_a", '{"type": "step-finish", "reason": "stop", "navide_probe": ' + probe + "}")],
+                 2, 3),
+        _db_step([oc_message("mQ", "ses_a", oc_assistant({"input": 4, "output": 1}))], 3, 4),
     ]
 
     oc2_now = opc2_t._NOW_MS
@@ -560,6 +631,14 @@ def _scenarios() -> dict[str, dict]:
                            message={"role": "user", "parts": [{"text": text}]})
 
     return {
+        **claude_python_only,
+        **codex_python_only,
+        "opencode_probe_surrogate": {
+            "vendor": "opencode", "env": {"XDG_DATA_HOME": "share"},
+            "file": "share/opencode/opencode.db",
+            "python_reads": ["usage@2", "activity@2", "turns"],
+            "steps": opencode_probe_steps,
+        },
         "qwen_0_25": {
             "vendor": "qwen", "env": {"QWEN_RUNTIME_DIR": "qwen"},
             "file": f"qwen/projects/{encode_claude_cwd(qwen_t._CWD)}/chats/{qwen_t._SID}.jsonl",
@@ -809,8 +888,12 @@ def _turn_dict(turn: Any) -> dict:
     return data
 
 
-def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Read the scenario the watcher's way; return every result, normalised."""
+def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch: pytest.MonkeyPatch,
+         before_read: Callable[[int], None] | None = None) -> dict:
+    """Read the scenario the watcher's way; return every result, normalised.
+
+    `before_read(n)` runs before the n-th read (the usage and activity calls of
+    step n; `n == len(steps)` is the final turns call)."""
     home = root / "home"
     home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
@@ -830,7 +913,7 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
     seen: set[str] = set()
     steps = []
     files: list[str] = []
-    for step in scenario["steps"]:
+    for n, step in enumerate(scenario["steps"]):
         for rel, text in (step.get("sidecars") or {}).items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text(text, encoding="utf-8")
@@ -859,6 +942,8 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
         clock[0] = step["now"]
         checkpoint = {k: v for k, v in checkpoint.items() if k not in (step.get("checkpoint_drop") or ())}
         seen.update(step.get("bag_add") or ())
+        if before_read is not None:
+            before_read(n)
         parsed = reader.parse_incremental(path, checkpoint)
         checkpoint = parsed.checkpoint
         got = {"usage": {"events": [_pick(e, USAGE_FIELDS) for e in parsed.events], "checkpoint": parsed.checkpoint}}
@@ -873,6 +958,8 @@ def _run(scenario: dict, root: Path, make_reader: Callable[[], Any], monkeypatch
             problem = opencode_vendor.read_problem(scenario["vendor"])
             got["problem"] = problem and {k: v for k, v in problem.items() if k != "since"}
         steps.append(got)
+    if before_read is not None:
+        before_read(len(scenario["steps"]))
     try:
         turns: Any = [_turn_dict(t) for t in reader.turns_for_session(path, "")]
     except UnicodeDecodeError:
@@ -907,6 +994,10 @@ def test_python_readers_match_the_parity_fixtures(name: str, tmp_path: Path, mon
         # `[normalised, as written]` pairs: the runtime hands a cwd on as
         # written and the seam normalises it (the declaration says which form).
         "as_written": scenario.get("as_written") or [],
+        # The calls (`<op>@<step>`, or `turns`) the runtime hands to the Python
+        # reader because a record is JSON only Python parses; the replay must
+        # get exactly that answer there, and take Python's state on from it.
+        "python_reads": scenario.get("python_reads") or [],
         "steps": [
             {**step, **({"db": result["files"][i]} if step["mode"] == "db" else {}), "expect": got}
             for i, (step, got) in enumerate(zip(scenario["steps"], result["steps"]))
@@ -964,11 +1055,52 @@ def test_switch_on_without_a_binary_falls_back_to_python(tmp_path: Path, monkeyp
     assert json.dumps(wrapped).replace("/rt", "/py") == json.dumps(expected)
 
 
+#: One scenario per route family: a JSONL store that is appended to (Claude), one
+#: that is rewritten under the reader (Codex), and a database that grows (OpenCode).
+FLIPPED = ["claude_turns", "codex_rewrites", "opencode_v1"]
+
+
+@pytest.mark.parametrize("name", FLIPPED)
+def test_flipping_the_switch_mid_session_changes_no_checkpoint_bag_or_event(
+        name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime_switch) -> None:
+    """The two readers share their state: a session read by Rust, then by
+    Python, then by Rust again over the same growing store gives exactly the
+    events, checkpoints and seen-keys bag of an all-Python run."""
+    cli_runtime_build.binary()
+    scenario = _scenarios()[name]
+    vendor = scenario["vendor"]
+    reads = len(scenario["steps"]) + 1  # the steps, then the turns call
+    assert reads >= 4, "enough reads to flip twice"
+    first, second = max(1, reads // 3), max(2, 2 * reads // 3)
+    on = [not first <= n < second for n in range(reads)]  # Rust, Python, Rust
+    runtime_switch.apply(False)
+    expected = _run(scenario, tmp_path / "py", _python_reader(vendor), monkeypatch)
+
+    answered: list[int] = []
+
+    def flip(n: int) -> None:
+        runtime_switch.apply(on[n])
+        answered.append(cli_runtime.status()["calls"].get(vendor, {}).get("rust", 0))
+
+    cli_runtime.reset_counts()
+    wrapped = _run(scenario, tmp_path / "rt", lambda: cli_runtime.wrap(cli_vendor(vendor).make_log_reader()),
+                   monkeypatch, before_read=flip)
+    assert json.loads(_compared(wrapped).replace("/rt", "/py")) == json.loads(_compared(expected))
+    final = cli_runtime.status()["calls"][vendor]
+    # Each phase was read by who it should be: Rust answered before and after
+    # the Python phase, and nothing during it.
+    assert answered[first] > answered[0], "Rust read the start of the session"
+    assert answered[second] == answered[first], "Python read the middle of the session"
+    assert final["rust"] > answered[second], "Rust read the end of it"
+    assert final["fallback"] == final["unreadable"] == 0
+
+
 @pytest.mark.parametrize("name", sorted(_scenarios()))
 def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime_switch) -> None:
     cli_runtime_build.binary()
     scenario = _scenarios()[name]
     runtime_switch.apply(True)
+    cli_runtime.reset_counts()
     expected = _run(scenario, tmp_path / "py", _python_reader(scenario["vendor"]), monkeypatch)
     calls: list[str] = []
     real_call = cli_runtime._call
@@ -982,7 +1114,21 @@ def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(cli_runtime, "_call", counting)
     wrapped = _run(scenario, tmp_path / "rt",
                    lambda: cli_runtime.wrap(cli_vendor(scenario["vendor"]).make_log_reader()), monkeypatch)
-    # The Rust process answered every routed call (no silent fallback).
-    assert set(calls) == {"usage", "activity", "turns"}
-    assert len(calls) == 2 * len(scenario["steps"]) + 1
     assert json.loads(_compared(wrapped).replace("/rt", "/py")) == json.loads(_compared(expected))
+    # The Rust process answered every routed call but the ones the scenario
+    # names (a record only Python parses): those were Python's, and no call
+    # fell back for a fault.
+    handed_over = scenario.get("python_reads") or []
+    steps = len(scenario["steps"])
+    # OpenCode's own `turns_for_session` calls `parse_activity` on the wrapped
+    # reader: when the turns call is Python's, that nested activity call is
+    # the runtime's, once.
+    nested = ["activity"] if "turns" in handed_over and scenario["vendor"] == "opencode" else []
+    assert sorted(calls) == sorted(
+        ["usage"] * (steps - sum(r.startswith("usage@") for r in handed_over))
+        + ["activity"] * (steps - sum(r.startswith("activity@") for r in handed_over))
+        + ["turns"] * ("turns" not in handed_over)
+        + nested)
+    counts = cli_runtime.status()["calls"][scenario["vendor"]]
+    assert counts["python"] == len(handed_over)
+    assert counts["fallback"] == counts["unreadable"] == counts["unsupported"] == 0
