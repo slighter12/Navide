@@ -2,6 +2,11 @@
 name = "navide-cli-runtime"
 version = "0.1.0"
 edition = "2021"
+# The oldest toolchain that builds the crate with the pinned dependencies in
+# Cargo.lock: 1.85 builds and tests it, 1.80 cannot even read the lock's
+# `hashbrown 0.17.1` (it needs the `edition2024` Cargo feature, stable from
+# 1.85). Raise it when a dependency pin asks for more.
+rust-version = "1.85"
 publish = false
 build = "build.rs"
 

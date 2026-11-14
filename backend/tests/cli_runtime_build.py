@@ -51,8 +51,19 @@ def cargo(*args: str, timeout: float = 1500.0) -> "subprocess.CompletedProcess[s
     done = subprocess.run([exe, args[0], "--locked", "--manifest-path", str(CRATE / "Cargo.toml"), *args[1:]],
                           capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=_toolchain_env())
     if done.returncode != 0:
-        pytest.fail(f"cargo {args[0]} failed for navide-cli-runtime:\n{done.stderr[-4000:]}")
+        pytest.fail(
+            f"cargo {args[0]} failed for navide-cli-runtime (it needs Rust {_rust_version()} or newer, "
+            f"Cargo.toml's rust-version; {REQUIRED_ENV}=0 skips the tests that need the runtime):\n"
+            f"{done.stderr[-4000:]}"
+        )
     return done
+
+
+def _rust_version() -> str:
+    for line in (CRATE / "Cargo.toml").read_text(encoding="utf-8").splitlines():
+        if line.startswith("rust-version"):
+            return line.split("=", 1)[1].strip().strip('"')
+    return "(no rust-version declared)"
 
 
 def _toolchain_env() -> dict[str, str]:
@@ -65,15 +76,19 @@ def _toolchain_env() -> dict[str, str]:
     empty directory. Cargo would fetch every crate again into
     ``$HOME/.cargo`` too. Both homes are
     named from the account's own home, which the password database still
-    knows, unless the environment already names them.
+    knows, unless the environment already names them. ``.rustup`` is named
+    only where it exists (no rustup, no toolchain home); ``.cargo`` always,
+    since that is where any cargo keeps its crates by default, so a cargo that
+    is not rustup's, on an account that has no ``.cargo`` yet, still fills the
+    account's cache and not the suite's throwaway home on every run.
     """
     import pwd  # Unix only, as this helper is past the Windows skip
 
     env = dict(os.environ)
     home = Path(pwd.getpwuid(os.getuid()).pw_dir)
-    for key, name in (("RUSTUP_HOME", ".rustup"), ("CARGO_HOME", ".cargo")):
-        if key not in env and (home / name).is_dir():
-            env[key] = str(home / name)
+    env.setdefault("CARGO_HOME", str(home / ".cargo"))
+    if "RUSTUP_HOME" not in env and (home / ".rustup").is_dir():
+        env["RUSTUP_HOME"] = str(home / ".rustup")
     return env
 
 
