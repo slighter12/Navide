@@ -61,6 +61,14 @@ def _seen(script: Path) -> list[str]:
     return log_file.read_text(encoding="utf-8").split() if log_file.exists() else []
 
 
+@pytest.fixture
+def routes(pytestconfig: pytest.Config) -> int:
+    """How many routes one reader call passes through: `wrap` routes the
+    instance, and under ``-p tests.cli_runtime_on`` the class is routed as
+    well. A call the runtime declines is counted once by each."""
+    return 2 if pytestconfig.pluginmanager.has_plugin("tests.cli_runtime_on") else 1
+
+
 def _wait_for(done: Callable[[], bool], seconds: float = 10.0) -> None:
     deadline = time.monotonic() + seconds
     while not done():
@@ -86,7 +94,8 @@ def _qwen(tmp_path: Path) -> tuple[Any, Path]:
     return cli_runtime.wrap(cli_vendor("qwen").make_log_reader()), chat
 
 
-def test_a_stalled_process_times_out_and_python_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
+def test_a_stalled_process_times_out_and_python_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam,
+                                                        routes: int) -> None:
     exe = _stand_in(tmp_path, STALLS)
     monkeypatch.setenv(cli_runtime.BINARY_ENV, str(exe))
     monkeypatch.setattr(cli_runtime, "CALL_TIMEOUT_S", 0.4)
@@ -104,7 +113,10 @@ def test_a_stalled_process_times_out_and_python_answers(tmp_path: Path, monkeypa
     assert _seen(exe) == ["observes", "usage"]
     counts = seam.status()["calls"]["qwen"]
     assert counts["rust"] == 0
-    assert counts["fallback"] >= 2 * len(scenario["steps"]) + 1
+    # Every routed call is one fallback: usage and activity for each step, the
+    # turns call, and the `parse_activity` that Python's own turns read makes
+    # through the reader (a routed method too), once per route.
+    assert counts["fallback"] == (2 * len(scenario["steps"]) + 1 + 1) * routes
     assert seam.status()["state"] == "waiting-to-restart"
 
 
@@ -183,7 +195,7 @@ for line in sys.stdin:
 
 
 def test_one_dead_process_is_one_failure_however_many_callers_waited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                                     seam) -> None:
+                                                                     seam, routes: int) -> None:
     callers = cli_runtime.BREAKER_FAILURES + 3
     exe = _stand_in(tmp_path, DIES_WITH_CALLERS_WAITING)
     Path(str(exe) + ".count").write_text(str(callers), encoding="utf-8")
@@ -214,9 +226,57 @@ def test_one_dead_process_is_one_failure_however_many_callers_waited(tmp_path: P
     status = seam.status()
     assert status["failures"] == 1, "the process died once"
     assert status["state"] == "waiting-to-restart", "one death does not trip the breaker"
-    # (At least: `-p tests.cli_runtime_on` routes the class as well as the
-    # instance, and counts each call on both.)
-    assert status["calls"]["qwen"]["fallback"] >= callers
+    assert status["calls"]["qwen"]["fallback"] == callers * routes
+
+
+def test_one_failed_start_is_one_attempt_and_one_failure_however_many_callers_wanted_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
+    callers = cli_runtime.BREAKER_FAILURES + 3
+    present = tmp_path / "navide-cli-runtime"
+    present.write_text("", encoding="utf-8")
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(present))
+    monkeypatch.setattr(cli_runtime, "BACKOFF_BASE_S", 1000.0)
+    attempts: list[int] = []
+    meet = threading.Barrier(callers)
+
+    def popen_fails(_exe: Path) -> Any:
+        attempts.append(1)
+        try:
+            meet.wait(1.0)  # every caller that tries to start is here together, if any but one does
+        except threading.BrokenBarrierError:
+            pass
+        raise OSError("EAGAIN: the process limit")
+
+    monkeypatch.setattr(cli_runtime, "_Client", popen_fails)
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+
+    start = threading.Barrier(callers)
+    results: list[Any] = []
+
+    def call() -> None:
+        start.wait(10.0)
+        results.append(reader.parse_incremental(chat, {}))
+
+    threads = [threading.Thread(target=call, daemon=True) for _ in range(callers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(15.0)
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(results) == callers and all(result.events == [] for result in results), "Python answered every caller"
+
+    assert len(attempts) == 1, "one caller started the process; the rest used Python for that call"
+    status = seam.status()
+    assert status["failures"] == 1, "the start failed once"
+    assert status["state"] == "waiting-to-restart", "one failed start does not trip the breaker"
+
+
+def test_wrapping_a_reader_twice_routes_it_once(seam) -> None:
+    reader = cli_runtime.wrap(cli_vendor("qwen").make_log_reader())
+    routed = {name: getattr(reader, name) for name, _ in cli_runtime.ROUTES}
+    assert cli_runtime.wrap(reader) is reader
+    assert {name: getattr(reader, name) for name in routed} == routed, "the second wrap replaced nothing"
 
 
 def test_a_call_that_arrives_as_the_process_dies_does_not_wait_out_its_timeout(tmp_path: Path) -> None:
@@ -250,7 +310,7 @@ for line in sys.stdin:
 
 
 def test_an_error_answered_on_every_poll_is_logged_once_and_counted_every_time(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture, routes: int) -> None:
     monkeypatch.setenv(cli_runtime.BINARY_ENV, str(_stand_in(tmp_path, ANSWERS_PANIC)))
     reader, chat = _qwen(tmp_path)
     seam.apply(True)
@@ -258,7 +318,7 @@ def test_an_error_answered_on_every_poll_is_logged_once_and_counted_every_time(
         for _ in range(5):
             assert reader.parse_incremental(chat, {}).events == []
     assert len([r for r in caplog.records if "could not answer" in r.getMessage()]) == 1
-    assert seam.status()["calls"]["qwen"]["fallback"] >= 5  # every poll (twice each under cli_runtime_on)
+    assert seam.status()["calls"]["qwen"]["fallback"] == 5 * routes  # every poll, once per route
     assert seam.status()["state"] == "running", "an error answer is not a dead process"
 
 

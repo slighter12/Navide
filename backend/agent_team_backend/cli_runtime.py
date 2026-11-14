@@ -110,6 +110,9 @@ _retry_at = 0.0
 _breaker_open = False
 #: Set by `shutdown()`: no call starts the process again until the switch is applied.
 _stopping = False
+#: A caller is starting the process: the others use Python meanwhile, so one
+#: failed start is one failure however many callers were waiting to start it.
+_starting = False
 _no_binary_logged = False
 #: (CLI, kind) of the error answers already logged.
 _errors_logged: set[tuple[str, str]] = set()
@@ -386,7 +389,7 @@ def _process_failed(client: "_Client | None", err: BaseException) -> None:
 
 def _client_for_call() -> "_Client | None":
     """The running process, started if it may be; None means "use Python"."""
-    global _client, _generation
+    global _client, _generation, _starting
     with _state:
         if not _enabled or _breaker_open or _stopping:
             return None
@@ -394,31 +397,38 @@ def _client_for_call() -> "_Client | None":
         if current is not None and not current.dead:
             return current
         waiting = time.monotonic() < _retry_at
+        # One caller starts the process; the others use Python for this call.
+        starts = current is None and not waiting and not _starting
+        if starts:
+            _starting = True
     if current is not None:
         # It exited on its own between calls.
         _process_failed(current, OSError("navide-cli-runtime exited"))
         return None
-    if waiting:
-        return None
-    exe = binary()
-    if exe is None:
-        _log_no_binary()
+    if not starts:
         return None
     try:
-        fresh = _Client(exe)
-    except OSError as err:
-        _process_failed(None, err)
+        exe = binary()
+        if exe is None:
+            _log_no_binary()
+            return None
+        try:
+            fresh = _Client(exe)
+        except OSError as err:
+            _process_failed(None, err)
+            return None
+        with _state:
+            if _enabled and not _stopping:
+                _generation += 1
+                fresh.generation = _generation
+                _client = fresh
+                return fresh
+        # Switched off or stopped while it started.
+        _reap(fresh)
         return None
-    with _state:
-        if _enabled and not _stopping and _client is None:
-            _generation += 1
-            fresh.generation = _generation
-            _client = fresh
-            return fresh
-        # Switched off, stopped, or another thread started one, meanwhile.
-        winner = _client if _enabled and not _stopping else None
-    _reap(fresh)
-    return winner
+    finally:
+        with _state:
+            _starting = False
 
 
 def _observed(client: "_Client") -> dict[str, dict]:
@@ -629,6 +639,9 @@ def _turns(reader: Any, original: Callable[..., list[TurnUsage]], path: Path, se
     return out
 
 
+#: Set on a reader that `wrap` has routed.
+_ROUTED = "_cli_runtime_routed"
+
 ROUTES = (("parse_incremental", _usage), ("parse_activity", _activity), ("turns_for_session", _turns))
 
 
@@ -637,8 +650,10 @@ def wrap(reader: Any) -> Any:
 
     The bound methods are replaced on the instance, so the reader keeps its
     class, its attributes and every other method; each call checks the switch.
+    A reader is routed once: wrapping it again returns it as it is (a second
+    route would ask the runtime twice for every call it declines).
     """
-    if not str(getattr(reader, "vendor", "") or ""):
+    if not str(getattr(reader, "vendor", "") or "") or getattr(reader, _ROUTED, False):
         return reader
     for name, route in ROUTES:
         original = getattr(reader, name)
@@ -649,4 +664,5 @@ def wrap(reader: Any) -> Any:
             return _route(reader, _original, *args, **kwargs)
 
         setattr(reader, name, routed)
+    setattr(reader, _ROUTED, True)
     return reader
