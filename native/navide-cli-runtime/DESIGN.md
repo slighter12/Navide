@@ -32,6 +32,9 @@ The same holds outside the crate. The application keeps no list of CLIs:
   CLI with no `agents/<key>.ts` gets its spec from the declaration alone. The
   `AgentKey` type is the declared keys.
 
+The packaged backend lists nothing either: its PyInstaller spec collects the
+`cli_vendors` package (`collect_submodules`), and a test runs that collection.
+
 So a new CLI needs exactly:
 
 1. `src/vendors/<key>.rs`: the declaration.
@@ -39,8 +42,11 @@ So a new CLI needs exactly:
    `NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in` and committed.
 
 With those it is in the menus, launches, and resumes if it declares how. No
-shared file is edited. Two more files exist only where the application does
-more for the CLI than launch it, and each is found by its name:
+shared file is edited, and no test list: the recording tests
+(`cli_declarations_main.json`, `MAIN_REGISTRY_ORDER`, `MAIN_ORDER`, `MAIN`)
+hold main's CLIs to main's values and compare only the keys they recorded.
+Two more files exist only where the application does more for the CLI than
+launch it, and each is found by its name:
 
 3. `backend/agent_team_backend/cli_vendors/<key>.py`: credentials, usage,
    install detection, hooks, and the Python log reader (which still reads the
@@ -48,10 +54,19 @@ more for the CLI than launch it, and each is found by its name:
 4. `src/renderer/src/platform/plugin-shell/agents/<key>.ts`: capability
    flags, prompt patterns, quota semantics.
 
-What is still listed by hand, and is not registration: the packaged backend's
-`hiddenimports` (PyInstaller cannot see an import by name; a test holds the
-list to the modules on disk), and the test lists and documents that name
-every CLI (`docs/adding-a-cli-vendor.md`, "Other hand-kept lists").
+A CLI with files 1 and 2 only is registered on both sides from its
+declaration alone, and a backend and a frontend test declare a fake CLI of
+that kind to show it. The repository's other gates still name every CLI. They
+were found by declaring a throwaway CLI of that kind (never committed) and
+running both suites, and they are what is left of "one declaration plus its
+tests": the regression inventory (`tests/fixtures/cli-regression/catalog.json`
+with its fixture, and a row in `tests/cli/vendorContracts.test.ts`: tests, as
+they should be), and the older lists of `docs/adding-a-cli-vendor.md`
+("Other hand-kept lists"): eight backend tests (launch argv inventory, the
+README sentence, the Help panel table, `helpCliFacts.ts`, native memory,
+verified version, risk declarations, the extensions declaration) and three
+frontend lists (the plans plugin's retained specs, `TURN_START_SIGNAL`, the ＋
+menu's cap).
 
 ## A vendor is a type (`decl::Vendor`)
 
@@ -264,13 +279,9 @@ frames) with the runtime pushing events instead of answering polls. Requests
 then batch, a watcher pass over N files is one frame each way, and PTY output
 and WS fan-out have the stream they need. `wire.rs` and the seam are replaced
 by it; the vendor, backend and declaration layers carry over unchanged. Not
-done in this round: the transport stays stdio JSON lines.
-
-One thing to settle before PTY ownership shares a process with the SQLite
-reads: on macOS, in this crate's unit tests, a child forked while another
-thread held a SQLite connection (the system library) was killed with signal 9
-before it wrote anything, about one run in five; it did not happen once the
-two were kept apart (`session::FD_FORK_LOCK`). The cause is not established.
+done in this round: the transport stays stdio JSON lines. The process model
+and the four open points of the channel are in the next section; none of it
+is built.
 
 The two sides keep one state format, so the switch can flip mid-session:
 usage checkpoints are main's JSON, and the activity state is the watcher's
@@ -278,6 +289,85 @@ seen-keys bag in the key formats main's readers use (`observe/bag.rs`). A
 cwd is handed on as the transcript wrote it; where main normalises it (claude:
 NFC) the declaration says so (`cwd_form`) and the seam applies it, so the
 crate needs no Unicode tables.
+
+### The next stage: process model and channel (planned, not built)
+
+#### Two processes from one crate
+
+Today one process does the reads, and the seam's whole recovery is "kill it":
+a call that waits longer than `CALL_TIMEOUT_S` kills the process
+(`cli_runtime.py::_process_failed`), every call in flight falls back, and
+every observer loses the point its walk had reached. That is right for reads,
+whose memory is an optimisation. It cannot be the process that owns the
+panes: killing it would close every PTY master and send every agent SIGHUP.
+So the stage splits the runtime into two processes built from the same crate:
+
+- **The PTY host** owns the panes (`session.rs`: spawn, I/O, resize,
+  signal). It **never opens SQLite** and **the seam never kills it**. It ends
+  when the backend shuts it down, and nothing about a stalled read can reach
+  it.
+- **The observe worker** is today's `serve`: the readers and the observers'
+  resume memory. It **may be killed and restarted**. The recovery in the
+  section above (timeout, kill, growing delay, the breaker after five
+  failures, the generation count) applies to the observe worker only.
+
+The split also makes the one open question about `session.rs` moot instead of
+answered. On macOS, in this crate's unit tests, a child forked while another
+thread held a SQLite connection (the system library) was killed with signal 9
+before it wrote anything, about one run in five; it did not happen once the
+two were kept apart (`session::FD_FORK_LOCK`). The cause is not established.
+With the host never opening a database, nothing there forks beside one, and
+the lock stays only as the precaution it is in the tests.
+
+A smaller change goes with the next wire: today one file that stalls (a
+transcript on a stalled network volume) costs the whole worker. A **per-file
+circuit** (stop routing a file that timed out, for a while, and let every
+other file keep its reads) would limit that to the file, and the worker
+would be killed only when it is itself unresponsive. It needs no new process;
+it needs the request to name its file in the channel, which the channel below
+does.
+
+#### The framed duplex channel: four points the plan must settle
+
+1. **Where the WebSocket ends.** If PTY bytes went runtime, local socket,
+   Python, WebSocket, the Python event loop would stay on the hot path, and
+   the lag with hundreds of agents would stay with it. That hop is
+   **temporary**, a step that lets the host be built and tested behind the
+   backend's existing WebSocket. The end state is that **the runtime serves
+   the terminal stream itself**: the host owns the socket the renderer
+   connects to, and Python keeps the control plane (spawn requests,
+   attribution, settings), not the bytes.
+2. **Who owns checkpoints and the seen-keys bag once the runtime pushes.**
+   Today both sides share one state format so the switch can flip
+   mid-session (usage checkpoints are main's JSON, the activity state is the
+   watcher's bag). A runtime that pushes events must own that state: a bag
+   kept in two places cannot say what was already emitted. The plan: the
+   worker owns both while the switch is on; the format stays main's, and
+   turning the switch off or on is a **handover** (the owner writes its state
+   out in that format at a checkpoint boundary, the other reads it), not a
+   shared object. What gives way is "flip at any instant"; what stays is "flip
+   without losing or repeating an event".
+3. **The frame format.** PTY output is bytes, so a frame is a header, then a
+   raw payload, with no JSON wrapped around it: `type` (1 byte), `stream id`
+   (4 bytes, big endian), `length` (4 bytes, big endian), then `length`
+   bytes. Control frames (open, resize, exit, a batch of reads, an event) have
+   a type of their own and carry JSON; `data` frames carry the bytes as they
+   came off the PTY. A reader that meets an unknown type skips `length`
+   bytes, so the format can grow.
+4. **Backpressure per stream.** One pane that floods its output must neither
+   starve the others nor grow memory without bound: each stream has a
+   bounded queue and its own window, and the writer serves the streams in
+   turn. The limit is the repo's rule that **scrollback is never cleared**: a
+   slow consumer is answered by pausing the read of that one PTY (the kernel's
+   PTY buffer then slows the child), never by discarding what was read or
+   emitting a clear. The host keeps each stream's scrollback itself, so a
+   consumer that reconnects replays from it. The backend's reader today drops
+   its oldest queued output at a cap (`test_terminals_reader_pause_bound.py`);
+   whether the host may keep that behaviour, or must pause instead, is decided
+   against that rule before the host is written.
+
+Windows is its own stage: no file identity, no ConPTY, no named-pipe
+transport, so none of this exists there yet.
 
 ### Who reports a store that cannot be read
 

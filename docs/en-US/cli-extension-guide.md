@@ -107,22 +107,49 @@ declaration says how):
    variable (plain `cargo test`), that test fails when either copy is not
    what the source prints. It needs no built binary.
 
-No shared file is edited for that: not `registry.py`, not `agents/index.ts`.
+No shared file is edited for that: not `registry.py`, not `agents/index.ts`,
+and none of the recording tests (`cli_declarations_main.json`,
+`MAIN_REGISTRY_ORDER`, `MAIN_ORDER`/`MAIN`): they hold the CLIs main had to the
+values main had, compare only those keys, and leave a later CLI out. A
+declared CLI with no vendor file on a side is registered there from its
+declaration alone, and the structural tests check only the files that exist
+(a backend test and a frontend test declare a fake CLI to show it).
+
+What the repository's tests still ask of **every** registered CLI, with or
+without vendor files, was found by declaring a throwaway CLI (launch only, no
+vendor file) and running both suites; it was not committed:
+
+3. Its regression inventory entry, `tests/fixtures/cli-regression/catalog.json`
+   with a fixture `<key>.json` beside it, and its row in
+   `tests/cli/vendorContracts.test.ts` (the inventory tests fail until both
+   name the CLI).
+4. The hand-kept lists that name every CLI. With the throwaway CLI these
+   backend tests failed: `test_cli_launch_argv.py`,
+   `test_cli_vendors_registry.py` (the README sentence, the `CliAgentsHelp.vue`
+   table, `helpCliFacts.ts`), `test_native_memory.py`,
+   `test_spawn_probe_version_drift.py`, `test_risk_declarations.py` and
+   `test_cli_extensions.py` (a CLI must declare where its extensions live,
+   which takes a vendor file); on the frontend,
+   `plugins/navide-plans/src/retained/agentSpecs.ts`, `TURN_START_SIGNAL` in
+   `submitTurnConfirm.ts` and the ＋ menu's cap in `ControlPane.vue` had to name
+   it. They are listed in [Adding a CLI vendor](../adding-a-cli-vendor.md#other-hand-kept-lists).
+   So one declaration plus its tests is true of registration and of the
+   recording tests; it is not yet true of the whole repository.
 
 For everything beyond launch and resume, add the vendor file of the side
 that needs it; each is found by its name:
 
-3. `backend/agent_team_backend/cli_vendors/<key>.py`, exporting `SPEC`
+5. `backend/agent_team_backend/cli_vendors/<key>.py`, exporting `SPEC`
    (credentials, usage, install detection, the log reader, hooks). Spread
    `**declared("<key>")` (`cli_vendors/_declared.py`): it supplies
    `supports_model`, `supports_effort`, `known_efforts`,
    `spawn_env_defaults`, `home_env_vars`, `interrupt_key`,
    `supports_session_resume` and `resume_id_from_command`; do not set these
-   by hand. The module must also be named in the `hiddenimports` of
-   `backend/agent_team_backend.spec`, because the registry imports it by name
-   and PyInstaller cannot see that (`test_pyinstaller_spec.py` fails
-   otherwise).
-4. `src/renderer/src/platform/plugin-shell/agents/<key>.ts`, exporting `SPEC`
+   by hand. The packaged backend needs no entry for it: the PyInstaller spec
+   collects every module of the package (`collect_submodules`, because the
+   registry imports it by name and the graph walk cannot see that), and
+   `test_pyinstaller_spec.py` runs that collection.
+6. `src/renderer/src/platform/plugin-shell/agents/<key>.ts`, exporting `SPEC`
    (capability flags, prompt patterns, quota semantics). Spread
    `...declared('<key>')` (`agents/_declared.ts`): it supplies `label`,
    `defaultCommand`, `skipPermissionFlag`, `modelArgs`, `effortArgs`,

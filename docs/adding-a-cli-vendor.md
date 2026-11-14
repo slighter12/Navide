@@ -2,8 +2,8 @@
 
 Navide supports one CLI agent per vendor file. Adding a vendor is a
 self-contained PR: its declaration, two new spec files (found by their names;
-nothing registers them), and the test lists and docs under
-[Other hand-kept lists](#other-hand-kept-lists).
+nothing registers them, and the packaged backend collects them), and the test
+lists and docs under [Other hand-kept lists](#other-hand-kept-lists).
 You never need to read or modify the shared orchestration code.
 
 ## Declaration
@@ -27,10 +27,10 @@ separate, optional part of the same file, described in the section after it.
    "unsupported" for your vendor — the app degrades gracefully.
 2. Do not register it: `cli_vendors/registry.py` imports the module named
    after each declared key, in the order the declarations give
-   (`order.registry`). Because that import is by name, add the module to the
-   `hiddenimports` of `backend/agent_team_backend.spec`
-   (`test_pyinstaller_spec.py` fails until you do); a module PyInstaller
-   leaves out is registered in the packaged app from its declaration alone.
+   (`order.registry`). The packaged app needs no entry either: the PyInstaller
+   spec collects every module of the `cli_vendors` package
+   (`collect_submodules`), and `test_pyinstaller_spec.py` runs that
+   collection and fails if a module on disk is not in it.
 3. If the CLI writes local conversation logs, implement the log reader in
    your vendor file and set `make_log_reader`.
 4. Add `backend/agent_team_backend/log_readers/<key>.py`. Every registered
@@ -55,9 +55,12 @@ separate, optional part of the same file, described in the section after it.
    unsupported capabilities with negative assertions instead of inventing
    uniform capabilities or skipping the vendor. See
    [CI and CLI regressions](en-US/ci-and-cli-regression.md).
-7. Add your key to the hardcoded lists in the tests: `EXPECTED_KEYS` in
-   `backend/tests/test_cli_vendors_registry.py`, and the `SNAPSHOT` in
-   `backend/tests/vendors/test_install_deps_snapshot.py`. The snapshot is
+7. Add your key to the `SNAPSHOT` in
+   `backend/tests/vendors/test_install_deps_snapshot.py`. (The recording
+   tests need no entry: `test_cli_declarations.py`,
+   `test_cli_vendors_registry.py` and `agents/__tests__/declared.test.ts`
+   compare only the CLIs main had, and hold the declared ones to each other.)
+   The snapshot is
    ordered by `DEPS`, which is `_AGENT_CLI_ORDER` first and then the remaining
    keys in **registry order** — so unless you add your key to
    `_AGENT_CLI_ORDER`, your entry goes where the key sorts among the others,
@@ -174,7 +177,25 @@ separate, optional part of the same file, described in the section after it.
 
 The steps above are not the whole set. These lists also name every vendor
 (or every vendor of a kind), and each one fails a test, not a build, when a
-new key is missing — so they are easy to find only after a red run:
+new key is missing — so they are easy to find only after a red run.
+
+A CLI that is only declared (no `cli_vendors/<key>.py`, `log_readers/<key>.py`
+or `agents/<key>.ts`) is registered, listed and launched from its declaration,
+and the structural tests check only the adapter files that exist. The
+repository's tests still ask these things of every registered CLI, and no
+adapter file satisfies them. Found by declaring a throwaway CLI of that kind
+and running both suites (it was not committed):
+
+- its regression inventory entry and fixture:
+  `tests/fixtures/cli-regression/catalog.json` and `<key>.json` beside it, and
+  its row in `tests/cli/vendorContracts.test.ts`;
+- the lists below, of which the backend ones failed for it:
+  `test_cli_launch_argv.py`, the README sentence, the `CliAgentsHelp.vue` row,
+  `src/renderer/src/lib/helpCliFacts.ts`, `native_memory.py`, a verified
+  version (`test_spawn_probe_version_drift.py`), `test_risk_declarations.py`,
+  and an `extensions` declaration (`test_cli_extensions.py`, which needs a
+  vendor file); the frontend ones are `plugins/navide-plans/src/retained/agentSpecs.ts`,
+  `TURN_START_SIGNAL` and the ＋ menu cap.
 
 - `backend/tests/test_cli_launch_argv.py` — `EXPECTED_VENDORS`.
 - `backend/tests/cli_regression/support/isolation.py` — `CLI_NAMES` (the
@@ -183,8 +204,8 @@ new key is missing — so they are easy to find only after a red run:
   verified version (`cli_verified_version` or the account-switch evidence); a
   vendor wired from docs with no install declares none and is listed as an
   exception there instead of inventing one.
-- `backend/tests/test_cli_vendors_registry.py` — besides `EXPECTED_KEYS`, the
-  `test_vendors_without_session_ids` set when `supports_session_resume=False`.
+- `src/renderer/src/lib/helpCliFacts.ts` — `MCP_WIRED` and `NO_LOG_READER`,
+  which `test_help_cli_facts_mirror_the_registry` holds to the registry.
 - `backend/tests/vendors/test_risk_declarations.py` — `DEFAULT_ROOTS` (and the
   override-variable table) only when the spec declares `data_dirs`.
 - `src/renderer/src/lib/submitTurnConfirm.ts` — `TURN_START_SIGNAL` (`true`
@@ -194,9 +215,6 @@ new key is missing — so they are easy to find only after a red run:
   (`.ws-add-scroll` `max-height`, ~24px per CLI row) and `ADD_MENU_MAX_H`
   above it; `ControlPane.addMenu.test.ts` fails when the CLI list outgrows
   the cap.
-- `backend/agent_team_backend.spec` — `hiddenimports`, for every vendor with
-  a `cli_vendors/<key>.py` (`test_pyinstaller_spec.py` holds that list to the
-  vendor modules on disk and to `_MIGRATED_READERS`).
 - The vendor count and list in `README.md`, `README.ja-JP.md` and
   `README.zh-TW.md`, the roster in `docs/en-US/cli-vendor-matrix.md`, the key
   list and an integration record in `docs/en-US/cli-extension-guide.md`.
