@@ -3,10 +3,74 @@
 Branch `refactor/cli-runtime-lifecycle-main`, based on upstream/main
 `75272dd4b`, pushed to the fork (draft PR 18). The design is in `DESIGN.md`.
 
-This is the state after fix round 2. Round 1 ended at `aec1a324b`; its two
-reviews (2-A: WITH LIMITS, 2-B: NOT READY as a base) are the first part of
-this report, finding by finding. Round 1's own table follows, and the rest
-describes what the branch holds now.
+This is the state after fix round 3. Round 2 ended at `5690f50d1` (CI run
+43553202513 was its last); round 3 answers review 3-A (N1 to N7), first in
+this report. Round 2's section follows, then round 1's own table, and the rest
+describes what the branch holds now. Round 1 ended at `aec1a324b`; its two
+reviews (2-A: WITH LIMITS, 2-B: NOT READY as a base) are in the round 2
+section, finding by finding.
+
+## Fix round 3: every review 3-A finding
+
+"Before" is what the code at `5690f50d1` did. Each fix names the test that
+shows it; where a test was run against the unfixed code, the result is given.
+
+| Finding | Status | What changed | The test that shows it |
+|---------|--------|--------------|------------------------|
+| **N1** Medium: the next stage (process model and channel) was not designed | Design only, as decided | DESIGN.md, "The next stage: process model and channel": a PTY host that is never killed and never opens SQLite, and an observe worker that may be killed and restarted; a framed duplex channel (type, stream id, length, raw payload) and the four gaps of today's one-line-per-request wire it closes; a circuit that is per file, not per process. Marked planned, not built. | None: no code changed. Not verified by running anything, and says so. |
+| **N2** Medium: adding a CLI still edited the recording tests, and tests forbade a declaration-only CLI | Fixed for the recordings; the whole-repo policy lists remain (below) | The recording tests iterate over the recorded keys only (`test_cli_declarations.py` `RECORDED`, `test_cli_vendors_registry.py`, `declared.test.ts`). Order tests compare relative order. The tests that forbade a CLI with no module or spec file are relaxed to "every recorded one is still there". `docs/adding-a-cli-vendor.md`, `docs/en-US/cli-extension-guide.md` and DESIGN.md say what a new CLI needs, from the proof below. | Backend: `test_cli_vendors_registry.py::test_a_declared_cli_with_no_module_is_registered_from_its_declaration` (a test-only declaration, registry reloaded). Frontend: `declared.test.ts` "a declared CLI with no spec file" (the declarations mocked). Plus `test_the_recording_of_main_is_of_declared_clis`, `test_the_runtime_and_the_backend_name_the_same_sessions`. |
+| **N3** Low: two callers could both start the process | Fixed | `_starting` is set under `_state` by the caller that starts it; the others return `None` (fall back) while it is set, and it is cleared in a `finally`. | `test_cli_runtime_seam.py::test_one_failed_start_is_one_attempt_and_one_failure_however_many_callers_wanted_it` (callers behind a barrier). With the flag removed the test failed (several attempts); with it, one attempt and one failure. |
+| **N4** Low: the fallback counts were "at least"; `wrap` was not idempotent | Fixed | The seam tests compare exact counts: `expected * routes`, where `routes` is 2 under `tests/cli_runtime_on.py` (it routes the class and the instance) and 1 otherwise. The stalled-seam count is `(2*steps+1+1)*routes`: Python's `turns_for_session` makes one nested routed `parse_activity`. `wrap` returns a reader it has already routed. | `test_wrapping_a_reader_twice_routes_it_once`. With the guard removed it failed (twice the calls). |
+| **N5** Low: 20 hand-written `hiddenimports` | Fixed | `backend/agent_team_backend.spec` collects `cli_vendors` with `collect_submodules`; the hand list is gone. | `test_pyinstaller_spec.py::test_every_vendor_module_is_a_hidden_import`, `test_every_vendor_module_is_a_declared_cli`, `test_every_lazy_log_reader_vendor_is_a_hidden_import`. |
+| **N6** Low: no `rust-version`, a bare build-failure message, a toolchain-home case | Fixed | `Cargo.toml` declares `rust-version = "1.85"`: found by trying, 1.85 builds and tests the crate, 1.80 cannot read the lock (`hashbrown 0.17.1` needs `edition2024`). The failure message names `rust-version` and `NAVIDE_CLI_RUNTIME_REQUIRED=0`. The build sets `CARGO_HOME` to the account's when the environment has none, and `RUSTUP_HOME` only if it exists. | `backend/tests/test_cli_runtime_build.py` (three tests: the failure message names what it needs and how to skip; the crate declares a `rust-version` and the message quotes it; `CARGO_HOME` and `RUSTUP_HOME` cases). The 1.85 floor itself is a method result, not a test: 1.85 built and tested the crate, 1.80 did not. |
+| **N7** Low: a build that gave up left an older staged runtime in the package | Fixed | `scripts/build-cli-runtime.mjs` removes the staged binary when it gives up. `build-stt.mjs` is unchanged, as decided. | `tests/infrastructure/cliRuntimePackaging.test.ts` "a build that gives up leaves no older runtime staged" (3 tests). With the `rmSync` removed, the test failed. |
+
+### The fake-CLI proof (goal 1, end to end)
+
+A throwaway CLI, `fakecli`, was added as the guides describe: one
+declaration `src/vendors/fakecli.rs` and one `launch` record, devin-like (no
+log reader, no resume). Then the checked-in copies were regenerated
+(`NAVIDE_DECLARATIONS_WRITE=1 cargo test --test checked_in`) and the whole
+backend and frontend suites run. Everything was then reverted; no fake file is
+in any commit (`git status` clean of it).
+
+- **Registration works with no list edited.** The backend registered
+  `fakecli` from its declaration in the right place; the frontend `agents`
+  index did the same; the four recording lists needed no edit.
+- **The suites still wanted, per CLI:** an entry and a fixture in the CLI
+  regression catalog (`catalog.py`, `catalog.json`; the inventory gate aborts
+  the whole run with "vendor coverage differs"); a row in
+  `tests/cli/vendorContracts.test.ts`; and hand lists that name every CLI:
+  the launch-argv inventory, the three READMEs, the Help panel table and
+  `helpCliFacts.ts`, native memory, verified versions, risk declarations,
+  extensions; in the frontend, the plans "retained" row, `TURN_START_SIGNAL`
+  and the ControlPane cap. Of 12 backend failures in the first pass, 4 were
+  the recording tests and the spec list (fixed by the relaxations and N5
+  above); 8 are these policy lists.
+- **Decision:** those lists are product policy (a CLI is not shipped until
+  someone says what its README, risk and version are), not recordings of
+  main, so they are not relaxed. They are listed in the guides and DESIGN.md
+  as the work a new CLI really needs; "one file" is true of the runtime and
+  the registration, not of the whole repository.
+
+### Commands and results (round 3, after the last change)
+
+| Command | Result |
+|---------|--------|
+| `cargo test --offline` (crate) | 37 passed. |
+| `cargo check --offline --all-targets` (crate) | Finished, no warnings (also clean with `RUSTFLAGS="-D warnings"`). |
+| switch off: `test_cli_runtime_seam.py`, `test_cli_runtime_build.py`, `test_pyinstaller_spec.py` | 35 passed, 1 skipped (Windows only). |
+| switch off: `test_cli_declarations.py`, `test_cli_vendors_registry.py` | 128 passed. |
+| switch on: `uv --project backend run pytest -p tests.cli_runtime_on backend/tests/vendors backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_claude_activity_resume.py backend/tests/test_activity_high_water.py` | 881 passed, 4 skipped; fallback 0 for every observed CLI. |
+| `node scripts/changed-backend-tests.mjs`, in full, after the last change | exit 0: 16638 passed, 111 skipped, 1 xfailed, then the serial pass 105 passed, 4 skipped. |
+| `uv --project backend run ruff check` on the changed Python files | all checks passed. |
+| `bun run vitest run tests/infrastructure/cliRuntimePackaging.test.ts src/renderer/src/platform/plugin-shell/agents` | 107 passed (4 files). |
+| `bun run vitest run --changed upstream/main` | 20506 passed, 1 failed: `src/main/plugins/pluginExternalWorkspace.test.ts`, `Executable not found in $PATH: "pnpm"`. This machine has no pnpm and the install is a network step; the test is not touched by this branch. Run alone it fails the same way. It is the same pnpm failure as in round 2. |
+| `bun run typecheck:web` | no errors. |
+
+Not verified: the Linux run (CI's `cli-runtime` job is its first), a release
+dry run (signing, notarization, package contents), and the `pnpm`-based
+external workspace test above.
 
 ## Fix round 2: every review 2 finding
 
@@ -283,9 +347,9 @@ their fixes.
 - The first switch-on run of round 2 ended with 2 failed, 876 passed: two of
   the new seam tests compared fallback counts exactly, and
   `tests.cli_runtime_on` routes the reader class as well as the instance, so
-  each call is counted twice there. They compare "at least" now, as the
-  older tests in the file do. The switch-off runs before it could not show
-  this.
+  each call is counted twice there. They compared "at least" for the rest of
+  round 2; round 3 (N4) makes them exact again, multiplied by the number of
+  routes. The switch-off runs before it could not show this.
 - The first `--changed upstream/main` frontend run had 3 failures: the pnpm
   one above, `ciGate.test.ts` (the new CI job was not in its backend group)
   and `ciPathFilter.test.ts` (the new packaging test named a path under
