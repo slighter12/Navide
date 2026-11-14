@@ -23,6 +23,7 @@ import sqlite3
 import json
 import os
 import re
+import sys
 import time
 import unicodedata
 from pathlib import Path
@@ -891,6 +892,10 @@ def _python_reader(vendor: str) -> Callable[[], Any]:
     return lambda: cli_vendor(vendor).make_log_reader()
 
 
+# The fixtures record what main's readers return on Unix, the only place the
+# runtime that replays them is built. On Windows the same readers return the
+# same paths with its separators (`<root>\share\...`, a cwd of `\usr`).
+@pytest.mark.skipif(sys.platform == "win32", reason="the parity fixtures record Unix paths; the runtime is Unix only")
 @pytest.mark.parametrize("name", sorted(_scenarios()))
 def test_python_readers_match_the_parity_fixtures(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     scenario = _scenarios()[name]
