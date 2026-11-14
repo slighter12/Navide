@@ -11,8 +11,11 @@ Whether a run builds it is decided by where cargo is expected:
   No cargo, or a build that fails, fails the test.
 * ``NAVIDE_CLI_RUNTIME_REQUIRED=0`` (CI's backend jobs, which compile no
   Rust): the tests skip. The ``cli-runtime`` job is where they run.
-* Unset (a developer's machine): built when cargo is installed, and a build
-  that fails fails the test; skipped only when there is no cargo at all.
+* Unset (a developer's machine): built when cargo is on ``PATH``, and a build
+  that fails fails the test. Without cargo (the isolated runner,
+  ``scripts/isolated-pytest.sh``, starts from an empty environment) the tests
+  that drive ``serve`` use the release build only when it is newer than every
+  source of the crate, and skip otherwise; nothing older than the source runs.
 * Windows: skipped. The runtime is not built or shipped there (it has no file
   identity or PTY off Unix, so it observes nothing).
 """
@@ -52,12 +55,21 @@ def cargo(*args: str, timeout: float = 1500.0) -> "subprocess.CompletedProcess[s
     return done
 
 
+def _newer_than_the_source(exe: Path) -> bool:
+    sources = [CRATE / "Cargo.toml", CRATE / "Cargo.lock", CRATE / "build.rs", *(CRATE / "src").rglob("*.rs")]
+    return exe.is_file() and exe.stat().st_mtime > max(source.stat().st_mtime for source in sources)
+
+
 def binary() -> Path:
-    """The release build, up to date with the source (built once per process)."""
+    """The release build, up to date with the source (settled once per process)."""
     global _built
     if _built is None:
-        cargo("build", "--release")
         exe = CRATE / "target" / "release" / "navide-cli-runtime"
-        assert exe.is_file(), f"cargo built no {exe}"
-        _built = exe
+        unasked = sys.platform != "win32" and os.environ.get(REQUIRED_ENV) is None
+        if unasked and shutil.which("cargo") is None and _newer_than_the_source(exe):
+            _built = exe  # no cargo here to ask, and no source is newer than it
+        else:
+            cargo("build", "--release")
+            assert exe.is_file(), f"cargo built no {exe}"
+            _built = exe
     return _built
