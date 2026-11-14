@@ -22,6 +22,20 @@ macro_rules! registry {
             vec![$(decl::export::<crate::vendors::$vendor::V>()),*]
         }
 
+        /// The launch and resume part of every declaration, in the same order,
+        /// each with `observed`: whether the CLI declares its records (and so
+        /// has a log reader that reports turns), which the other sides read
+        /// instead of keeping a list of their own.
+        fn launch_values() -> Vec<Value> {
+            vec![$({
+                let mut value = serde_json::to_value(<crate::vendors::$vendor::V as Vendor>::CLI)
+                    .expect("declarations are plain data");
+                let observed = <crate::vendors::$vendor::V as Vendor>::OBSERVE.is_some();
+                value.as_object_mut().expect("a declaration is an object").insert("observed".into(), Value::Bool(observed));
+                value
+            }),*]
+        }
+
         /// Call `visitor` once per declared CLI, with its type and the name
         /// of its file under `src/vendors/`.
         pub fn each(visitor: &mut impl Visit) {
@@ -94,10 +108,10 @@ macro_rules! registry {
 each_vendor!(registry);
 
 /// What `declarations launch` prints: the launch and resume part of every
-/// declaration, as the checked-in `cli_declarations.json` holds it (pretty
-/// JSON and a final newline).
+/// declaration, and whether it is observed, as the checked-in
+/// `cli_declarations.json` holds it (pretty JSON and a final newline).
 pub fn launch_json() -> String {
-    let mut text = serde_json::to_string_pretty(ALL).expect("declarations are plain data");
+    let mut text = serde_json::to_string_pretty(&launch_values()).expect("declarations are plain data");
     text.push('\n');
     text
 }

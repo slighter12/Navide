@@ -849,9 +849,16 @@ def _ts_key_set(source: str, name: str) -> set[str]:
 def test_help_cli_facts_mirror_the_registry():
     # The Help pages say which CLIs can send through MCP and which have no
     # output protocol. The renderer cannot ask the backend, so helpCliFacts.ts
-    # mirrors two registry facts; a vendor added here must be added there.
+    # mirrors the first by hand: `mcp_wiring` is a fact of the Python spec,
+    # which the declaration does not carry. The second it derives from the
+    # declarations' `observed`; here that is held to the registry.
     source = HELP_CLI_FACTS.read_text(encoding="utf-8")
     wired = {key for key, spec in registry.VENDORS.items() if spec.mcp_wiring is not None}
     no_reader = {key for key, spec in registry.VENDORS.items() if spec.make_log_reader is None}
     assert _ts_key_set(source, "MCP_WIRED") == wired
-    assert _ts_key_set(source, "NO_LOG_READER") == no_reader
+    assert "OBSERVED_AGENT_KEYS" in source, "NO_LOG_READER is derived from the declarations' `observed`"
+    unobserved = {key for key, entry in _declared.declarations().items() if not entry["observed"]}
+    assert unobserved == no_reader, "`observed` in a declaration and `make_log_reader` on its spec disagree"
+    # The CLIs main had without a log reader (the list this test used to read
+    # off helpCliFacts.ts).
+    assert {"mcode", "devin", "kiro"} <= no_reader

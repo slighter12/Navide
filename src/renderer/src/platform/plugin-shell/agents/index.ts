@@ -47,6 +47,14 @@ export const AGENT_SPECS: AgentSpec[] = [...clis, ...others]
 /** Specs that are real CLI agents (excludes the plain-shell terminal entry). */
 export const CLI_AGENT_SPECS: AgentSpec[] = AGENT_SPECS.filter((s) => s.agentKey !== 'terminal')
 
+/** The CLIs whose records the runtime declares (`observed` in the declaration,
+ *  printed by `declarations launch`): they have a log reader, and it reports
+ *  when a turn starts. The renderer reads this instead of keeping its own list
+ *  of the CLIs that have none. */
+export const OBSERVED_AGENT_KEYS: ReadonlySet<string> = new Set(
+  declarations.filter((entry) => entry.observed).map((entry) => entry.key),
+)
+
 /** CLIs whose panes can be re-spawned via the vendor resume command (aider is
  *  excluded by its spec: no session ids, the gate flags never satisfy). */
 export const REBUILD_CAPABLE_AGENTS: string[] = CLI_AGENT_SPECS.filter(

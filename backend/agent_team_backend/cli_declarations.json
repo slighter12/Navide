@@ -28,7 +28,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "antigravity",
@@ -82,7 +83,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "claude",
@@ -141,7 +143,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "codex",
@@ -190,7 +193,8 @@
     },
     "interrupt": [
       27
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "copilot",
@@ -249,7 +253,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "cursor",
@@ -296,7 +301,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "devin",
@@ -325,7 +331,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": false
   },
   {
     "key": "droid",
@@ -375,7 +382,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "goose",
@@ -422,7 +430,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "grok",
@@ -472,7 +481,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "hermes",
@@ -523,7 +533,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "kilo",
@@ -574,7 +585,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "kimi",
@@ -629,7 +641,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "kiro",
@@ -662,7 +675,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": false
   },
   {
     "key": "mcode",
@@ -691,7 +705,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": false
   },
   {
     "key": "muse",
@@ -750,7 +765,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "openclaw",
@@ -799,7 +815,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "opencode",
@@ -848,7 +865,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "pi",
@@ -908,7 +926,8 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "qwen",
@@ -959,6 +978,7 @@
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   }
 ]

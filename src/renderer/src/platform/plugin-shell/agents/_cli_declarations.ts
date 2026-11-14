@@ -32,7 +32,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "antigravity",
@@ -86,7 +87,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "claude",
@@ -145,7 +147,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "codex",
@@ -194,7 +197,8 @@ export default [
     },
     "interrupt": [
       27
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "copilot",
@@ -253,7 +257,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "cursor",
@@ -300,7 +305,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "devin",
@@ -329,7 +335,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": false
   },
   {
     "key": "droid",
@@ -379,7 +386,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "goose",
@@ -426,7 +434,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "grok",
@@ -476,7 +485,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "hermes",
@@ -527,7 +537,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "kilo",
@@ -578,7 +589,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "kimi",
@@ -633,7 +645,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "kiro",
@@ -666,7 +679,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": false
   },
   {
     "key": "mcode",
@@ -695,7 +709,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": false
   },
   {
     "key": "muse",
@@ -754,7 +769,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "openclaw",
@@ -803,7 +819,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "opencode",
@@ -852,7 +869,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "pi",
@@ -912,7 +930,8 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   },
   {
     "key": "qwen",
@@ -963,6 +982,7 @@ export default [
     },
     "interrupt": [
       3
-    ]
+    ],
+    "observed": true
   }
 ] as const
