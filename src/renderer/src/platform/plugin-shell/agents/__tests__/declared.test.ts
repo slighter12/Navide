@@ -6,7 +6,8 @@
  * the command, and the arguments its functions built. The declarations must
  * keep giving exactly these.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import declarations from '../_cli_declarations'
 import { AGENT_SPECS } from '../index'
 
 interface Held {
@@ -96,7 +97,9 @@ const MAIN: Record<string, Held> = {
 
 /** The display order of main's hand-kept `ORDERED` list in `index.ts`,
  *  recorded before discovery replaced it. It is each declaration's
- *  `order.menu`, with the plain terminal after the CLIs. */
+ *  `order.menu`, with the plain terminal after the CLIs. A CLI declared
+ *  later is not in it and needs no entry: the tests below compare the
+ *  recorded keys only. */
 const MAIN_ORDER = [
   'claude', 'codex', 'antigravity', 'grok', 'kimi', 'opencode', 'qwen', 'kilo', 'pi', 'copilot',
   'cursor', 'aider', 'muse', 'droid', 'mcode', 'goose', 'devin', 'kiro', 'openclaw', 'hermes',
@@ -126,7 +129,15 @@ describe('agent specs built from the declarations', () => {
   const vendors = AGENT_SPECS.filter((spec) => spec.agentKey !== 'terminal')
 
   it('lists the specs in the order main listed them', () => {
-    expect(AGENT_SPECS.map((spec) => spec.agentKey)).toEqual(MAIN_ORDER)
+    const listed = AGENT_SPECS.map((spec) => spec.agentKey)
+    expect(MAIN_ORDER.filter((key) => !listed.includes(key))).toEqual([])
+    // Relative order of the recorded keys only; a later CLI takes its own place.
+    expect(listed.filter((key) => MAIN_ORDER.includes(key))).toEqual(MAIN_ORDER)
+  })
+
+  it('lists the plain terminal after every CLI', () => {
+    const listed = AGENT_SPECS.map((spec) => spec.agentKey)
+    expect(listed.indexOf('terminal')).toBe(listed.length - 1)
   })
 
   it.each(MAIN_ORDER.filter((key) => key !== 'terminal'))('%s recognizes a resume command as on main', (key) => {
@@ -138,8 +149,9 @@ describe('agent specs built from the declarations', () => {
     expect(now.flags).toBe(main.flags)
   })
 
-  it('covers every vendor', () => {
-    expect(vendors.map((spec) => spec.agentKey).sort()).toEqual(Object.keys(MAIN).sort())
+  it('still lists every vendor main had', () => {
+    const keys = vendors.map((spec) => spec.agentKey)
+    expect(Object.keys(MAIN).filter((key) => !keys.includes(key))).toEqual([])
   })
 
   it.each(Object.entries(MAIN))('%s launches and resumes as on main', (key, main) => {
@@ -158,5 +170,39 @@ describe('agent specs built from the declarations', () => {
     const claude = vendors.find((spec) => spec.agentKey === 'claude')!
     expect(claude.modelArgs?.('a$&b')).toBe('--model a$&b')
     expect(claude.resumeArgs?.("$'x")).toBe("--resume $'x")
+  })
+})
+
+describe('a declared CLI with no spec file', () => {
+  afterEach(() => {
+    vi.doUnmock('../_cli_declarations')
+    vi.resetModules()
+  })
+
+  it('is listed from its declaration alone, where its order.menu says', async () => {
+    // A fake CLI no Rust file declares: devin's declaration under another key,
+    // with a resume command, one place after devin, and no agents/<key>.ts.
+    const devin = declarations.find((entry) => entry.key === 'devin')!
+    const fake = {
+      ...devin,
+      key: 'nosuchcli',
+      label: 'No Such CLI',
+      order: { ...devin.order, menu: devin.order.menu + 1 },
+      resume: { ...devin.resume, args: ['--resume', '{id}'] },
+    }
+    vi.resetModules()
+    vi.doMock('../_cli_declarations', () => ({ default: [...declarations, fake] }))
+    const fresh = await import('../index')
+
+    const keys = fresh.AGENT_SPECS.map((spec) => spec.agentKey)
+    expect(keys.indexOf('nosuchcli')).toBe(keys.indexOf('devin') + 1)
+    expect(keys.at(-1)).toBe('terminal')
+    const spec = fresh.AGENT_SPECS.find((candidate) => candidate.agentKey === 'nosuchcli')!
+    expect(spec.label).toBe('No Such CLI')
+    expect(spec.defaultCommand).toBe('devin')
+    expect(spec.resumeArgs?.('abc')).toBe('--resume abc')
+    expect(spec.resumeCommandPattern?.test('devin --resume abc')).toBe(true)
+    // Main's CLIs keep their order around it.
+    expect(keys.filter((key) => MAIN_ORDER.includes(key))).toEqual(MAIN_ORDER)
   })
 })

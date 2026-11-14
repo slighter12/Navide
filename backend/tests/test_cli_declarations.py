@@ -11,6 +11,11 @@ resume fields, and the session id each of main's ``resume_id_from_command``
 functions found in every command of ``_corpus``. It was recorded from those
 functions and is not regenerated: the declarations must keep giving the same
 values and the same ids.
+
+The recording covers the CLIs main had. A CLI declared after it is not in the
+recording and needs no edit to it: the recorded tests iterate over the
+recorded keys only (and require those to still be declared), and the tests
+over every declared key need no recording.
 """
 
 from __future__ import annotations
@@ -27,7 +32,10 @@ from agent_team_backend.cli_vendors import registry
 from tests import cli_runtime_build
 
 MAIN = Path(__file__).with_name("cli_declarations_main.json")
+#: Every declared CLI.
 KEYS = sorted(cli_declarations.declarations())
+#: The CLIs the recording of main holds: a subset of KEYS.
+RECORDED = sorted(json.loads(MAIN.read_text(encoding="utf-8"))["launch"])
 
 _UUID = "0198f6a2-71aa-4d02-9c11-2233445566aa"
 _VALUES = ("abc123", _UUID, _UUID.upper(), "-x", "--yolo", "agent:main:navide-1", "navide-abc", "navide-abc #2",
@@ -104,18 +112,27 @@ def _launch_fields(key: str) -> dict[str, Any]:
 
 def test_every_registered_cli_is_declared_once() -> None:
     assert KEYS == sorted(registry.VENDORS)
-    assert sorted(_main()["launch"]) == KEYS
+
+
+def test_the_recording_of_main_is_of_declared_clis() -> None:
+    """A recorded CLI that is no longer declared would silently stop being
+    compared; a declared CLI the recording lacks is a newer one."""
+    assert set(RECORDED) <= set(KEYS)
+    assert sorted(_main()["resume_ids"]) == RECORDED
+
+
+def test_only_codex_of_mains_clis_is_interrupted_by_another_byte() -> None:
     # Only a CLI interrupted by another byte than ^C names its key (codex: Esc).
-    assert {key: spec.interrupt_key for key, spec in registry.VENDORS.items() if spec.interrupt_key} == {
+    assert {key: registry.VENDORS[key].interrupt_key for key in RECORDED if registry.VENDORS[key].interrupt_key} == {
         "codex": b"\x1b"}
 
 
-@pytest.mark.parametrize("key", KEYS)
+@pytest.mark.parametrize("key", RECORDED)
 def test_launch_and_resume_fields_are_mains(key: str) -> None:
     assert _launch_fields(key) == _main()["launch"][key]
 
 
-@pytest.mark.parametrize("key", KEYS)
+@pytest.mark.parametrize("key", RECORDED)
 def test_resume_ids_are_mains(key: str) -> None:
     recorded = _main()["resume_ids"][key]
     corpus = _corpus(key)
@@ -173,18 +190,32 @@ def test_the_registry_and_menu_orders_are_declared() -> None:
         assert len(set(places)) == len(places) == len(KEYS), name
 
 
-@pytest.mark.parametrize("key", KEYS)
-def test_the_runtime_names_the_same_sessions(key: str) -> None:
-    """The Rust ``resume_id`` (its own parser over the same declaration)
-    against the ids recorded from main, for a slice of the corpus."""
-    commands = _corpus(key)[::3]
+def _runtime_ids(key: str, commands: list[Any]) -> list[str]:
+    """What the Rust ``resume_id`` (its own parser over the same declaration)
+    reads out of each command."""
     requests = "".join(json.dumps({"id": n, "op": "resume_id", "vendor": key, "command": command}) + "\n"
                        for n, command in enumerate(commands))
     done = subprocess.run([str(cli_runtime_build.binary()), "serve"], input=requests, capture_output=True, text=True,
                           encoding="utf-8", check=True, timeout=120)
     answers = {a["id"]: a for a in map(json.loads, done.stdout.splitlines())}
     assert len(answers) == len(commands)
+    for answer in answers.values():
+        assert answer["ok"], answer
+    return [answers[n]["result"] for n in range(len(commands))]
+
+
+@pytest.mark.parametrize("key", RECORDED)
+def test_the_runtime_names_the_same_sessions_as_main(key: str) -> None:
+    """The Rust ``resume_id`` against the ids recorded from main, for a slice
+    of the corpus."""
+    commands = _corpus(key)[::3]
     recorded = _main()["resume_ids"][key]["ids"]
-    for n, command in enumerate(commands):
-        assert answers[n]["ok"], answers[n]
-        assert answers[n]["result"] == recorded.get(str(n * 3), ""), command
+    assert _runtime_ids(key, commands) == [recorded.get(str(n * 3), "") for n in range(len(commands))]
+
+
+@pytest.mark.parametrize("key", KEYS)
+def test_the_runtime_and_the_backend_name_the_same_sessions(key: str) -> None:
+    """The two readers of one declaration agree on every declared CLI, with or
+    without a recording of main: a CLI added later is held by this test."""
+    commands = _corpus(key)[::3]
+    assert _runtime_ids(key, commands) == [cli_declarations.resume_id(key, command) for command in commands]

@@ -43,9 +43,12 @@ describe('spec assembly', () => {
 
   it('lists every spec file, found without being registered', () => {
     const onDisk = vendorFiles.filter(({ mod }) => mod.SPEC).map(({ stem }) => stem).sort()
-    const registered = AGENT_SPECS.map((s) => s.agentKey).sort()
+    const registered = AGENT_SPECS.map((s) => s.agentKey)
 
-    expect(registered).toEqual(onDisk)
+    // Every file is listed. A declared CLI may have no file (it is listed
+    // from its declaration alone: `declared.test.ts`), so the reverse is not
+    // required.
+    expect(onDisk.filter((stem) => !registered.includes(stem))).toEqual([])
     // The list holds the files' own SPEC objects, not copies built beside them.
     for (const { stem, mod } of vendorFiles) {
       expect(AGENT_SPECS.find((s) => s.agentKey === stem), stem).toBe(mod.SPEC)
