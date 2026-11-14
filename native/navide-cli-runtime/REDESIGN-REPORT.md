@@ -3,13 +3,68 @@
 Branch `refactor/cli-runtime-lifecycle-main`, based on upstream/main
 `75272dd4b`, pushed to the fork (draft PR 18). The design is in `DESIGN.md`.
 
-This is the state after fix round 4, which answers reviews 4-A and 4-B, first in
-this report. Round 2 ended at `5690f50d1` (CI run 43553202513 was its last);
-round 3 answered review 3-A (N1 to N7), whose section follows round 4's.
-Round 2's section follows that, then round 1's own table, and the rest
-describes what the branch holds now. Round 1 ended at `aec1a324b`; its two
-reviews (2-A: WITH LIMITS, 2-B: NOT READY as a base) are in the round 2
+This is the state after fix round 5, which answers reviews 5-A and 5-B (no
+finding Medium or higher), first in this report. Round 4's section follows
+(reviews 4-A and 4-B). Round 2 ended at `5690f50d1` (CI run 43553202513 was
+its last); round 3 answered review 3-A (N1 to N7), whose section follows
+round 4's. Round 2's section follows that, then round 1's own table, and the
+rest describes what the branch holds now. Round 1 ended at `aec1a324b`; its
+two reviews (2-A: WITH LIMITS, 2-B: NOT READY as a base) are in the round 2
 section, finding by finding.
+
+## Fix round 5: the Lows and every known contradiction
+
+"Before" is the head `c59d2a8ad`. No crate source changed this round (Python,
+tests and documents only), so `cargo` was not re-run.
+
+| Item | Status | What changed | The test that shows it |
+|------|--------|--------------|------------------------|
+| **N4 / B5-2** documents that contradicted round 4 | Fixed | `DESIGN.md` (the remaining-gates paragraph now lists only the regression inventory and the prose); `docs/adding-a-cli-vendor.md` (step 4: a reader module only when a reader exists, `_MIGRATED_READERS` / `__all__` optional and asked by no test; step 7: the `SNAPSHOT` needs no entry; Frontend steps 5 and 7: the plans copy is frozen v1 and the flagless list is a recorded subset; the "Other hand-kept lists" introduction); `docs/en-US/cli-extension-guide.md` step 4; the `submitTurnConfirm.ts` comment; `docs/en-US/architecture.md` (the planned transport). The round 4 CI row below. The guide also says that a **second binary name** (an alias or legacy binary) is the one thing added by hand to `CLI_NAMES`' alias set in `isolation.py`. | Docs only. |
+| **N1** memory table order | Recorded, behaviour unchanged | Listed under "Rust differences from main (known)" (it is Python's). The comment in `native_memory.py` no longer says the order is unobservable. | New `test_native_memory.py::test_a_workspace_that_is_a_cli_s_user_directory_lists_the_file_under_the_first_row_that_reaches_it`: workspace `home/.codex`, `AGENTS.md` there. Pins Project `AGENTS.md` now, User `.codex/AGENTS.md` with main's row order, equal readers and an equal set of allowed paths. It passed on the first run (it pins current behaviour; both labels were asserted, so the prediction in the review is confirmed). |
+| **N2** pins by count | Fixed | `_VERIFIED` is held to main's sixteen by key; the extensions declaration is held to main's nineteen by key. | `test_every_vendor_has_a_verified_version_or_says_why_it_has_none`, `test_every_vendor_declares_where_its_extensions_live_or_says_it_has_none`. Not shown failing: they only tighten (a mutation was not run). |
+| **N3** risk roots no longer pinned by hand | Kept as decided | The guide says a new CLI pins its roots in its own `tests/vendors/test_<key>.py` (step 7). | Docs only. |
+| **N5** a start that hangs; `deferred` with no binary | Fixed | `binary()` is looked for before anything is `starting`, outside the lock, so with no binary no caller is counted as stepping aside. A start has a deadline (`START_DEADLINE_S`, 30 s): the next caller past it abandons the start by epoch (the state leaves `starting`, one failed start is counted and the restart is backed off), and a client the late start returns is reaped. | `test_nothing_is_starting_while_the_binary_is_being_looked_for`, `test_a_start_past_its_deadline_is_abandoned_and_what_it_returns_later_is_not_used` (late start comes up / late start fails: no second failure). |
+| **B5-1 (1)** `apply(False)` then `apply(True)` during a start | Fixed | A start takes an epoch when it begins; `apply()` moves the epoch on and clears `starting`, and a start installs its process only if its epoch is still current. | `test_a_start_that_began_before_the_switch_went_off_and_on_installs_nothing`. |
+| **B5-1 (2)** `_ask`'s cold-start `deferred` | Documented | Making it consistent would count `deferred` for a CLI the runtime may never observe (`_known` is empty before the first handshake), and would move the counter table; the comment in `_ask` says why. | None. |
+| **N7** `memory_sources` shape | Fixed | Every scope is one of the two values and no part is empty, absolute, a separator or `..`. | New `test_every_declared_row_is_a_relative_path_of_one_of_the_two_scopes`. |
+| **SNAPSHOT** | Fixed | `test_install_deps_snapshot.py` compares the recorded ids, in relative order, with the live entries of those ids; a new CLI adds nothing. | `test_agent_cli_install_entries_unchanged`. |
+| **N6** what `observed` means | Documented | The guide: `observed` = the runtime declares records, a Python reader exists, and it reports turn starts; a CLI that breaks the equality needs a new declared field. | Docs only. |
+| **M1–M4, P2, P7** DESIGN.md | Written, design only | M1: the host's control operations from `terminals.py` (spawn, write, resize with the drain barrier, foreground query, kill with the descendant snapshot, exit, the pid registry) and how a backend injection and the user's keystrokes are ordered (whole input frames, an input lease with a 2 s bound). M2: P3 compares per-stream concatenated bytes and the byte offsets of resize and exit, plus frame invariants, not frame sequences. M3: a slow consumer is treated as no consumer after a bound and catches up by replay (a `gap` frame when the offset is gone); only the owner's credit counts, a second consumer is a watcher. M4: the hop stage's measure is "not worse", the end state's is the 200-pane improvement, a renderer-side measure is added, and the Unix socket + message port is weighed against a hand-written WebSocket (decision: the socket and port, the WebSocket as the fallback). P7: the header has an `offset` field. P2: the handshake checks `Origin`, and the token is never put in a URL. | None: no code changed. |
+
+### What the three new start-path tests were checked against
+
+The tests were written first. They were then run **one per invocation** against
+the committed (unfixed) `cli_runtime.py`, with only the `START_DEADLINE_S`
+constant added so that they fail on behaviour and not on a missing name (run
+together, a failed test leaves `_starting` set and made the next one fail for
+the wrong reason; that run was discarded). Each failed for the reason it
+tests: the binary test saw `state == "starting"` and the second caller counted
+`deferred: 1`; both deadline cases (`comes up` and `fails`) saw `starting`
+where `waiting-to-restart` was expected after the deadline; the off-and-on
+test saw `starting` where `idle` was expected after the flip. That last test's
+final assertion (nothing installed) was not reached on the old code; that the
+old code installs the late process is read from the code (`_enabled` is true
+and `_stopping` false again when the start returns). Then the fixed file was
+restored (`git diff` shows it) and all pass: `test_cli_runtime_seam.py` 24
+passed (20 before). The first draft of the binary test recursed through
+`status()`, which also looks for the binary; that was the test's bug and is
+fixed.
+
+### Commands and results (round 5)
+
+| Command | Result |
+|---------|--------|
+| `env -u NAVIDE_PANE_MARK uv --project backend run pytest -q -p tests.cli_runtime_on backend/tests/vendors backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_claude_activity_resume.py backend/tests/test_activity_high_water.py` | 889 passed, 4 skipped. `fallback=0` for all 17 observed CLIs; the counter table is round 4's, line for line (`unsupported` copilot 29, hermes 2, openclaw 2, opencode 2; `deferred` opencode 7; `unreadable` grok 2, pi 1). |
+| `... pytest -q backend/tests/vendors/test_install_deps_snapshot.py backend/tests/test_cli_extensions.py backend/tests/test_spawn_probe_version_drift.py` | 79 passed. |
+| `... pytest -q backend/tests/test_native_memory.py` | 54 passed. |
+| `uv --project backend run ruff check` on the seven changed Python files | all checks passed. |
+| `bun run vitest run --changed upstream/main` | 20507 passed, 1 failed: `pluginExternalWorkspace.test.ts`, `Executable not found in $PATH: "pnpm"` (no pnpm on this machine; the same failure as rounds 2 to 4; not touched by this branch). |
+| `bun run typecheck:web` | no errors. |
+| `node scripts/changed-backend-tests.mjs` (bare, after the last code change) | exit 0: 16723 passed, 40 skipped, 1 xfailed (17 min), then the serial pass 106 passed, 4 skipped. Run after the last code change; the report and this row were edited after it (documents only). |
+
+| CI | Result |
+|----|--------|
+| Run on the round 5 push | CI_RESULT |
 
 ## Fix round 4: every review 4 finding
 
@@ -77,7 +132,7 @@ the restored copies (nothing was regenerated by hand).
 
 | CI | Result |
 |----|--------|
-| Run on the round 4 push | filled in below after the run finishes (it is reported to the manager; a later commit would start another run) |
+| Run 43575701753 on `c59d2a8ad` (round 4's push) | 21 jobs passed, including both `Rust CLI runtime` legs. One failed: `Backend tests (Windows, 1/5)`, only `channels/test_manager.py::test_stuck_seam_does_not_block_other_chats[interrupt]` (a 0.2 s wall-clock assert), so the `Lint and test` gate failed. An upstream flake: upstream PR 885 fixes that test, after upstream's release dry run 43559161079 measured 0.735 s against the budget with none of this branch's code. This branch touches no channels or guard code, and nothing of the Rust runtime runs on Windows. Not re-run (a `gh` write). |
 
 Not verified: the Linux and Windows runs (CI is their first), and the `pnpm`-based
 external workspace test.
@@ -541,6 +596,15 @@ Still open, all in cases no fixture or vendor test reaches:
 - goose's store env value is not checked for being absolute.
 - `\d` is ASCII in aider's matchers and `char::is_numeric` in hermes's (main:
   Unicode decimal digits); aider's case-insensitive words fold ASCII only.
+- Python, not Rust: the memory table (`native_memory.MEMORY_SOURCES`) is
+  assembled in registry order, main's was in its own, and the order shows in
+  one case. `candidates()` keeps the scope and relative path of the first row
+  to reach a path, so when the workspace is itself a CLI's user directory
+  (`~/.codex`) its `AGENTS.md` is listed under Project as `AGENTS.md`, where
+  main listed it under User as `.codex/AGENTS.md`. The set of allowed paths,
+  the readers and `canonical` are the same. Kept (no order reproduces main in
+  every nested case); pinned by
+  `test_native_memory.py::test_a_workspace_that_is_a_cli_s_user_directory_lists_the_file_under_the_first_row_that_reaches_it`.
 - claude's three read-meter tests measure Python's own `Path.open` reads; with
   the switch on they are skipped by `tests/cli_runtime_on.py` with that
   reason, and the behaviour is tested in

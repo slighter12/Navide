@@ -35,13 +35,19 @@ separate, optional part of the same file, described in the section after it.
    module in it, and fails if a module on disk is not in it.
 3. If the CLI writes local conversation logs, implement the log reader in
    your vendor file and set `make_log_reader`.
-4. Add `backend/agent_team_backend/log_readers/<key>.py`. Every registered
-   vendor needs a module there — a re-export shim when you wrote a reader
-   (copy any existing one), an empty placeholder when you did not. If you
-   wrote one, also list its class in `log_readers/__init__.py`
-   (`_MIGRATED_READERS` and `__all__`). Shipping no reader has one consequence
-   worth knowing up front: Navide cannot learn the id of a session it started,
-   so set `supports_session_resume=False` (it defaults to **True**) and leave
+4. If you wrote a reader, add `backend/agent_team_backend/log_readers/<key>.py`
+   as a re-export shim (copy any existing one): a spec that sets
+   `make_log_reader` must have it. A CLI without a reader needs no file there
+   (the empty placeholders of devin, kiro and mcode exist because main had
+   them, and a test holds main's CLIs to their files). Listing the class in
+   `log_readers/__init__.py` (`_MIGRATED_READERS` and `__all__`) is optional
+   and nothing asks for it: it only lets `from agent_team_backend.log_readers
+   import <Key>LogReader` resolve, so add it only if code imports the reader
+   that way. A CLI listed in `_MIGRATED_READERS` is also checked to be a
+   hidden import of the packaged app, which the whole-package collection
+   already satisfies. Shipping no reader has one consequence worth knowing up
+   front: Navide cannot learn the id of a session it started, so set
+   `supports_session_resume=False` (it defaults to **True**) and leave
    `resumeArgs` out of the frontend spec — the two sides are cross-checked.
 5. Set `memory_sources` on your `SPEC`, naming the instruction file your CLI
    reads (`AGENTS.md` for most). `native_memory.py` builds its table from the
@@ -57,16 +63,16 @@ separate, optional part of the same file, described in the section after it.
    unsupported capabilities with negative assertions instead of inventing
    uniform capabilities or skipping the vendor. See
    [CI and CLI regressions](en-US/ci-and-cli-regression.md).
-7. Add your key to the `SNAPSHOT` in
-   `backend/tests/vendors/test_install_deps_snapshot.py`. (The recording
-   tests need no entry: `test_cli_declarations.py`,
-   `test_cli_vendors_registry.py` and `agents/__tests__/declared.test.ts`
-   compare only the CLIs main had, and hold the declared ones to each other.)
-   The snapshot is
-   ordered by `DEPS`, which is `_AGENT_CLI_ORDER` first and then the remaining
-   keys in **registry order** — so unless you add your key to
-   `_AGENT_CLI_ORDER`, your entry goes where the key sorts among the others,
-   which is usually *not* the end. Run the test and let the diff place it.
+7. No edit to `backend/tests/vendors/test_install_deps_snapshot.py`: its
+   `SNAPSHOT` is a recording of the entries that existed, compared by id and
+   relative order only. Your own `Dep` is stated in your vendor file and
+   covered by `tests/vendors/test_<key>.py`. (The other recording tests need
+   no entry either: `test_cli_declarations.py`, `test_cli_vendors_registry.py`
+   and `agents/__tests__/declared.test.ts` compare only the CLIs main had, and
+   hold the declared ones to each other.)
+   Pin your data roots there too: `test_risk_declarations.py` checks only
+   that they resolve under the pane home, so the values of `data_dirs` are
+   asserted by your own test file or by nobody.
 8. Only if your spec sets `login_command_args`: add the key to the expected set
    in `backend/tests/test_login_spawn_command.py`.
 9. Account switching is opt-in through `account_switch=AccountSwitchSpec(...)`
@@ -159,17 +165,18 @@ separate, optional part of the same file, described in the section after it.
 4. Update `src/renderer/src/components/__tests__/CliAgentsHelp.test.ts`: the
    table row count (asserted twice, once per locale), the sign-in command
    list, and the list of which cells render a `<code>` element.
-5. Append your `{ agentKey, label, hint }` to
-   `plugins/navide-plans/src/retained/agentSpecs.ts` — the plans plugin keeps a
-   retained copy that a test compares against the live list.
+5. Do not touch `plugins/navide-plans/src/retained/agentSpecs.ts`: the plans
+   plugin keeps a frozen v1 copy of main's CLIs, and its test compares only
+   the recorded keys against the live list. A new CLI is not added to v1.
 6. Only if your spec declares `home_env_vars`: add each one to
    `SPAWN_ENV_RESERVED_KEYS` in
    `src/renderer/src/platform/plugin-shell/lib/cliLaunchOverride.ts`. This is
    product code, not a test list: a home relocator Navide sets itself must not
    be offered as a user-editable spawn env var, or the page promises an
    override that gets overwritten.
-7. Only if your spec has no `skipPermissionFlag`: update the flagless-vendor
-   list in `src/renderer/src/platform/plugin-shell/lib/cliPermission.test.ts`.
+7. Nothing for a spec with no `skipPermissionFlag`: the flagless-vendor list in
+   `src/renderer/src/platform/plugin-shell/lib/cliPermission.test.ts` is a
+   recorded subset (the six main had), so a new flagless CLI is not added.
 8. Run `pnpm vitest run src/renderer/src/platform/plugin-shell/agents` — the structural tests there
    check your spec against the rules the template states (key matches the
    filename, the file is listed, `resumeCommandPattern` matches the
@@ -178,22 +185,21 @@ separate, optional part of the same file, described in the section after it.
 
 ## Other hand-kept lists
 
-The steps above are not the whole set. These lists also name every vendor
-(or every vendor of a kind), and each one fails a test, not a build, when a
-new key is missing — so they are easy to find only after a red run.
+The steps above are not the whole set. A few lists also name every vendor, and
+each one fails a test, not a build, when a new key is missing — so they are
+easy to find only after a red run.
 
 Most lists that used to name every vendor now derive from the declarations or
 the vendor's own spec, or are recorded subsets (a test that holds main's CLIs
-to their recorded values and leaves yours alone). Found by declaring a
-throwaway CLI that was a copy of goose, adapter files included, and running
-both suites (it was not committed). The throwaway still needed these, and
-nothing else:
+to their recorded values and leaves yours alone), so none of them is edited
+for a new CLI. Found by declaring a throwaway CLI that was a copy of goose,
+adapter files included, and running both suites (it was not committed). The
+throwaway still needed these, and nothing else:
 
 - its regression inventory entry and fixture:
   `tests/fixtures/cli-regression/catalog.json` and `<key>.json` beside it, and
   its row in `tests/cli/vendorContracts.test.ts` (the inventory tests fail
   until both name the CLI);
-- its key in the `SNAPSHOT` of `test_install_deps_snapshot.py` (step 7);
 - the vendor count and list in `README.md`, `README.ja-JP.md` and
   `README.zh-TW.md` (`test_readmes_list_every_registered_vendor`), and a row in
   the `vendors` table of `CliAgentsHelp.vue`;
@@ -211,9 +217,18 @@ What the CLI states in its own files, so no shared list changes:
 - `data_dirs`, or `data_dirs_none_reason`, for `test_risk_declarations.py`;
 - `extensions`, or `extensions_none_reason` (aider), for `test_cli_extensions.py`;
 - `observed` in its Rust declaration: `helpCliFacts.ts` (`NO_LOG_READER`) and
-  `submitTurnConfirm.ts` (`TURN_START_SIGNAL`) derive from it;
+  `submitTurnConfirm.ts` (`TURN_START_SIGNAL`) derive from it. It stands for
+  three facts that agree today: the runtime declares the CLI's records, a
+  Python reader exists (the registry test requires the two to be equal), and
+  that reader reports turn starts. A CLI that breaks the equality (a reader
+  that cannot report a turn start, or a Python reader shipped before its Rust
+  declaration) needs a new declared field first; do not set `observed` to
+  paper over it;
 - its binary name: `CLI_NAMES` in the regression guard is built from each
-  declaration's `launch.program`.
+  declaration's `launch.program`. A second name the CLI answers to (an alias
+  or a legacy binary) is not declared anywhere: add it by hand to the alias
+  set beside it in `backend/tests/cli_regression/support/isolation.py`, or
+  the guard will not refuse a real run of it.
 
 Still by hand, only when the fact applies: `MCP_WIRED` in `helpCliFacts.ts`
 (held to the registry by `test_help_cli_facts_mirror_the_registry`). The ＋

@@ -21,7 +21,7 @@ export const SUBMIT_TURN_CONFIRM_MS = 12_000
 
 /** Whether a vendor's log reader reports the start of a turn (agent_active
  *  after a turn end) — the only thing the watch can wait for. Every agent spec
- *  is listed on purpose (a test enforces it): a vendor that cannot signal a
+ *  is mapped, from its declaration (below): a vendor that cannot signal a
  *  turn would have every growth-only submit read as unconfirmed, and a
  *  scheduler run recorded as an error. Those keep main's growth verdict.
  *

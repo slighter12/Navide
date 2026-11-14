@@ -56,17 +56,17 @@ launch it, and each is found by its name:
 
 A CLI with files 1 and 2 only is registered on both sides from its
 declaration alone, and a backend and a frontend test declare a fake CLI of
-that kind to show it. The repository's other gates still name every CLI. They
-were found by declaring a throwaway CLI of that kind (never committed) and
-running both suites, and they are what is left of "one declaration plus its
-tests": the regression inventory (`tests/fixtures/cli-regression/catalog.json`
-with its fixture, and a row in `tests/cli/vendorContracts.test.ts`: tests, as
-they should be), and the older lists of `docs/adding-a-cli-vendor.md`
-("Other hand-kept lists"): eight backend tests (launch argv inventory, the
-README sentence, the Help panel table, `helpCliFacts.ts`, native memory,
-verified version, risk declarations, the extensions declaration) and three
-frontend lists (the plans plugin's retained specs, `TURN_START_SIGNAL`, the ＋
-menu's cap).
+that kind to show it. What the repository still asks of a new CLI was found by
+declaring a throwaway CLI (never committed) and running both suites; it is
+what is left of "one declaration plus its tests": the regression inventory
+(`tests/fixtures/cli-regression/catalog.json` with its fixture, and a row in
+`tests/cli/vendorContracts.test.ts`: tests, as they should be), and prose a
+person writes (the README sentence in three languages and the Help panel
+row). Every list that used to name each CLI is derived from the declaration
+or the CLI's own `VendorSpec` (instruction-file sources, verified version,
+risk roots, extensions, `observed`, its binary name), or is a recording that
+compares only the keys it recorded (`docs/adding-a-cli-vendor.md`, "Other
+hand-kept lists").
 
 ## A vendor is a type (`decl::Vendor`)
 
@@ -349,22 +349,25 @@ does.
    without losing or repeating an event".
 3. **The frame format.** PTY output is bytes, so a frame is a header, then a
    raw payload, with no JSON wrapped around it: `type` (1 byte), `stream id`
-   (4 bytes, big endian), `length` (4 bytes, big endian), then `length`
-   bytes. Control frames (open, resize, exit, a batch of reads, an event) have
-   a type of their own and carry JSON; `data` frames carry the bytes as they
+   (4 bytes, big endian), `offset` (8 bytes, big endian), `length` (4 bytes,
+   big endian), then `length` bytes. `offset` is the position in the stream's
+   byte count: for a `data` frame, where its first byte sits; for a `resize`
+   or `exit` frame, the byte count at which it takes effect (what makes their
+   ordering against the data checkable, P3); 0 for frames about no position.
+   Control frames (open, resize, exit, a batch of reads, an event) have a
+   type of their own and carry JSON; `data` frames carry the bytes as they
    came off the PTY. A reader that meets an unknown type skips `length`
    bytes, so the format can grow.
 4. **Backpressure per stream.** One pane that floods its output must neither
    starve the others nor grow memory without bound: each stream has a
    bounded queue and its own window, and the writer serves the streams in
-   turn. The limit is the repo's rule that **scrollback is never cleared**: a
-   slow consumer is answered by pausing the read of that one PTY (the kernel's
-   PTY buffer then slows the child), never by discarding what was read or
-   emitting a clear. The host keeps each stream's scrollback itself, so a
-   consumer that reconnects replays from it. The backend's reader today drops
-   its oldest queued output at a cap (`test_terminals_reader_pause_bound.py`);
-   whether the host may keep that behaviour, or must pause instead, is decided
-   against that rule before the host is written.
+   turn. The limit is the repo's rule that **scrollback is never cleared**:
+   nothing is answered by emitting a clear. A consumer that cannot keep up is
+   not allowed to slow the agent: past a bound the host treats it as no
+   consumer, keeps draining the PTY into the stream's bounded scrollback, and
+   the consumer catches up by replay (P6). The backend's reader today drops
+   its oldest queued output at a cap (`test_terminals_reader_pause_bound.py`),
+   so this is the same behaviour with the dropped bytes still replayable.
 
 Windows is its own stage: no file identity, no ConPTY, no named-pipe
 transport, so none of this exists there yet.
@@ -394,21 +397,60 @@ from the CLIs' own logs, which the observe worker reads. Anything that wants
 screen contents later takes them from the host's scrollback, not from a second
 read.
 
+**The control operations the host must offer (M1).** Reading is not all
+`terminals.py` does with a PTY handle. Everything below moves with the master
+fd, and each is a request on the framed channel with an answer (the host owns
+the fd, so Python cannot call it directly any more):
+
+| Operation | Today (`terminals.py`) | Notes for the host |
+|---|---|---|
+| **Spawn** | `create` (`:582`): `pty_registry.register` the child, then the handle | Python still builds argv, env and cwd (account homes, hooks, MCP wiring, the sanitized environment); the host receives them whole and runs `fork`/`exec`. No declaration is read by the host. |
+| **Write** | `write` (`:887`), `_flush_input`: an in-order byte buffer per session, partial writes and EAGAIN finished from a writable callback, the pending count returned | The host owns the input buffer and the same semantics; the pending count is an answer to a probe write. |
+| **Resize**, and **force redraw** | `resize` (`:1043`); `force_redraw` (`:1049`) is two resizes; `drain_output` (`:1060`) is the barrier: old-width bytes land before the ack, new-width after | The barrier becomes the host's: bytes read before the resize carry smaller offsets than the `resize` frame. |
+| **Foreground-group query** | `shell_in_foreground` (`:784`): `handle.foreground_group()` compared with the child's group; also read inside `kill` before the master closes; used by `ws_handlers.py` (the "is the shell at its prompt" checks) | A request/answer; it must be answerable while output is flowing. |
+| **Kill** | `kill` (`:1151`): descendant snapshot, then `killpg` of the child's group and the snapshotted descendants, with an optional SIGTERM-first grace (`ShutdownSpec`) | The snapshot and the signals both need the host (it holds the child and the group). The grace policy stays Python's: the host exposes "signal group", "signal pids", "close master". |
+| **Exit status** | EOF/EIO on the master, then `waitpid` | The host reports `exit` with status or signal at its byte offset (P3). |
+| **The pid registry** | `pty_registry.register` / `unregister` / `update_descendants` (`:650`, `:748`, `:1471`, `:1497`), used to reap orphans after a crash | Python keeps writing it (it owns the data dir), fed by the host's spawn and exit answers; a host crash is then reaped by the same registry. |
+
+*How a backend injection and the user's keystrokes are ordered.* Today both
+reach the PTY through `TerminalService.write` on the one event loop, so a
+delivered message or a submit (one `write` call) can never be split by a
+keystroke. Once the renderer writes to the host directly there are two
+writers. The rule: the host appends **whole input frames** to the stream's
+input buffer in arrival order, and a backend injection that is more than one
+frame (a paste then the Enter that submits it) takes an **input lease** first:
+between `lease` and `release` the host queues the renderer's keystrokes behind
+the injection, and a lease that is not released within a bound (2 s) is
+dropped, so a backend that died mid-injection cannot freeze the pane's input.
+A single-frame injection needs no lease.
+
 The host's renderer socket authenticates each connection before it serves a
 byte: a per-launch random token handed to the renderer over the existing
 authenticated backend channel, presented in the first (hello) frame, compared
-in constant time, and the listener binds loopback only. A connection that
-fails the check is closed with no reply. The listener is a new trust boundary
-and is listed as a planned item in `docs/en-US/architecture.md`.
+in constant time, and the listener binds loopback only. The token is **never
+put in a URL** (no query string, no path, no subprotocol: those are logged and
+shown in devtools). If the transport is a WebSocket, the handshake also checks
+the `Origin` header against the app's own origins and refuses anything else
+before the upgrade, because a web page in the user's browser can open a
+WebSocket to a loopback port. A connection that fails either check is closed
+with no reply. The listener is a new trust boundary and is listed as a planned
+item in `docs/en-US/architecture.md`.
 
-**P3. The PTY parity oracle.** Recorded from main, per scenario: the raw byte
-stream read off the master, the WebSocket frames the backend emitted (type,
-stream, length, payload), and the order of resize and exit events relative to
-the data. Scenarios: burst output, split multi-byte characters, a resize
-mid-stream, exit with unread output, EOF versus EIO. The host replays each
-scenario through a pseudo-terminal running a scripted child and requires the
-same frame sequence, byte for byte, with resize and exit ordering equal.
-Timing is not compared; ordering and content are.
+**P3. The PTY parity oracle (M2).** Main's frame boundaries come from a timer
+and caps (`_absorb_output`, `_flush_output`), so two runs of main do not cut
+the same frames, and main's frames are not in the host's format. A frame
+sequence therefore cannot be the oracle. Recorded from main, per scenario and
+per stream: the **concatenated bytes** the consumer received, and the **byte
+offset** (a position in that concatenation) of each resize acknowledgement
+and of the exit. The host replays each scenario through a pseudo-terminal
+running a scripted child and requires, per stream, the same concatenated
+bytes and the same offsets for resize and exit, plus the invariants every
+frame must keep on its own: no payload above the size cap (64 KB on main,
+1 MiB on the wire, P7), and no multi-byte character split across a frame
+where main guarantees it does not. Scenarios: burst output, split multi-byte
+characters, a resize mid-stream, exit with unread output, EOF versus EIO.
+Timing and frame boundaries are not compared; content, ordering and the
+invariants are.
 
 **P4. A stalled read wedges its lane.** A read that blocks (a hung network
 volume) holds its lane's thread. Two options, the plan takes the first:
@@ -429,35 +471,84 @@ Whether panes survive a *backend* restart: not in this stage. They end with
 the backend; surviving would need a reattach protocol and a separate security
 review.
 
-**P6. No consumer versus a slow consumer.** With **no consumer** attached
-(window closed, pane detached) the host keeps draining the PTY into a bounded
-per-stream scrollback so the child never blocks. With a **slow consumer**
-attached it stops reading that one PTY (the kernel buffer then slows the
-child). Neither clears scrollback: the bound on the buffer drops the *oldest
-bytes from replay history*, never emits a clear sequence, and never discards
-bytes the consumer has not yet been given.
+**P6. No consumer versus a slow consumer (M3).** With **no consumer**
+attached (window closed, pane detached) the host keeps draining the PTY into a
+bounded per-stream scrollback so the child never blocks. A **slow consumer**
+is treated the same way after a bound: pausing the read would slow the agent
+itself whenever a window is in the background or the renderer lags, which is
+the case this rewrite is for, and main never does that (it drops its oldest
+queued output). So: while the consumer's unacknowledged bytes stay under the
+bound, the host sends as credit allows; past it (starting values 4 MiB
+unacknowledged, or no credit for 5 s, to be tuned by the P8 measure) the
+stream is "detached" for sending, the host keeps draining into scrollback,
+and the consumer catches up by replay from its last acknowledged offset (P7).
+The bound on the scrollback drops the *oldest bytes from replay history*,
+never emits a clear sequence, and a replay that finds its offset gone is told
+so by a `gap` frame (the lost range) and resumes at the oldest kept byte; the
+renderer keeps its terminal as it is and does not clear it.
+
+*Whose credit counts.* A stream has one **owner**, the window that owns the
+pane (what `_active_emit` routes to today). Only the owner's credit and
+acknowledgements move the stream's send position and decide "slow". A second
+consumer (a pop-out or mirrored view) is a **watcher**: it has its own offset,
+it is served from scrollback by replay, and it can never hold up the PTY read
+or the owner.
 
 **P7. Frame details.** Maximum payload length 1 MiB (larger is a protocol
 error that closes the connection). A hello frame first, carrying the protocol
-version and the token; an unknown version is refused. Each data frame carries
-a stream byte offset so a reconnect asks for "from offset N" and the host
-replays from scrollback or says the offset is gone. A credit frame grants the
+version and the token; an unknown version is refused. Every frame has the
+`offset` field of the header above, so each data frame carries its stream
+byte offset: a reconnect asks for "from offset N" and the host replays from
+scrollback or answers with a `gap` frame (P6). A credit frame grants the
 host permission to send N more bytes on a stream; the host sends nothing past
 its credit. Stream ids are allocated by the side that opens the stream from
 its own counter (host-opened odd, backend-opened even) and never reused within
 a connection.
 
-**P8. I/O model, dependency, and the measure.** Decision: a readiness loop
-(`poll`/`kqueue` through `libc`, already a dependency) on a small fixed thread
-count, not a thread per pane, because the motive is hundreds of panes.
-The WebSocket handshake and framing are hand-written (RFC 6455 subset: no
-extensions, no fragmentation we emit), keeping the crate's rule of serde,
-serde_json, libc and (Linux) libsqlite3-sys; adding a WebSocket crate would
-need the dependency rule changed first and is not planned. Acceptance for the
-scale motive: event-loop lag measured in `S/perf-harness` at **200 panes**
-with the host on, against the Python baseline recorded on the same machine;
-the host must not be worse at 20 panes and must show a lower p99 loop lag at
-200. A result that misses it is a defect to fix, not a budget to relax.
+**P8. I/O model, transport, and the measure (M4).** Decision: a readiness
+loop (`poll`/`kqueue` through `libc`, already a dependency) on a small fixed
+thread count, not a thread per pane, because the motive is hundreds of panes.
+
+*Transport to the renderer.* Two options were weighed.
+
+- **A hand-written WebSocket** (RFC 6455 subset), keeping the crate's rule of
+  serde, serde_json, libc and (Linux) libsqlite3-sys: it needs a hand-written
+  SHA-1, base64 and HTTP upgrade parser on a new loopback TCP listener that is
+  a trust boundary. Feasible, but the riskiest code in the plan, and any web
+  page can try to connect to a loopback port (hence the `Origin` and token
+  rules in P2).
+- **A Unix socket to the Electron main process, then a message port to the
+  renderer.** The socket has file permissions (a mode-0600 path in a
+  per-launch directory), no TCP listener, no token and none of the parsers
+  above; main relays frames to the renderer over a `MessagePort`. Costs: one
+  JS copy per frame in the main process, which must not become the new
+  bottleneck at 200 panes; Windows needs a named pipe (Windows is its own
+  stage anyway); and dev web mode (the renderer in a browser against its
+  isolated backend, `docs/en-US/ui-verification.md`) has no main process, so
+  the backend's WebSocket path stays for it.
+
+*Decision:* the end state uses the **Unix socket and message port**, because
+it removes the listener and the hand-written protocol code; the hand-written
+WebSocket is the fallback if the renderer-side measure below shows the main
+process hop is the bottleneck, and it carries the P2 rules. The temporary
+hop (behind the backend's existing WebSocket) needs neither. Adding a
+WebSocket crate would need the dependency rule changed first and is not
+planned.
+
+*Measures.* They differ by stage, so the first measurement cannot read as a
+failure of the design:
+
+- **The hop stage** (bytes still pass through Python, so the Python loop does
+  the same work as today): the measure is **not worse**, at 20 and 200 panes,
+  than the Python baseline recorded on the same machine.
+- **The end state** (the host serves the renderer): event-loop lag measured in
+  `S/perf-harness` at **200 panes** against that baseline, with a lower p99
+  loop lag at 200 and not worse at 20. A result that misses it is a defect to
+  fix, not a budget to relax.
+- **Renderer side** (where a user sees lag), added at both stages: long-task
+  time and p99 frame time on the renderer main thread at 200 panes, and the
+  keystroke-to-echo latency of one pane while the other 199 flood output. The
+  Python loop lag alone could improve while the renderer gets worse.
 
 **P9. How the host is switched on.** One key in the UI settings document,
 off by default, read once at backend start (a change applies to *new* panes).

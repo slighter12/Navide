@@ -127,12 +127,14 @@ vendor file) and running both suites; it was not committed:
    (`EXPECTED_VENDORS`, `CLI_NAMES`, `MEMORY_SOURCES`, the exemption sets, the
    plans plugin's frozen copy, `NO_LOG_READER`, `TURN_START_SIGNAL`, the ＋
    menu's cap) now derive from the declaration or the vendor's own spec, or are
-   recorded subsets. A second throwaway CLI, a copy of goose with its adapter
-   files, still needed: the `SNAPSHOT` in `test_install_deps_snapshot.py`, the
-   README vendor count and list, and the `CliAgentsHelp.vue` row. They are
-   listed in [Adding a CLI vendor](../adding-a-cli-vendor.md#other-hand-kept-lists).
-   So one declaration plus its tests is true of registration and of the
-   recording tests; it is not yet true of the whole repository.
+   recorded subsets (that includes the `SNAPSHOT` in
+   `test_install_deps_snapshot.py`). A second throwaway CLI, a copy of goose
+   with its adapter files, still needed: the README vendor count and list, and
+   the `CliAgentsHelp.vue` row. They are listed in
+   [Adding a CLI vendor](../adding-a-cli-vendor.md#other-hand-kept-lists), with
+   the one list a second binary name goes into by hand (the alias set beside
+   `CLI_NAMES`). So one declaration plus its tests is true of registration and
+   of the recording tests; the prose a person writes is what is left.
 
 For everything beyond launch and resume, add the vendor file of the side
 that needs it; each is found by its name:
