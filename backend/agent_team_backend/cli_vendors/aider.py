@@ -652,6 +652,8 @@ def identity_from_secret(secret):
 
 SPEC = VendorSpec(
     key="aider",
+    extensions_none_reason="aider has no extension system to show",
+    data_dirs_none_reason="aider keeps its files in the workspace, which is not a data root",
     # Provider/model selection is open-ended; no verified default host set.
     expected_hosts=(),
     # History is a configurable workspace FILE, not a dedicated data root.

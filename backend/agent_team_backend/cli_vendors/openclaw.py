@@ -487,6 +487,7 @@ _MEMORY_SOURCES = (
 
 SPEC = VendorSpec(
     memory_sources=_MEMORY_SOURCES,
+    cli_unverified_reason="wired from the docs (read 2026-11-07); no install to run, so no version was checked",
     key="openclaw",
     label="OpenClaw",
     extensions=ExtensionsSpec(

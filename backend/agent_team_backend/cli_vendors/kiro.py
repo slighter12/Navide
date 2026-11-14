@@ -74,6 +74,7 @@ _MEMORY_SOURCES = (
 
 SPEC = VendorSpec(
     memory_sources=_MEMORY_SOURCES,
+    cli_unverified_reason="wired from the docs (read 2026-11-12); no binary installed, so no version was checked",
     key="kiro",
     label="Kiro CLI (AWS)",
     extensions=ExtensionsSpec(
