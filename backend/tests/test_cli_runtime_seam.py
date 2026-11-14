@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -270,6 +271,72 @@ def test_one_failed_start_is_one_attempt_and_one_failure_however_many_callers_wa
     status = seam.status()
     assert status["failures"] == 1, "the start failed once"
     assert status["state"] == "waiting-to-restart", "one failed start does not trip the breaker"
+
+
+def test_a_start_that_cannot_get_a_thread_falls_back_backs_off_and_kills_the_child(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
+    exe = _stand_in(tmp_path, STALLS)
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(exe))
+    monkeypatch.setattr(cli_runtime, "BACKOFF_BASE_S", 1000.0)
+    children: list[Any] = []
+    real_popen = subprocess.Popen
+
+    def popen(*args: Any, **kwargs: Any) -> Any:
+        children.append(real_popen(*args, **kwargs))  # the start itself succeeds
+        return children[-1]
+
+    class OutOfThreads(threading.Thread):
+        def start(self) -> None:
+            if self.name == "cli-runtime-read":
+                raise RuntimeError("can't start new thread")
+            super().start()
+
+    monkeypatch.setattr(cli_runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(cli_runtime, "threading", SimpleNamespace(Thread=OutOfThreads, Lock=threading.Lock,
+                                                                  local=threading.local))
+    reader, chat = _qwen(tmp_path)
+    seam.apply(True)
+
+    assert reader.parse_incremental(chat, {}).events == [], "Python answered"
+    status = seam.status()
+    assert status["failures"] == 1 and status["state"] == "waiting-to-restart"
+    assert len(children) == 1 and children[0].poll() is not None, "the child was killed and reaped"
+
+
+def test_calls_during_a_start_are_deferred_not_faults_and_the_state_says_starting(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, caplog: pytest.LogCaptureFixture) -> None:
+    present = tmp_path / "navide-cli-runtime"
+    present.write_text("", encoding="utf-8")
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(present))
+    monkeypatch.setattr(cli_runtime, "BACKOFF_BASE_S", 1000.0)
+    monkeypatch.setattr(cli_runtime, "SLOW_START_S", 0.05)
+    entered, release = threading.Event(), threading.Event()
+
+    def held_start(_exe: Path) -> Any:
+        entered.set()
+        release.wait(10.0)
+        raise OSError("the start failed in the end")
+
+    monkeypatch.setattr(cli_runtime, "_Client", held_start)
+    seam.apply(True)
+    starter = threading.Thread(target=lambda: cli_runtime._call("qwen", "usage"), daemon=True)
+    starter.start()
+    assert entered.wait(10.0)
+    assert seam.status()["state"] == "starting"
+
+    with caplog.at_level(logging.WARNING, logger=cli_runtime.log.name):
+        time.sleep(0.1)
+        for _ in range(3):
+            assert cli_runtime._call("qwen", "usage") is None
+    assert seam.status()["calls"] == {"qwen": {"rust": 0, "unsupported": 0, "unreadable": 0, "deferred": 3,
+                                               "fallback": 0}}
+    assert len([r for r in caplog.records if "has been starting" in r.getMessage()]) == 1, "said once"
+
+    release.set()
+    starter.join(10.0)
+    assert not starter.is_alive()
+    status = seam.status()
+    assert status["state"] == "waiting-to-restart" and status["failures"] == 1
 
 
 def test_wrapping_a_reader_twice_routes_it_once(seam) -> None:

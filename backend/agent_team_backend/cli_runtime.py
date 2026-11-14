@@ -83,6 +83,8 @@ BACKOFF_MAX_S = 60.0
 #: A process that has run this long without failing has a clean record again.
 HEALTHY_AFTER_S = 120.0
 _CLOSE_GRACE_S = 2.0
+#: A start that takes longer than this is said once (a binary on a stalled volume).
+SLOW_START_S = 3.0
 
 #: The outcomes counted per CLI. ``rust``: answered by the runtime.
 #: ``unsupported``: the runtime declined a store its declaration does not
@@ -90,7 +92,8 @@ _CLOSE_GRACE_S = 2.0
 #: ``Unsupported``). ``unreadable``: the file could not be opened or read, and
 #: the Python reader decided what that means, as on main. ``deferred``: the
 #: reader asked to make its own reads (one with a failing query on record
-#: does, until that query works again). ``fallback``: a fault — a stalled,
+#: does, until that query works again), or the call arrived while another
+#: caller was starting the process. ``fallback``: a fault — a stalled,
 #: dead or failing process, or an error answer.
 OUTCOMES = ("rust", "unsupported", "unreadable", "deferred", "fallback")
 
@@ -113,6 +116,11 @@ _stopping = False
 #: A caller is starting the process: the others use Python meanwhile, so one
 #: failed start is one failure however many callers were waiting to start it.
 _starting = False
+#: When the start in flight began, and whether it was said to be slow.
+_start_began = 0.0
+_slow_start_logged = False
+#: Per calling thread: the last `_client_for_call` stepped aside for a start.
+_aside = threading.local()
 _no_binary_logged = False
 #: (CLI, kind) of the error answers already logged.
 _errors_logged: set[tuple[str, str]] = set()
@@ -201,6 +209,8 @@ def status() -> dict[str, Any]:
             state = "off"
         elif _breaker_open:
             state = "stopped-after-failures"
+        elif _starting:
+            state = "starting"
         elif client is not None and not client.dead:
             state = "running"
         elif time.monotonic() < _retry_at:
@@ -247,8 +257,18 @@ class _Client:
         self.generation = 0
         #: What the process observes: CLI key -> {"cwd": form}. None until asked.
         self.observed: dict[str, dict] | None = None
-        for target, name in ((self._write, "cli-runtime-write"), (self._read, "cli-runtime-read")):
-            threading.Thread(target=target, name=name, daemon=True).start()
+        try:
+            for target, name in ((self._write, "cli-runtime-write"), (self._read, "cli-runtime-read")):
+                threading.Thread(target=target, name=name, daemon=True).start()
+        except BaseException:
+            # No thread may own the pipes (the thread limit): the caller never
+            # gets this object, so end and reap the child here.
+            self.kill()
+            try:
+                self._proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                pass
+            raise
 
     def _write(self) -> None:
         stdin = self._proc.stdin
@@ -389,18 +409,28 @@ def _process_failed(client: "_Client | None", err: BaseException) -> None:
 
 def _client_for_call() -> "_Client | None":
     """The running process, started if it may be; None means "use Python"."""
-    global _client, _generation, _starting
+    global _client, _generation, _starting, _start_began, _slow_start_logged
+    _aside.stepped = False
+    slow_for = 0.0
     with _state:
         if not _enabled or _breaker_open or _stopping:
             return None
         current = _client
         if current is not None and not current.dead:
             return current
-        waiting = time.monotonic() < _retry_at
+        now = time.monotonic()
+        waiting = now < _retry_at
         # One caller starts the process; the others use Python for this call.
         starts = current is None and not waiting and not _starting
         if starts:
-            _starting = True
+            _starting, _start_began, _slow_start_logged = True, now, False
+        elif current is None and _starting:
+            _aside.stepped = True
+            if now - _start_began > SLOW_START_S and not _slow_start_logged:
+                _slow_start_logged = True
+                slow_for = now - _start_began
+    if slow_for:
+        log.warning("navide-cli-runtime has been starting for %.0f s; readers use Python until it is up", slow_for)
     if current is not None:
         # It exited on its own between calls.
         _process_failed(current, OSError("navide-cli-runtime exited"))
@@ -408,13 +438,13 @@ def _client_for_call() -> "_Client | None":
     if not starts:
         return None
     try:
-        exe = binary()
-        if exe is None:
-            _log_no_binary()
-            return None
         try:
+            exe = binary()
+            if exe is None:
+                _log_no_binary()
+                return None
             fresh = _Client(exe)
-        except OSError as err:
+        except Exception as err:  # noqa: BLE001 — any failed start falls back to Python and backs off
             _process_failed(None, err)
             return None
         with _state:
@@ -452,7 +482,9 @@ def _call(vendor: str, op: str, **fields: Any) -> "tuple[Any, dict] | None":
     about that CLI; None means "use Python"."""
     client = _client_for_call()
     if client is None:
-        if _enabled and vendor in _known and binary() is not None:
+        if getattr(_aside, "stepped", False):
+            _count(vendor, "deferred")  # another caller is starting the process: not a fault
+        elif _enabled and vendor in _known and binary() is not None:
             _count(vendor, "fallback")
         return None
     try:
