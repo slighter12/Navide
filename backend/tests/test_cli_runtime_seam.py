@@ -13,10 +13,12 @@ The misbehaving processes are small scripts started in place of the binary
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
@@ -462,3 +464,26 @@ def test_what_the_reader_would_log_is_logged_once_through_its_own_logger(
     said = [r for r in caplog.records if "names no session key" in r.getMessage()]
     assert len(said) == 1 and said[0].name == "agent_team_backend.log_readers.openclaw"
     assert seam.status()["calls"]["openclaw"]["fallback"] == 0
+
+
+def test_cargo_runs_with_the_accounts_rust_homes_not_the_suites_empty_home(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite's ``HOME`` is an empty directory. A rustup-managed cargo given
+    only that finds no toolchain there, which failed every build on CI's Linux."""
+    pwd = pytest.importorskip("pwd")
+    account = tmp_path / "account"
+    for name in (".rustup", ".cargo"):
+        (account / name).mkdir(parents=True)
+    stand_in = tmp_path / "bin" / "cargo"
+    stand_in.parent.mkdir()
+    stand_in.write_text('#!/bin/sh\necho "$RUSTUP_HOME"\necho "$CARGO_HOME"\n', encoding="utf-8")
+    stand_in.chmod(0o755)
+    monkeypatch.setenv("PATH", str(stand_in.parent), prepend=os.pathsep)
+    monkeypatch.setenv(cli_runtime_build.REQUIRED_ENV, "1")
+    monkeypatch.delenv("RUSTUP_HOME", raising=False)
+    monkeypatch.delenv("CARGO_HOME", raising=False)
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: SimpleNamespace(pw_dir=str(account)))
+    assert cli_runtime_build.cargo("build").stdout.splitlines() == [str(account / ".rustup"), str(account / ".cargo")]
+    # A home the environment names is the one cargo gets.
+    monkeypatch.setenv("RUSTUP_HOME", str(tmp_path / "named"))
+    assert cli_runtime_build.cargo("build").stdout.splitlines()[0] == str(tmp_path / "named")

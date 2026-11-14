@@ -49,10 +49,32 @@ def cargo(*args: str, timeout: float = 1500.0) -> "subprocess.CompletedProcess[s
             pytest.fail(f"cargo was not found, and {REQUIRED_ENV}=1")
         pytest.skip("cargo is not installed: navide-cli-runtime cannot be built from source")
     done = subprocess.run([exe, args[0], "--locked", "--manifest-path", str(CRATE / "Cargo.toml"), *args[1:]],
-                          capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+                          capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=_toolchain_env())
     if done.returncode != 0:
         pytest.fail(f"cargo {args[0]} failed for navide-cli-runtime:\n{done.stderr[-4000:]}")
     return done
+
+
+def _toolchain_env() -> dict[str, str]:
+    """This process's environment, with the Rust homes of the account running it.
+
+    The suite's conftest points ``HOME`` at an empty directory. A cargo that
+    rustup manages looks for its toolchains under ``$HOME/.rustup`` and finds
+    none there: it fails ("rustup could not choose a version of cargo to
+    run") or, with ``RUSTUP_TOOLCHAIN`` set, installs that toolchain into the
+    empty directory. Cargo would fetch every crate again into
+    ``$HOME/.cargo`` too. Both homes are
+    named from the account's own home, which the password database still
+    knows, unless the environment already names them.
+    """
+    import pwd  # Unix only, as this helper is past the Windows skip
+
+    env = dict(os.environ)
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    for key, name in (("RUSTUP_HOME", ".rustup"), ("CARGO_HOME", ".cargo")):
+        if key not in env and (home / name).is_dir():
+            env[key] = str(home / name)
+    return env
 
 
 def _newer_than_the_source(exe: Path) -> bool:
