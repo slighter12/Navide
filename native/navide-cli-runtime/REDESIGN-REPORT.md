@@ -3,8 +3,9 @@
 Branch `refactor/cli-runtime-lifecycle-main`, based on upstream/main
 `75272dd4b`, pushed to the fork (draft PR 18). The design is in `DESIGN.md`.
 
-This is the state after fix round 6 (the full review), first in this report
-after the PR summary. Round 5 answers reviews 5-A and 5-B (no finding Medium
+This is the state after fix round 7 (the last seven review items), first in
+this report after the PR summary; round 6 (the full review) follows it. Round
+5 answers reviews 5-A and 5-B (no finding Medium
 or higher). Round 4's section follows
 (reviews 4-A and 4-B). Round 2 ended at `5690f50d1` (CI run 43553202513 was
 its last); round 3 answered review 3-A (N1 to N7), whose section follows
@@ -24,7 +25,8 @@ section, finding by finding.
   agent specs and the Rust readers are all read from it. The Python readers
   stay in the tree and answer whenever the runtime cannot.
 - **What it costs, and what it does not do.** A routed call costs about 62 µs
-  against 23 µs for the Python reader (micro-benchmark below). This PR does not
+  against 23 µs for the Python reader (micro-benchmark below; the round 7
+re-run, 2026-11-14, gave 63 µs against 23 µs). This PR does not
   target the lag with hundreds of agents; it is the seam, the declaration flow
   and the parity proof that a later stage builds on.
 - **What is off by default.** The `rustCliRuntime` UI setting (no Settings
@@ -34,6 +36,60 @@ section, finding by finding.
   (this repository has no unsigned `--dir` script and `dist` needs pnpm);
   Linux and Windows locally (CI covers them, see the CI table in the round 6
   section); the Rust side of the Windows path.
+- **Also not run.**
+  - No reader call was routed through a packaged sidecar. In the packaged-like
+    layout (a frozen backend beside `<resources>/bin/navide-cli-runtime`) only
+    `/health` was read, so the handshake and the calls were not exercised there.
+  - The perf harness (hundreds of panes) was not re-run for round 6 or round 7.
+    The micro-benchmark was re-run in round 7 (2026-11-14, see below); its
+    earlier 62 µs / 23 µs figure predated round 6.
+
+## Fix round 7 (the last review's seven items)
+
+Starts from `a8d6d00fa` (round 6 head; its final CI is run 43610111921: green,
+Secret scan 43610111901: green). Every item below is the manager's decision
+from review 7; nothing else changed.
+
+| Item | Status | What changed | The test that shows it |
+|------|--------|--------------|------------------------|
+| **K2** bytes that `json.loads(bytes)` reads were `Rejected` | Fixed | `pyjson::parse_bytes` answers `Python` for bytes that start with a UTF-8 BOM (`EF BB BF`) or a UTF-16 BOM (`FF FE`, `FE FF`), or that hold a NUL in the first 4 bytes (how `json.detect_encoding` recognises UTF-16 and UTF-32 without a mark). Otherwise as before: valid UTF-8 only. | `tests/json_dialect.json` gains 13 cases (65 in all): a duplicate key, `-NaN` twice, and 10 byte cases given as `hex` (plain UTF-8, UTF-8 BOM, UTF-16 LE and BE with a BOM, UTF-16 without one, UTF-32 without one, a BOM in front of a non-JSON body, non-UTF-8 bytes, an unfinished object). `test_cli_runtime_json.py` checks each `python_accepts` against CPython 3.12 (69 passed) and the crate test checks each `expect`. The parity scenario `cursor_db` gains a blob cell of UTF-8-with-BOM JSON (`python_reads: ["activity@4"]`): switch-on equals all-Python. **Fails on old code:** `env -u NAVIDE_PANE_MARK uv --project backend run pytest -q backend/tests/test_cli_runtime_parity.py -k "switch_on and cursor"` with the new check disabled failed: the switch-on run returned no activity event for the BOM step, where all-Python returned a `turn_complete` event (the BOM cell's record was lost); the crate test `the_recorded_dialect_cases_are_told_apart_as_python_does` failed 7 byte cases (`rejected, expected "python"`) before the fix. The duplicate-key and `-NaN` cases passed on the old code (they pin what the review checked by hand). |
+| **K1** `notes` / `reads` applied outside the fallback | Fixed | `_ask` only asks; each route applies `notes` and `reads` (`_apply_side`) inside its conversion `try`, after the result is converted and before the caller's state is touched. `_log_notes` and `_apply_reads` read every entry before they write any, so a malformed entry writes nothing. | `test_what_an_unreadable_answer_said_beside_its_result_is_not_applied_and_the_reader_reads` (seam; usage, activity and turns, each with an answer whose `result` is `None` and with a `reads` entry that has no `reason` after a valid one): falls back, the reader's own read returns, one "shape this backend cannot read" line, nothing in the read-problem registry. **Fails on old code:** the same command on the round 6 `cli_runtime.py` failed all 6 cases (`AttributeError` on a `None` result; `KeyError: 'reason'`, with the first entry already written to the registry). |
+| **C2** docs: "the next call is the runtime's again" | Fixed | Corrected in the `OUTCOMES` comment of `cli_runtime.py` and under "Rust differences from main (known)". | Docs only. |
+| **A1** dialect case count | Fixed | The round 6 table says 65 cases (52 when round 6 ended). | `len(json.loads(tests/json_dialect.json))` is 65. |
+| **A2** "What was not run" | Fixed | Added the packaged sidecar, the perf harness, and the re-run micro-benchmark. | See "Micro-benchmark" for the new numbers. |
+
+### Decisions inside the items
+
+- `parse_bytes` checks the BOM and NUL rules before it decodes, so a text such
+  as `\0\0` is `Python` (wider than CPython, which then rejects it): a wider
+  answer costs a call, never a record.
+- The `hex` form was added to `json_dialect.json` rather than a second file, so
+  the crate and Python read one list; `text` cases are unchanged.
+- The seam test uses OpenCode's reader because it has the read-problem
+  registry (`_report_problem` / `_read_ok`); a reader without one ignores
+  `reads` as before.
+- The parity scenario declares only `activity@4` as a hand-over: in this
+  scenario Cursor's usage and turns calls were answered by the runtime (the
+  test's call count shows it), and the counter assertion (`python == hand-overs
+  x routes`) holds with the switch on and with the plugin.
+
+### Commands and results (round 7)
+
+| Command | Result |
+|---------|--------|
+| `cargo test --offline` | 49 passed (8 suites). |
+| `cargo clippy --offline --all-targets` | no issues. |
+| `cargo check --offline --all-targets` | no warnings. |
+| `env -u NAVIDE_PANE_MARK uv --project backend run pytest -q` on parity, seam, json, declarations (switch off) | 309 passed. |
+| the same four files plus `backend/tests/vendors`, `test_claude_activity_resume.py`, `test_activity_high_water.py` with `-p tests.cli_runtime_on` (switch on) | 1119 passed, 4 skipped. All 17 CLIs are in the counter table and `fallback=0` for every one. Against round 6 the table changed for one CLI: `cursor` rust 47 -> 49 and python 0 -> 3 (the new BOM step's one hand-over: 2 in `test_switch_on_matches_python[cursor_db]`, which counts it once per route, and 1 in `test_python_readers_match_the_parity_fixtures[cursor_db]`, where the plugin's class route answers; each run alone was checked: 2 and 1). Every other row is round 6's, line for line. |
+| `node scripts/changed-backend-tests.mjs` (bare, after the last code change, waited for in-turn) | exit 0: 16971 passed, 40 skipped, 110 deselected, 1 xfailed (13 min 23 s), then the serial pass 106 passed, 4 skipped. |
+| `git fetch upstream`, `git merge-tree --write-tree upstream/main HEAD` | clean (a tree id, no conflicts). upstream/main had moved to `1a6259b0d`. |
+| `uv --project backend run python backend/tests/bench_cli_runtime.py` and `... 500 20000` | see "Micro-benchmark": 63.1 µs routed against 22.6 µs (empty start); 65.0 against 22.5 (20,000 earlier records). |
+
+`cargo fmt --check` was not used: the crate has never been rustfmt-formatted
+(it reports differences in files this round did not touch).
+
+The CI result for the round 7 head is in the delivery message.
 
 ## Fix round 6 (full review): state of this report
 
@@ -71,7 +127,7 @@ that are not JSON) and genuinely corrupt lines on Python for good.
 | Item | Status | What changed | The test that shows it |
 |------|--------|--------------|------------------------|
 | **Merge, L1** `MCP_TIMEOUT` | Fixed | `git merge upstream/main`; claude's `env_defaults` carries `MCP_TIMEOUT=120000`; declarations regenerated; `cli_declarations_main.json` follows upstream's later change. | `test_spawn_env_request.py::test_a_claude_pane_gets_a_longer_mcp_connect_budget` passes; `test_cli_declarations.py`. |
-| **C1** a record Python reads is stepped over | Fixed | `pyjson::parse` / `lenient`; `Error::PythonReads` is wire kind `python` and outcome `python`; nothing is committed on a hand-over (file lines, SQLite JSON cells). | Six new probe fixtures (`claude_probe_{surrogate,nan,deep,corrupt}`, `codex_probe_surrogate`, `opencode_probe_surrogate`) in `test_switch_on_matches_python` (switch-on equals all-Python, for usage, activity and turns); `test_cli_runtime_json.py` (55 dialect cases, `tests/json_dialect.json`). **Fails on old code:** `... pytest backend/tests/test_cli_runtime_parity.py -k "test_switch_on_matches_python and probe"` failed 6 probes on the pre-fix binary. `claude_probe_corrupt` shows that Python steps over a corrupt line, so the next checkpoint is past it and nothing loops. |
+| **C1** a record Python reads is stepped over | Fixed | `pyjson::parse` / `lenient`; `Error::PythonReads` is wire kind `python` and outcome `python`; nothing is committed on a hand-over (file lines, SQLite JSON cells). | Six new probe fixtures (`claude_probe_{surrogate,nan,deep,corrupt}`, `codex_probe_surrogate`, `opencode_probe_surrogate`) in `test_switch_on_matches_python` (switch-on equals all-Python, for usage, activity and turns); `test_cli_runtime_json.py` (52 dialect cases when round 6 ended, 65 after round 7: `tests/json_dialect.json`). **Fails on old code:** `... pytest backend/tests/test_cli_runtime_parity.py -k "test_switch_on_matches_python and probe"` failed 6 probes on the pre-fix binary. `claude_probe_corrupt` shows that Python steps over a corrupt line, so the next checkpoint is past it and nothing loops. |
 | **C2** a request the runtime cannot parse | Fixed | `wire::parse_request` parses to `Value` first and answers a bad request under its id (kind `request`, or `python`); a non-UTF-8 line is answered, not fatal. `_Client.call` encodes strictly (`ensure_ascii=False`, `allow_nan=False`); a path or key Python cannot send raises `PythonReads` before a slot is taken: no request, no kill, no breaker failure. | Crate: `a_request_that_cannot_be_parsed_is_answered_under_its_id`. Seam: `test_a_request_python_cannot_send_as_utf8_is_python_reads_it_and_the_process_is_left_alone`, `test_a_request_the_process_refuses_is_answered_at_once_and_does_not_count_against_it`, `test_the_binary_answers_a_request_it_cannot_parse_under_its_id` (the real binary). **Not shown failing on old code** (read from the code: `lines()` aborted on non-UTF-8, and an `id: null` answer waited the 10 s timeout). |
 | **R1 / C4** SQLite open mode | Fixed | `mode=ro` first, checked with a schema probe; `immutable=1` only when that is refused and the database has no `-wal` / `-shm`; after an immutable read a `-wal` that appeared discards the read (`PythonReads`). The comment about the system SQLite stays. | `a_wal_database_without_sidecars_is_read_and_a_wal_that_appears_after_an_immutable_read_is_noticed` (it uses `wal_checkpoint(TRUNCATE)` and removes the sidecars by hand; macOS was confirmed to take the immutable path). The remaining difference is listed under "Rust differences from main (known)". |
 | **C3** a field missing from the answer | Fixed | The conversion of an answer into Python objects is inside the fallback (`_bad_answer`: `rust` is taken back, `fallback` counted, logged once per CLI); `_activity` converts everything before it mutates the caller's bag. | `test_an_answer_that_cannot_be_read_falls_back_to_python_not_into_the_watcher` (seam). Not shown failing on old code. |
@@ -118,7 +174,7 @@ that are not JSON) and genuinely corrupt lines on Python for good.
 | CI | Result |
 |----|--------|
 | Run on the round 6 push (`d91e17b29`) | run 43607754703: green (every job, Windows included); Secret scan 43607754771: green. |
-| Run on the push that fixes the counter reset | see the delivery message |
+| Run on the push that fixes the counter reset (`a8d6d00fa`, the round 6 head) | run 43610111921: green; Secret scan 43610111901: green; `gh pr checks 18`: 24 passed, 0 failed. |
 
 ## Fix round 5: the Lows and every known contradiction
 
@@ -375,6 +431,25 @@ build, microseconds per call, median; "mean" is the mean of the two methods.
 |------------|---------------------:|---------------:|--------------:|
 | starts empty, 2,000 rounds | 22.9 | 82.1 | 61.8 |
 | 20,000 earlier records, 500 rounds | 23.5 | 392.5 | 62.7 |
+
+Re-run in round 7 (2026-11-14, macOS, release build, head `a8d6d00fa` plus
+the round 7 changes, which the benchmark's Claude transcript does not touch):
+`uv --project backend run python backend/tests/bench_cli_runtime.py` (2,000
+rounds, starts empty) and `... bench_cli_runtime.py 500 20000`. The first
+table's "after" column was measured before round 6; these are the current
+numbers.
+
+| Transcript | main's Python reader | Routed, round 7 |
+|------------|---------------------:|----------------:|
+| starts empty, 2,000 rounds | 22.6 | 63.1 |
+| 20,000 earlier records, 500 rounds | 22.5 | 65.0 |
+
+Per method (µs, round 7): `parse_incremental` 24.2 / 63.3 and
+`parse_activity` 21.0 / 63.0 (empty start); 24.2 / 65.3 and 20.7 / 64.7
+(20,000 earlier). One routed usage call taken apart (empty start): encode
+1.6, pipe 11.5, threads 8.0, rust 35.8, decode 1.5, objects 0.5. Every call
+was answered by the runtime (`fallback` 0). The routed call is about 3 times
+Python's, as before round 6; the perf harness was not re-run.
 
 "Before" in the first row is the runtime as built at `aec1a324b` plus this
 round's earlier commits (the read path was untouched until then). The second
@@ -700,7 +775,12 @@ Still open, all in cases no fixture or vendor test reaches:
   `_num` would.
 - antigravity's workspace is recomputed every walk (main caches by mtime), and
   its is-a-directory test is relative to the process cwd for relative paths.
-- A JSON BOM inside a SQLite BLOB is not stripped.
+- A JSON BOM inside a SQLite BLOB (round 7): `json.loads(bytes)` detects the
+  encoding, so bytes that start with a UTF-8 or UTF-16 BOM, or hold a NUL in
+  the first 4 bytes (UTF-16 or UTF-32 without a mark), are handed to the Python
+  reader (`pyjson::parse_bytes` answers `Python`); the runtime does not strip
+  or decode them itself. A BOM in front of *text* (`json.loads(str)`) is still
+  rejected, as main rejects it. Anything else that is not UTF-8 is `Rejected`.
 - goose's store env value is not checked for being absolute.
 - `\d` is ASCII in aider's matchers and `char::is_numeric` in hermes's (main:
   Unicode decimal digits); aider's case-insensitive words fold ASCII only.
@@ -710,8 +790,13 @@ Still open, all in cases no fixture or vendor test reaches:
   escape, `NaN` / `Infinity`, a number out of a double's range or of any
   length, nesting past 128 levels) hands the whole call to the Python reader:
   the answer is the non-fault kind `python` (counted as `python`), nothing is
-  committed, and the next call is the runtime's again once Python's reader has
-  stepped past the record as main does. The rule is the classifier
+  committed. On an incremental path (usage, activity) the next call is the
+  runtime's again once Python's reader has stepped past the record as main
+  does. **That does not hold for whole-file passes** (`turns_for_session`,
+  SQLite counters, full-usage passes): they have no checkpoint to move, so
+  after one Python-only record they stay on Python for that file for as long as
+  the record is in it (each poll is counted as `python`). That costs time and
+  never a record. The rule is the classifier
   `pyjson::parse` (`Value`, `Python` or `Rejected`), not "any parse failure",
   which would have kept plain-text cells (hermes `content`, opencode rows that
   are not JSON) and corrupt lines on Python for good. The classifier is
