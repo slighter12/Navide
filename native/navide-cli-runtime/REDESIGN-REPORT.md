@@ -1,12 +1,115 @@
 # Redesign report: lifecycle runtime on main
 
 Branch `refactor/cli-runtime-lifecycle-main`, based on upstream/main
-`75272dd4b`. Nothing is pushed. The design is in `DESIGN.md`.
+`75272dd4b`, pushed to the fork (draft PR 18). The design is in `DESIGN.md`.
 
-This is the state after fix round 1 (the first round ended at `543c573f2`).
-Both reviews of that round said WITH LIMITS; the first part of this report
-goes through every finding of both. The rest describes what the branch holds
-now.
+This is the state after fix round 2. Round 1 ended at `aec1a324b`; its two
+reviews (2-A: WITH LIMITS, 2-B: NOT READY as a base) are the first part of
+this report, finding by finding. Round 1's own table follows, and the rest
+describes what the branch holds now.
+
+## Fix round 2: every review 2 finding
+
+"Before" is what the code at `aec1a324b` did. Each fix names the test that
+shows it; where that test was run against the unfixed code, the result is
+given.
+
+### Acted on
+
+| Finding | Status | What changed | The test that shows it |
+|---------|--------|--------------|------------------------|
+| **B-1** High, **A goal 1**: adding a CLI edited two shared registries | Fixed | A declaration names the CLI's place in the two lists (`Cli::order.menu`, `order.registry`). `cli_vendors/registry.py` imports each declared CLI's module by its key; `agents/index.ts` finds spec files with `import.meta.glob`. Neither keeps a list, and a declared CLI with no adapter file is registered from its declaration alone. `AgentKey` is the declared keys, so the frontend copy of the declarations became a typed constant (`agents/_cli_declarations.ts`). DESIGN.md and `docs/en-US/cli-extension-guide.md` state exactly which files a new CLI needs. | Backend: `test_cli_vendors_registry.py::test_registry_is_discovered_in_mains_order` (main's order, recorded; each spec is its module's `SPEC`), `test_a_declared_cli_with_no_module_is_registered_from_its_declaration`, `test_a_vendor_module_that_cannot_be_imported_is_not_mistaken_for_a_missing_one`, `test_pyinstaller_spec.py::test_every_vendor_module_is_a_hidden_import`. Before the hand tuple was deleted, a one-off test compared the discovered tuple with it, spec by spec, by identity: 20 of 20, same order. Frontend: `agents/__tests__/declared.test.ts` "lists the specs in the order main listed them", `specs.test.ts` "lists every spec file, found without being registered". |
+| **B-2** High, **A-N1** Medium: the currency test compared the JSON with a prebuilt binary and skipped without one; no CI ran the crate | Fixed | `tests/checked_in.rs` (plain `cargo test`, no binary) compares both checked-in copies with what the source prints and rewrites them on request. The backend currency test runs `cargo run -- declarations launch`. Every backend test that runs the runtime has cargo bring the release build up to date first (`tests/cli_runtime_build.py`): with `NAVIDE_CLI_RUNTIME_REQUIRED=1` a runtime that cannot be built is a failure, never a skip. CI has a `cli-runtime` job on Linux and macOS, on the backend scope of `scripts/ci-changed-scopes.mjs` and in the required gate: `cargo check` with warnings denied, `cargo test`, the sidecar build, the backend's runtime tests with the switch off, then the vendor suites with `-p tests.cli_runtime_on`. | `tests/checked_in.rs::the_checked_in_declarations_are_what_the_source_prints`: run after `order` was added to the declarations and before regenerating, it failed on the stale JSON with no release rebuild. `tests/infrastructure/cliRuntimePackaging.test.ts` ("Rust CLI runtime in CI"), `ciPathFilter.test.ts`. |
+| **B-3** Medium, **A-N2** Medium: one dead process counted once per waiting caller | Fixed | Every process that becomes the current one has a generation; `_process_failed` counts a generation once, under `_state`. | `test_cli_runtime_seam.py::test_one_dead_process_is_one_failure_however_many_callers_waited`: 8 callers behind a barrier, a stand-in that exits once all 8 are waiting. Before: `failures == 8`, breaker open. After: 1, `waiting-to-restart`. |
+| **B-4** Medium, **A-N10**: `Vendor::probe` took `&mut dyn FnMut` | Fixed | `probe` is generic over the query function. `src/` holds no `dyn`. `registry::observer(key)` builds the one observer asked for. | Compile-time; `grep -rn dyn src/` is empty. |
+| **Packaging** (A, B): no build step put the binary in a package | Wired, not yet exercised | `scripts/build-cli-runtime.mjs` (modelled on `build-stt.mjs`; `build:cli-runtime`) stages the release binary in `build/cli-runtime/`; the macOS and Linux `extraResources` copy it to `<resources>/bin`; `release.yml` builds it where it builds the speech sidecar (required on macOS arm64 and Linux x64, best-effort on the Linux arm64 dry run), verifies its Developer ID signature and hardened runtime on macOS and its presence in the Linux AppImage. Windows carries nothing, and the script, `package.json` and the tests say so. **A release dry run is still needed**: none was run, so signing, notarization and the package contents are unverified. | `tests/infrastructure/cliRuntimePackaging.test.ts` (16 tests: script, staged name against the seam's, both resource lists, no Windows entry, the three release jobs, the macOS and Linux verify steps). The script itself was run: it built and staged the binary. |
+| **Routed-call overhead** (manager; the harness's 0.19 ms against 0.10 ms) | Reduced; the boundary's own cost remains | Found with `backend/tests/bench_cli_runtime.py`: every call read the **whole transcript** to look at the header lines a slot is seeded from. Fixed in `observe/file.rs::all_lines` (line by line, no further than asked) and one path lookup saved in the tail read. Numbers under "Micro-benchmark". | `observe/file.rs::a_header_read_stops_at_the_lines_it_was_asked_for` (a pipe that never ends: the old read would not return). |
+| **A-N3** Low: a call registered as the reader thread ended waited out its timeout | Fixed | `dead` is set and checked under the lock a call registers under. | `test_a_call_that_arrives_as_the_process_dies_does_not_wait_out_its_timeout`. Before: `TimeoutError` after 30 s. |
+| **A-N4** Medium if confirmed: `joined` read a cell's type after converting it to text | Confirmed, fixed | The type is read first. | `observe/sqlite.rs::a_blob_that_is_not_utf8_is_joined_as_a_blob`. Written first, it failed against the old order: `joined` returned `None` for a BLOB holding `0xFF`. |
+| **A-N5** Low: an error answer logged on every poll; a panic dropped a whole lane's reader memory | Fixed | The seam logs an error answer once per CLI and kind (`status()` still counts every one). A panic replaces only the observer of the request's CLI. | `test_an_error_answered_on_every_poll_is_logged_once_and_counted_every_time` (before: 5 warnings); `wire.rs::a_panic_costs_only_its_own_clis_reader_memory` (before: the other CLI's observer was rebuilt too). |
+| **A-N6** Low, **A-D2** frontend: 17 hand-written resume patterns | Partly generated; the rest documented | `declared()` derives `resumeCommandPattern` from the declared program, base arguments and resume arguments: the command Navide itself builds. Six hand-written patterns that only repeated it are deleted (antigravity, codex, goose, grok, muse, pi), and claude, droid and qwen now carry the pattern that was App.vue's generic fallback for them. Seven stay hand-written because they recognize more than the declared command, which the declaration's resume arguments cannot express: a short-flag alias (kilo, kimi, opencode), the `=` and spaced forms both (copilot, cursor, openclaw), a former program name (cursor), arguments in between (hermes, openclaw). aider's is for its id-less restore. Deriving them from `resume.parse` instead was tried on paper and rejected: it would change what six CLIs recognize (it would add `=` forms and aliases main's patterns refuse). | `declared.test.ts` "%s recognizes a resume command as on main": all 20, the regex source compared with a recording of main's (or the generic shape where main had none). |
+| **A-N7** Low: a reader call after `shutdown()` started the process again | Fixed | `shutdown()` sets a flag `_client_for_call` honours; applying the switch clears it. | `test_a_call_after_shutdown_does_not_start_the_process_again`. Before: a new process was asked `observes` and `usage`. |
+| **A-N8** Low, **A-D4** residual: antigravity opened two connections per walk | Fixed | A slot seeded from the database is declared (`SqliteRecords::seeds`, `StoreSeed`) and read on the walk's own connection; `sqlite::joined(path, …)`, the second opener, is gone. | The antigravity parity fixtures replay unchanged. No test counts connections: `Db::open` has one caller and nothing else opens one. |
+
+### Not acted on
+
+| Finding | Why |
+|---------|-----|
+| **A-N9** Low: the rule-coverage trace does not see effects, `Settling.when`, `revisit.when`, label queries, initialiser alternatives, `Ext` branches or the parts of `ExactTurns` | Not small. Each of those is a separate trace point in the engine and needs a fixture record that reaches it, recorded from main's Python; several (orphan handling in exact turns) have no recorded scenario yet. Left as stated in round 1: the check covers rule matches. |
+| **A**, small leftover: `LINE_KEY` repeated in 8 vendor files | Each is a `const` of that vendor's own `Text<V>`. Sharing it needs a generic associated constant holding a promoted slice, which was not tried; eight one-line constants were judged cheaper than the risk. |
+| **A**: the opencode / kilo `reads` and `deferred` costs (the Rust path depends on the Python reader; deferral is per CLI, not per database; a busy database is read twice) | Port debt by the reviewer's own verdict, not a defect of this stage. Carried under "Not done". |
+| Header slot read on every call (found by the benchmark) | See "Micro-benchmark": about 15 of the remaining 35 µs. Matching main's per-file cache needs the observer's memory in slot initialisation at seven call sites and a per-CLI declared choice; planned with the next wire. |
+
+Two things review 2-A pointed at in this report are corrected below: the
+backoff is `1 s × 2ⁿ`, so 1, 2, 4 and 8 s before the breaker opens at the
+fifth failure, and the 60 s cap in the code is not reached with these
+constants; and "one connection per observer call" is now true of antigravity
+too.
+
+### Found while fixing
+
+- **The crate's unit tests were flaky on macOS once a SQLite unit test joined
+  them**: the PTY test's child was killed with signal 9 before it wrote
+  anything, in 12 of about 58 runs. In none of 16 runs with the SQLite test
+  left out, and none of 16 with its connection opened under
+  `session::FD_FORK_LOCK`, which is what the test now does. The cause is not
+  established (a hypothesis only: the system SQLite's descriptors across
+  `fork`). It matters for the next stage, where one process will both read
+  SQLite stores and fork panes; `session.rs` and DESIGN.md record it.
+- The same PTY test read its child's output after the child had exited, and
+  its drain helper threw away a read that returned data right after the
+  exit. The child now waits for a line and the output is read while it is
+  alive.
+- Two `wire.rs` tests swapped the process's panic hook at the same time, so
+  the silent hook could stay in place and hide another test's failure
+  message. They take turns now.
+
+## Micro-benchmark
+
+`uv --project backend run python backend/tests/bench_cli_runtime.py <rounds>
+<earlier>`: a Claude transcript in the fake agent's format grows by one
+record, then `parse_incremental` and `parse_activity` are called, `rounds`
+times, on a transcript that already holds `earlier` records. macOS, release
+build, microseconds per call, median; "mean" is the mean of the two methods.
+
+| Transcript | main's Python reader | Routed, before | Routed, after |
+|------------|---------------------:|---------------:|--------------:|
+| starts empty, 2,000 rounds | 22.9 | 82.1 | 61.8 |
+| 20,000 earlier records, 500 rounds | 23.5 | 392.5 | 62.7 |
+
+"Before" in the first row is the runtime as built at `aec1a324b` plus this
+round's earlier commits (the read path was untouched until then). The second
+row's "before" was measured with the old whole-file read put back beside the
+new code for one run, since the old binary was gone by then; that slightly
+overstates it (the same construction gave 88.0 where the true old binary
+gave 82.1 in the first row).
+
+One routed usage call, taken apart (after; 20,000 earlier records):
+
+| Part | µs |
+|------|---:|
+| request encoded to a JSON line (Python) | 1.7 |
+| pipe round trip and the runtime's own request handling (a `ping`) | 12.4 |
+| the seam's writer and reader threads and the caller's queue | 7.0 |
+| the read itself in Rust, with its larger answer | 35.1 |
+| answer parsed (Python) | 1.6 |
+| result objects built (Python) | 0.4 |
+
+Inside the 35 µs, measured in the runtime with a throwaway timing test: the
+slot header read about 15, the tail read about 20, request parsing 2,
+building and serialising the answer 3. JSON is not where the time goes; file
+opens are (two per call on macOS).
+
+What this means for the harness's result: its transcripts were short (180
+records at most), so the whole-file read was a small part of its 0.19 ms.
+The fix removes a cost that grew with the transcript (20 µs per call by
+2,000 records, 330 by 20,000) and will move the harness's number only a
+little; that was not re-measured with the harness, which was not run this
+round. The rest of the gap to Python is the process boundary
+(about 19 µs) and the per-call header read, neither of which this round
+removes; DESIGN.md has the plan (a framed duplex channel before PTY and
+WebSocket work, the header value kept per file with it). No
+unchanged-file shortcut was added in Python: main's reader has none.
 
 ## Fix round 1: every review finding
 
@@ -31,12 +134,12 @@ is named; where it could not, that is said.
 | Finding | Status | What changed | The test that shows it |
 |---------|--------|--------------|------------------------|
 | **A-S1**, **B-design-2** High: no read timeout under one lock the switch-off path also took | Fixed | A writer thread and a reader thread own the pipes; a caller waits for its answer on its own queue with a timeout (10 s), holding no lock. On timeout the process is killed and Python answers. `apply(False)` sets a flag and kills the process without any lock a call holds. | `test_cli_runtime_seam.py::test_a_stalled_process_times_out_and_python_answers`, `test_switching_off_returns_at_once_and_frees_a_stalled_call` (a stand-in process that never answers). |
-| **A-S2** Medium: no backoff; a panic killed shared state | Fixed | `catch_unwind` per request in `serve`. In the seam: restart after `1 s × 2ⁿ` (capped at 60 s), and after 5 failures in a row the runtime stays on Python until the switch is flipped, saying so once. | `wire.rs::a_panicking_request_answers_an_error_and_the_next_one_is_served`; `test_a_process_that_keeps_dying_is_given_up_on_and_said_once`, `test_a_failed_process_is_not_restarted_before_its_delay`. |
+| **A-S2** Medium: no backoff; a panic killed shared state | Fixed | `catch_unwind` per request in `serve`. In the seam: restart after `1 s × 2ⁿ` (1, 2, 4, 8 s; the code's 60 s cap is not reached before the breaker opens), and after 5 failures in a row the runtime stays on Python until the switch is flipped, saying so once. Round 2 made a failure a process, not a caller (B-3). | `wire.rs::a_panicking_request_answers_an_error_and_the_next_one_is_served`; `test_a_process_that_keeps_dying_is_given_up_on_and_said_once`, `test_a_failed_process_is_not_restarted_before_its_delay`. |
 | **A-S3** Medium: one lock and one single-threaded child | Fixed | `serve` answers on four worker lanes keyed by vendor and path (one file's reads stay in order, different files run side by side); the Python side holds no lock across a call. | `wire.rs::a_slow_read_does_not_hold_up_another_file`, `one_files_requests_are_answered_in_order`. |
 | **A-S4** Medium: switch on with no binary was silent | Fixed | Logged once. Outcomes are counted per CLI (`rust`, `unsupported`, `unreadable`, `deferred`, `fallback`) and reported in `/health` diagnostics. | `test_switched_on_without_a_binary_says_so_once`, `test_status_counts_who_answered`, `test_health_diagnostics.py::test_health_reports_the_rust_cli_runtime_switch`. |
 | **A-S5** Low: `_stop()` could stall the event loop | Fixed | The process is reaped in a thread. | `test_switching_off_returns_at_once_and_frees_a_stalled_call`. |
 | **A-S6**: file identity off Unix, spawn flags, the wrong osplat helper | Fixed | Off Unix `observes` answers nothing, so nothing is routed. `osplat` has `bundled_executable(name)` and `helper_process_options()`. | `test_osplat_windows_discovery.py` (both helpers, Windows and POSIX). The off-Unix `observes` answer is a `cfg` constant and was not run: this machine is macOS. |
-| **B-design-3** High: missing shutdown; binary found only in a dev checkout | Fixed, except packaging | A shutdown handler of its own (`app._stop_cli_runtime`, registered after `_stop_log_watcher`, so the watcher has stopped) calls `cli_runtime.shutdown` through `asyncio.to_thread`. `binary()` looks where a packaged app keeps its sidecars (`frozen_env.packaged_bin_dir()`), as `navide-stt` does. **Not done:** no build script compiles the runtime into the app bundle, so a packaged app finds no binary, says so once and stays on Python. | `test_shutdown_seen_flush.py::test_the_rust_cli_runtime_is_stopped_off_the_event_loop_after_the_watcher`; `test_the_binary_is_looked_up_like_the_other_sidecars`. |
+| **B-design-3** High: missing shutdown; binary found only in a dev checkout | Fixed, except packaging | A shutdown handler of its own (`app._stop_cli_runtime`, registered after `_stop_log_watcher`, so the watcher has stopped) calls `cli_runtime.shutdown` through `asyncio.to_thread`. `binary()` looks where a packaged app keeps its sidecars (`frozen_env.packaged_bin_dir()`), as `navide-stt` does. Packaging was not done in round 1; round 2 wired it (see above). | `test_shutdown_seen_flush.py::test_the_rust_cli_runtime_is_stopped_off_the_event_loop_after_the_watcher`; `test_the_binary_is_looked_up_like_the_other_sidecars`. |
 | **B-design-4** Medium: `cost_ledger.py` built readers outside `wrap` | Fixed | Both sites wrap. | `test_the_cost_ledgers_own_readers_go_through_the_switch`. |
 | **A-S7** Low: text describing a UI that does not exist; guide not updated | Fixed | The seam's and `app.py`'s text say there is no toggle. `docs/en-US/cli-extension-guide.md` has the declaration steps and the switch; `docs/adding-a-cli-vendor.md` starts with them. | — |
 | **A-S8** Medium: the switch-on suite could not tell Rust from a silent fallback | Fixed | `tests/cli_runtime_on.py` prints who answered every routed call per CLI and fails on any fallback, or on a declined store whose CLI is not listed with its reason (`EXPECTED_UNSUPPORTED`). | The table under "Commands and results". |
@@ -87,46 +190,64 @@ SQL strings.
   codex, copilot, cursor, droid, goose, grok, hermes, kilo, kimi, muse,
   openclaw, opencode, pi, qwen. devin, kiro and mcode have no log reader on
   main.
-- **Single source**: the two generated `cli_declarations.json` files, read by
-  `cli_vendors/_declared.py` and `agents/_declared.ts`.
+- **Single source**: the two generated copies of `declarations launch`
+  (`cli_declarations.json` for the backend, `agents/_cli_declarations.ts` for
+  the frontend), read by `cli_vendors/_declared.py` and `agents/_declared.ts`.
+  They are also the list of CLIs: `cli_vendors/registry.py` and
+  `agents/index.ts` are built from them and keep no list of their own.
 - **Seam**: `backend/agent_team_backend/cli_runtime.py`, off by default.
+- **Packaging and CI**: `scripts/build-cli-runtime.mjs`, the macOS and Linux
+  `extraResources`, the `release.yml` steps, and CI's `cli-runtime` job.
 
 ## Size (`wc -l`)
 
 | Part | Lines |
 |------|-------|
-| Core: `src/` without `src/vendors/` (22 files, 6,101, unit tests included) plus `build.rs` (35) | 6,136 |
-| Declarations: `src/vendors/` (20 files) | 3,402 |
-| of which extension code: each file's `Ext` enum, `impl Vendor` and helper functions, unit tests excluded (counted by item line ranges) | about 706 |
-| of which the three launch-and-resume-only files (devin, kiro, mcode) | 42 |
-| Crate tests: `tests/*.rs` (parity replay and rule coverage, declaration checks, the outside CLI, local time) | 627 |
+| Core: `src/` without `src/vendors/` (22 files, 6,322, unit tests included) plus `build.rs` (35) | 6,357 |
+| Declarations: `src/vendors/` (20 files) | 3,422 |
+| of which extension code: each file's `Ext` enum, `impl Vendor` and helper functions, unit tests excluded (round 1's count by item line ranges, less the 6 lines of antigravity's removed `init`) | about 700 |
+| of which the three launch-and-resume-only files (devin, kiro, mcode) | 45 |
+| Crate tests: `tests/*.rs` (parity replay and rule coverage, declaration checks, the checked-in copies, the outside CLI, local time) | 686 |
 | Parity fixtures: `tests/parity/*.json` | 27 files |
-| Seam: `cli_runtime.py` | 616 |
-| Readers of the generated JSON: `_declared.py` 129, `_declared.ts` 75 | 204 |
+| Seam: `cli_runtime.py` | 652 |
+| Readers of the generated declarations: `_declared.py` 131, `_declared.ts` 97 | 228 |
+| The two registries: `cli_vendors/registry.py` 148 (was 160, with its hand list), `agents/index.ts` 59 (was 76) | 207 |
+| Round 2's tooling: `scripts/build-cli-runtime.mjs` 57, `backend/tests/cli_runtime_build.py` 63, `backend/tests/bench_cli_runtime.py` 208 | 328 |
 
-Extension code by file: aider 120, antigravity 90, cursor 64, opencode 60
+The core grew by 221 lines in round 2: `StoreSeed` and `Order` in `decl.rs`,
+the bounded header read, and unit tests (the header read on a pipe, the
+SQLite cell type, a panic's reach, the test database writer).
+
+Extension code by file (round 1's count): aider 120, antigravity 90, cursor 64, opencode 60
 (shared with kilo), grok 51, openclaw 49, claude 43, goose 39, muse 37,
 hermes 34, qwen 30, codex 29, kimi 25, pi 21, copilot 7 and droid 7 (their
 `impl Vendor` only; both declare `NoExt`).
 
 ## Commands and results
 
-Run in this worktree on macOS, on the final code of the branch.
+Run in this worktree on macOS (rustc 1.99.1), on the final code of round 2.
+Nothing was run on Linux or Windows.
 
 | Command | Result |
 |---------|--------|
-| `cargo test --offline` (in `native/navide-cli-runtime`) | 32 passed, 7 suites |
-| `cargo check --offline --all-targets` | clean, no warnings |
-| `cargo build --release --offline` | built |
-| switch off: `uv --project backend run pytest backend/tests/vendors backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_claude_activity_resume.py backend/tests/test_activity_high_water.py backend/tests/test_cli_declarations.py backend/tests/test_cli_vendors_registry.py backend/tests/test_health_diagnostics.py backend/tests/test_shutdown_seen_flush.py backend/tests/test_osplat.py backend/tests/test_osplat_windows_discovery.py` | 1,080 passed, 2 skipped |
-| switch on: `uv --project backend run pytest -p tests.cli_runtime_on backend/tests/vendors backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_claude_activity_resume.py backend/tests/test_activity_high_water.py` | 874 passed, 4 skipped (the mcode package is not installed; the 3 Python read meters, reason printed); no unexpected fallback |
-| `node scripts/changed-backend-tests.mjs` (switch off; re-run in full after the last code change, exit 0) | parallel phase: 16,672 passed, 39 skipped, 109 deselected, 1 xfailed in 17:02; serial phase: 105 passed, 4 skipped |
-| `bun run vitest run src/renderer/src/platform/plugin-shell tests/cli` | 18 files, 371 tests passed |
-| `bun run typecheck:web` | passed |
+| `cargo test --offline` (in `native/navide-cli-runtime`) | 37 passed, 8 suites |
+| `cargo check --offline --all-targets`, and again with `RUSTFLAGS="-D warnings"` as CI runs it | clean, no warnings |
+| `cargo build --release --locked`; `NAVIDE_CLI_RUNTIME_REQUIRED=1 node scripts/build-cli-runtime.mjs` | built; staged in `build/cli-runtime/` |
+| switch off: `uv --project backend run pytest backend/tests/vendors backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_claude_activity_resume.py backend/tests/test_activity_high_water.py backend/tests/test_cli_declarations.py backend/tests/test_cli_vendors_registry.py backend/tests/test_health_diagnostics.py backend/tests/test_shutdown_seen_flush.py backend/tests/test_osplat.py backend/tests/test_osplat_windows_discovery.py backend/tests/test_pyinstaller_spec.py` | 1,101 passed, 3 skipped (the runtime built from source by the tests) |
+| switch on: `uv --project backend run pytest -p tests.cli_runtime_on backend/tests/vendors backend/tests/test_cli_runtime_parity.py backend/tests/test_cli_runtime_seam.py backend/tests/test_claude_activity_resume.py backend/tests/test_activity_high_water.py` | 878 passed, 4 skipped (the mcode package is not installed; the 3 Python read meters, reason printed); fallback 0 for every observed CLI |
+| `node scripts/changed-backend-tests.mjs -- -n 4 --dist loadfile -m "not serial"` (the whole suite; re-run after the last change, exit 0) | 16,664 passed, 38 skipped, 1 xfailed in 3:30; its unsandboxed files: 105 passed, 4 skipped |
+| `node scripts/changed-backend-tests.mjs -- -m serial` | 16 passed, 2 skipped (the script exits 5 here: its second pass has no serial test to select) |
+| `uv --project backend run ruff check backend` | all checks passed |
+| `bun run vitest run --changed upstream/main` (re-run after the last change) | 1,339 files, 20,551 tests, **1 failed**: `src/main/plugins/pluginExternalWorkspace.test.ts`, "Executable not found in $PATH: pnpm". pnpm is not installed on this machine; the test does not touch this branch's code, and CI installs pnpm for the job that runs it. |
+| the affected files: `bun run vitest run src/renderer/src/platform/plugin-shell tests/cli plugins/navide-plans/src/retained` and the four tests that read the agent list | 29 files, 604 tests passed |
+| `bun run vitest run tests/infrastructure` | 24 files, 266 passed, 4 skipped |
+| `bun run typecheck` (node, integration, the plugins, web, public) | passed |
 
-The whole-frontend selection (`bun run vitest run --changed upstream/main`:
-340 files, 6,026 tests passed) was run after the agent specs changed and not
-again; no frontend file changed after it.
+Inside the isolated runner (`changed-backend-tests`, which starts from an
+empty environment with no cargo), the tests that drive the runtime used the
+release build because it was newer than every crate source; one test skipped
+there, the `cargo run` currency check, which the switch-off row above and
+`tests/checked_in.rs` both ran.
 
 Who answered the routed reader calls in the switch-on run:
 
@@ -156,20 +277,30 @@ unreadable, where the Python reader decides what that means, as on main;
 `deferred` is OpenCode's reader making its own reads while it has a failing
 query on record. No call fell back on a fault.
 
-Two failures on the way are worth knowing about; the final runs above caught
-both, and the results in the table are from after their fixes.
+Failures on the way in round 2; the results in the table are from after
+their fixes.
 
-- After the frontend specs were changed to spread `declared(key)`, three
-  checks in `backend/tests/test_cli_vendors_registry.py` failed: they read
-  `modelArgs`, `resumeArgs` and `defaultCommand` out of the spec sources with
-  regular expressions. They now read the declaration the spec spreads, and
-  require that a spec spreads its own key. The first pass of this round ran
-  the frontend tests after that change but not this backend file.
-- The first full `changed-backend-tests` run ended with 1 failed, 16,671
-  passed: `test_acp_tui_unchanged.py` pins `app._stop_log_watcher` to main's
-  text plus its one ACP hook, and the runtime's stop had been added inside
-  it. The stop is now a shutdown handler of its own, and that function is
-  main's again.
+- The first switch-on run of round 2 ended with 2 failed, 876 passed: two of
+  the new seam tests compared fallback counts exactly, and
+  `tests.cli_runtime_on` routes the reader class as well as the instance, so
+  each call is counted twice there. They compare "at least" now, as the
+  older tests in the file do. The switch-off runs before it could not show
+  this.
+- The first `--changed upstream/main` frontend run had 3 failures: the pnpm
+  one above, `ciGate.test.ts` (the new CI job was not in its backend group)
+  and `ciPathFilter.test.ts` (the new packaging test named a path under
+  `backend/tests` as a string, which that ratchet reads as a frontend test
+  reading backend tests). Both tests were corrected.
+- The first full backend run of round 2 passed with every runtime test
+  skipped: the isolated runner has no cargo on its `PATH`, and the tests had
+  just been changed to build with cargo. The build helper's rule for that
+  case (use the release build only when no source is newer) is the result.
+- The crate's unit tests failed in about one run in five until the SQLite
+  test was kept apart from the PTY test's fork (see "Found while fixing").
+
+Round 1's two (three registry checks reading the spec sources by regular
+expression; `test_acp_tui_unchanged.py` pinning `app._stop_log_watcher`) are
+in the history of this file.
 
 ## Python defects found (main unchanged)
 
@@ -240,8 +371,21 @@ touched this round; the JSONL `\r` item was re-read in the code.
 
 ## Not done
 
-- **Packaging**: no build step puts `navide-cli-runtime` into the app bundle
-  (the lookup is ready for it).
+- **A release dry run.** Packaging is wired and tested as text
+  (`cliRuntimePackaging.test.ts`), and the build script was run locally, but
+  no release or dry run was run: the signed and notarized Mach-O, and the
+  binary inside the Linux packages, are unverified until one is.
+- **Linux.** Nothing of this crate or its backend tests was ever run on
+  Linux locally (no Linux machine or container here). CI's `cli-runtime` job
+  is its first run there.
+- **The wire.** Still one JSON line per request over stdio; the framed duplex
+  channel is planned in DESIGN.md, with the per-file header value.
+- **The harness.** The perf harness was not re-run after the read-path fix.
+- **opencode / kilo port debt** (review 2-A): the Rust path for copilot,
+  opencode and kilo still depends on the Python reader for a failing query;
+  deferral is per CLI, not per database; a busy database is read twice per
+  poll.
+- **Rule-coverage tracing** beyond rule matches (review 2-A N9).
 - **A Settings toggle** for `rustCliRuntime`.
 - **PTY ownership** (`session.rs` is kept, unwired), **Windows ConPTY** and
   **Windows file identity**.
