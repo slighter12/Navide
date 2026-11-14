@@ -9,6 +9,10 @@
 // (possibly empty) and exits 0. Set NAVIDE_CLI_RUNTIME_REQUIRED=1 to make any
 // failure fatal (release jobs that must ship the sidecar, and CI).
 //
+// A build that gives up removes the binary an earlier build staged: a package
+// made after it must carry no runtime at all (the backend then stays on
+// Python) rather than an older runtime beside newer readers and declarations.
+//
 // Windows is not supported: the runtime has no file identity and no PTY off
 // Unix, so it observes nothing there, and no Windows package carries it. On
 // Windows this script does nothing, whatever the variable says.
@@ -17,7 +21,7 @@
 // it returns in well under a second.
 
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -34,6 +38,7 @@ if (process.platform === 'win32') {
 }
 
 function giveUp(message) {
+  rmSync(staged, { force: true })
   if (required) {
     console.error(`[cli-runtime] ${message} (NAVIDE_CLI_RUNTIME_REQUIRED=1)`)
     process.exit(1)

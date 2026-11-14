@@ -6,8 +6,11 @@
 //
 // Windows is deliberately absent everywhere: the runtime observes nothing off
 // Unix, so no Windows package carries it and no Windows job builds it.
-import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
 type Resource = { from: string; to: string; filter?: string[] }
@@ -89,6 +92,56 @@ describe('Rust CLI runtime sidecar packaging', () => {
     for (const name of ['release-windows-gates', 'release-windows-x64', 'release-windows-arm64']) {
       expect(builds(release[name]), name).toEqual([])
     }
+  })
+})
+
+// The script is run from a copy in a scratch root (it stages under the root
+// above its own directory), with a PATH that holds no cargo or a cargo that
+// fails: the staged binary of an earlier build must be gone afterwards.
+describe.skipIf(process.platform === 'win32')('a build that gives up leaves no older runtime staged', () => {
+  const roots: string[] = []
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+  })
+
+  function stagedBuild(cargo: string | null, env: Record<string, string> = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'cli-runtime-build-'))
+    roots.push(root)
+    mkdirSync(join(root, 'scripts'))
+    copyFileSync('scripts/build-cli-runtime.mjs', join(root, 'scripts', 'build-cli-runtime.mjs'))
+    const staged = join(root, 'build', 'cli-runtime', BINARY)
+    mkdirSync(join(root, 'build', 'cli-runtime'), { recursive: true })
+    writeFileSync(staged, 'an older build')
+    mkdirSync(join(root, 'bin'))
+    if (cargo !== null) {
+      writeFileSync(join(root, 'bin', 'cargo'), cargo)
+      chmodSync(join(root, 'bin', 'cargo'), 0o755)
+    }
+    const done = spawnSync(process.execPath, [join(root, 'scripts', 'build-cli-runtime.mjs')], {
+      env: { PATH: join(root, 'bin'), ...env },
+      encoding: 'utf8',
+    })
+    return { done, staged }
+  }
+
+  it('removes it when cargo is missing', () => {
+    const { done, staged } = stagedBuild(null)
+    expect(done.status).toBe(0)
+    expect(done.stderr).toContain('cargo not found')
+    expect(existsSync(staged)).toBe(false)
+  })
+
+  it('removes it when the build fails', () => {
+    const { done, staged } = stagedBuild('#!/bin/sh\n[ "$1" = "--version" ] && exit 0\nexit 1\n')
+    expect(done.status).toBe(0)
+    expect(done.stderr).toContain('cargo build failed')
+    expect(existsSync(staged)).toBe(false)
+  })
+
+  it('removes it before a required build fails', () => {
+    const { done, staged } = stagedBuild(null, { NAVIDE_CLI_RUNTIME_REQUIRED: '1' })
+    expect(done.status).toBe(1)
+    expect(existsSync(staged)).toBe(false)
   })
 })
 
