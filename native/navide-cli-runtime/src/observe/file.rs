@@ -209,13 +209,14 @@ fn text_record(line: &str) -> Value {
 }
 
 fn tail(path: &Path, checkpoint: &Map<String, Value>, kind: &str, decode: impl Fn(&[u8]) -> Option<Value>) -> io::Result<Tail> {
-    let meta = std::fs::metadata(path)?;
+    // One path lookup: the identity and length are the opened file's own.
+    let mut file = FsFile::open(path)?;
+    let meta = file.metadata()?;
     let identity = identity(&meta);
     let prior_identity = py_str_opt(checkpoint.get("identity"));
     let prior_anchor = py_str_opt(checkpoint.get("anchor"));
     let mut offset = py_int(checkpoint.get("offset")) as u64;
     let mut rotated = offset != 0 && (prior_identity != identity || meta.len() < offset);
-    let mut file = FsFile::open(path)?;
     if offset != 0 && !rotated && !prior_anchor.is_empty() && anchor(&mut file, offset)? != prior_anchor {
         rotated = true;
     }
@@ -394,24 +395,34 @@ pub fn walk_text(path: &Path, high_water: usize, mut visit: impl FnMut(usize, &V
 /// error, as main's strict text-mode open raises (else its bad bytes are
 /// replaced).
 pub fn all_lines(path: &Path, limit: usize, strict: bool, mut visit: impl FnMut(usize, &str, Option<&Value>) -> bool) -> Result<(), Error> {
-    let data = std::fs::read(path)?;
-    let text = match std::str::from_utf8(&data) {
-        Ok(text) => std::borrow::Cow::Borrowed(text),
-        Err(err) if strict => {
-            let line = data[..err.valid_up_to()].iter().filter(|b| **b == b'\n').count() + 1;
-            return Err(Error::Decode { line });
-        }
-        Err(_) => String::from_utf8_lossy(&data),
-    };
-    for (index, raw) in text.split_inclusive('\n').enumerate() {
-        if limit != 0 && index >= limit {
-            break;
-        }
+    let mut each = |index: usize, raw: &str| {
         let stripped = py_strip(raw);
         let value = if stripped.is_empty() { None } else { serde_json::from_str::<Value>(stripped).ok() };
-        if !visit(index + 1, stripped, value.as_ref()) {
+        visit(index + 1, stripped, value.as_ref())
+    };
+    if strict {
+        // The whole file must be UTF-8 before any line counts.
+        let data = std::fs::read(path)?;
+        let text = std::str::from_utf8(&data)
+            .map_err(|err| Error::Decode { line: data[..err.valid_up_to()].iter().filter(|b| **b == b'\n').count() + 1 })?;
+        for (index, raw) in text.split_inclusive('\n').enumerate() {
+            if (limit != 0 && index >= limit) || !each(index, raw) {
+                break;
+            }
+        }
+        return Ok(());
+    }
+    // Line by line, and no further than the caller looks: a header read
+    // (a few lines, on every call) must not cost the whole transcript.
+    let mut reader = io::BufReader::new(FsFile::open(path)?);
+    let mut line = Vec::new();
+    let mut index = 0;
+    while limit == 0 || index < limit {
+        line.clear();
+        if io::BufRead::read_until(&mut reader, b'\n', &mut line)? == 0 || !each(index, &String::from_utf8_lossy(&line)) {
             break;
         }
+        index += 1;
     }
     Ok(())
 }
@@ -497,6 +508,41 @@ mod tests {
         .unwrap();
         assert_eq!(seen, 2);
         assert!(matches!(all_lines(&f.path, 0, true, |_, _, _| true), Err(Error::Decode { line: 2 })));
+    }
+
+    /// A slot's header read happens on every call: it must cost the lines it
+    /// looks at, not the transcript. A pipe that never ends stands for a
+    /// transcript of any size: reading it whole would not return.
+    #[cfg(unix)]
+    #[test]
+    fn a_header_read_stops_at_the_lines_it_was_asked_for() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let f = tempfile_lite::TempFile::new("fifo");
+        let name = std::ffi::CString::new(f.path.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let (release, held) = channel::<()>();
+        let path = f.path.clone();
+        let writer = std::thread::spawn(move || {
+            let mut pipe = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            pipe.write_all(b"{\"cwd\":\"/w\"}\n{\"n\":2}\n").unwrap();
+            // Held open: the reader never sees an end of file.
+            let _ = held.recv_timeout(Duration::from_secs(20));
+        });
+        let (found, got) = channel();
+        let path = f.path.clone();
+        std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            let read = all_lines(&path, 1, false, |number, text, _| {
+                seen.push((number, text.to_owned()));
+                true
+            });
+            let _ = found.send(read.map(|()| seen).map_err(|err| err.to_string()));
+        });
+        let seen = got.recv_timeout(Duration::from_secs(5)).expect("the read returns without the end of the file");
+        assert_eq!(seen, Ok(vec![(1, "{\"cwd\":\"/w\"}".to_owned())]));
+        release.send(()).unwrap();
+        writer.join().unwrap();
     }
 }
 

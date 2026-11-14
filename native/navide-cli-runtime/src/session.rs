@@ -13,7 +13,15 @@ use std::sync::Mutex;
 /// several threads at once, and a descriptor created between `openpty` and
 /// its close-on-exec flag would leak into another child (measured in the
 /// evaluation crate, which this module reuses).
-static FD_FORK_LOCK: Mutex<()> = Mutex::new(());
+///
+/// Also seen here, on macOS, in this crate's own tests: a child forked while
+/// another thread had a SQLite connection open (the system library) was
+/// killed with signal 9 before it wrote anything, in 12 of about 58 runs of
+/// the unit tests; in none of 16 with the SQLite test left out, and none of
+/// 16 once its connection was opened under this lock. Why is not
+/// established. Before PTY ownership is wired in, a process that both reads
+/// SQLite stores and forks panes has to keep the two apart.
+pub(crate) static FD_FORK_LOCK: Mutex<()> = Mutex::new(());
 
 pub struct Spawn<'a> {
     pub argv: &'a [String],
@@ -144,8 +152,16 @@ mod tests {
             match session.read(&mut buf).unwrap() {
                 None => break,
                 Some(0) => {
-                    if session.try_wait().unwrap().is_some() && session.read(&mut buf).unwrap().is_none_or(|n| n == 0) {
-                        break;
+                    if session.try_wait().unwrap().is_some() {
+                        // The child is gone; what it wrote last may only be
+                        // readable now, and is output like any other.
+                        match session.read(&mut buf).unwrap() {
+                            Some(n) if n > 0 => {
+                                out.extend_from_slice(&buf[..n]);
+                                continue;
+                            }
+                            _ => break,
+                        }
                     }
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
@@ -155,15 +171,35 @@ mod tests {
         out
     }
 
+    /// What the child has written once `needle` is in it (or after 10 s).
+    fn read_until(session: &mut Session, needle: &str) -> String {
+        let mut seen = String::new();
+        let mut buf = [0u8; 1024];
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !seen.contains(needle) && std::time::Instant::now() < deadline {
+            if let Some(n) = session.read(&mut buf).unwrap() {
+                seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        seen
+    }
+
     #[test]
     fn a_child_gets_the_pty_as_its_controlling_terminal_and_size() {
-        let argv: Vec<String> = ["/bin/sh", "-c", "stty size; tty -s && echo has-tty; printf \"%s\" \"$NAVIDE_T\""].map(String::from).to_vec();
-        let env = vec![("NAVIDE_T".to_owned(), "ok".to_owned()), ("PATH".to_owned(), "/usr/bin:/bin".to_owned())];
+        // The child waits for a line after printing, so what it printed is
+        // read while it is alive and its exit is this test's to ask for.
+        let argv: Vec<String> =
+            ["/bin/sh", "-c", "stty size; tty -s && echo has-tty; echo \"$NAVIDE_T\"; read done"].map(String::from).to_vec();
+        let env = vec![("NAVIDE_T".to_owned(), "env-ok".to_owned()), ("PATH".to_owned(), "/usr/bin:/bin".to_owned())];
         let mut session = Session::spawn(&Spawn { argv: &argv, cwd: std::path::Path::new("/"), env: &env, rows: 33, cols: 101 }).unwrap();
-        let text = String::from_utf8_lossy(&drain(&mut session)).into_owned();
-        assert!(text.contains("33 101"), "{text:?}");
+        let text = read_until(&mut session, "env-ok");
+        // Said with the child's fate: it has been seen killed before it wrote.
+        assert!(text.contains("33 101"), "{text:?}; the child: {:?}", session.try_wait());
         assert!(text.contains("has-tty"), "{text:?}");
-        assert!(text.contains("ok"), "{text:?}");
+        assert!(text.contains("env-ok"), "{text:?}");
+        session.write(b"\n").unwrap();
+        drain(&mut session);
         assert!(session.wait().unwrap().success());
     }
 
@@ -173,15 +209,7 @@ mod tests {
         let env = vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())];
         let mut session = Session::spawn(&Spawn { argv: &argv, cwd: std::path::Path::new("/"), env: &env, rows: 24, cols: 80 }).unwrap();
         session.write(b"hello\n").unwrap();
-        let mut seen = String::new();
-        let mut buf = [0u8; 1024];
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !seen.contains("got:hello") && std::time::Instant::now() < deadline {
-            if let Some(n) = session.read(&mut buf).unwrap() {
-                seen.push_str(&String::from_utf8_lossy(&buf[..n]));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        let seen = read_until(&mut session, "got:hello");
         assert!(seen.contains("got:hello"), "{seen:?}");
         session.write(b"\x03").unwrap();
         // Keep reading while the child exits: macOS holds an exiting session

@@ -262,6 +262,19 @@ mod tests {
         String::from_utf8(bytes).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect()
     }
 
+    /// `run` with the panics it provokes on purpose kept off the test output.
+    /// The hook is the process's, so two tests must not swap it at once: the
+    /// second would save the first's silent hook and leave it in place.
+    fn quietly<T>(run: impl FnOnce() -> T) -> T {
+        static SWAP: Mutex<()> = Mutex::new(());
+        let _one_at_a_time = SWAP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let out = run();
+        std::panic::set_hook(previous);
+        out
+    }
+
     fn by_id(answers: &[Value], id: i64) -> &Value {
         answers.iter().find(|a| a["id"] == id).unwrap_or_else(|| panic!("no answer for {id}"))
     }
@@ -274,10 +287,7 @@ mod tests {
             }
             handle(observers, req)
         }
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        let answers = run("{\"id\":1,\"op\":\"boom\"}\n{\"id\":2,\"op\":\"ping\"}\nnot json\n", 1, handler);
-        std::panic::set_hook(previous);
+        let answers = quietly(|| run("{\"id\":1,\"op\":\"boom\"}\n{\"id\":2,\"op\":\"ping\"}\nnot json\n", 1, handler));
         assert_eq!(by_id(&answers, 1)["ok"], false);
         assert_eq!(by_id(&answers, 1)["kind"], "panic");
         assert_eq!(by_id(&answers, 1)["error"], "panic: declared rule blew up");
@@ -304,10 +314,7 @@ mod tests {
                 _ => Ok(json!([observer(observers, "claude")?.take_notes().len(), observer(observers, "codex")?.take_notes().len()])),
             }
         }
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        let answers = run("{\"id\":1,\"op\":\"mark\"}\n{\"id\":2,\"op\":\"boom\",\"vendor\":\"claude\"}\n{\"id\":3,\"op\":\"notes\"}\n", 1, handler);
-        std::panic::set_hook(previous);
+        let answers = quietly(|| run("{\"id\":1,\"op\":\"mark\"}\n{\"id\":2,\"op\":\"boom\",\"vendor\":\"claude\"}\n{\"id\":3,\"op\":\"notes\"}\n", 1, handler));
         assert_eq!(by_id(&answers, 2)["kind"], "panic");
         assert_eq!(by_id(&answers, 3)["result"], json!([0, 1]), "claude's observer is new, codex's is the one it was");
     }

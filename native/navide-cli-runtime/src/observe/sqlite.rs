@@ -295,13 +295,6 @@ pub(crate) mod testing {
         assert_eq!(unsafe { sqlite3_exec(db.0, sql.as_ptr(), std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
     }
 
-    /// A fresh directory under the system's temporary one.
-    pub fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("navide-cli-runtime-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 }
 
 #[cfg(test)]
@@ -310,13 +303,16 @@ mod tests {
 
     #[test]
     fn a_blob_that_is_not_utf8_is_joined_as_a_blob() {
-        let dir = testing::scratch("joined");
-        let path = dir.join("store.db");
-        // A protobuf-like blob: a length byte that is not UTF-8 on its own,
-        // then text; and a TEXT row.
-        testing::write(&path, "CREATE TABLE t (data); INSERT INTO t VALUES (x'12FF66696C653A2F2F2F757372'), ('z')");
-        let db = Db::open(&path, &[], &[], &[]).unwrap().unwrap();
+        // No child is forked while this connection is open: on macOS, a PTY
+        // child spawned by `session`'s tests in that window was killed
+        // (signal 9) before it wrote anything, in about one run in five
+        // (see `session::FD_FORK_LOCK`).
+        #[cfg(unix)]
+        let _no_fork = crate::session::FD_FORK_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = crate::observe::file::tempfile_lite::TempFile::new("joined");
+        // A protobuf-like blob: a byte that is not UTF-8, then text; and a TEXT row.
+        testing::write(&store.path, "CREATE TABLE t (data); INSERT INTO t VALUES (x'12FF66696C653A2F2F2F757372'), ('z')");
+        let db = Db::open(&store.path, &[], &[], &[]).unwrap().unwrap();
         assert_eq!(db.joined("SELECT data FROM t ORDER BY rowid").as_deref(), Some("\u{12}file:///usrz"));
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }
