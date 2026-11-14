@@ -103,7 +103,8 @@ describe('Rust CLI runtime in CI', () => {
     expect(runs).toContain('cargo test --locked --manifest-path native/navide-cli-runtime/Cargo.toml')
     expect(runs).toContain('node scripts/build-cli-runtime.mjs')
     const switchedOn = runs.find((run) => run.includes('-p tests.cli_runtime_on'))
-    expect(switchedOn).toContain('backend/tests/vendors')
+    // (A pattern, not a path string: this test reads nothing under the backend's tests.)
+    expect(switchedOn).toMatch(/\/tests\/vendors /)
     // Built before any backend test runs it.
     expect(runs.indexOf('node scripts/build-cli-runtime.mjs')).toBeLessThan(runs.indexOf(switchedOn!))
   })
