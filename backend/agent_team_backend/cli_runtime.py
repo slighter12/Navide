@@ -85,6 +85,10 @@ HEALTHY_AFTER_S = 120.0
 _CLOSE_GRACE_S = 2.0
 #: A start that takes longer than this is said once (a binary on a stalled volume).
 SLOW_START_S = 3.0
+#: A start still not finished after this long is abandoned (a binary on a
+#: volume that never answers): the state leaves ``starting``, it counts as one
+#: failed start, and a process the start returns later is ended, not installed.
+START_DEADLINE_S = 30.0
 
 #: The outcomes counted per CLI. ``rust``: answered by the runtime.
 #: ``unsupported``: the runtime declined a store its declaration does not
@@ -116,6 +120,9 @@ _stopping = False
 #: A caller is starting the process: the others use Python meanwhile, so one
 #: failed start is one failure however many callers were waiting to start it.
 _starting = False
+#: Taken when a start begins and moved on when it is given up on or the switch
+#: is applied: a start installs its process only if its number is still current.
+_start_epoch = 0
 #: When the start in flight began, and whether it was said to be slow.
 _start_began = 0.0
 _slow_start_logged = False
@@ -133,11 +140,15 @@ def enabled() -> bool:
 
 def apply(on: bool) -> None:
     """Make the backend match the switch. Idempotent; never raises, never waits."""
-    global _enabled, _failures, _retry_at, _breaker_open, _stopping, _no_binary_logged
+    global _enabled, _failures, _retry_at, _breaker_open, _stopping, _no_binary_logged, _starting, _start_epoch
     _enabled = bool(on)
     with _state:
-        # Flipping the switch is the way out of a tripped breaker.
+        # Flipping the switch is the way out of a tripped breaker, and out of a
+        # start that never ends: one that began before this is ended when it
+        # returns, not installed.
         _failures, _retry_at, _breaker_open, _stopping = 0, 0.0, False, False
+        _start_epoch += 1
+        _starting = False
         _errors_logged.clear()
         if not _enabled:
             _no_binary_logged = False
@@ -409,9 +420,9 @@ def _process_failed(client: "_Client | None", err: BaseException) -> None:
 
 def _client_for_call() -> "_Client | None":
     """The running process, started if it may be; None means "use Python"."""
-    global _client, _generation, _starting, _start_began, _slow_start_logged
+    global _client, _generation, _starting, _start_began, _slow_start_logged, _start_epoch
     _aside.stepped = False
-    slow_for = 0.0
+    slow_for = abandoned_after = 0.0
     with _state:
         if not _enabled or _breaker_open or _stopping:
             return None
@@ -419,46 +430,72 @@ def _client_for_call() -> "_Client | None":
         if current is not None and not current.dead:
             return current
         now = time.monotonic()
-        waiting = now < _retry_at
-        # One caller starts the process; the others use Python for this call.
-        starts = current is None and not waiting and not _starting
-        if starts:
-            _starting, _start_began, _slow_start_logged = True, now, False
-        elif current is None and _starting:
-            _aside.stepped = True
-            if now - _start_began > SLOW_START_S and not _slow_start_logged:
-                _slow_start_logged = True
-                slow_for = now - _start_began
+        if current is None and _starting:
+            if now - _start_began > START_DEADLINE_S:
+                # Give the start up: whatever it returns later carries an old
+                # epoch and is ended, not installed.
+                _start_epoch += 1
+                _starting = False
+                abandoned_after = now - _start_began
+            else:
+                # One caller starts the process; the others use Python for this call.
+                _aside.stepped = True
+                if now - _start_began > SLOW_START_S and not _slow_start_logged:
+                    _slow_start_logged = True
+                    slow_for = now - _start_began
+        may_start = current is None and not abandoned_after and not _starting and now >= _retry_at
     if slow_for:
         log.warning("navide-cli-runtime has been starting for %.0f s; readers use Python until it is up", slow_for)
+    if abandoned_after:
+        _process_failed(None, TimeoutError(f"navide-cli-runtime did not start within {abandoned_after:.0f}s"))
+        return None
     if current is not None:
         # It exited on its own between calls.
         _process_failed(current, OSError("navide-cli-runtime exited"))
         return None
-    if not starts:
+    if not may_start:
         return None
+    # Looked for outside the lock and before anything is "starting": with no
+    # binary there is no start, so no caller steps aside for one.
+    try:
+        exe = binary()
+    except Exception as err:  # noqa: BLE001 — a binary that cannot even be looked for is a failed start
+        _process_failed(None, err)
+        return None
+    if exe is None:
+        _log_no_binary()
+        return None
+    with _state:
+        if _starting:
+            _aside.stepped = True
+            return None
+        if not _enabled or _breaker_open or _stopping or _client is not None or time.monotonic() < _retry_at:
+            return None
+        _start_epoch += 1
+        mine = _start_epoch
+        _starting, _start_began, _slow_start_logged = True, time.monotonic(), False
     try:
         try:
-            exe = binary()
-            if exe is None:
-                _log_no_binary()
-                return None
             fresh = _Client(exe)
         except Exception as err:  # noqa: BLE001 — any failed start falls back to Python and backs off
-            _process_failed(None, err)
+            with _state:
+                current_start = mine == _start_epoch
+            if current_start:  # not one that was given up on already
+                _process_failed(None, err)
             return None
         with _state:
-            if _enabled and not _stopping:
+            if mine == _start_epoch and _enabled and not _stopping:
                 _generation += 1
                 fresh.generation = _generation
                 _client = fresh
                 return fresh
-        # Switched off or stopped while it started.
+        # Switched off, stopped or given up on while it started.
         _reap(fresh)
         return None
     finally:
         with _state:
-            _starting = False
+            if mine == _start_epoch:
+                _starting = False
 
 
 def _observed(client: "_Client") -> dict[str, dict]:
@@ -569,6 +606,10 @@ def _ask(reader: Any, op: str, path: Path, **fields: Any) -> "tuple[Any, dict] |
     the result already passed on; None means the reader reads this one."""
     vendor = str(reader.vendor)
     if _reads_itself(reader):
+        # Counted only for a CLI the process has said it observes. Before the
+        # first handshake `_known` is empty, so this is not counted then (it
+        # cannot be told from a CLI the runtime never observes); `_call`
+        # counts a step-aside for a start in flight without that test.
         if vendor in _known:
             _count(vendor, "deferred")
         return None

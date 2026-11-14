@@ -339,6 +339,113 @@ def test_calls_during_a_start_are_deferred_not_faults_and_the_state_says_startin
     assert status["state"] == "waiting-to-restart" and status["failures"] == 1
 
 
+class _LateClient:
+    """What a start returns after it was given up on: only ended, never used."""
+
+    dead = False
+    generation = 0
+
+    def __init__(self) -> None:
+        self.killed = threading.Event()
+
+    def kill(self) -> None:
+        self.killed.set()
+
+    def close(self) -> None:
+        pass
+
+
+def _held_start(monkeypatch: pytest.MonkeyPatch, outcome: str = "comes up") -> tuple[threading.Event, threading.Event, _LateClient]:
+    """Make `_Client(...)` block until released, then return a stand-in client
+    (``outcome`` "comes up") or raise (``"fails"``)."""
+    entered, release, late = threading.Event(), threading.Event(), _LateClient()
+
+    def start(_exe: Path) -> Any:
+        entered.set()
+        release.wait(10.0)
+        if outcome == "fails":
+            raise OSError("the start failed in the end")
+        return late
+
+    monkeypatch.setattr(cli_runtime, "_Client", start)
+    return entered, release, late
+
+
+def _present_binary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    present = tmp_path / "navide-cli-runtime"
+    present.write_text("", encoding="utf-8")
+    monkeypatch.setenv(cli_runtime.BINARY_ENV, str(present))
+    monkeypatch.setattr(cli_runtime, "BACKOFF_BASE_S", 1000.0)
+
+
+def test_nothing_is_starting_while_the_binary_is_being_looked_for(monkeypatch: pytest.MonkeyPatch, seam) -> None:
+    seam.apply(True)
+    seen: list[tuple[str, dict]] = []
+    looking = []
+
+    def no_binary() -> None:
+        # `status()` looks for the binary too: only the first look is the start's.
+        if not looking:
+            looking.append(True)
+            state = seam.status()["state"]
+            # A second caller arrives while the first is looking.
+            assert cli_runtime._call("qwen", "usage") is None
+            seen.append((state, seam.status()["calls"]))
+        return None
+
+    monkeypatch.setattr(cli_runtime, "binary", no_binary)
+    assert cli_runtime._client_for_call() is None
+    assert seen == [("idle", {})], "no start was in flight, and the second caller was not counted as stepping aside"
+    assert seam.status()["state"] == "idle" and seam.status()["failures"] == 0
+
+
+@pytest.mark.parametrize("late", ["comes up", "fails"])
+def test_a_start_past_its_deadline_is_abandoned_and_what_it_returns_later_is_not_used(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam, late: str) -> None:
+    _present_binary(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli_runtime, "START_DEADLINE_S", 0.05)
+    entered, release, client = _held_start(monkeypatch, late)
+    seam.apply(True)
+    results: list[Any] = []
+    starter = threading.Thread(target=lambda: results.append(cli_runtime._client_for_call()), daemon=True)
+    starter.start()
+    assert entered.wait(10.0)
+    assert seam.status()["state"] == "starting"
+    time.sleep(0.1)
+
+    assert cli_runtime._client_for_call() is None, "this caller found the start past its deadline"
+    status = seam.status()
+    assert status["state"] == "waiting-to-restart" and status["failures"] == 1, "abandoned: one failed start"
+
+    release.set()
+    starter.join(10.0)
+    assert not starter.is_alive()
+    assert results == [None] and cli_runtime._client is None, "the late result was not installed"
+    if late == "comes up":
+        assert client.killed.wait(5.0), "the late process was ended"
+    assert seam.status()["failures"] == 1, "the late start did not count a second failure"
+
+
+def test_a_start_that_began_before_the_switch_went_off_and_on_installs_nothing(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam) -> None:
+    _present_binary(tmp_path, monkeypatch)
+    entered, release, client = _held_start(monkeypatch)
+    seam.apply(True)
+    results: list[Any] = []
+    starter = threading.Thread(target=lambda: results.append(cli_runtime._client_for_call()), daemon=True)
+    starter.start()
+    assert entered.wait(10.0)
+
+    seam.apply(False)
+    seam.apply(True)
+    assert seam.status()["state"] == "idle", "applying the switch ends the start in flight"
+    release.set()
+    starter.join(10.0)
+    assert not starter.is_alive()
+    assert results == [None] and cli_runtime._client is None, "the start from before the flip installed nothing"
+    assert client.killed.wait(5.0), "its process was ended"
+
+
 def test_wrapping_a_reader_twice_routes_it_once(seam) -> None:
     reader = cli_runtime.wrap(cli_vendor("qwen").make_log_reader())
     routed = {name: getattr(reader, name) for name, _ in cli_runtime.ROUTES}
