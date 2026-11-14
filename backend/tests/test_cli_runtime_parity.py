@@ -1023,6 +1023,19 @@ def runtime_switch():
     cli_runtime.apply(before)
 
 
+def _tally(vendor: str) -> dict[str, int]:
+    """The process-wide outcome counts of one CLI now (a copy)."""
+    return dict(cli_runtime.status()["calls"].get(vendor, {}))
+
+
+def _since(before: dict[str, int], vendor: str) -> dict[str, int]:
+    """What was counted for ``vendor`` after ``before`` was taken. A test never
+    resets the global counts: ``tests.cli_runtime_on`` reads them at the end of
+    the session to gate on every fault fallback."""
+    now = _tally(vendor)
+    return {key: now.get(key, 0) - before.get(key, 0) for key in set(now) | set(before)}
+
+
 @pytest.mark.parametrize("name", ["qwen_0_25", "claude_turns"])
 def test_switch_off_is_mains_reader(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime_switch) -> None:
     scenario = _scenarios()[name]
@@ -1082,17 +1095,18 @@ def test_flipping_the_switch_mid_session_changes_no_checkpoint_bag_or_event(
         runtime_switch.apply(on[n])
         answered.append(cli_runtime.status()["calls"].get(vendor, {}).get("rust", 0))
 
-    cli_runtime.reset_counts()
+    before = _tally(vendor)
     wrapped = _run(scenario, tmp_path / "rt", lambda: cli_runtime.wrap(cli_vendor(vendor).make_log_reader()),
                    monkeypatch, before_read=flip)
     assert json.loads(_compared(wrapped).replace("/rt", "/py")) == json.loads(_compared(expected))
-    final = cli_runtime.status()["calls"][vendor]
+    final = _tally(vendor)
     # Each phase was read by who it should be: Rust answered before and after
     # the Python phase, and nothing during it.
     assert answered[first] > answered[0], "Rust read the start of the session"
     assert answered[second] == answered[first], "Python read the middle of the session"
     assert final["rust"] > answered[second], "Rust read the end of it"
-    assert final["fallback"] == final["unreadable"] == 0
+    gained = _since(before, vendor)
+    assert gained["fallback"] == gained["unreadable"] == 0
 
 
 @pytest.mark.parametrize("name", sorted(_scenarios()))
@@ -1100,9 +1114,11 @@ def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest
                                   pytestconfig: pytest.Config) -> None:
     cli_runtime_build.binary()
     scenario = _scenarios()[name]
-    runtime_switch.apply(True)
-    cli_runtime.reset_counts()
+    # The expected run is Python's even when a plugin routes every reader class.
+    runtime_switch.apply(False)
     expected = _run(scenario, tmp_path / "py", _python_reader(scenario["vendor"]), monkeypatch)
+    runtime_switch.apply(True)
+    before = _tally(scenario["vendor"])
     calls: list[str] = []
     real_call = cli_runtime._call
 
@@ -1130,12 +1146,9 @@ def test_switch_on_matches_python(name: str, tmp_path: Path, monkeypatch: pytest
         + ["activity"] * (steps - sum(r.startswith("activity@") for r in handed_over))
         + ["turns"] * ("turns" not in handed_over)
         + nested)
-    counts = cli_runtime.status()["calls"][scenario["vendor"]]
-    if pytestconfig.pluginmanager.has_plugin("tests.cli_runtime_on"):
-        # The class is routed as well as the instance, and a Python-read
-        # `turns_for_session` makes routed calls of its own that meet the same
-        # record: each is counted. At least the hand-overs themselves.
-        assert counts["python"] >= len(handed_over)
-    else:
-        assert counts["python"] == len(handed_over)
+    counts = _since(before, scenario["vendor"])
+    # Under the plugin the reader class is routed as well as the wrapped
+    # instance, so each hand-over meets two routes and is counted by both.
+    routes = 2 if pytestconfig.pluginmanager.has_plugin("tests.cli_runtime_on") else 1
+    assert counts["python"] == len(handed_over) * routes
     assert counts["fallback"] == counts["unreadable"] == counts["unsupported"] == 0
